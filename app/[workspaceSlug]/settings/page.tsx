@@ -121,12 +121,24 @@ export default async function SettingsPage({ params }: PageProps) {
         <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
-                <header>
-                    <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                        Manage workspace operations, client-facing experiences, connections, access, and lead generation.
-                    </p>
-                </header>
+                <WorkspaceIdentityEditor
+                    workspace={{
+                        name: workspace.name,
+                        slug: workspace.slug,
+                        bannerHeight: workspace.banner_height,
+                        bannerPosition: workspace.banner_position,
+                        bannerSrc,
+                        logoSrc,
+                    }}
+                    updateName={updateWorkspaceName.bind(null, workspace.slug)}
+                    updateCoverLayout={updateWorkspaceCoverLayout.bind(null, workspace.slug)}
+                    uploadBanner={uploadWorkspaceBanner.bind(null, workspace.slug)}
+                    uploadLogo={uploadWorkspaceLogo.bind(null, workspace.slug)}
+                    description={null}
+                    bannerLabel="workspace banner"
+                    displayName="Settings"
+                    showNameEditor={false}
+                />
 
                 <div className="mt-8 grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
                     <SettingsSectionNav sections={settingsSections} />
@@ -190,26 +202,8 @@ export default async function SettingsPage({ params }: PageProps) {
                         <UnifiedSection
                             id="agency-branding"
                             title="Agency Branding"
-                            description="Manage shared agency identity for workspace surfaces now and client-facing experiences as their theme controls are introduced."
+                            description="Manage the branding used across onboarding sessions, the future client portal, and other client-facing experiences."
                         >
-                            <WorkspaceIdentityEditor
-                                workspace={{
-                                    name: workspace.name,
-                                    slug: workspace.slug,
-                                    bannerHeight: workspace.banner_height,
-                                    bannerPosition: workspace.banner_position,
-                                    bannerSrc,
-                                    logoSrc,
-                                }}
-                                updateName={updateWorkspaceName.bind(null, workspace.slug)}
-                                updateCoverLayout={updateWorkspaceCoverLayout.bind(null, workspace.slug)}
-                                uploadBanner={uploadWorkspaceBanner.bind(null, workspace.slug)}
-                                uploadLogo={uploadWorkspaceLogo.bind(null, workspace.slug)}
-                                description="Manage the banner and logo currently used across workspace surfaces."
-                                bannerLabel="workspace banner"
-                                displayName="Workspace imagery"
-                                showNameEditor={false}
-                            />
                             <SettingsPlaceholder
                                 title="Client-facing theme"
                                 description="Colour controls for onboarding sessions, the future client portal, and other client-facing interfaces will be added here. No configurable client-facing colour theme is active yet."
