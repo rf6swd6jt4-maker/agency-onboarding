@@ -249,12 +249,7 @@ export function ganttDependencyGhostRanges(
             const predecessor = output.get(edge.dependsOnWorkItemId) ?? explicitRanges.get(edge.dependsOnWorkItemId)
             if (!predecessor) continue
             const start = completionAnchors.get(edge.dependsOnWorkItemId) ?? (predecessor.open ? nowDay : predecessor.end ?? predecessor.start)
-            // A lifecycle successor is an unbounded next stage, unlike an
-            // ordinary next task. Mark it as visually open so its full title
-            // can be measured and retained at every zoom level.
-            output.set(item.id, item.workflowRole === "lifecycle_stage"
-                ? { start, end: null, derived: false, open: false, futureOpen: true }
-                : { start, end: ganttAdvanceIntervals(start, scale, 1), derived: false, open: false, futureOpen: false })
+            output.set(item.id, { start, end: ganttAdvanceIntervals(start, scale, 1), derived: false, open: false, futureOpen: false })
             changed = true
         }
         if (!changed) break
@@ -331,14 +326,6 @@ export function ganttGridDividerAtOrAfter(day: number, scale: GanttScale, nowDay
     return activeDivider
 }
 
-// A finish-to-start pair that lands within the same visible grid interval
-// needs a rail on the interval's far divider. Routing through the target's
-// previous divider would start the return leg to the left of the completed bar.
-export function ganttTightSequenceDivider(sourceDay: number, targetStartDay: number, scale: GanttScale) {
-    const nextDivider = ganttNextGridDivider(sourceDay, scale)
-    return targetStartDay >= sourceDay - 1e-7 && targetStartDay <= nextDivider + 1e-7 ? nextDivider : null
-}
-
 export function ganttProjectDay(day: number, rangeStart: number, dayWidth: number, gutter = 0) {
     return gutter + (day - rangeStart) * dayWidth
 }
@@ -360,10 +347,7 @@ export function ganttProjectedBarGeometry({ range, scale, rangeStart, dayWidth, 
     // Open work reaches the now line exactly. Completed/due work retains the
     // visual clearance that keeps its edge and connector arrow off a divider.
     const truthfulRight = range.open ? projectedRight : Math.max(left + 1, projectedRight - effectiveInset)
-    // Lifecycle successors are intentionally projected as an open-ended visual
-    // stage. They are not a timed work-item forecast, so their label must not
-    // be truncated merely because the active zoom interval is narrow.
-    const right = range.open || range.futureOpen ? Math.max(truthfulRight, left + contentWidth) : truthfulRight
+    const right = range.open ? Math.max(truthfulRight, left + contentWidth) : truthfulRight
     return { left, right, width: Math.max(1, right - left), truthfulRight, overflow: range.open && right > truthfulRight + .5 }
 }
 
