@@ -30,8 +30,11 @@ import {
 export const dynamic = "force-dynamic"
 
 const settingsSections = [
-    { id: "workspace", label: "Workspace", detail: "Name and identity" },
-    { id: "onboarding-domain", label: "Onboarding Domain", detail: "Client portal hostname" },
+    { id: "workspace", label: "Workspace", detail: "Name and workspace details" },
+    { id: "services", label: "Services", detail: "Catalogue and default pricing" },
+    { id: "onboarding", label: "Onboarding", detail: "Domain and session builder" },
+    { id: "client-portal", label: "Client Portal", detail: "Future portal settings" },
+    { id: "agency-branding", label: "Agency Branding", detail: "Shared client-facing identity" },
     { id: "connections", label: "Connections", detail: "Stripe and WhatsApp" },
     { id: "users", label: "Users", detail: "Access and invitations" },
     { id: "leadgen-automation", label: "Lead Gen Automation", detail: "Poll cadence and limits" },
@@ -58,6 +61,21 @@ function UnifiedSection({
             </div>
             {children}
         </section>
+    )
+}
+
+function SettingsPlaceholder({
+    title,
+    description,
+}: {
+    title: string
+    description: string
+}) {
+    return (
+        <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/45 p-4 sm:p-5">
+            <h3 className="text-base font-semibold text-neutral-200">{title}</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-500">{description}</p>
+        </div>
     )
 }
 
@@ -103,26 +121,12 @@ export default async function SettingsPage({ params }: PageProps) {
         <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
-                <div>
-                    <WorkspaceIdentityEditor
-                        workspace={{
-                            name: workspace.name,
-                            slug: workspace.slug,
-                            bannerHeight: workspace.banner_height,
-                            bannerPosition: workspace.banner_position,
-                            bannerSrc,
-                            logoSrc,
-                        }}
-                        updateName={updateWorkspaceName.bind(null, workspace.slug)}
-                        updateCoverLayout={updateWorkspaceCoverLayout.bind(null, workspace.slug)}
-                        uploadBanner={uploadWorkspaceBanner.bind(null, workspace.slug)}
-                        uploadLogo={uploadWorkspaceLogo.bind(null, workspace.slug)}
-                        description={null}
-                        bannerLabel="workspace banner"
-                        displayName="Settings"
-                        showNameEditor={false}
-                    />
-                </div>
+                <header>
+                    <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+                        Manage workspace operations, client-facing experiences, connections, access, and lead generation.
+                    </p>
+                </header>
 
                 <div className="mt-8 grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
                     <SettingsSectionNav sections={settingsSections} />
@@ -145,9 +149,20 @@ export default async function SettingsPage({ params }: PageProps) {
                         </UnifiedSection>
 
                         <UnifiedSection
-                            id="onboarding-domain"
-                            title="Onboarding Domain"
-                            description="Control the custom domain clients use for onboarding sessions."
+                            id="services"
+                            title="Services"
+                            description="Manage the services your agency offers and the default prices used when preparing client work."
+                        >
+                            <SettingsPlaceholder
+                                title="Service catalogue"
+                                description="Workspace service management and default pricing will be configured here. The current onboarding, invoicing, and fulfilment flows continue using the existing service definitions until that catalogue is introduced."
+                            />
+                        </UnifiedSection>
+
+                        <UnifiedSection
+                            id="onboarding"
+                            title="Onboarding"
+                            description="Manage the client onboarding domain now, with session structure and form-building controls to follow."
                         >
                             <WorkspaceOnboardingDomain
                                 domain={workspace.custom_onboarding_domain}
@@ -158,6 +173,46 @@ export default async function SettingsPage({ params }: PageProps) {
                                 verifyAction={verifyWorkspaceOnboardingDomain.bind(null, workspace.slug)}
                                 cancelAction={cancelWorkspaceOnboardingDomain.bind(null, workspace.slug)}
                                 canManage={role !== "member"}
+                            />
+                        </UnifiedSection>
+
+                        <UnifiedSection
+                            id="client-portal"
+                            title="Client Portal"
+                            description="This section will hold the settings for the post-onboarding client experience."
+                        >
+                            <SettingsPlaceholder
+                                title="Client portal settings"
+                                description="The client portal is not available yet. Its domain, access, communication, fulfilment progress, and results settings will be added here when the portal is built."
+                            />
+                        </UnifiedSection>
+
+                        <UnifiedSection
+                            id="agency-branding"
+                            title="Agency Branding"
+                            description="Manage shared agency identity for workspace surfaces now and client-facing experiences as their theme controls are introduced."
+                        >
+                            <WorkspaceIdentityEditor
+                                workspace={{
+                                    name: workspace.name,
+                                    slug: workspace.slug,
+                                    bannerHeight: workspace.banner_height,
+                                    bannerPosition: workspace.banner_position,
+                                    bannerSrc,
+                                    logoSrc,
+                                }}
+                                updateName={updateWorkspaceName.bind(null, workspace.slug)}
+                                updateCoverLayout={updateWorkspaceCoverLayout.bind(null, workspace.slug)}
+                                uploadBanner={uploadWorkspaceBanner.bind(null, workspace.slug)}
+                                uploadLogo={uploadWorkspaceLogo.bind(null, workspace.slug)}
+                                description="Manage the banner and logo currently used across workspace surfaces."
+                                bannerLabel="workspace banner"
+                                displayName="Workspace imagery"
+                                showNameEditor={false}
+                            />
+                            <SettingsPlaceholder
+                                title="Client-facing theme"
+                                description="Colour controls for onboarding sessions, the future client portal, and other client-facing interfaces will be added here. No configurable client-facing colour theme is active yet."
                             />
                         </UnifiedSection>
 
