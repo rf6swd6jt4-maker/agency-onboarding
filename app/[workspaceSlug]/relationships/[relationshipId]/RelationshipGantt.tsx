@@ -17,12 +17,14 @@ import {
     ganttGridDividerAtOrAfter,
     ganttGridDividers,
     ganttLifecycleSuccessorPath,
+    ganttNextGridDivider,
     ganttOpenOverflowConnectorPath,
     ganttOpenTrailEnd,
     ganttPreviousGridDivider,
     ganttProjectDay,
     ganttProjectedBarGeometry,
     ganttStableTopologicalOrder,
+    ganttTightSequenceDivider,
     ganttWorkflowChildProjection,
     type GanttDisplayRange,
     type GanttProjectedBarGeometry,
@@ -287,7 +289,10 @@ export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initial
     const ghostRanges = useMemo(() => ganttDependencyGhostRanges(previewedItems, plan.dependencies, workflowProjection.ranges, nowDay, scale, workflowProjection.completionAnchors, workflowProjection.hiddenItemIds), [nowDay, plan.dependencies, previewedItems, scale, workflowProjection])
     const ghostItemIds = useMemo(() => new Set([...workflowProjection.ghostItemIds, ...ghostRanges.keys()]), [ghostRanges, workflowProjection.ghostItemIds])
     const displayRanges = useMemo(() => new Map([...workflowProjection.ranges, ...ghostRanges]), [ghostRanges, workflowProjection.ranges])
-    const renderedGeometry = useCallback((item: RelationshipGanttItem, range: GanttDisplayRange): GanttProjectedBarGeometry => ganttProjectedBarGeometry({ range, scale, rangeStart, dayWidth, gutter: timelineGutter, inset: barInset, contentWidth: range.open ? openContentWidths.get(item.id) ?? 0 : 0 }), [barInset, dayWidth, openContentWidths, rangeStart, scale, timelineGutter])
+    const renderedGeometry = useCallback((item: RelationshipGanttItem, range: GanttDisplayRange): GanttProjectedBarGeometry => {
+        const needsMeasuredTitle = range.open || (range.futureOpen && item.workflowRole === "lifecycle_stage")
+        return ganttProjectedBarGeometry({ range, scale, rangeStart, dayWidth, gutter: timelineGutter, inset: barInset, contentWidth: needsMeasuredTitle ? openContentWidths.get(item.id) ?? 0 : 0 })
+    }, [barInset, dayWidth, openContentWidths, rangeStart, scale, timelineGutter])
     const scheduledItems = plan.items.filter((item) => item.section === "relationship" && displayRanges.has(item.id))
     const sharedItems = plan.items.filter((item) => item.section === "shared" && displayRanges.has(item.id))
     const unscheduledItems = plan.items.filter((item) => !displayRanges.has(item.id) && !workflowProjection.hiddenItemIds.has(item.id))
@@ -906,6 +911,8 @@ export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initial
         const scheduleRange = ranges.get(item.id)
         const isGhost = ghostItemIds.has(item.id)
         const openEnded = Boolean(range?.open)
+        const keepGhostLifecycleTitleVisible = Boolean(range?.futureOpen && isGhost && item.workflowRole === "lifecycle_stage")
+        const titleNeedsMeasurement = openEnded || keepGhostLifecycleTitleVisible
         const showOpenTrail = Boolean(range?.open || range?.futureOpen)
         const geometry = range ? renderedGeometry(item, range) : null
         const colours = relationshipPhaseColours(item.lifecyclePhase)
@@ -962,10 +969,10 @@ export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initial
                 </> : null}
                 {row.depth > 0 && canResize ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-2.5 inset-y-0 z-30 border-y border-dashed" style={{ borderColor: barBorder }} /> : null}
                 {canResize && scheduleRange ? <button type="button" aria-label={`Resize start of ${item.title}`} onPointerDown={(event) => startBarDrag(event, item, scheduleRange, "start")} className="absolute -inset-y-px -left-px z-40 w-[11px] cursor-ew-resize" style={{ backgroundColor: barBorder }} /> : null}
-                <div data-gantt-measure={openEnded ? item.id : undefined} data-gantt-extra={openEnded ? linkSize + 16 : undefined} className={`relative flex items-center gap-1.5 ${openEnded ? "w-max shrink-0 whitespace-nowrap" : "min-w-0 flex-1"}`}>
+                <div data-gantt-measure={titleNeedsMeasurement ? item.id : undefined} data-gantt-extra={titleNeedsMeasurement ? openEnded ? linkSize + 16 : 12 : undefined} className={`relative flex items-center gap-1.5 ${titleNeedsMeasurement ? "w-max shrink-0 whitespace-nowrap" : "min-w-0 flex-1"}`}>
                     {statusLabel ? <Status label={statusLabel} tone={item.status === "done" ? "green" : item.status === "canceled" ? "grey" : "red"} compact className="relative shrink-0" /> : null}
                     {showAssignee && item.assignees[0] ? <div className="relative flex shrink-0 items-center gap-1"><Assignee name={item.assignees[0].username} avatarSrc={item.assignees[0].avatarUrl} compact compactSize={row.depth === 0 ? "md" : "sm"} />{item.assignees.length > 1 ? <span className={`shrink-0 font-medium ${row.depth === 0 ? "text-xs" : "text-[9px]"}`}>+{item.assignees.length - 1}</span> : null}</div> : null}
-                    <span className={`relative leading-none ${openEnded ? "whitespace-nowrap" : "min-w-0 flex-1 truncate"} ${row.depth === 0 ? "text-sm font-semibold" : "text-[11px] font-normal"}`}>{item.title}</span>
+                    <span className={`relative leading-none ${titleNeedsMeasurement ? "whitespace-nowrap" : "min-w-0 flex-1 truncate"} ${row.depth === 0 ? "text-sm font-semibold" : "text-[11px] font-normal"}`}>{item.title}</span>
                 </div>
                 {showBarLink ? <Link href={`/${workspaceSlug}/work-items/${item.id}`} aria-label={`Open ${item.title}`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()} className="absolute inset-y-0 z-10 flex items-center justify-center border-l" style={{ right: `${handleSpace}px`, width: `${linkSize}px`, borderColor: barBorder, borderLeftStyle: row.depth > 0 ? "dashed" : "solid", backgroundColor: colours.background, color: barBorder }}><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className={row.depth === 0 ? "h-[18px] w-[18px]" : "h-3.5 w-3.5"}><path d="M5 11 11 5M6 5h5v5" /></svg></Link> : null}
                 {canResize && scheduleRange ? <button type="button" aria-label={`Resize end of ${item.title}`} onPointerDown={(event) => startBarDrag(event, item, scheduleRange, "end")} className="absolute -inset-y-px -right-px z-40 w-[11px] cursor-ew-resize" style={{ backgroundColor: barBorder }} /> : null}
@@ -1022,7 +1029,16 @@ export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initial
             const path = ganttOpenOverflowConnectorPath({ sourceX, sourceBottom: sourceBarEdge, rowBoundaryY: targetBoundaryY, targetDivider: rail.targetDivider, targetY: y2, targetLeft: targetGeometry.left })
             return [{ key: `${edge.workItemId}-${edge.dependsOnWorkItemId}`, itemIds: [edge.workItemId, edge.dependsOnWorkItemId], external: edge.external, path, arrow: ganttArrowHeadPath(targetGeometry.left, rail.targetDivider, y2) }]
         }
-        const rail = USE_ADAPTIVE_CONNECTOR_RAILS
+        const tightSequenceDivider = !fromRange.open && !fromRange.futureOpen
+            ? ganttTightSequenceDivider(sourceDay, toRange.start, scale)
+            : null
+        // When a completed item and its dependant meet within one visible
+        // column, go to the next column line before descending. This preserves
+        // the old wrapped route without sending its first return leg left of
+        // the completed item.
+        const rail = tightSequenceDivider !== null
+            ? { sourceDivider: timelineX(ganttNextGridDivider(sourceDay, scale)), targetDivider: timelineX(tightSequenceDivider), mode: "grid" as const }
+            : USE_ADAPTIVE_CONNECTOR_RAILS
             ? ganttConnectorRail({ sourceRight: sourceGeometry.right, targetLeft: targetGeometry.left, sourceDivider, targetDivider })
             : { sourceDivider, targetDivider, mode: "grid" as const }
         const path = ganttBoundaryConnectorPath({ sourceRight: sourceGeometry.right, sourceY: y1, sourceDivider: rail.sourceDivider, rowBoundaryY: targetBoundaryY, targetDivider: rail.targetDivider, targetY: y2, targetLeft: targetGeometry.left })

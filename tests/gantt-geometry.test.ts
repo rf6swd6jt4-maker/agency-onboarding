@@ -17,6 +17,7 @@ import {
     ganttProjectDay,
     ganttProjectedBarGeometry,
     ganttStableTopologicalOrder,
+    ganttTightSequenceDivider,
     ganttWorkflowChildProjection,
     type GanttScale,
     type GanttTimingItem,
@@ -251,6 +252,16 @@ test("lifecycle successor ghosts begin after the projected child sequence", () =
     const base = ganttDisplayRanges(items, now)
     const anchored = ganttDependencyGhostRanges(items, [{ workItemId: "next", dependsOnWorkItemId: "stage" }], base, now, "hour", new Map([["stage", now + 3 / 24]]))
     assert.equal(anchored.get("next")?.start, now + 3 / 24)
+    assert.equal(anchored.get("next")?.end, null)
+    assert.equal(anchored.get("next")?.futureOpen, true)
+})
+
+test("lifecycle successor title geometry can outgrow its zoom interval while task ghosts stay fixed", () => {
+    const start = day("2026-07-10") + 9 / 24
+    const lifecycle = ganttProjectedBarGeometry({ range: { start, end: null, derived: false, open: false, futureOpen: true }, scale: "hour", rangeStart: day("2026-07-10"), dayWidth: 240, contentWidth: 180 })
+    const task = ganttProjectedBarGeometry({ range: { start, end: start + 1 / 24, derived: false, open: false, futureOpen: false }, scale: "hour", rangeStart: day("2026-07-10"), dayWidth: 240, contentWidth: 180 })
+    assert.equal(lifecycle.width, 180)
+    assert.ok(Math.abs(task.width - 10) < 1e-8)
 })
 
 test("topological ordering keeps predecessors first while retaining stable sibling order", () => {
@@ -269,6 +280,15 @@ test("adaptive connector rails keep a direct grid route but reject a wide grid U
     assert.deepEqual(ganttConnectorRail({ sourceRight: 110, targetLeft: 170, sourceDivider: 120, targetDivider: 160 }), { sourceDivider: 120, targetDivider: 160, mode: "grid" })
     assert.deepEqual(ganttConnectorRail({ sourceRight: 320, targetLeft: 360, sourceDivider: 640, targetDivider: 272 }), { sourceDivider: 328, targetDivider: 328, mode: "local" })
     assert.deepEqual(ganttConnectorRail({ sourceRight: 420, targetLeft: 380, sourceDivider: 640, targetDivider: 272 }), { sourceDivider: 420, targetDivider: 420, mode: "local" })
+})
+
+test("tight finish-to-start pairs wrap from the next column line", () => {
+    const source = day("2026-07-10") + 10 / 24
+    const target = source + 10 / 1440
+    const divider = ganttTightSequenceDivider(source, target, "hour")!
+    assert.equal(divider, day("2026-07-10") + 11 / 24)
+    assert.equal(ganttBoundaryConnectorPath({ sourceRight: 110, sourceY: 20, sourceDivider: 160, rowBoundaryY: 32, targetDivider: 160, targetY: 48, targetLeft: 150 }), "M 110 20 H 160 V 32 H 160 V 48 H 150")
+    assert.equal(ganttTightSequenceDivider(source, day("2026-07-10") + 11.5 / 24, "hour"), null)
 })
 
 test("connector source routing uses an exact divider or the nearer now line", () => {
