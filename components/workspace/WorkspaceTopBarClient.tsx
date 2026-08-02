@@ -74,6 +74,7 @@ type Props = {
     username: string
     email: string
     avatarSrc?: string | null
+    isAdmin: boolean
     leaveAction: (formData: FormData) => void
     createRelationshipAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createWorkItemAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
@@ -292,6 +293,10 @@ function LeadIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M4 19V5" /><path d="M4 19h16" /><path d="m7 15 4-4 3 3 5-7" /></svg>
 }
 
+function AdminIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M12 3 5 6v5c0 4.7 2.8 8 7 10 4.2-2 7-5.3 7-10V6l-7-3Z" /><path d="M9 12h6" /><path d="M12 9v6" /></svg>
+}
+
 function SettingsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><circle cx="12" cy="12" r="3" /><path d="M12 3v3" /><path d="M12 18v3" /><path d="M3 12h3" /><path d="M18 12h3" /><path d="m5.6 5.6 2.1 2.1" /><path d="m16.3 16.3 2.1 2.1" /><path d="m18.4 5.6-2.1 2.1" /><path d="m7.7 16.3-2.1 2.1" /></svg>
 }
@@ -338,7 +343,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avatarSrc, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, workItemOptions, relationshipOptions }: Props) {
+function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avatarSrc, isAdmin, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, workItemOptions, relationshipOptions }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -433,6 +438,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         if (suffix === "leadgen/new") return "New Poll"
         if (suffix.startsWith("leadgen/poll/")) return "Lead Poll"
         if (suffix === "leadgen/polls") return "Polls"
+        if (suffix === "admin") return "Admin"
         if (suffix === "settings") return "Settings"
         if (suffix === "users") return "Users"
         return suffix.split("/")[0]?.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tab"
@@ -1416,6 +1422,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         { label: "Assets", href: `/${workspace.slug}/assets`, icon: <AssetsIcon /> },
         { label: "Communications", href: `/${workspace.slug}/communications`, icon: <CommunicationsIcon /> },
         { label: "Lead Gen", meta: LEADGEN_POLLING_SYSTEM_VERSION_LABEL, href: `/${workspace.slug}/leadgen`, icon: <LeadIcon /> },
+        ...(isAdmin ? [{ label: "Admin", href: `/${workspace.slug}/admin`, icon: <AdminIcon /> }] : []),
         { label: "Settings", href: `/${workspace.slug}/settings`, icon: <SettingsIcon /> },
     ]
 

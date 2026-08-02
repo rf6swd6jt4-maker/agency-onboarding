@@ -13,9 +13,10 @@ type Props = {
 }
 
 export async function WorkspaceTopBar({ userId, workspace }: Props) {
-    const [{ data: profile }, { data: authResult }, { data: workItems }, { data: relationships }] = await Promise.all([
+    const [{ data: profile }, { data: authResult }, { data: membership }, { data: workItems }, { data: relationships }] = await Promise.all([
         supabaseAdmin.from("user_profiles").select("username, avatar_path").eq("user_id", userId).maybeSingle(),
         supabaseAdmin.auth.admin.getUserById(userId),
+        supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspace.id).eq("user_id", userId).maybeSingle(),
         supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspace.id).order("title").limit(200),
         supabaseAdmin.from("relationships").select("id, primary_person_name, business_name").eq("workspace_id", workspace.id).order("updated_at", { ascending: false }).limit(200),
     ])
@@ -31,6 +32,7 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         username={username}
         email={authResult.user?.email ?? ""}
         avatarSrc={avatarSrc}
+        isAdmin={membership?.role === "owner" || membership?.role === "admin"}
         leaveAction={leaveWorkspace.bind(null, username)}
         createRelationshipAction={createRelationshipFromModal.bind(null, workspace.slug)}
         createWorkItemAction={createWorkItemFromModal.bind(null, workspace.slug)}
