@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { LibraryTabs } from "@/components/library/LibraryTabs"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import {
     listWorkspaceWorkItems,
@@ -40,9 +41,20 @@ export default async function WorkItemsPage({ params }: PageProps) {
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
                 <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-                <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+                <header>
                     <div>
-                        <h1 className="text-2xl font-semibold tracking-tight">Work Items</h1>
+                        <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+                            Browse workspace work items and assets from one place.
+                        </p>
+                    </div>
+                </header>
+
+                <LibraryTabs workspaceSlug={workspace.slug} active="work-items" />
+
+                <header className="mt-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+                    <div>
+                        <h2 className="text-xl font-semibold tracking-tight">Work Items</h2>
                         <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
                             Workspace-native tasks across relationships, onboarding, fulfilment, and retained work.
                         </p>

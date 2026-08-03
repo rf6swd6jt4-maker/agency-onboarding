@@ -285,6 +285,10 @@ function AssetsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="8" cy="10" r="1.5" /><path d="m4 17 5-5 4 4 2-2 5 5" /></svg>
 }
 
+function LibraryIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M5 4v16" /><path d="M10 4v16" /><path d="m15 5 3-1 3 15-3 1-3-15Z" /></svg>
+}
+
 function CommunicationsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M5 7h14" /><path d="M5 12h9" /><path d="M5 17h6" /><path d="M4 4h16v11a3 3 0 0 1-3 3H9l-5 3V4Z" /></svg>
 }
@@ -1418,8 +1422,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         { label: "Relationships", href: `/${workspace.slug}/relationships`, icon: <RelationshipsIcon /> },
         { label: "Onboarding", href: `/${workspace.slug}/onboarding`, icon: <HomeIcon /> },
         { label: "Project Management", href: `/${workspace.slug}/work`, icon: <WorkIcon /> },
-        { label: "Work Items", href: `/${workspace.slug}/work-items`, icon: <WorkIcon /> },
-        { label: "Assets", href: `/${workspace.slug}/assets`, icon: <AssetsIcon /> },
+        { label: "Library", href: `/${workspace.slug}/work-items`, activeHrefs: [`/${workspace.slug}/work-items`, `/${workspace.slug}/assets`], icon: <LibraryIcon /> },
         { label: "Communications", href: `/${workspace.slug}/communications`, icon: <CommunicationsIcon /> },
         { label: "Lead Gen", meta: LEADGEN_POLLING_SYSTEM_VERSION_LABEL, href: `/${workspace.slug}/leadgen`, icon: <LeadIcon /> },
         { label: "Admin", href: `/${workspace.slug}/admin`, icon: <AdminIcon />, disabled: !isAdmin },
@@ -1723,9 +1726,10 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                 </div>
                 {sidebarItems.map((item) => {
                     const disabled = "disabled" in item && item.disabled
-                    const active = item.href === defaultWorkspaceUrl
+                    const active = item.activeHrefs?.some((href) => activePathname === href || activePathname.startsWith(`${href}/`))
+                        ?? (item.href === defaultWorkspaceUrl
                         ? activePathname === defaultWorkspaceUrl
-                        : activePathname === item.href || activePathname.startsWith(`${item.href}/`)
+                        : activePathname === item.href || activePathname.startsWith(`${item.href}/`))
                     const itemClassName = `flex min-h-12 items-center gap-3 rounded-lg px-4 text-base transition md:min-h-10 md:px-3 md:text-sm ${disabled ? "cursor-not-allowed text-neutral-700" : active ? "bg-neutral-900 text-white" : "text-neutral-400 hover:bg-neutral-900/70 hover:text-white"}`
 
                     if (disabled) return (

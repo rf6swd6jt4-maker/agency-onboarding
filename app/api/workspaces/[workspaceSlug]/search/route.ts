@@ -42,13 +42,15 @@ function result(id: string, type: string, label: string, description: string, hr
 
 function staticNavigationResults(workspace: { name: string; slug: string }, query: string, isAdmin: boolean): SearchResult[] {
     const settingsPath = `${workspace.name} > Settings`
+    const libraryPath = `${workspace.name} > Library`
     const entries = [
         { id: "page-home", type: "Page", label: "Relationships", description: "Workspace home relationship panel", href: workspaceHref(workspace.slug, "relationships"), path: workspace.name, keywords: ["dashboard", "crm", "relationships"] },
         { id: "page-relationships", type: "Page", label: "Relationships", description: "Relationship Hub list", href: workspaceHref(workspace.slug, "relationships"), path: `${workspace.name} > Relationships`, keywords: ["crm", "people", "accounts"] },
         { id: "page-onboarding", type: "Page", label: "Onboarding", description: "Relationship onboarding status and submissions", href: workspaceHref(workspace.slug, "onboarding"), path: `${workspace.name} > Onboarding`, keywords: ["forms", "submissions", "portal"] },
         { id: "page-work", type: "Page", label: "Project Management", description: "Fulfilment relationship work items", href: workspaceHref(workspace.slug, "work"), path: `${workspace.name} > Project Management`, keywords: ["tasks", "project management", "queue", "fulfilment"] },
-        { id: "page-work-items", type: "Page", label: "Work Items", description: "Workspace-native task IDs and work item list", href: workspaceHref(workspace.slug, "work-items"), path: `${workspace.name} > Work Items`, keywords: ["tasks", "work item ids", "work ids"] },
-        { id: "page-assets", type: "Page", label: "Assets", description: "Workspace asset IDs and file gallery", href: workspaceHref(workspace.slug, "assets"), path: `${workspace.name} > Assets`, keywords: ["files", "uploads", "asset ids", "gallery"] },
+        { id: "page-library", type: "Page", label: "Library", description: "Workspace work items and assets", href: workspaceHref(workspace.slug, "work-items"), path: libraryPath, keywords: ["tasks", "files", "uploads", "gallery"] },
+        { id: "page-work-items", type: "Tab", label: "Work Items", description: "Workspace-native task IDs and work item list", href: workspaceHref(workspace.slug, "work-items"), path: `${libraryPath} > Work Items`, keywords: ["tasks", "work item ids", "work ids"] },
+        { id: "page-assets", type: "Tab", label: "Assets", description: "Workspace asset IDs and file gallery", href: workspaceHref(workspace.slug, "assets"), path: `${libraryPath} > Assets`, keywords: ["files", "uploads", "asset ids", "gallery"] },
         { id: "page-communications", type: "Page", label: "Communications", description: "Relationship communication summaries", href: communicationsHref(workspace.slug), path: `${workspace.name} > Communications`, keywords: ["messages", "chat", "whatsapp", "communication"] },
         { id: "page-leadgen", type: "Page", label: "Lead Gen", description: "Lead generation dashboard", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen`, keywords: ["leads", "lead generation"] },
         { id: "action-new-poll", type: "Action", label: "New Poll", description: "Create and preflight a new lead-generation poll", href: workspaceHref(workspace.slug, "leadgen/new"), path: `${workspace.name} > Lead Gen > New Poll`, keywords: ["create poll", "start poll", "run poll", "poll preflight", "leadgen new"] },
@@ -161,7 +163,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
                 workItemHref(workspace.slug, item.id),
                 {
                     hubHref: item.native_href?.startsWith("/") ? item.native_href : undefined,
-                    path: `${workspace.name} > Project Management`,
+                    path: `${workspace.name} > Library > Work Items`,
                     recordId: shortId(item.id),
                 }
             ))
@@ -242,7 +244,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
                 assetHref(workspace.slug, asset.id),
                 {
                     hubHref: undefined,
-                    path: `${workspace.name} > Relationships > Assets`,
+                    path: `${workspace.name} > Library > Assets`,
                     recordId: shortId(asset.id),
                 }
             ))
