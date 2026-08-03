@@ -12,7 +12,7 @@ import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relations
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
-import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
+import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
 import {
     appendWorkspaceTabHistory,
@@ -1747,6 +1747,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                 </div>
                 {sidebarItems.map((item) => {
                     const disabled = item.disabled
+                    const showPrivateIcon = shouldShowPrivateWorkspacePanelIcon(item, workspaceRole)
                     const active = item.activeHrefs?.some((href) => activePathname === href || activePathname.startsWith(`${href}/`))
                         ?? (item.href === defaultWorkspaceUrl
                         ? activePathname === defaultWorkspaceUrl
@@ -1758,7 +1759,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-600">{item.meta}</span>}
-                            {item.access === "private" && <span className="shrink-0 text-neutral-600"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
+                            {showPrivateIcon && <span className="shrink-0 text-neutral-600"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
                         </button>
                     )
 
@@ -1767,7 +1768,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-500">{item.meta}</span>}
-                            {item.access === "private" && <span className="shrink-0 text-neutral-500"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
+                            {showPrivateIcon && <span className="shrink-0 text-neutral-500"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
                         </Link>
                     )
                 })}

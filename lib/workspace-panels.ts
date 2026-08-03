@@ -41,6 +41,10 @@ export function canAccessWorkspacePanel(panel: Pick<WorkspacePanel, "access">, r
     return panel.access === "public" || canAccessPrivateWorkspacePanels(role)
 }
 
+export function shouldShowPrivateWorkspacePanelIcon(panel: Pick<WorkspacePanel, "access">, role: WorkspaceRole) {
+    return panel.access === "private" && role === "staff"
+}
+
 export function workspacePanelHref(workspaceSlug: string, panel: Pick<WorkspacePanel, "route">) {
     return `/${workspaceSlug}/${panel.route}`
 }

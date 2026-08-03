@@ -5,6 +5,7 @@ import {
     canAccessWorkspacePanel,
     PRIVATE_WORKSPACE_PANELS,
     PUBLIC_WORKSPACE_PANELS,
+    shouldShowPrivateWorkspacePanelIcon,
     WORKSPACE_PANELS,
 } from "../lib/workspace-panels.ts"
 import {
@@ -46,6 +47,16 @@ test("workspace panels have one explicit public block followed by one private bl
     assert.equal(PUBLIC_WORKSPACE_PANELS.every((panel) => canAccessWorkspacePanel(panel, "staff")), true)
     assert.equal(PRIVATE_WORKSPACE_PANELS.some((panel) => canAccessWorkspacePanel(panel, "staff")), false)
     assert.equal(PRIVATE_WORKSPACE_PANELS.every((panel) => canAccessWorkspacePanel(panel, "admin")), true)
+})
+
+test("private panel icons are only shown to staff", () => {
+    const privatePanel = PRIVATE_WORKSPACE_PANELS[0]
+    const publicPanel = PUBLIC_WORKSPACE_PANELS[0]
+
+    assert.equal(shouldShowPrivateWorkspacePanelIcon(privatePanel, "staff"), true)
+    assert.equal(shouldShowPrivateWorkspacePanelIcon(privatePanel, "admin"), false)
+    assert.equal(shouldShowPrivateWorkspacePanelIcon(privatePanel, "owner"), false)
+    assert.equal(shouldShowPrivateWorkspacePanelIcon(publicPanel, "staff"), false)
 })
 
 test("search calls top-level destinations panels and hides all private records from staff", () => {
