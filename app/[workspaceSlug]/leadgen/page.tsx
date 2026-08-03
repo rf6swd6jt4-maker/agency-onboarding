@@ -7,7 +7,7 @@ import { MobileCardActionSurface } from "@/components/list/MobileCardActionSurfa
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import { promoteLeadgenCompanyToRelationship, removeLeadgenCompany } from "./actions"
 import { relationshipHubHref } from "@/lib/relationships"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
@@ -19,7 +19,7 @@ type PageProps = { params: Promise<{ workspaceSlug: string }>; searchParams: Pro
 export default async function LeadgenWorkspacePage({ params, searchParams }: PageProps) {
     const { workspaceSlug } = await params
     const { relationshipError } = await searchParams
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug, "admin")
     const latestPollResult = await supabaseAdmin
         .from("leadgen_polls")
         .select("id, status, created_at")
@@ -70,7 +70,7 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
                 <div>
                     <h1 className="text-2xl font-semibold tracking-tight">Lead Gen <span className="font-mono text-lg text-neutral-500">{LEADGEN_POLLING_SYSTEM_VERSION_LABEL}</span></h1>
-                    <p className="mt-2 text-sm text-neutral-400">Review qualified owner-phone leads from the latest poll. Research candidates and rejected evidence stay on the poll detail page. Signed in as {role}.</p>
+                    <p className="mt-2 text-sm text-neutral-400">Review qualified owner-phone leads from the latest poll. Research candidates and rejected evidence stay on the poll detail page. Signed in as {workspaceRoleLabel(role)}.</p>
                 </div>
                 <NewPollButton href={`/${workspace.slug}/leadgen/new`} />
             </div>

@@ -18,7 +18,7 @@ type PageProps = {
     params: Promise<{ workspaceSlug: string; relationshipId: string }>
 }
 
-export default async function WorkDetailPlaceholder({ params }: PageProps) {
+export default async function FulfilmentDetailPlaceholder({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
     const { workspace, user } = await requireWorkspace(workspaceSlug)
     const relationship = await getRelationship(workspace.id, relationshipId)
@@ -33,10 +33,10 @@ export default async function WorkDetailPlaceholder({ params }: PageProps) {
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
                         <header className="border-b border-neutral-800 pb-6">
-                            <p className="text-sm text-neutral-500">Project Management detail</p>
+                            <p className="text-sm text-neutral-500">Fulfilment detail</p>
                             <h1 className="mt-2 text-3xl font-semibold tracking-tight">{relationship.primary_person_name}</h1>
                             <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-400">
-                                This page will replace the old ClickUp Client Work list for this relationship. Future task rows will open global work-item detail pages at `/work-items/[id]`.
+                                This panel will replace the old ClickUp Client Work list for this relationship. Future task rows will open global work-item detail panels at `/work-items/[id]`.
                             </p>
                         </header>
 
@@ -58,7 +58,7 @@ export default async function WorkDetailPlaceholder({ params }: PageProps) {
                 <section className="mt-6 rounded-2xl border border-neutral-800 bg-black p-5">
                     <h2 className="text-lg font-semibold">Future fulfilment workspace</h2>
                     <p className="mt-2 text-sm leading-6 text-neutral-400">
-                        Placeholder for relationship fulfilment tasks, blockers, due dates, assigned work, assets, and links to global work-item detail pages.
+                        Placeholder for relationship fulfilment tasks, blockers, due dates, assigned work, assets, and links to global work-item detail panels.
                     </p>
                     <div className="mt-4 divide-y divide-neutral-900 rounded-xl border border-neutral-900">
                         {openItems.slice(0, 6).map((item) => (
@@ -79,7 +79,7 @@ export default async function WorkDetailPlaceholder({ params }: PageProps) {
                         <section className="mt-6 rounded-2xl border border-red-500/20 bg-red-950/10 p-5">
                             <h2 className="text-lg font-semibold text-red-100">Danger zone placeholder</h2>
                             <p className="mt-2 text-sm leading-6 text-red-100/70">
-                                Project archive/delete controls will live here after the real PM detail page is built.
+                                Project archive/delete controls will live here after the real fulfilment detail panel is built.
                             </p>
                         </section>
                     </div>

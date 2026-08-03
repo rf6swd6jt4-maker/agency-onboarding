@@ -23,7 +23,7 @@ function statusTone(status: RelationshipWorkItemStatus) {
     return "bg-neutral-500 text-neutral-300"
 }
 
-export default async function WorkQueuePage({ params }: PageProps) {
+export default async function FulfilmentPage({ params }: PageProps) {
     const { workspaceSlug } = await params
     const { workspace, user } = await requireWorkspace(workspaceSlug)
     const allItems = await listWorkQueueItems(workspace.slug, workspace.id)
@@ -40,7 +40,7 @@ export default async function WorkQueuePage({ params }: PageProps) {
                 <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
                     <div>
                         <h1 className="text-2xl font-semibold tracking-tight">
-                            Project Management
+                            Fulfilment
                         </h1>
                         <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
                             Fulfilment-stage relationships and their shared tasks. This uses the same work items visible from the relationship record.

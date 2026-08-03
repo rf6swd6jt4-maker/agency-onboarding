@@ -132,7 +132,7 @@ function plural(value: number, singular: string, pluralLabel = `${singular}s`) {
 
 export default async function LeadgenPollObjectPage({ params }: PageProps) {
     const { workspaceSlug, pollId } = await params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspace(workspaceSlug, "admin")
     const pollResult = await supabaseAdmin
         .from("leadgen_polls")
         .select("id, requested_by, status, trigger, source_count, source_snapshot, icp_snapshot, candidate_count, normalised_count, deduped_count, enriched_count, qualified_count, current_stage, target_validated_count, max_seed_candidates, seeded_count, validation_passed_count, owner_identity_count, owner_phone_count, callable_phone_count, stage_summary, created_at, started_at, completed_at, error")

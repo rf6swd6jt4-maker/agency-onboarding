@@ -12,6 +12,8 @@ import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relations
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
+import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
+import type { WorkspaceRole } from "@/lib/workspaces"
 import {
     appendWorkspaceTabHistory,
     isReopenClosedTabShortcut,
@@ -74,7 +76,7 @@ type Props = {
     username: string
     email: string
     avatarSrc?: string | null
-    isAdmin: boolean
+    workspaceRole: WorkspaceRole
     leaveAction: (formData: FormData) => void
     createRelationshipAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createWorkItemAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
@@ -242,7 +244,7 @@ function ShellRelationshipContextPanel({ context, workspaceSlug, onNavigate }: {
                             Onboarding
                         </button>
                         <button type="button" onClick={() => onNavigate(workHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
-                            Project work
+                            Fulfilment
                         </button>
                     </div>
                 </section>
@@ -289,6 +291,14 @@ function LibraryIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M5 4v16" /><path d="M10 4v16" /><path d="m15 5 3-1 3 15-3 1-3-15Z" /></svg>
 }
 
+function BuilderIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M4 5h16v14H4z" /><path d="M8 9h8" /><path d="M8 13h5" /><path d="M17 12v5" /><path d="M14.5 14.5h5" /></svg>
+}
+
+function PrivatePanelIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-2"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+}
+
 function CommunicationsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M5 7h14" /><path d="M5 12h9" /><path d="M5 17h6" /><path d="M4 4h16v11a3 3 0 0 1-3 3H9l-5 3V4Z" /></svg>
 }
@@ -303,6 +313,18 @@ function AdminIcon() {
 
 function SettingsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><circle cx="12" cy="12" r="3" /><path d="M12 3v3" /><path d="M12 18v3" /><path d="M3 12h3" /><path d="M18 12h3" /><path d="m5.6 5.6 2.1 2.1" /><path d="m16.3 16.3 2.1 2.1" /><path d="m18.4 5.6-2.1 2.1" /><path d="m7.7 16.3-2.1 2.1" /></svg>
+}
+
+function workspacePanelIcon(key: WorkspacePanelKey) {
+    if (key === "relationships") return <RelationshipsIcon />
+    if (key === "onboarding") return <HomeIcon />
+    if (key === "fulfilment") return <WorkIcon />
+    if (key === "communications") return <CommunicationsIcon />
+    if (key === "library") return <LibraryIcon />
+    if (key === "onboarding-builder") return <BuilderIcon />
+    if (key === "leadgen") return <LeadIcon />
+    if (key === "admin") return <AdminIcon />
+    return <SettingsIcon />
 }
 
 function createTabId() {
@@ -347,7 +369,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avatarSrc, isAdmin, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, workItemOptions, relationshipOptions }: Props) {
+function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, workItemOptions, relationshipOptions }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -430,8 +452,8 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         if (suffix.startsWith("relationships/")) return "Relationship"
         if (suffix === "onboarding") return "Onboarding"
         if (suffix.startsWith("onboarding/")) return "Onboarding Detail"
-        if (suffix === "work") return "Project Management"
-        if (suffix.startsWith("work/")) return "Project Detail"
+        if (suffix === "work") return "Fulfilment"
+        if (suffix.startsWith("work/")) return "Fulfilment Detail"
         if (suffix === "work-items") return "Work Items"
         if (suffix.startsWith("work-items/")) return "Work Item"
         if (suffix === "assets") return "Assets"
@@ -1025,14 +1047,15 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
 
     function directSearchHref(value: string) {
         const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ")
-        if (normalized === "new poll" || normalized === "create poll" || normalized === "start poll" || normalized === "run poll") return `/${workspace.slug}/leadgen/new`
+        const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(workspaceRole)
+        if (canAccessPrivatePanels && (normalized === "new poll" || normalized === "create poll" || normalized === "start poll" || normalized === "run poll")) return `/${workspace.slug}/leadgen/new`
         if (normalized === "communications" || normalized === "communication" || normalized === "messages" || normalized === "client messages" || normalized === "chat") return `/${workspace.slug}/communications`
         if (normalized === "manual relationship" || normalized === "start relationship" || normalized === "new relationship" || normalized === "add relationship" || normalized === "manual client" || normalized === "add manual client" || normalized === "new client" || normalized === "add client") return `/${workspace.slug}/relationships?create=relationship`
-        if (normalized === "seed sources" || normalized === "seed source category") return `/${workspace.slug}/settings#leadgen-sources-seed`
-        if (normalized === "business validation" || normalized === "business validation sources") return `/${workspace.slug}/settings#leadgen-sources-business-validation`
-        if (normalized === "owner identity" || normalized === "owner identity discovery" || normalized === "owner discovery") return `/${workspace.slug}/settings#leadgen-sources-owner-identity`
-        if (normalized === "owner phone" || normalized === "owner phone sources" || normalized === "phone discovery") return `/${workspace.slug}/settings#leadgen-sources-owner-phone`
-        if (normalized === "phone validation" || normalized === "phone validation sources") return `/${workspace.slug}/settings#leadgen-sources-phone-validation`
+        if (canAccessPrivatePanels && (normalized === "seed sources" || normalized === "seed source category")) return `/${workspace.slug}/settings#leadgen-sources-seed`
+        if (canAccessPrivatePanels && (normalized === "business validation" || normalized === "business validation sources")) return `/${workspace.slug}/settings#leadgen-sources-business-validation`
+        if (canAccessPrivatePanels && (normalized === "owner identity" || normalized === "owner identity discovery" || normalized === "owner discovery")) return `/${workspace.slug}/settings#leadgen-sources-owner-identity`
+        if (canAccessPrivatePanels && (normalized === "owner phone" || normalized === "owner phone sources" || normalized === "phone discovery")) return `/${workspace.slug}/settings#leadgen-sources-owner-phone`
+        if (canAccessPrivatePanels && (normalized === "phone validation" || normalized === "phone validation sources")) return `/${workspace.slug}/settings#leadgen-sources-phone-validation`
         return null
     }
 
@@ -1418,16 +1441,14 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
     }
 
     const navButtonClass = "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-neutral-400"
-    const sidebarItems = [
-        { label: "Relationships", href: `/${workspace.slug}/relationships`, icon: <RelationshipsIcon /> },
-        { label: "Onboarding", href: `/${workspace.slug}/onboarding`, icon: <HomeIcon /> },
-        { label: "Project Management", href: `/${workspace.slug}/work`, icon: <WorkIcon /> },
-        { label: "Library", href: `/${workspace.slug}/work-items`, activeHrefs: [`/${workspace.slug}/work-items`, `/${workspace.slug}/assets`], icon: <LibraryIcon /> },
-        { label: "Communications", href: `/${workspace.slug}/communications`, icon: <CommunicationsIcon /> },
-        { label: "Lead Gen", meta: LEADGEN_POLLING_SYSTEM_VERSION_LABEL, href: `/${workspace.slug}/leadgen`, icon: <LeadIcon /> },
-        { label: "Admin", href: `/${workspace.slug}/admin`, icon: <AdminIcon />, disabled: !isAdmin },
-        { label: "Settings", href: `/${workspace.slug}/settings`, icon: <SettingsIcon /> },
-    ]
+    const sidebarItems = WORKSPACE_PANELS.map((panel) => ({
+        ...panel,
+        href: workspacePanelHref(workspace.slug, panel),
+        activeHrefs: ("activeRoutes" in panel ? panel.activeRoutes : [panel.route]).map((route) => `/${workspace.slug}/${route}`),
+        icon: workspacePanelIcon(panel.key),
+        meta: panel.key === "leadgen" ? LEADGEN_POLLING_SYSTEM_VERSION_LABEL : null,
+        disabled: !canAccessWorkspacePanel(panel, workspaceRole),
+    }))
 
     const visibleTabs = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrderRef.current)
@@ -1725,7 +1746,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                     </button>
                 </div>
                 {sidebarItems.map((item) => {
-                    const disabled = "disabled" in item && item.disabled
+                    const disabled = item.disabled
                     const active = item.activeHrefs?.some((href) => activePathname === href || activePathname.startsWith(`${href}/`))
                         ?? (item.href === defaultWorkspaceUrl
                         ? activePathname === defaultWorkspaceUrl
@@ -1733,17 +1754,20 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                     const itemClassName = `flex min-h-12 items-center gap-3 rounded-lg px-4 text-base transition md:min-h-10 md:px-3 md:text-sm ${disabled ? "cursor-not-allowed text-neutral-700" : active ? "bg-neutral-900 text-white" : "text-neutral-400 hover:bg-neutral-900/70 hover:text-white"}`
 
                     if (disabled) return (
-                        <button key={item.label} type="button" disabled aria-label={`${item.label} — admins only`} className={`${itemClassName} w-full text-left`}>
+                        <button key={item.key} type="button" disabled aria-label={`${item.label} — private panel`} className={`${itemClassName} w-full text-left`}>
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                            {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-600">{item.meta}</span>}
+                            {item.access === "private" && <span className="shrink-0 text-neutral-600"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
                         </button>
                     )
 
                     return (
-                        <Link key={item.label} href={item.href} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateActiveTab(item.href); closeSidebarAfterNavigation() }} className={itemClassName}>
+                        <Link key={item.key} href={item.href} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateActiveTab(item.href); closeSidebarAfterNavigation() }} className={itemClassName}>
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                            {"meta" in item && item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-500">{item.meta}</span>}
+                            {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-500">{item.meta}</span>}
+                            {item.access === "private" && <span className="shrink-0 text-neutral-500"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
                         </Link>
                     )
                 })}

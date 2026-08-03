@@ -14,6 +14,8 @@ import {
     type RelationshipRecord,
 } from "@/lib/relationships"
 import { shortId } from "@/lib/ui/relative-time"
+import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, WORKSPACE_PANELS, workspacePanelHref } from "@/lib/workspace-panels"
+import { normalizeWorkspaceRole, type WorkspaceRole } from "@/lib/workspaces"
 
 export const dynamic = "force-dynamic"
 
@@ -40,37 +42,43 @@ function result(id: string, type: string, label: string, description: string, hr
     return { id, type, label, description, href, ...options }
 }
 
-function staticNavigationResults(workspace: { name: string; slug: string }, query: string, isAdmin: boolean): SearchResult[] {
+function staticNavigationResults(workspace: { name: string; slug: string }, query: string, role: WorkspaceRole): SearchResult[] {
     const settingsPath = `${workspace.name} > Settings`
     const libraryPath = `${workspace.name} > Library`
+    const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(role)
+    const panelEntries = WORKSPACE_PANELS
+        .filter((panel) => canAccessWorkspacePanel(panel, role))
+        .map((panel) => ({
+            id: `panel-${panel.key}`,
+            type: "Panel",
+            label: panel.label,
+            description: panel.description,
+            href: workspacePanelHref(workspace.slug, panel),
+            path: `${workspace.name} > ${panel.label}`,
+            keywords: [...panel.keywords],
+        }))
     const entries = [
-        { id: "page-home", type: "Page", label: "Relationships", description: "Workspace home relationship panel", href: workspaceHref(workspace.slug, "relationships"), path: workspace.name, keywords: ["dashboard", "crm", "relationships"] },
-        { id: "page-relationships", type: "Page", label: "Relationships", description: "Relationship Hub list", href: workspaceHref(workspace.slug, "relationships"), path: `${workspace.name} > Relationships`, keywords: ["crm", "people", "accounts"] },
-        { id: "page-onboarding", type: "Page", label: "Onboarding", description: "Relationship onboarding status and submissions", href: workspaceHref(workspace.slug, "onboarding"), path: `${workspace.name} > Onboarding`, keywords: ["forms", "submissions", "portal"] },
-        { id: "page-work", type: "Page", label: "Project Management", description: "Fulfilment relationship work items", href: workspaceHref(workspace.slug, "work"), path: `${workspace.name} > Project Management`, keywords: ["tasks", "project management", "queue", "fulfilment"] },
-        { id: "page-library", type: "Page", label: "Library", description: "Workspace work items and assets", href: workspaceHref(workspace.slug, "work-items"), path: libraryPath, keywords: ["tasks", "files", "uploads", "gallery"] },
-        { id: "page-work-items", type: "Tab", label: "Work Items", description: "Workspace-native task IDs and work item list", href: workspaceHref(workspace.slug, "work-items"), path: `${libraryPath} > Work Items`, keywords: ["tasks", "work item ids", "work ids"] },
-        { id: "page-assets", type: "Tab", label: "Assets", description: "Workspace asset IDs and file gallery", href: workspaceHref(workspace.slug, "assets"), path: `${libraryPath} > Assets`, keywords: ["files", "uploads", "asset ids", "gallery"] },
-        { id: "page-communications", type: "Page", label: "Communications", description: "Relationship communication summaries", href: communicationsHref(workspace.slug), path: `${workspace.name} > Communications`, keywords: ["messages", "chat", "whatsapp", "communication"] },
-        { id: "page-leadgen", type: "Page", label: "Lead Gen", description: "Lead generation dashboard", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen`, keywords: ["leads", "lead generation"] },
-        { id: "action-new-poll", type: "Action", label: "New Poll", description: "Create and preflight a new lead-generation poll", href: workspaceHref(workspace.slug, "leadgen/new"), path: `${workspace.name} > Lead Gen > New Poll`, keywords: ["create poll", "start poll", "run poll", "poll preflight", "leadgen new"] },
-        { id: "page-leads", type: "Tab", label: "Leads", description: "Qualified and discovered lead list", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen > Leads`, keywords: ["leadgen companies", "lead list"] },
-        { id: "page-polls", type: "Tab", label: "Polls", description: "Lead generation poll history", href: workspaceHref(workspace.slug, "leadgen/polls"), path: `${workspace.name} > Lead Gen > Polls`, keywords: ["runs", "automation history"] },
+        ...panelEntries,
+        { id: "tab-work-items", type: "Tab", label: "Work Items", description: "Workspace-native task IDs and work item list", href: workspaceHref(workspace.slug, "work-items"), path: `${libraryPath} > Work Items`, keywords: ["tasks", "work item ids", "work ids"] },
+        { id: "tab-assets", type: "Tab", label: "Assets", description: "Workspace asset IDs and file gallery", href: workspaceHref(workspace.slug, "assets"), path: `${libraryPath} > Assets`, keywords: ["files", "uploads", "asset ids", "gallery"] },
         { id: "action-new-relationship", type: "Action", label: "Start New Relationship", description: "Create a relationship manually at any lifecycle stage", href: workspaceHref(workspace.slug, "relationships?create=relationship"), path: `${workspace.name} > Relationships > New`, keywords: ["manual relationship", "new relationship", "add relationship", "manual client", "new client", "add client"] },
-        ...(isAdmin ? [{ id: "page-admin", type: "Page", label: "Admin", description: "Workspace administration tools and automation-failure follow-up", href: workspaceHref(workspace.slug, "admin"), path: `${workspace.name} > Admin`, keywords: ["admin tools", "automation failures", "admin work items", "goals"] }] : []),
-        { id: "page-settings", type: "Page", label: "Settings", description: "Unified workspace settings", href: workspaceHref(workspace.slug, "settings"), path: settingsPath, keywords: ["workspace settings"] },
-        { id: "settings-workspace", type: "Settings", label: "Workspace", description: "Edit the workspace name", href: workspaceHref(workspace.slug, "settings#workspace"), path: `${settingsPath} > Workspace`, keywords: ["name", "identity"] },
-        { id: "settings-onboarding-domain", type: "Settings", label: "Onboarding Domain", description: "Client portal hostname", href: workspaceHref(workspace.slug, "settings#onboarding-domain"), path: `${settingsPath} > Onboarding Domain`, keywords: ["custom domain", "hostname", "portal"] },
-        { id: "settings-connections", type: "Settings", label: "Connections", description: "Stripe and WhatsApp credentials", href: workspaceHref(workspace.slug, "settings#connections"), path: `${settingsPath} > Connections`, keywords: ["stripe", "whatsapp", "meta"] },
-        { id: "settings-users", type: "Settings", label: "Users", description: "Access and invitations", href: workspaceHref(workspace.slug, "settings#users"), path: `${settingsPath} > Users`, keywords: ["team", "members", "invite"] },
-        { id: "settings-leadgen-automation", type: "Settings", label: "Lead Gen Automation", description: "Poll cadence, candidate volume, and owner-evidence defaults", href: workspaceHref(workspace.slug, "settings#leadgen-automation"), path: `${settingsPath} > Lead Gen Automation`, keywords: ["poll automation", "automatic polls", "cadence"] },
-        { id: "settings-leadgen-targeting", type: "Settings", label: "Lead Gen Targeting", description: "ICP industries and locations", href: workspaceHref(workspace.slug, "settings#leadgen-targeting"), path: `${settingsPath} > Lead Gen Targeting`, keywords: ["industries", "locations", "icp"] },
-        { id: "settings-leadgen-sources", type: "Settings", label: "Lead Gen Sources", description: "Source readiness, mappings, and controls", href: workspaceHref(workspace.slug, "settings#leadgen-sources"), path: `${settingsPath} > Lead Gen Sources`, keywords: ["sources", "mappings", "source controls"] },
-        { id: "settings-leadgen-sources-seed", type: "Settings", label: "Seed Sources", description: "Candidate creation sources required before staged validation and owner discovery can run", href: workspaceHref(workspace.slug, "settings#leadgen-sources-seed"), path: `${settingsPath} > Lead Gen Sources > Seed Sources`, keywords: ["lead gen source category", "source categories", "seed sources", "candidate sources", "overture", "osm", "web crawler"] },
-        { id: "settings-leadgen-sources-business-validation", type: "Settings", label: "Business Validation Sources", description: "Sources that confirm a seeded business is real enough to enter the owner pipeline", href: workspaceHref(workspace.slug, "settings#leadgen-sources-business-validation"), path: `${settingsPath} > Lead Gen Sources > Business Validation Sources`, keywords: ["lead gen source category", "source categories", "business validation", "validation sources", "business validation sources"] },
-        { id: "settings-leadgen-sources-owner-identity", type: "Settings", label: "Owner Identity Discovery", description: "Sources that can find credible owner, principal, license holder, or authorised official names", href: workspaceHref(workspace.slug, "settings#leadgen-sources-owner-identity"), path: `${settingsPath} > Lead Gen Sources > Owner Identity Discovery`, keywords: ["lead gen source category", "source categories", "owner identity", "owner identity discovery", "owner discovery", "owner name sources"] },
-        { id: "settings-leadgen-sources-owner-phone", type: "Settings", label: "Owner Phone Sources", description: "Sources that can attach phone numbers to discovered owners or principals", href: workspaceHref(workspace.slug, "settings#leadgen-sources-owner-phone"), path: `${settingsPath} > Lead Gen Sources > Owner Phone Sources`, keywords: ["lead gen source category", "source categories", "owner phone", "owner phone sources", "phone discovery"] },
-        { id: "settings-leadgen-sources-phone-validation", type: "Settings", label: "Phone Validation Sources", description: "Sources that check owner-phone format and future reachability signals", href: workspaceHref(workspace.slug, "settings#leadgen-sources-phone-validation"), path: `${settingsPath} > Lead Gen Sources > Phone Validation Sources`, keywords: ["lead gen source category", "source categories", "phone validation", "phone validation sources", "validate phones"] },
+        ...(canAccessPrivatePanels ? [
+            { id: "action-new-poll", type: "Action", label: "New Poll", description: "Create and preflight a new lead-generation poll", href: workspaceHref(workspace.slug, "leadgen/new"), path: `${workspace.name} > Lead Gen > New Poll`, keywords: ["create poll", "start poll", "run poll", "poll preflight", "leadgen new"] },
+            { id: "tab-leads", type: "Tab", label: "Leads", description: "Qualified and discovered lead list", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen > Leads`, keywords: ["leadgen companies", "lead list"] },
+            { id: "tab-polls", type: "Tab", label: "Polls", description: "Lead generation poll history", href: workspaceHref(workspace.slug, "leadgen/polls"), path: `${workspace.name} > Lead Gen > Polls`, keywords: ["runs", "automation history"] },
+            { id: "settings-workspace", type: "Settings", label: "Workspace", description: "Edit the workspace name", href: workspaceHref(workspace.slug, "settings#workspace"), path: `${settingsPath} > Workspace`, keywords: ["name", "identity"] },
+            { id: "settings-onboarding-domain", type: "Settings", label: "Onboarding Domain", description: "Client portal hostname", href: workspaceHref(workspace.slug, "settings#onboarding-domain"), path: `${settingsPath} > Onboarding Domain`, keywords: ["custom domain", "hostname", "portal"] },
+            { id: "settings-connections", type: "Settings", label: "Connections", description: "Stripe and WhatsApp credentials", href: workspaceHref(workspace.slug, "settings#connections"), path: `${settingsPath} > Connections`, keywords: ["stripe", "whatsapp", "meta"] },
+            { id: "settings-users", type: "Settings", label: "Users", description: "Access and invitations", href: workspaceHref(workspace.slug, "settings#users"), path: `${settingsPath} > Users`, keywords: ["team", "staff", "invite"] },
+            { id: "settings-leadgen-automation", type: "Settings", label: "Lead Gen Automation", description: "Poll cadence, candidate volume, and owner-evidence defaults", href: workspaceHref(workspace.slug, "settings#leadgen-automation"), path: `${settingsPath} > Lead Gen Automation`, keywords: ["poll automation", "automatic polls", "cadence"] },
+            { id: "settings-leadgen-targeting", type: "Settings", label: "Lead Gen Targeting", description: "ICP industries and locations", href: workspaceHref(workspace.slug, "settings#leadgen-targeting"), path: `${settingsPath} > Lead Gen Targeting`, keywords: ["industries", "locations", "icp"] },
+            { id: "settings-leadgen-sources", type: "Settings", label: "Lead Gen Sources", description: "Source readiness, mappings, and controls", href: workspaceHref(workspace.slug, "settings#leadgen-sources"), path: `${settingsPath} > Lead Gen Sources`, keywords: ["sources", "mappings", "source controls"] },
+            { id: "settings-leadgen-sources-seed", type: "Settings", label: "Seed Sources", description: "Candidate creation sources required before staged validation and owner discovery can run", href: workspaceHref(workspace.slug, "settings#leadgen-sources-seed"), path: `${settingsPath} > Lead Gen Sources > Seed Sources`, keywords: ["lead gen source category", "source categories", "seed sources", "candidate sources", "overture", "osm", "web crawler"] },
+            { id: "settings-leadgen-sources-business-validation", type: "Settings", label: "Business Validation Sources", description: "Sources that confirm a seeded business is real enough to enter the owner pipeline", href: workspaceHref(workspace.slug, "settings#leadgen-sources-business-validation"), path: `${settingsPath} > Lead Gen Sources > Business Validation Sources`, keywords: ["lead gen source category", "source categories", "business validation", "validation sources", "business validation sources"] },
+            { id: "settings-leadgen-sources-owner-identity", type: "Settings", label: "Owner Identity Discovery", description: "Sources that can find credible owner, principal, license holder, or authorised official names", href: workspaceHref(workspace.slug, "settings#leadgen-sources-owner-identity"), path: `${settingsPath} > Lead Gen Sources > Owner Identity Discovery`, keywords: ["lead gen source category", "source categories", "owner identity", "owner identity discovery", "owner discovery", "owner name sources"] },
+            { id: "settings-leadgen-sources-owner-phone", type: "Settings", label: "Owner Phone Sources", description: "Sources that can attach phone numbers to discovered owners or principals", href: workspaceHref(workspace.slug, "settings#leadgen-sources-owner-phone"), path: `${settingsPath} > Lead Gen Sources > Owner Phone Sources`, keywords: ["lead gen source category", "source categories", "owner phone", "owner phone sources", "phone discovery"] },
+            { id: "settings-leadgen-sources-phone-validation", type: "Settings", label: "Phone Validation Sources", description: "Sources that check owner-phone format and future reachability signals", href: workspaceHref(workspace.slug, "settings#leadgen-sources-phone-validation"), path: `${settingsPath} > Lead Gen Sources > Phone Validation Sources`, keywords: ["lead gen source category", "source categories", "phone validation", "phone validation sources", "validate phones"] },
+        ] : []),
     ]
 
     return entries
@@ -108,9 +116,10 @@ async function requireSearchWorkspace(workspaceSlug: string) {
         .eq("user_id", user.id)
         .maybeSingle()
 
-    return membership ? {
+    const role = normalizeWorkspaceRole(membership?.role)
+    return membership && role ? {
         workspace: workspace as { id: string; slug: string; name: string; status: string },
-        role: membership.role as string,
+        role,
     } : null
 }
 
@@ -119,14 +128,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
     const access = await requireSearchWorkspace(workspaceSlug)
     if (!access) return Response.json({ results: [] }, { status: 401 })
     const { workspace, role } = access
-    const isAdmin = role === "owner" || role === "admin"
+    const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(role)
 
     const rawQuery = request.nextUrl.searchParams.get("q") ?? ""
     const query = rawQuery.trim().toLowerCase()
     if (query.length < 2) return Response.json({ results: [] })
 
     const results: SearchResult[] = []
-    results.push(...staticNavigationResults(workspace, query, isAdmin))
+    results.push(...staticNavigationResults(workspace, query, role))
 
     const relationships = await listRelationshipsForWorkspace(workspace.id)
 
@@ -185,18 +194,22 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
             .is("archived_at", null)
             .order("created_at", { ascending: false })
             .limit(80),
-        supabaseAdmin
-            .from("leadgen_companies")
-            .select("id, display_name, legal_name, dba_name, entity_number, owner_name, owner_phone, phone, website_url, source_key, source_record_id, first_seen_poll_id, qualification_status")
-            .eq("workspace_id", workspace.id)
-            .order("created_at", { ascending: false })
-            .limit(80),
-        supabaseAdmin
-            .from("leadgen_polls")
-            .select("id, status, trigger, source_count, candidate_count, qualified_count, error, created_at")
-            .eq("workspace_id", workspace.id)
-            .order("created_at", { ascending: false })
-            .limit(80),
+        canAccessPrivatePanels
+            ? supabaseAdmin
+                .from("leadgen_companies")
+                .select("id, display_name, legal_name, dba_name, entity_number, owner_name, owner_phone, phone, website_url, source_key, source_record_id, first_seen_poll_id, qualification_status")
+                .eq("workspace_id", workspace.id)
+                .order("created_at", { ascending: false })
+                .limit(80)
+            : Promise.resolve({ data: [], error: null }),
+        canAccessPrivatePanels
+            ? supabaseAdmin
+                .from("leadgen_polls")
+                .select("id, status, trigger, source_count, candidate_count, qualified_count, error, created_at")
+                .eq("workspace_id", workspace.id)
+                .order("created_at", { ascending: false })
+                .limit(80)
+            : Promise.resolve({ data: [], error: null }),
         supabaseAdmin
             .from("client_communication_channels")
             .select("id, client_id, external_address, provider")
@@ -251,7 +264,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
         }
     }
 
-    if (!companyError) {
+    if (canAccessPrivatePanels && !companyError) {
         for (const company of (companies ?? []).filter((company) => includesQuery([company.id, company.display_name, company.legal_name, company.dba_name, company.entity_number, company.owner_name, company.owner_phone, company.phone, company.website_url, company.source_key, company.source_record_id, company.first_seen_poll_id], query)).slice(0, 5)) {
             results.push(result(
                 `leadgen-${company.id}`,
@@ -267,7 +280,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
         }
     }
 
-    if (!pollError) {
+    if (canAccessPrivatePanels && !pollError) {
         for (const poll of (polls ?? []).filter((poll) => includesQuery([poll.id, poll.status, poll.trigger, poll.error], query)).slice(0, 5)) {
             results.push(result(
                 `poll-${poll.id}`,

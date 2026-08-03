@@ -184,7 +184,7 @@ export function onboardingDetailHref(workspaceSlug: string, relationshipId: stri
     return workspaceHref(workspaceSlug, `onboarding/${relationshipId}`)
 }
 
-export function workDetailHref(workspaceSlug: string, relationshipId: string) {
+export function fulfilmentDetailHref(workspaceSlug: string, relationshipId: string) {
     return workspaceHref(workspaceSlug, `work/${relationshipId}`)
 }
 

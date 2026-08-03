@@ -3,6 +3,7 @@ import { createAssetFromModal, createRelationshipFromModal, createWorkItemFromMo
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { leaveWorkspace } from "@/app/users/[username]/actions"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
+import { normalizeWorkspaceRole } from "@/lib/workspaces"
 
 type Product = "client-work" | "leadgen"
 
@@ -32,7 +33,7 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         username={username}
         email={authResult.user?.email ?? ""}
         avatarSrc={avatarSrc}
-        isAdmin={membership?.role === "owner" || membership?.role === "admin"}
+        workspaceRole={normalizeWorkspaceRole(membership?.role) ?? "staff"}
         leaveAction={leaveWorkspace.bind(null, username)}
         createRelationshipAction={createRelationshipFromModal.bind(null, workspace.slug)}
         createWorkItemAction={createWorkItemFromModal.bind(null, workspace.slug)}

@@ -10,7 +10,7 @@ import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, updateWorkspaceUserRole } from "../users/actions"
@@ -184,7 +184,7 @@ export default async function SettingsPage({ params }: PageProps) {
                                 saveAction={saveWorkspaceOnboardingDomain.bind(null, workspace.slug)}
                                 verifyAction={verifyWorkspaceOnboardingDomain.bind(null, workspace.slug)}
                                 cancelAction={cancelWorkspaceOnboardingDomain.bind(null, workspace.slug)}
-                                canManage={role !== "member"}
+                                canManage={role === "owner" || role === "admin"}
                             />
                         </UnifiedSection>
 
@@ -231,27 +231,27 @@ export default async function SettingsPage({ params }: PageProps) {
                         >
                             <form action={inviteWorkspaceUser.bind(null, workspace.slug)} className="grid gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:grid-cols-[1fr_auto_auto] sm:p-5">
                                 <input name="email" type="email" required placeholder="person@business.com" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2" />
-                                <select name="role" defaultValue="member" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
-                                    <option value="member">Member</option>
+                                <select name="role" defaultValue="staff" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
+                                    <option value="staff">Staff</option>
                                     {isOwner && <option value="admin">Admin</option>}
                                 </select>
                                 <button className="rounded-lg bg-white px-4 py-2 font-medium text-black">Invite user</button>
                             </form>
                             <div className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
                                 <PendingWorkspaceInvitations workspaceId={workspace.id} removeAction={removeWorkspaceInvitation.bind(null, workspace.slug)} />
-                                {users.map(({ user: workspaceUser, role: memberRole }) => (
+                                {users.map(({ user: workspaceUser, role: assignedRole }) => (
                                     <div key={workspaceUser?.id} className="flex flex-col gap-3 border-b border-neutral-800 p-4 last:border-0 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                                         <div>
                                             <p className="break-words font-medium">{workspaceUser?.email}</p>
-                                            <p className="text-sm capitalize text-neutral-500">{memberRole}</p>
+                                            <p className="text-sm text-neutral-500">{workspaceRoleLabel(assignedRole)}</p>
                                         </div>
-                                        {memberRole !== "owner" && (
+                                        {normalizeWorkspaceRole(assignedRole) !== "owner" && (
                                             <div className="flex flex-wrap gap-2">
                                                 {isOwner && (
                                                     <form action={updateWorkspaceUserRole.bind(null, workspace.slug)} className="flex min-w-0 flex-1 gap-2 sm:flex-none">
                                                         <input type="hidden" name="userId" value={workspaceUser?.id} />
-                                                        <select name="role" defaultValue={memberRole} className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm sm:w-auto">
-                                                            <option value="member">Member</option>
+                                                        <select name="role" defaultValue={normalizeWorkspaceRole(assignedRole) ?? "staff"} className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm sm:w-auto">
+                                                            <option value="staff">Staff</option>
                                                             <option value="admin">Admin</option>
                                                         </select>
                                                         <button className="rounded-lg border border-neutral-700 px-3 py-1 text-sm">Save</button>

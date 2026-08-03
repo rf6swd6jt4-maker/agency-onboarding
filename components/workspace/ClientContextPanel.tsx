@@ -205,7 +205,7 @@ export function ClientContextPanel({ workspaceSlug, relationship, metrics = [] }
                             Onboarding
                         </Link>
                         <Link href={workspaceHref(workspaceSlug, `work/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
-                            Project work
+                            Fulfilment
                         </Link>
                     </div>
                 </section>

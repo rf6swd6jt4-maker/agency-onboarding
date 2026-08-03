@@ -2,7 +2,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { redirectToLogin } from "@/lib/auth/server-redirects"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { getCurrentUser } from "@/lib/workspaces"
+import { getCurrentUser, workspaceRoleLabel } from "@/lib/workspaces"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { Avatar } from "@/components/account/Avatar"
 import { LeaveWorkspaceForm } from "@/components/account/LeaveWorkspaceForm"
@@ -74,7 +74,7 @@ export default async function UserAccountPage({ params }: PageProps) {
                                     <div key={invite.id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-blue-400/30 bg-blue-500/10 p-5">
                                         <div>
                                             <p className="font-medium">{workspace.name}</p>
-                                            <p className="mt-1 text-sm capitalize text-neutral-300">Invited as {invite.role}</p>
+                                            <p className="mt-1 text-sm text-neutral-300">Invited as {workspaceRoleLabel(invite.role)}</p>
                                         </div>
                                         <form action={acceptWorkspaceInvitation.bind(null, profile.username)}>
                                             <input type="hidden" name="token" value={invite.id} />
@@ -101,7 +101,7 @@ export default async function UserAccountPage({ params }: PageProps) {
                                 <div key={membership.workspace_id} className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
                                     <div>
                                         <Link href={`/${workspace.slug}`} className="font-medium hover:underline">{workspace.name}</Link>
-                                        <p className="mt-1 text-sm capitalize text-neutral-500">{membership.role}</p>
+                                        <p className="mt-1 text-sm text-neutral-500">{workspaceRoleLabel(membership.role)}</p>
                                     </div>
                                     <LeaveWorkspaceForm workspaceId={membership.workspace_id} action={leaveWorkspace.bind(null, profile.username)} />
                                 </div>

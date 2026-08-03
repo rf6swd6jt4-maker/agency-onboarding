@@ -13,7 +13,7 @@ import { sourceLabel } from "@/lib/leadgen/sources"
 import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { compactText, formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import Link from "next/link"
 import { cancelLeadgenPoll, removeLeadgenPoll, retryLeadgenPoll } from "../actions"
 
@@ -97,7 +97,7 @@ function investigationStats(tasks: InvestigationTask[], claims: EvidenceClaim[])
 
 export default async function LeadgenPollsPage({ params }: PageProps) {
     const { workspaceSlug } = await params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug, "admin")
     const pollsResult = await supabaseAdmin
         .from("leadgen_polls")
         .select("id, requested_by, status, trigger, source_count, source_snapshot, candidate_count, normalised_count, deduped_count, enriched_count, qualified_count, created_at, started_at, completed_at, error")
@@ -154,7 +154,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
                 <div>
                     <h1 className="text-2xl font-semibold tracking-tight">Polls</h1>
-                    <p className="mt-2 text-sm text-neutral-400">Track source polling, queue state, run durations, and pipeline counts. Signed in as {role}.</p>
+                    <p className="mt-2 text-sm text-neutral-400">Track source polling, queue state, run durations, and pipeline counts. Signed in as {workspaceRoleLabel(role)}.</p>
                 </div>
                 <NewPollButton href={`/${workspace.slug}/leadgen/new`} />
             </div>

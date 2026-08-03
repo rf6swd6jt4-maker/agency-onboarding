@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace, type WorkspaceRole } from "@/lib/workspaces"
+import { normalizeWorkspaceRole, requireWorkspace, type WorkspaceRole } from "@/lib/workspaces"
 import { sendWorkspaceInvitation } from "@/lib/email"
 
 function invitedRole(value: FormDataEntryValue | null) {
-    if (value === "member" || value === "admin") return value
+    const role = normalizeWorkspaceRole(value)
+    if (role === "staff" || role === "admin") return role
     throw new Error("Invalid role")
 }
 
@@ -19,17 +20,10 @@ export async function inviteWorkspaceUser(slug: string, formData: FormData) {
     const email = String(formData.get("email") ?? "").trim().toLowerCase()
     const requestedRole = invitedRole(formData.get("role"))
     if (!email) throw new Error("Email is required")
-    if (role !== "owner" && requestedRole !== "member") {
+    if (role !== "owner" && requestedRole !== "staff") {
         throw new Error("Only workspace owners can invite admins")
     }
 
-    const { data: listed } = await supabaseAdmin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1000,
-    })
-    const existingUser = listed.users.find(
-        (user) => user.email?.toLowerCase() === email
-    )
     const { data: invitation, error } = await supabaseAdmin.from("workspace_invitations").upsert({ workspace_id: workspace.id, email, role: requestedRole, invited_by: (await requireUserManager(slug)).user.id, expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), accepted_at: null }, { onConflict: "workspace_id,email" }).select("id").single()
     if (error) throw new Error(error.message)
     const inviteUrl = `https://betelgeze.com/invitation?token=${invitation.id}&email=${encodeURIComponent(email)}`
@@ -60,8 +54,8 @@ export async function removeWorkspaceUser(slug: string, formData: FormData) {
         .eq("user_id", userId)
         .maybeSingle()
     if (!target || target.role === "owner") throw new Error("Owners cannot be removed here")
-    if (actingRole !== "owner" && target.role !== "member") {
-        throw new Error("Admins can only remove members")
+    if (actingRole !== "owner" && normalizeWorkspaceRole(target.role) !== "staff") {
+        throw new Error("Admins can only remove staff")
     }
     await supabaseAdmin
         .from("workspace_memberships")

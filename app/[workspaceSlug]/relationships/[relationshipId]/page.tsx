@@ -6,7 +6,7 @@ import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import {
     getRelationship,
     onboardingDetailHref,
-    workDetailHref,
+    fulfilmentDetailHref,
 } from "@/lib/relationships"
 import { effectiveGanttRanges, getRelationshipGanttPlan } from "@/lib/relationship-gantt"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
@@ -96,7 +96,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
 
                         <section className="mt-5 flex flex-wrap gap-2 border-t border-neutral-900 pt-5 text-sm">
                             {isOnboarding && <Link href={onboardingDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open onboarding detail</Link>}
-                            {isFulfilment && <Link href={workDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open project detail</Link>}
+                            {isFulfilment && <Link href={fulfilmentDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open fulfilment detail</Link>}
                         </section>
 
                     </div>

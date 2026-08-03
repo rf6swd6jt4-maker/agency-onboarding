@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation"
 import { redirectToLogin } from "@/lib/auth/server-redirects"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { getCurrentUser } from "@/lib/workspaces"
+import { getCurrentUser, normalizeWorkspaceRole } from "@/lib/workspaces"
 import { deleteOnboardingUploads, storeProfileAvatar } from "@/lib/onboarding/uploads"
 
 const usernamePattern = /^[a-z0-9][a-z0-9-]{1,27}[a-z0-9]$/
@@ -36,7 +36,9 @@ export async function acceptWorkspaceInvitation(username: string, formData: Form
     const token = String(formData.get("token") ?? "")
     const { data: invite } = await supabaseAdmin.from("workspace_invitations").select("id, workspace_id, email, role, expires_at, accepted_at").eq("id", token).maybeSingle()
     if (!invite || invite.accepted_at || new Date(invite.expires_at) < new Date() || invite.email.toLowerCase() !== user.email.toLowerCase()) throw new Error("This invitation is no longer available.")
-    const { error } = await supabaseAdmin.from("workspace_memberships").upsert({ workspace_id: invite.workspace_id, user_id: user.id, role: invite.role })
+    const role = normalizeWorkspaceRole(invite.role)
+    if (!role) throw new Error("This invitation has an invalid role.")
+    const { error } = await supabaseAdmin.from("workspace_memberships").upsert({ workspace_id: invite.workspace_id, user_id: user.id, role })
     if (error) throw new Error(error.message)
     await supabaseAdmin.from("workspace_invitations").update({ accepted_at: new Date().toISOString() }).eq("id", invite.id)
     redirect(`/users/${username}`)
@@ -81,7 +83,7 @@ export async function leaveWorkspace(username: string, formData: FormData) {
         .eq("workspace_id", workspaceId)
         .eq("user_id", user.id)
         .maybeSingle()
-    if (!membership) throw new Error("You are not a member of this workspace")
+    if (!membership) throw new Error("You do not have access to this workspace")
     if (membership.role === "owner") {
         const { count } = await supabaseAdmin
             .from("workspace_memberships")

@@ -4,9 +4,9 @@ import { redirectToLogin } from "@/lib/auth/server-redirects"
 import { getVerifiedUser } from "@/lib/auth/verified-user"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { normalizeWorkspaceRole, workspaceRoleMeetsMinimum, type WorkspaceRole } from "@/lib/workspace-roles"
 
-export const WORKSPACE_ROLES = ["owner", "admin", "member"] as const
-export type WorkspaceRole = (typeof WORKSPACE_ROLES)[number]
+export { WORKSPACE_ROLES, normalizeWorkspaceRole, workspaceRoleLabel, type WorkspaceRole } from "@/lib/workspace-roles"
 
 type Workspace = {
     id: string
@@ -26,12 +26,6 @@ type Workspace = {
     custom_onboarding_domain_error: string | null
 }
 
-const roleRank: Record<WorkspaceRole, number> = {
-    member: 1,
-    admin: 2,
-    owner: 3,
-}
-
 export function isValidWorkspaceSlug(value: string) {
     return /^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$/.test(value)
 }
@@ -43,7 +37,7 @@ export async function getCurrentUser() {
 
 export async function requireWorkspace(
     slug: string,
-    minimumRole: WorkspaceRole = "member"
+    minimumRole: WorkspaceRole = "staff"
 ): Promise<{ user: User; workspace: Workspace; role: WorkspaceRole }> {
     const supabase = await createSupabaseServerClient()
     const user = await getVerifiedUser(supabase)
@@ -76,16 +70,18 @@ export async function requireWorkspace(
               .maybeSingle()
         : { data: null }
 
+    const role = normalizeWorkspaceRole(membership?.role)
     if (
         !membership ||
+        !role ||
         !workspace ||
         workspace.status !== "active" ||
-        roleRank[membership.role as WorkspaceRole] < roleRank[minimumRole]
+        !workspaceRoleMeetsMinimum(role, minimumRole)
     ) {
         redirect("/workspaces")
     }
 
-    return { user, workspace, role: membership.role as WorkspaceRole }
+    return { user, workspace, role }
 }
 
 export async function getWorkspaceForPublicOnboarding(slug: string) {
