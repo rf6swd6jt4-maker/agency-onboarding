@@ -42,28 +42,19 @@ export default async function AssetsPage({ params }: PageProps) {
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
                 <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-                <header>
+                <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
                     <div>
                         <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
                         <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
                             Browse workspace work items and assets from one place.
                         </p>
                     </div>
+                    <Link href={workspaceHref(workspace.slug, "assets?create=asset")} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-center text-sm font-medium leading-none text-black sm:min-h-10 sm:px-3">
+                        New asset
+                    </Link>
                 </header>
 
                 <LibraryTabs workspaceSlug={workspace.slug} active="assets" />
-
-                <header className="mt-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                    <div>
-                        <h2 className="text-xl font-semibold tracking-tight">Assets</h2>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                            Files and workspace records in one gallery.
-                        </p>
-                    </div>
-                    <Link href={workspaceHref(workspace.slug, "assets?create=asset")} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-center text-sm font-medium leading-none text-black sm:min-h-10 sm:px-3">
-                        Upload asset
-                    </Link>
-                </header>
 
                 <section className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 sm:grid-cols-4">
                     {[
