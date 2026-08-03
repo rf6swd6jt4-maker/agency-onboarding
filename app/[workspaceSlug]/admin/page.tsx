@@ -1,3 +1,4 @@
+import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -15,12 +16,14 @@ export default async function AdminPage({ params }: PageProps) {
         <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
-                <header>
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-neutral-500">Workspace administration</p>
-                    <h1 className="mt-2 text-2xl font-semibold tracking-tight">Admin</h1>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                        Admin tools will live here. This area will support automation-failure follow-up, including work items assigned to admins, and a future Goals section.
-                    </p>
+                <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
+                <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+                    <div>
+                        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
+                        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+                            Admin tools will live here. This area will support automation-failure follow-up, including work items assigned to admins, and a future Goals section.
+                        </p>
+                    </div>
                 </header>
 
                 <section className="mt-6 rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/45 p-5 sm:p-6">
