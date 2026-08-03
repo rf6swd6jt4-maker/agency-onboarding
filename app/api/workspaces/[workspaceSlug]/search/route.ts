@@ -40,7 +40,7 @@ function result(id: string, type: string, label: string, description: string, hr
     return { id, type, label, description, href, ...options }
 }
 
-function staticNavigationResults(workspace: { name: string; slug: string }, query: string): SearchResult[] {
+function staticNavigationResults(workspace: { name: string; slug: string }, query: string, isAdmin: boolean): SearchResult[] {
     const settingsPath = `${workspace.name} > Settings`
     const entries = [
         { id: "page-home", type: "Page", label: "Relationships", description: "Workspace home relationship panel", href: workspaceHref(workspace.slug, "relationships"), path: workspace.name, keywords: ["dashboard", "crm", "relationships"] },
@@ -55,6 +55,7 @@ function staticNavigationResults(workspace: { name: string; slug: string }, quer
         { id: "page-leads", type: "Tab", label: "Leads", description: "Qualified and discovered lead list", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen > Leads`, keywords: ["leadgen companies", "lead list"] },
         { id: "page-polls", type: "Tab", label: "Polls", description: "Lead generation poll history", href: workspaceHref(workspace.slug, "leadgen/polls"), path: `${workspace.name} > Lead Gen > Polls`, keywords: ["runs", "automation history"] },
         { id: "action-new-relationship", type: "Action", label: "Start New Relationship", description: "Create a relationship manually at any lifecycle stage", href: workspaceHref(workspace.slug, "relationships?create=relationship"), path: `${workspace.name} > Relationships > New`, keywords: ["manual relationship", "new relationship", "add relationship", "manual client", "new client", "add client"] },
+        ...(isAdmin ? [{ id: "page-admin", type: "Page", label: "Admin", description: "Workspace administration tools and automation-failure follow-up", href: workspaceHref(workspace.slug, "admin"), path: `${workspace.name} > Admin`, keywords: ["admin tools", "automation failures", "admin work items", "goals"] }] : []),
         { id: "page-settings", type: "Page", label: "Settings", description: "Unified workspace settings", href: workspaceHref(workspace.slug, "settings"), path: settingsPath, keywords: ["workspace settings"] },
         { id: "settings-workspace", type: "Settings", label: "Workspace", description: "Edit the workspace name", href: workspaceHref(workspace.slug, "settings#workspace"), path: `${settingsPath} > Workspace`, keywords: ["name", "identity"] },
         { id: "settings-onboarding-domain", type: "Settings", label: "Onboarding Domain", description: "Client portal hostname", href: workspaceHref(workspace.slug, "settings#onboarding-domain"), path: `${settingsPath} > Onboarding Domain`, keywords: ["custom domain", "hostname", "portal"] },
@@ -105,20 +106,25 @@ async function requireSearchWorkspace(workspaceSlug: string) {
         .eq("user_id", user.id)
         .maybeSingle()
 
-    return membership ? workspace as { id: string; slug: string; name: string; status: string } : null
+    return membership ? {
+        workspace: workspace as { id: string; slug: string; name: string; status: string },
+        role: membership.role as string,
+    } : null
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const workspace = await requireSearchWorkspace(workspaceSlug)
-    if (!workspace) return Response.json({ results: [] }, { status: 401 })
+    const access = await requireSearchWorkspace(workspaceSlug)
+    if (!access) return Response.json({ results: [] }, { status: 401 })
+    const { workspace, role } = access
+    const isAdmin = role === "owner" || role === "admin"
 
     const rawQuery = request.nextUrl.searchParams.get("q") ?? ""
     const query = rawQuery.trim().toLowerCase()
     if (query.length < 2) return Response.json({ results: [] })
 
     const results: SearchResult[] = []
-    results.push(...staticNavigationResults(workspace, query))
+    results.push(...staticNavigationResults(workspace, query, isAdmin))
 
     const relationships = await listRelationshipsForWorkspace(workspace.id)
 

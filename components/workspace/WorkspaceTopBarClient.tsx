@@ -1422,7 +1422,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         { label: "Assets", href: `/${workspace.slug}/assets`, icon: <AssetsIcon /> },
         { label: "Communications", href: `/${workspace.slug}/communications`, icon: <CommunicationsIcon /> },
         { label: "Lead Gen", meta: LEADGEN_POLLING_SYSTEM_VERSION_LABEL, href: `/${workspace.slug}/leadgen`, icon: <LeadIcon /> },
-        ...(isAdmin ? [{ label: "Admin", href: `/${workspace.slug}/admin`, icon: <AdminIcon /> }] : []),
+        { label: "Admin", href: `/${workspace.slug}/admin`, icon: <AdminIcon />, disabled: !isAdmin },
         { label: "Settings", href: `/${workspace.slug}/settings`, icon: <SettingsIcon /> },
     ]
 
@@ -1722,11 +1722,21 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                     </button>
                 </div>
                 {sidebarItems.map((item) => {
+                    const disabled = "disabled" in item && item.disabled
                     const active = item.href === defaultWorkspaceUrl
                         ? activePathname === defaultWorkspaceUrl
                         : activePathname === item.href || activePathname.startsWith(`${item.href}/`)
+                    const itemClassName = `flex min-h-12 items-center gap-3 rounded-lg px-4 text-base transition md:min-h-10 md:px-3 md:text-sm ${disabled ? "cursor-not-allowed text-neutral-700" : active ? "bg-neutral-900 text-white" : "text-neutral-400 hover:bg-neutral-900/70 hover:text-white"}`
+
+                    if (disabled) return (
+                        <button key={item.label} type="button" disabled aria-label={`${item.label} — admins only`} className={`${itemClassName} w-full text-left`}>
+                            <span className="shrink-0">{item.icon}</span>
+                            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                        </button>
+                    )
+
                     return (
-                        <Link key={item.label} href={item.href} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateActiveTab(item.href); closeSidebarAfterNavigation() }} className={`flex min-h-12 items-center gap-3 rounded-lg px-4 text-base transition md:min-h-10 md:px-3 md:text-sm ${active ? "bg-neutral-900 text-white" : "text-neutral-400 hover:bg-neutral-900/70 hover:text-white"}`}>
+                        <Link key={item.label} href={item.href} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateActiveTab(item.href); closeSidebarAfterNavigation() }} className={itemClassName}>
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             {"meta" in item && item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-500">{item.meta}</span>}
