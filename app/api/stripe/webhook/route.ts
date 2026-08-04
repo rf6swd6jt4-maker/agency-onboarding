@@ -6,6 +6,7 @@ import {
 } from "@/lib/stripe/api"
 import { handlePaidStripeInvoice } from "@/lib/client-sales/automation"
 import { getStripeWebhookCandidates } from "@/lib/workspace-integrations"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -14,6 +15,21 @@ function isPaidInvoiceEvent(type: string) {
     // Stripe can emit either event for a successful invoice payment. Both
     // contain the invoice object and must advance the same sale workflow.
     return type === "invoice.paid" || type === "invoice.payment_succeeded"
+}
+
+async function reportStripeAutomationFailure(workspaceId: string, eventId: string, operation: string, error: string) {
+    const { data: workspace } = await supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).maybeSingle()
+    await reportPlatformFailure({
+        workspaceId,
+        category: "billing",
+        source: "stripe_webhook",
+        operation,
+        fingerprint: platformFailureFingerprint(["stripe", operation, error]),
+        severity: "warning",
+        summary: "Stripe automation could not process an event",
+        diagnostics: { stripe_event_id: eventId, error },
+        sourceHref: workspace?.slug ? `/${workspace.slug}/settings#connections` : null,
+    })
 }
 
 export async function POST(request: NextRequest) {
@@ -54,6 +70,8 @@ export async function POST(request: NextRequest) {
             return Response.json({ ok: true, duplicate: true })
         }
 
+        await reportStripeAutomationFailure(workspaceId, event.id, "record_event", eventInsertError.message)
+
         return Response.json(
             { error: `Could not record Stripe event: ${eventInsertError.message}` },
             { status: 500 }
@@ -62,6 +80,7 @@ export async function POST(request: NextRequest) {
 
     if (isPaidInvoiceEvent(event.type)) {
         if (!invoice) {
+            await reportStripeAutomationFailure(workspaceId, event.id, "paid_invoice_payload", "Paid invoice event missing invoice object")
             return Response.json(
                 { error: "Paid invoice event missing invoice object" },
                 { status: 400 }
@@ -73,8 +92,10 @@ export async function POST(request: NextRequest) {
         if (!result?.ok) {
             const error =
                 result && "error" in result
-                    ? result.error
+                    ? result.error ?? "Could not process paid invoice"
                     : "Could not process paid invoice"
+
+            await reportStripeAutomationFailure(workspaceId, event.id, "paid_invoice_automation", error)
 
             return Response.json(
                 {

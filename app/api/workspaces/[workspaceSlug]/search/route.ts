@@ -156,26 +156,49 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
 
     const relationshipByClientId = new Map(relationships.map((relationship) => [relationship.client_id, relationship]).filter((entry): entry is [string, RelationshipRecord] => Boolean(entry[0])))
 
-    const workItems = await supabaseAdmin
-        .from("work_items")
-        .select("id, title, description, lifecycle_phase, native_href, native_kind, native_id")
-        .eq("workspace_id", workspace.id)
-        .limit(80)
+    const workItemSelect = "id, title, description, lifecycle_phase, native_href, native_kind, native_id, area, kind, visibility, maintenance_category"
+    const [publicWorkItems, privateWorkItems] = await Promise.all([
+        supabaseAdmin.from("work_items").select(workItemSelect).eq("workspace_id", workspace.id).eq("visibility", "workspace").limit(80),
+        canAccessPrivatePanels
+            ? supabaseAdmin.from("work_items").select(workItemSelect).eq("workspace_id", workspace.id).eq("visibility", "admins_only").limit(80)
+            : Promise.resolve({ data: [], error: null }),
+    ])
+    const workItems = { data: [...(publicWorkItems.data ?? []), ...(privateWorkItems.data ?? [])], error: publicWorkItems.error ?? privateWorkItems.error }
 
     if (!workItems.error) {
         for (const item of (workItems.data ?? []).filter((item) => includesQuery([item.id, item.native_id, item.title, item.description, item.lifecycle_phase], query)).slice(0, 6)) {
+            const isPrivate = item.visibility === "admins_only"
             results.push(result(
                 `work-${item.id}`,
-                "Work item",
+                item.kind === "maintenance" ? "Maintenance" : item.kind === "okr_action" ? "OKR action" : "Work item",
                 item.title,
-                item.description ?? "Workspace work item",
+                item.description ?? (isPrivate ? "Private Admin work item" : "Workspace work item"),
                 workItemHref(workspace.slug, item.id),
                 {
                     hubHref: item.native_href?.startsWith("/") ? item.native_href : undefined,
-                    path: `${workspace.name} > Library > Work Items`,
+                    path: isPrivate
+                        ? `${workspace.name} > Admin > ${item.kind === "maintenance" ? "Maintenance" : "OKRs"}`
+                        : `${workspace.name} > Library > Work Items`,
                     recordId: shortId(item.id),
                 }
             ))
+        }
+    }
+
+    if (canAccessPrivatePanels) {
+        const [{ data: okrs }, { data: keyResults }] = await Promise.all([
+            supabaseAdmin.from("workspace_okrs").select("id, title, description, status, period_start, period_end").eq("workspace_id", workspace.id).limit(60),
+            supabaseAdmin.from("workspace_okr_key_results").select("id, okr_id, name, description, unit, comparator, baseline_value, target_value").eq("workspace_id", workspace.id).limit(100),
+        ])
+        for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.title, item.description, item.status], query)).slice(0, 6)) {
+            results.push(result(`okr-${okr.id}`, "OKR", okr.title, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin/okrs/${okr.id}`, {
+                path: `${workspace.name} > Admin > OKRs`, recordId: shortId(okr.id),
+            }))
+        }
+        for (const keyResult of (keyResults ?? []).filter((item) => includesQuery([item.id, item.name, item.description, item.unit, item.comparator], query)).slice(0, 6)) {
+            results.push(result(`okr-key-result-${keyResult.id}`, "Key Result", keyResult.name, keyResult.description ?? "Measurable OKR outcome", `/${workspace.slug}/admin/okrs/${keyResult.okr_id}#key-result-${keyResult.id}`, {
+                path: `${workspace.name} > Admin > OKRs`, recordId: shortId(keyResult.id),
+            }))
         }
     }
 

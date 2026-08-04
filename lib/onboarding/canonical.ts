@@ -6,6 +6,7 @@ import { FormResponse, OnboardingFormDefinition, StoredUpload } from "@/lib/onbo
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { assetHref, onboardingDetailHref, relationshipHubHref, workItemHref } from "@/lib/relationships"
 import { completeWorkflowParents, createOnboardingReviewWork, ensureRelationshipStage } from "@/lib/relationship-workflow"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import {
     classifyUploadAsset,
     FINAL_ONBOARDING_STEP,
@@ -93,6 +94,28 @@ function extractUploadsFromResponse(response: FormResponse) {
     return uploads
 }
 
+async function reportOnboardingFailure(input: {
+    workspaceId: string
+    workspaceSlug: string
+    relationshipId: string
+    operation: string
+    error: unknown
+    diagnostics?: Record<string, unknown>
+}) {
+    const message = input.error instanceof Error ? input.error.message : String(input.error)
+    await reportPlatformFailure({
+        workspaceId: input.workspaceId,
+        category: "onboarding",
+        source: "canonical_onboarding",
+        operation: input.operation,
+        fingerprint: platformFailureFingerprint(["onboarding", input.operation, message]),
+        severity: "warning",
+        summary: "Onboarding automation could not generate required work",
+        diagnostics: { relationship_id: input.relationshipId, error: message, ...input.diagnostics },
+        sourceHref: onboardingDetailHref(input.workspaceSlug, input.relationshipId),
+    })
+}
+
 async function getWorkspaceSlugHeader() {
     return (await headers()).get("x-betelgeze-workspace-slug")
 }
@@ -165,6 +188,14 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
             console.error("Could not reconcile canonical onboarding work window", {
                 sessionId: session.id,
                 message: error instanceof Error ? error.message : String(error),
+            })
+            await reportOnboardingFailure({
+                workspaceId: session.workspace_id,
+                workspaceSlug: workspace.slug,
+                relationshipId: session.relationship_id,
+                operation: "reconcile_step_window",
+                error,
+                diagnostics: { session_id: session.id },
             })
         }
     }
@@ -275,20 +306,34 @@ async function createCanonicalStepWorkItem(input: {
                 code: error?.code,
                 message: error?.message,
             })
+            await reportOnboardingFailure({
+                workspaceId: input.session.workspace_id,
+                workspaceSlug: input.workspaceSlug,
+                relationshipId: input.session.relationship_id,
+                operation: "create_step_work_item",
+                error: error?.message ?? "No work item was returned",
+                diagnostics: { session_id: input.session.id, step_key: input.step.key, code: error?.code },
+            })
             throw new Error("Could not create the next onboarding step")
         } else {
             workItemId = item.id
         }
     }
 
-    if (!workItemId) throw new Error("Could not create the next onboarding step")
+    if (!workItemId) {
+        await reportOnboardingFailure({ workspaceId: input.session.workspace_id, workspaceSlug: input.workspaceSlug, relationshipId: input.session.relationship_id, operation: "resolve_step_work_item", error: "Could not resolve the created work item", diagnostics: { session_id: input.session.id, step_key: input.step.key } })
+        throw new Error("Could not create the next onboarding step")
+    }
 
     const { error: linkError } = await supabaseAdmin.from("work_item_relationships").upsert({
         workspace_id: input.session.workspace_id,
         work_item_id: workItemId,
         relationship_id: input.session.relationship_id,
     }, { onConflict: "work_item_id,relationship_id" })
-    if (linkError) throw new Error("link-onboarding-work-failed")
+    if (linkError) {
+        await reportOnboardingFailure({ workspaceId: input.session.workspace_id, workspaceSlug: input.workspaceSlug, relationshipId: input.session.relationship_id, operation: "link_step_relationship", error: linkError, diagnostics: { session_id: input.session.id, step_key: input.step.key, work_item_id: workItemId } })
+        throw new Error("link-onboarding-work-failed")
+    }
 
     if (input.predecessorId) {
         const { error: dependencyError } = await supabaseAdmin.from("work_item_dependencies").upsert({
@@ -297,7 +342,10 @@ async function createCanonicalStepWorkItem(input: {
             depends_on_work_item_id: input.predecessorId,
             source: "manual",
         }, { onConflict: "work_item_id,depends_on_work_item_id" })
-        if (dependencyError) throw new Error("link-onboarding-step-failed")
+        if (dependencyError) {
+            await reportOnboardingFailure({ workspaceId: input.session.workspace_id, workspaceSlug: input.workspaceSlug, relationshipId: input.session.relationship_id, operation: "link_step_dependency", error: dependencyError, diagnostics: { session_id: input.session.id, step_key: input.step.key, work_item_id: workItemId } })
+            throw new Error("link-onboarding-step-failed")
+        }
     }
     return workItemId
 }
@@ -687,7 +735,10 @@ export async function createRelationshipOnboardingSession({
         })
         .select("id, session_token")
         .single()
-    if (error || !session) throw new Error("create-session-failed")
+    if (error || !session) {
+        await reportOnboardingFailure({ workspaceId, workspaceSlug, relationshipId, operation: "create_session", error: error?.message ?? "No onboarding session was returned" })
+        throw new Error("create-session-failed")
+    }
 
     await Promise.all([
         selectedModules.length

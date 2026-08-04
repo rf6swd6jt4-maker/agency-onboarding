@@ -18,7 +18,7 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         supabaseAdmin.from("user_profiles").select("username, avatar_path").eq("user_id", userId).maybeSingle(),
         supabaseAdmin.auth.admin.getUserById(userId),
         supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspace.id).eq("user_id", userId).maybeSingle(),
-        supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspace.id).order("title").limit(200),
+        supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspace.id).eq("visibility", "workspace").order("title").limit(200),
         supabaseAdmin.from("relationships").select("id, primary_person_name, business_name").eq("workspace_id", workspace.id).order("updated_at", { ascending: false }).limit(200),
     ])
     const username = profile?.username ?? "account"

@@ -25,7 +25,7 @@ export const PUBLIC_WORKSPACE_PANELS = [
 export const PRIVATE_WORKSPACE_PANELS = [
     { key: "onboarding-builder", label: "Onboarding Builder", route: "onboarding-builder", access: "private", description: "Build workspace onboarding modules and session structure", keywords: ["onboarding modules", "session builder", "forms builder"] },
     { key: "leadgen", label: "Lead Gen", route: "leadgen", access: "private", description: "Lead generation dashboard", keywords: ["leads", "lead generation"] },
-    { key: "admin", label: "Admin", route: "admin", access: "private", description: "Workspace administration tools and automation-failure follow-up", keywords: ["admin tools", "automation failures", "admin work items", "goals"] },
+    { key: "admin", label: "Admin", route: "admin", access: "private", description: "Private OKRs, maintenance, and automation-failure follow-up", keywords: ["admin tools", "okr", "objectives", "key results", "metrics", "maintenance", "automation failures", "admin work items", "goals"] },
     { key: "settings", label: "Settings", route: "settings", access: "private", description: "Unified workspace settings", keywords: ["workspace settings"] },
 ] as const satisfies readonly WorkspacePanelDefinition[]
 

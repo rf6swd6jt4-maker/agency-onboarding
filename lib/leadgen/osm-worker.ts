@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import type { LeadgenSourcePlanItem } from "@/lib/leadgen/sources"
 import { recordEvidenceClaim } from "@/lib/leadgen/evidence-scoring"
 import { seedIndustryMappingsWithFallbacks, seedLocationMappingsWithFallbacks } from "@/lib/leadgen/seed-source-fallbacks"
@@ -88,12 +89,26 @@ ${clauses}
 out center ${limit};`
 }
 
-export async function setLeadgenPollStatus(pollId: string, workspaceId: string, status: string, error?: string | null) {
+export async function setLeadgenPollStatus(pollId: string, workspaceId: string, status: string, error?: string | null, reportMaintenance = false) {
     await supabaseAdmin
         .from("leadgen_polls")
         .update({ status, error: error ?? null, ...(["completed", "failed", "cancelled"].includes(status) ? { completed_at: new Date().toISOString() } : {}) })
         .eq("id", pollId)
         .eq("workspace_id", workspaceId)
+    if (status === "failed" && error && reportMaintenance) {
+        const { data: workspace } = await supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).maybeSingle()
+        await reportPlatformFailure({
+            workspaceId,
+            category: "leadgen",
+            source: "leadgen",
+            operation: "poll_processing",
+            fingerprint: platformFailureFingerprint(["leadgen", "poll_processing", error]),
+            severity: "warning",
+            summary: "Lead Gen poll could not progress",
+            diagnostics: { poll_id: pollId, error },
+            sourceHref: workspace?.slug ? `/${workspace.slug}/leadgen/poll/${pollId}` : null,
+        })
+    }
 }
 
 export async function refreshLeadgenPollCounts(pollId: string, workspaceId: string) {
@@ -142,7 +157,7 @@ export async function finalizeLeadgenPoll(pollId: string, workspaceId: string) {
             .eq("workspace_id", workspaceId),
     ])
     if (tasksResult.error) {
-        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not read poll task results: ${tasksResult.error.message}`)
+        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not read poll task results: ${tasksResult.error.message}`, true)
         return
     }
     const tasks = tasksResult.data ?? []
@@ -182,6 +197,7 @@ export async function finalizeLeadgenPoll(pollId: string, workspaceId: string) {
                         ? "The staged poll found owner phone evidence, but no owner phone numbers passed callable-format validation."
                         : "The poll completed, but no qualified leads had both an owner/principal and a callable phone number. Betelgeze stored any raw candidates/evidence internally, but the Leads tab only shows qualified leads."
             : warning,
+        majorityTasksFailed && Boolean(warning),
     )
     await refreshLeadgenPollCounts(pollId, workspaceId)
 }
@@ -448,12 +464,12 @@ export async function processOsmPoll(pollId: string, workspaceId: string, option
         .eq("status", "queued")
         .order("created_at", { ascending: true })
     if (tasksResult.error) {
-        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not load OSM tasks: ${tasksResult.error.message}`)
+        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not load OSM tasks: ${tasksResult.error.message}`, true)
         return
     }
     const tasks = tasksResult.data ?? []
     if (tasks.length === 0) {
-        if (options.finalize !== false) await setLeadgenPollStatus(pollId, workspaceId, "failed", "No queued OSM tasks were available for this poll.")
+        if (options.finalize !== false) await setLeadgenPollStatus(pollId, workspaceId, "failed", "No queued OSM tasks were available for this poll.", true)
         return
     }
     for (const task of tasks) {

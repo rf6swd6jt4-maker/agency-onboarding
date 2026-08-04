@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
 import { shouldIgnoreClickUpMessage } from "@/lib/client-messages/clickup-message-filters"
+import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
 
 export type JsonValue =
     | string
@@ -253,16 +254,25 @@ export async function sendLoggedClickUpMessageToWhatsApp({
             whatsappMessageId,
         }
     } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown Meta WhatsApp error"
         await supabaseAdmin
             .from("client_messages")
             .update({
                 status: "send_failed",
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Unknown Meta WhatsApp error",
+                error: message,
             })
             .eq("id", messageLog?.id)
+
+        await reportClientPlatformFailure({
+            clientId: channel.client_id,
+            category: "communications",
+            source: "clickup_whatsapp_bridge",
+            operation: "send_whatsapp_message",
+            fingerprint: platformFailureFingerprint(["whatsapp", "send", message]),
+            severity: "warning",
+            summary: "WhatsApp message delivery automation failed",
+            diagnostics: { error: message, clickup_message_id: messageId ?? null, message_log_id: messageLog?.id ?? null },
+        })
 
         return {
             ok: false,
@@ -348,16 +358,25 @@ export async function sendClickUpMessageEditToWhatsApp({
             editWhatsAppMessageId,
         }
     } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown Meta WhatsApp edit send error"
         await supabaseAdmin
             .from("client_messages")
             .update({
                 status: "edit_send_failed",
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : "Unknown Meta WhatsApp edit send error",
+                error: message,
             })
             .eq("id", existingMessage.id)
+
+        await reportClientPlatformFailure({
+            clientId: channel.client_id,
+            category: "communications",
+            source: "clickup_whatsapp_bridge",
+            operation: "send_whatsapp_edit",
+            fingerprint: platformFailureFingerprint(["whatsapp", "edit", message]),
+            severity: "warning",
+            summary: "WhatsApp message edit automation failed",
+            diagnostics: { error: message, clickup_message_id: messageId, message_log_id: existingMessage.id },
+        })
 
         return {
             handled: true,

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
 import {
     getEquivalentMessageAddresses,
     normalizeMessageAddress,
@@ -315,7 +316,7 @@ async function handleStatusUpdate({
     const errorMessage = getStatusError(status)
     const { data: message } = await supabaseAdmin
         .from("client_messages")
-        .select("id, raw_payload")
+        .select("id, client_id, raw_payload")
         .or(
             `provider_message_id.eq.${messageId},whatsapp_message_id.eq.${messageId}`
         )
@@ -357,6 +358,18 @@ async function handleStatusUpdate({
                 updated_at: new Date().toISOString(),
             })
             .eq("consent_template_message_id", messageId)
+        if (message?.client_id) {
+            await reportClientPlatformFailure({
+                clientId: message.client_id,
+                category: "communications",
+                source: "meta_whatsapp",
+                operation: "delivery_status",
+                fingerprint: platformFailureFingerprint(["whatsapp", "delivery", status.errors?.[0]?.code ?? errorMessage ?? "failed"]),
+                severity: "warning",
+                summary: "WhatsApp reported a message delivery failure",
+                diagnostics: { provider_message_id: messageId, error: errorMessage, status },
+            })
+        }
     }
 }
 

@@ -1759,12 +1759,12 @@ export async function processStateLicensingPoll(pollId: string, workspaceId: str
     if (options.stageKey) tasksQuery = tasksQuery.eq("stage_key", options.stageKey)
     const tasksResult = await tasksQuery
     if (tasksResult.error) {
-        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not load state licensing tasks: ${tasksResult.error.message}`)
+        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not load state licensing tasks: ${tasksResult.error.message}`, true)
         return
     }
     const tasks = (tasksResult.data ?? []) as LicensingTask[]
     if (tasks.length === 0) {
-        if (options.finalize !== false) await setLeadgenPollStatus(pollId, workspaceId, "failed", "No queued state licensing tasks were available for this poll.")
+        if (options.finalize !== false) await setLeadgenPollStatus(pollId, workspaceId, "failed", "No queued state licensing tasks were available for this poll.", true)
         return
     }
     const taskGroups = [...groupByKey(tasks, licensingTaskGroupKey)]

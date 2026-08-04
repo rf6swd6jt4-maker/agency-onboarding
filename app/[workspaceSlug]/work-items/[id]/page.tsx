@@ -35,14 +35,16 @@ function statusTone(status: string): "grey" | "yellow" | "green" | "red" {
 
 export default async function WorkItemDetailPage({ params }: PageProps) {
     const { workspaceSlug, id } = await params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const item = await getWorkItem(workspace.id, id)
     if (!item) notFound()
+    if (item.visibility === "admins_only" && role === "staff") notFound()
+    const isAdminItem = item.area === "admin"
     const [relationships, assets, planning, relationshipOptions] = await Promise.all([
-        listWorkItemRelationships(workspace.id, item.id),
-        listWorkItemAssets(workspace.id, item.id),
+        isAdminItem ? Promise.resolve([]) : listWorkItemRelationships(workspace.id, item.id),
+        isAdminItem ? Promise.resolve([]) : listWorkItemAssets(workspace.id, item.id),
         getWorkItemPlanningContext(workspace.id, item),
-        listRelationshipsForWorkspace(workspace.id),
+        isAdminItem ? Promise.resolve([]) : listRelationshipsForWorkspace(workspace.id),
     ])
     const contextRelationshipId = relationships[0]?.relationship_id
     const contextRelationship = contextRelationshipId ? await getRelationship(workspace.id, contextRelationshipId) : null
@@ -61,6 +63,7 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
                         <header className="pb-4">
+                            {isAdminItem ? <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-red-400">Private Admin work</p> : null}
                             <p className="font-mono text-sm text-neutral-500">Work item {shortId(item.id)}</p>
                             <h1 className="mt-2 text-3xl font-semibold tracking-tight">{item.title}</h1>
                         </header>
@@ -75,7 +78,7 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                     workOptions={planning.availableWorkItems.map((candidate) => ({ id: candidate.id, title: candidate.title, status: candidate.status }))}
                     relationships={relationships.map((link) => ({ id: link.relationship_id, label: link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship" }))}
                     relationshipOptions={relationshipOptions.map((relationship) => ({ id: relationship.id, label: relationship.business_name ?? relationship.primary_person_name }))}
-                    relationshipsLocked={item.native_kind === "onboarding_step"} priority={item.priority}
+                    relationshipsLocked={isAdminItem || item.native_kind === "onboarding_step"} priority={item.priority}
                 />
 
                 <section className="mt-6 rounded-2xl border border-neutral-800 bg-black p-5">

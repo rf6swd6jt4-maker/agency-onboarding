@@ -44,6 +44,9 @@ export type RelationshipWorkItem = {
     title: string
     description: string | null
     lifecycle_phase: RelationshipPhase
+    area?: "workspace" | "admin"
+    kind?: "standard" | "okr_action" | "maintenance"
+    visibility?: "workspace" | "admins_only"
     status: RelationshipWorkItemStatus
     priority: number
     is_key_task: boolean
@@ -404,6 +407,9 @@ function mapWorkItem(row: Record<string, unknown>, relationshipId: string | null
         title: String(row.title ?? "Untitled work item"),
         description: typeof row.description === "string" ? row.description : null,
         lifecycle_phase: normalizeRelationshipPhase(row.lifecycle_phase),
+        area: row.area === "admin" ? "admin" : "workspace",
+        kind: row.kind === "okr_action" || row.kind === "maintenance" ? row.kind : "standard",
+        visibility: row.visibility === "admins_only" ? "admins_only" : "workspace",
         status: String(row.status ?? "todo") as RelationshipWorkItemStatus,
         priority: typeof row.priority === "number" ? row.priority : Number(row.priority ?? 3),
         is_key_task: Boolean(row.is_key_task ?? true),
@@ -694,8 +700,9 @@ export async function listRelationshipTimelineItems(workspaceSlug: string, relat
 export async function listWorkQueueItems(workspaceSlug: string, workspaceId: string): Promise<WorkQueueItem[]> {
     const result = await supabaseAdmin
         .from("work_items")
-        .select("id, workspace_id, title, description, lifecycle_phase, status, priority, is_key_task, native_kind, native_id, native_href, planned_start_date, due_date, actual_start_at, actual_completed_at, sort_order, metadata, created_by, created_at, updated_at")
+        .select("id, workspace_id, title, description, lifecycle_phase, area, kind, visibility, status, priority, is_key_task, native_kind, native_id, native_href, planned_start_date, due_date, actual_start_at, actual_completed_at, sort_order, metadata, created_by, created_at, updated_at")
         .eq("workspace_id", workspaceId)
+        .eq("visibility", "workspace")
         .not("status", "in", "(done,canceled)")
         .order("priority", { ascending: true })
         .order("due_date", { ascending: true, nullsFirst: false })
@@ -792,8 +799,9 @@ export async function listWorkQueueItems(workspaceSlug: string, workspaceId: str
 export async function listWorkspaceWorkItems(workspaceId: string): Promise<RelationshipWorkItem[]> {
     const result = await supabaseAdmin
         .from("work_items")
-        .select("id, workspace_id, title, description, lifecycle_phase, status, priority, is_key_task, native_kind, native_id, native_href, planned_start_date, due_date, actual_start_at, actual_completed_at, sort_order, metadata, created_by, created_at, updated_at")
+        .select("id, workspace_id, title, description, lifecycle_phase, area, kind, visibility, status, priority, is_key_task, native_kind, native_id, native_href, planned_start_date, due_date, actual_start_at, actual_completed_at, sort_order, metadata, created_by, created_at, updated_at")
         .eq("workspace_id", workspaceId)
+        .eq("visibility", "workspace")
         .order("updated_at", { ascending: false })
         .limit(160)
 
@@ -892,6 +900,7 @@ export async function countOpenWorkItemsByRelationship(workspaceId: string) {
         .from("work_items")
         .select("id, status")
         .eq("workspace_id", workspaceId)
+        .eq("visibility", "workspace")
         .not("status", "in", "(done,canceled)")
         .limit(500)
 
@@ -929,7 +938,7 @@ export async function countOpenWorkItemsByRelationship(workspaceId: string) {
 export async function getWorkItem(workspaceId: string, workItemId: string): Promise<RelationshipWorkItem | null> {
     const result = await supabaseAdmin
         .from("work_items")
-        .select("id, workspace_id, title, description, lifecycle_phase, status, priority, is_key_task, native_kind, native_id, native_href, planned_start_date, planned_start_time, due_date, due_time, actual_start_at, actual_start_has_time, actual_completed_at, actual_completed_has_time, parent_work_item_id, sort_order, metadata, created_by, created_at, updated_at")
+        .select("id, workspace_id, title, description, lifecycle_phase, area, kind, visibility, status, priority, is_key_task, native_kind, native_id, native_href, planned_start_date, planned_start_time, due_date, due_time, actual_start_at, actual_start_has_time, actual_completed_at, actual_completed_has_time, parent_work_item_id, sort_order, metadata, created_by, created_at, updated_at")
         .eq("workspace_id", workspaceId)
         .eq("id", workItemId)
         .maybeSingle()
@@ -939,6 +948,7 @@ export async function getWorkItem(workspaceId: string, workItemId: string): Prom
 }
 
 export async function getWorkItemPlanningContext(workspaceId: string, item: RelationshipWorkItem) {
+    const visibility = item.visibility
     const [parentResult, dependenciesResult, assigneesResult, membersResult, workItemsResult] = await Promise.all([
         item.parent_work_item_id
             ? supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspaceId).eq("id", item.parent_work_item_id).maybeSingle()
@@ -947,8 +957,10 @@ export async function getWorkItemPlanningContext(workspaceId: string, item: Rela
             .select("depends_on_work_item_id, source, work_items!work_item_dependencies_depends_on_work_item_id_fkey(id, title, status)")
             .eq("workspace_id", workspaceId).eq("work_item_id", item.id).order("created_at"),
         supabaseAdmin.from("work_item_assignees").select("user_id").eq("workspace_id", workspaceId).eq("work_item_id", item.id),
-        supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspaceId),
-        supabaseAdmin.from("work_items").select("id, title, status, parent_work_item_id").eq("workspace_id", workspaceId).neq("id", item.id).order("title"),
+        visibility === "admins_only"
+            ? supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspaceId).in("role", ["owner", "admin"])
+            : supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspaceId),
+        supabaseAdmin.from("work_items").select("id, title, status, parent_work_item_id").eq("workspace_id", workspaceId).eq("visibility", visibility).neq("id", item.id).order("title"),
     ])
 
     const memberIds = [...new Set([

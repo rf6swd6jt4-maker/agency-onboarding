@@ -33,6 +33,7 @@ import {
     updateClickUpTask,
 } from "@/lib/client-messages/clickup"
 import { downloadOnboardingUpload } from "@/lib/onboarding/uploads"
+import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
 
 function getChannelId(response: unknown): string | null {
     if (!response || typeof response !== "object") return null
@@ -411,6 +412,7 @@ async function attachUploadsToClickUpTask({
                 stepKey,
             })
         } catch (error) {
+            const message = error instanceof Error ? error.message : `Attachment ${upload.name} failed`
             await addActivity(
                 clientId,
                 "clickup_attachment_failed",
@@ -418,6 +420,7 @@ async function attachUploadsToClickUpTask({
                     ? `ClickUp attachment failed for ${upload.name}: ${error.message}`
                     : `ClickUp attachment failed for ${upload.name}`
             )
+            await reportClientPlatformFailure({ clientId, category: "integrations", source: "clickup", operation: "sync_attachment", fingerprint: platformFailureFingerprint(["clickup", "attachment", message]), severity: "warning", summary: "ClickUp attachment synchronisation failed", diagnostics: { error: message, step_key: stepKey, file_name: upload.name } })
         }
     }
 }
@@ -718,6 +721,7 @@ export async function syncClientOnboardingStepToClickUp({
             await ensureClientServiceTasks(clientId)
         }
     } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown ClickUp onboarding sync error"
         await addActivity(
             clientId,
             "clickup_step_sync_failed",
@@ -725,6 +729,7 @@ export async function syncClientOnboardingStepToClickUp({
                 ? `ClickUp onboarding step sync failed: ${error.message}`
                 : "ClickUp onboarding step sync failed"
         )
+        await reportClientPlatformFailure({ clientId, category: "integrations", source: "clickup", operation: "sync_onboarding_step", fingerprint: platformFailureFingerprint(["clickup", "onboarding_step", message]), severity: "warning", summary: "ClickUp onboarding synchronisation failed", diagnostics: { error: message } })
     }
 }
 
@@ -772,6 +777,7 @@ export async function resetClientOnboardingClickUpTasks(clientId: string) {
             "ClickUp onboarding tasks reset to unsubmitted"
         )
     } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown ClickUp onboarding reset error"
         await addActivity(
             clientId,
             "clickup_onboarding_reset_failed",
@@ -779,6 +785,7 @@ export async function resetClientOnboardingClickUpTasks(clientId: string) {
                 ? `ClickUp onboarding reset failed: ${error.message}`
                 : "ClickUp onboarding reset failed"
         )
+        await reportClientPlatformFailure({ clientId, category: "integrations", source: "clickup", operation: "reset_onboarding_tasks", fingerprint: platformFailureFingerprint(["clickup", "onboarding_reset", message]), severity: "warning", summary: "ClickUp onboarding reset failed", diagnostics: { error: message } })
     }
 }
 
@@ -1115,6 +1122,7 @@ export async function ensureClientClickUpChannel(
             "clickup_channel_failed",
             `ClickUp Chat channel failed: ${message}`
         )
+        await reportClientPlatformFailure({ clientId: client.id, category: "integrations", source: "clickup", operation: "create_client_channel", fingerprint: platformFailureFingerprint(["clickup", "client_channel", message]), severity: "warning", summary: "ClickUp client channel creation failed", diagnostics: { error: message } })
 
         return {
             ok: false,

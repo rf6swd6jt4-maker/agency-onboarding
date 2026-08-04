@@ -1132,7 +1132,7 @@ export async function processPipelineSourcePoll(pollId: string, workspaceId: str
     if (options.stageKey) tasksQuery = tasksQuery.eq("stage_key", options.stageKey)
     const tasksResult = await tasksQuery
     if (tasksResult.error) {
-        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not load ${sourceKey} tasks: ${tasksResult.error.message}`)
+        await setLeadgenPollStatus(pollId, workspaceId, "failed", `Could not load ${sourceKey} tasks: ${tasksResult.error.message}`, true)
         return
     }
     const tasks = (tasksResult.data ?? []) as PipelineTask[]

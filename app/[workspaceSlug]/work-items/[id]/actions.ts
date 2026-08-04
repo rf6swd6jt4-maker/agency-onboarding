@@ -8,7 +8,7 @@ import { workItemHref } from "@/lib/relationships"
 async function requireWorkItem(slug: string, workItemId: string) {
     const context = await requireWorkspace(slug, "admin")
     const { data: item } = await supabaseAdmin.from("work_items")
-        .select("id, status, native_kind, parent_work_item_id")
+        .select("id, status, native_kind, parent_work_item_id, area, visibility")
         .eq("workspace_id", context.workspace.id).eq("id", workItemId).maybeSingle()
     if (!item) throw new Error("Work item not found")
     return { ...context, item }
@@ -63,9 +63,11 @@ export async function updateWorkItemDescription(slug: string, workItemId: string
 }
 
 export async function updateWorkItemAssignees(slug: string, workItemId: string, assigneeIds: string[]) {
-    const { workspace, user } = await requireWorkItem(slug, workItemId)
+    const { workspace, user, item } = await requireWorkItem(slug, workItemId)
     const uniqueIds = [...new Set(assigneeIds)]
-    const { data: members } = await supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id)
+    let membersQuery = supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id)
+    if (item.visibility === "admins_only") membersQuery = membersQuery.in("role", ["owner", "admin"])
+    const { data: members } = await membersQuery
     const memberIds = new Set((members ?? []).map((row) => row.user_id))
     if (uniqueIds.some((id) => !memberIds.has(id))) throw new Error("Assignees must belong to this workspace")
     await supabaseAdmin.from("work_item_assignees").delete().eq("workspace_id", workspace.id).eq("work_item_id", workItemId)
@@ -79,7 +81,7 @@ export async function updateWorkItemAssignees(slug: string, workItemId: string, 
 export async function updateWorkItemParent(slug: string, workItemId: string, parentWorkItemId: string | null, waitForParent: boolean) {
     const { workspace, user, item } = await requireWorkItem(slug, workItemId)
     const [{ data: items }, { data: dependencyEdges }] = await Promise.all([
-        supabaseAdmin.from("work_items").select("id, parent_work_item_id, status").eq("workspace_id", workspace.id),
+        supabaseAdmin.from("work_items").select("id, parent_work_item_id, status").eq("workspace_id", workspace.id).eq("visibility", item.visibility),
         supabaseAdmin.from("work_item_dependencies").select("work_item_id, depends_on_work_item_id").eq("workspace_id", workspace.id).neq("work_item_id", workItemId),
     ])
     const itemIds = new Set((items ?? []).map((row) => row.id))
@@ -112,7 +114,7 @@ export async function updateWorkItemDependencies(slug: string, workItemId: strin
     const { workspace, user, item } = await requireWorkItem(slug, workItemId)
     const uniqueIds = [...new Set(dependencyIds)].filter((id) => id !== workItemId && id !== item.parent_work_item_id)
     const [{ data: items }, { data: edges }] = await Promise.all([
-        supabaseAdmin.from("work_items").select("id, status").eq("workspace_id", workspace.id),
+        supabaseAdmin.from("work_items").select("id, status").eq("workspace_id", workspace.id).eq("visibility", item.visibility),
         supabaseAdmin.from("work_item_dependencies").select("work_item_id, depends_on_work_item_id").eq("workspace_id", workspace.id).neq("work_item_id", workItemId),
     ])
     const statuses = new Map((items ?? []).map((row) => [row.id, row.status]))
@@ -134,6 +136,7 @@ export async function updateWorkItemDependencies(slug: string, workItemId: strin
 
 export async function updateWorkItemRelationships(slug: string, workItemId: string, relationshipIds: string[]) {
     const { workspace, item } = await requireWorkItem(slug, workItemId)
+    if (item.area === "admin" || item.visibility === "admins_only") throw new Error("Private Admin work items cannot be linked to relationships")
     if (item.native_kind === "onboarding_step") throw new Error("Onboarding work-item relationships are managed by onboarding")
     const uniqueIds = [...new Set(relationshipIds)]
     const { data: relationships } = await supabaseAdmin.from("relationships").select("id").eq("workspace_id", workspace.id)
