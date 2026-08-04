@@ -107,11 +107,12 @@ test("workspace error screens report authenticated incidents to maintenance and 
 })
 
 test("global officer overrides category routing while preserving category fallbacks", async () => {
-    const [migration, triggerFix, maintenance, settings, settingsActions, maintenancePage, adminPage] = await Promise.all([
+    const [migration, triggerFix, maintenance, settings, officerSettings, settingsActions, maintenancePage, adminPage] = await Promise.all([
         readFile("supabase/migrations/20260804160000_global_maintenance_officer.sql", "utf8"),
         readFile("supabase/migrations/20260804170000_fix_admin_officer_validation.sql", "utf8"),
         readFile("lib/admin/maintenance.ts", "utf8"),
         readFile("app/[workspaceSlug]/settings/page.tsx", "utf8"),
+        readFile("components/admin/WorkspaceOfficerSettings.tsx", "utf8"),
         readFile("app/[workspaceSlug]/settings/actions.ts", "utf8"),
         readFile("app/[workspaceSlug]/admin/maintenance/page.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
@@ -122,7 +123,11 @@ test("global officer overrides category routing while preserving category fallba
     assert.doesNotMatch(triggerFix, /new\.owner_user_id|new\.responsible_user_id/)
     assert.ok(maintenance.indexOf('route.category === "global"') < maintenance.indexOf("route.category === category"))
     assert.match(settings, /id="officers"/)
-    assert.match(settings, /The category choices below stay saved and resume automatically/)
+    assert.match(settings, /key=\{`\$\{officerRoutes\.get\("global"\)/)
+    assert.match(officerSettings, /The category choices below stay saved and resume automatically/)
+    assert.match(officerSettings, /value=\{globalOfficer\}/)
+    assert.match(officerSettings, /value=\{categoryOfficers\[category\.key\]/)
+    assert.doesNotMatch(officerSettings, /defaultValue=/)
     assert.match(settingsActions, /MAINTENANCE_ROUTE_KEYS/)
     assert.match(settingsActions, /reportPlatformFailure/)
     assert.match(settingsActions, /source: "settings_officers"/)

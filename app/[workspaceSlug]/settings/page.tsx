@@ -2,6 +2,7 @@ import { WorkspaceIdentityEditor } from "@/components/admin/WorkspaceIdentityEdi
 import { PendingWorkspaceInvitations } from "@/components/admin/PendingWorkspaceInvitations"
 import { WorkspaceConnections } from "@/components/admin/WorkspaceConnections"
 import { WorkspaceOnboardingDomain } from "@/components/admin/WorkspaceOnboardingDomain"
+import { WorkspaceOfficerSettings } from "@/components/admin/WorkspaceOfficerSettings"
 import { AdaptiveTargetingSettings } from "@/components/leadgen/AdaptiveTargetingSettings"
 import { ManualSettingsForm, SettingsSectionActions } from "@/components/leadgen/ManualSettingsForm"
 import { SourceSettingsCard } from "@/components/leadgen/SourceSettingsCard"
@@ -118,6 +119,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
     const isOwner = role === "owner"
     const officerRoutes = new Map(maintenanceRouting.map((route) => [route.category, route.responsible_user_id]))
     const officers = users.filter((item) => ["owner", "admin"].includes(normalizeWorkspaceRole(item.role) ?? ""))
+    const officerOptions = officers.flatMap(({ user: officer, role: officerRole }) => officer?.id ? [{ id: officer.id, label: `${officer.email ?? workspaceRoleLabel(officerRole)} · ${workspaceRoleLabel(officerRole)}` }] : [])
     const connections = ["stripe", "meta_whatsapp"].map((provider) =>
         integrationResult.data?.find((item) => item.provider === provider)
         ?? { provider, enabled: false, mode: "disabled", config_hint: {} }
@@ -280,28 +282,13 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             description="Choose which owner or admin receives maintenance work when platform automations fail."
                         >
                             {query.officers === "save-failed" && <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">The officer settings could not be saved. The failure was recorded in Admin Activity and Maintenance.</p>}
-                            <form action={saveWorkspaceOfficers.bind(null, workspace.slug)} className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
-                                <div className="border-b border-neutral-800 p-4 sm:p-5">
-                                    <label className="block text-sm font-medium text-neutral-200">
-                                        Global officer
-                                        <select name="global" defaultValue={officerRoutes.get("global") ?? ""} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white">
-                                            <option value="">No global override</option>
-                                            {officers.map(({ user: officer, role: officerRole }) => <option key={officer?.id} value={officer?.id}>{officer?.email ?? workspaceRoleLabel(officerRole)} · {workspaceRoleLabel(officerRole)}</option>)}
-                                        </select>
-                                    </label>
-                                    <p className="mt-2 text-xs leading-5 text-neutral-500">When selected, this officer receives all new maintenance Work Items. The category choices below stay saved and resume automatically when the global override is cleared.</p>
-                                </div>
-                                <div className="p-4 sm:p-5">
-                                    <div>
-                                        <h3 className="text-base font-semibold text-neutral-200">Responsible officers</h3>
-                                        <p className="mt-1 text-sm leading-6 text-neutral-500">Used when there is no global officer. Unassigned categories fall back to the workspace owner.</p>
-                                    </div>
-                                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                                        {MAINTENANCE_CATEGORIES.map((category) => <label key={category} className="text-sm text-neutral-300">{maintenanceCategoryLabel(category)}<select name={category} defaultValue={officerRoutes.get(category) ?? ""} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-white"><option value="">Workspace owner (fallback)</option>{officers.map(({ user: officer, role: officerRole }) => <option key={officer?.id} value={officer?.id}>{officer?.email ?? workspaceRoleLabel(officerRole)} · {workspaceRoleLabel(officerRole)}</option>)}</select></label>)}
-                                    </div>
-                                    <button className="mt-5 inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">Save officers</button>
-                                </div>
-                            </form>
+                            <WorkspaceOfficerSettings
+                                key={`${officerRoutes.get("global") ?? ""}|${MAINTENANCE_CATEGORIES.map((category) => `${category}:${officerRoutes.get(category) ?? ""}`).join("|")}`}
+                                globalValue={officerRoutes.get("global") ?? ""}
+                                categories={MAINTENANCE_CATEGORIES.map((category) => ({ key: category, label: maintenanceCategoryLabel(category), value: officerRoutes.get(category) ?? "" }))}
+                                officers={officerOptions}
+                                action={saveWorkspaceOfficers.bind(null, workspace.slug)}
+                            />
                         </UnifiedSection>
 
                         <UnifiedSection
