@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
+import { recordClientAdminActivity } from "@/lib/admin/activity"
 import {
     getEquivalentMessageAddresses,
     normalizeMessageAddress,
@@ -111,7 +112,7 @@ type ClientCommunicationChannel = {
 }
 
 function logDiagnosticInsertError(context: string, error: unknown) {
-    console.error(
+    console.warn(
         `Meta WhatsApp bridge diagnostic failed: ${context}`,
         error instanceof Error ? error.message : error
     )
@@ -193,10 +194,7 @@ async function repairChannelAddress(
         .eq("id", channel.id)
 
     if (updateError) {
-        console.error(
-            "Meta WhatsApp bridge could not repair channel address",
-            updateError.message
-        )
+        await reportClientPlatformFailure({ clientId: channel.client_id, category: "communications", source: "meta_whatsapp", operation: "repair_channel_address", fingerprint: platformFailureFingerprint(["whatsapp", "repair_channel", updateError.message]), severity: "warning", summary: "WhatsApp channel address repair failed", diagnostics: { error: updateError.message, channel_id: channel.id } })
     }
 
     return {
@@ -370,6 +368,8 @@ async function handleStatusUpdate({
                 diagnostics: { provider_message_id: messageId, error: errorMessage, status },
             })
         }
+    } else if (message?.client_id) {
+        await recordClientAdminActivity({ clientId: message.client_id, category: "communications", eventKey: `whatsapp.message.${messageStatus}`, summary: `WhatsApp message ${messageStatus}`, entityType: "client_message", entityId: message.id, metadata: { provider_message_id: messageId, status: messageStatus } })
     }
 }
 

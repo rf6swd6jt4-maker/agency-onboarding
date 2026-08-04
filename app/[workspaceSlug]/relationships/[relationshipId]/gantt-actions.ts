@@ -6,6 +6,8 @@ import { requireWorkspace } from "@/lib/workspaces"
 import { getRelationshipGanttPlan, persistedScheduleMatchesChange, previewScheduleCascade, type RelationshipGanttDependency, type RelationshipGanttItem, type RelationshipGanttPlan, type ScheduleChange } from "@/lib/relationship-gantt"
 import { getRelationship } from "@/lib/relationships"
 import type { RelationshipPhase } from "@/lib/relationship-phases"
+import { recordAdminActivity } from "@/lib/admin/activity"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 
 export type GanttMutationResult =
     | { status: "saved"; workItemId?: string; plan?: RelationshipGanttPlan }
@@ -39,6 +41,11 @@ function errorResult(error: unknown): GanttMutationResult {
     return message.toLowerCase().includes("stale")
         ? { status: "stale", message: "The plan changed in another tab. Refresh and try again." }
         : { status: "invalid", message }
+}
+
+async function reportGanttFailure(workspaceId: string, slug: string, relationshipId: string, operation: string, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    await reportPlatformFailure({ workspaceId, category: "system_health", source: "gantt", operation, fingerprint: platformFailureFingerprint(["gantt", operation, message]), severity: "warning", summary: "Gantt automation failed", diagnostics: { relationship_id: relationshipId, error: message }, sourceHref: `/${slug}/relationships/${relationshipId}` })
 }
 
 export async function loadGanttPlan(slug: string, relationshipId: string): Promise<RelationshipGanttPlan | null> {
@@ -85,8 +92,10 @@ export async function applyGanttScheduleChanges(
     relationshipId: string,
     changes: ScheduleChange[],
 ): Promise<GanttMutationResult> {
+    let failureWorkspaceId: string | null = null
     try {
         const { workspace } = await requireGantt(slug, relationshipId)
+        failureWorkspaceId = workspace.id
         const payload = changes.map((change) => ({
             id: change.id,
             planned_start_date: change.plannedStartDate,
@@ -112,11 +121,13 @@ export async function applyGanttScheduleChanges(
             return !persisted || !persistedScheduleMatchesChange(persisted, change)
         })
         if (unverified) throw new Error(`The saved schedule for ${unverified.title} could not be verified. Refresh and try again.`)
+        await recordAdminActivity({ workspaceId: workspace.id, category: "gantt", eventKey: "gantt.schedule.updated", summary: `Gantt schedule updated for ${changes.length} work item${changes.length === 1 ? "" : "s"}`, entityType: "relationship", entityId: relationshipId, sourceHref: `/${slug}/relationships/${relationshipId}`, metadata: { work_item_ids: requestedIds } })
         await revalidateAffected(slug, workspace.id, changes.map((change) => change.id))
         const relationship = await getRelationship(workspace.id, relationshipId)
         const plan = relationship ? await getRelationshipGanttPlan(workspace.slug, relationship) : undefined
         return { status: "saved", plan }
     } catch (error) {
+        if (failureWorkspaceId) await reportGanttFailure(failureWorkspaceId, slug, relationshipId, "apply_schedule", error)
         return errorResult(error)
     }
 }
@@ -126,8 +137,10 @@ export async function createGanttWorkItem(
     relationshipId: string,
     input: { title: string; parentWorkItemId: string | null; startDate: string | null },
 ): Promise<GanttMutationResult> {
+    let failureWorkspaceId: string | null = null
     try {
         const { workspace, user, relationship } = await requireGantt(slug, relationshipId)
+        failureWorkspaceId = workspace.id
         const title = input.title.trim()
         if (!title) return { status: "invalid", message: "Enter a work-item title" }
         let lifecyclePhase = relationship.lifecycle_phase as RelationshipPhase
@@ -147,9 +160,11 @@ export async function createGanttWorkItem(
             p_created_by: user.id,
         })
         if (error) throw new Error(error.message)
+        await recordAdminActivity({ workspaceId: workspace.id, category: "gantt", eventKey: "gantt.work_item.created", summary: `Gantt work item created: ${title}`, entityType: "work_item", entityId: String(data), sourceHref: `/${slug}/relationships/${relationshipId}`, actorUserId: user.id, metadata: { relationship_id: relationshipId, parent_work_item_id: input.parentWorkItemId } })
         await revalidateAffected(slug, workspace.id, [String(data)])
         return { status: "saved", workItemId: String(data) }
     } catch (error) {
+        if (failureWorkspaceId) await reportGanttFailure(failureWorkspaceId, slug, relationshipId, "create_work_item", error)
         return errorResult(error)
     }
 }
@@ -159,8 +174,10 @@ export async function moveGanttWorkItem(
     relationshipId: string,
     input: { workItemId: string; parentWorkItemId: string | null; sortOrder: number; expectedUpdatedAt: string },
 ): Promise<GanttMutationResult> {
+    let failureWorkspaceId: string | null = null
     try {
         const { workspace } = await requireGantt(slug, relationshipId)
+        failureWorkspaceId = workspace.id
         const { error } = await supabaseAdmin.rpc("move_gantt_work_item", {
             p_workspace_id: workspace.id,
             p_work_item_id: input.workItemId,
@@ -169,9 +186,11 @@ export async function moveGanttWorkItem(
             p_expected_updated_at: input.expectedUpdatedAt,
         })
         if (error) throw new Error(error.message)
+        await recordAdminActivity({ workspaceId: workspace.id, category: "gantt", eventKey: "gantt.work_item.moved", summary: "Gantt work item moved", entityType: "work_item", entityId: input.workItemId, sourceHref: `/${slug}/relationships/${relationshipId}`, metadata: { relationship_id: relationshipId, parent_work_item_id: input.parentWorkItemId, sort_order: input.sortOrder } })
         await revalidateAffected(slug, workspace.id, [input.workItemId])
         return { status: "saved" }
     } catch (error) {
+        if (failureWorkspaceId) await reportGanttFailure(failureWorkspaceId, slug, relationshipId, "move_work_item", error)
         return errorResult(error)
     }
 }
@@ -182,8 +201,10 @@ export async function createGanttDependency(
     workItemId: string,
     dependsOnWorkItemId: string,
 ): Promise<GanttMutationResult> {
+    let failureWorkspaceId: string | null = null
     try {
         const { workspace, user } = await requireGantt(slug, relationshipId)
+        failureWorkspaceId = workspace.id
         if (workItemId === dependsOnWorkItemId) return { status: "invalid", message: "A work item cannot depend on itself" }
 
         // Reject cycles: the new edge means workItemId waits for dependsOnWorkItemId,
@@ -209,9 +230,11 @@ export async function createGanttDependency(
             depends_on_work_item_id: dependsOnWorkItemId, source: "manual", created_by: user.id,
         })
         if (error) throw new Error(error.message)
+        await recordAdminActivity({ workspaceId: workspace.id, category: "gantt", eventKey: "gantt.dependency.created", summary: "Gantt dependency created", entityType: "work_item", entityId: workItemId, sourceHref: `/${slug}/relationships/${relationshipId}`, actorUserId: user.id, metadata: { relationship_id: relationshipId, depends_on_work_item_id: dependsOnWorkItemId } })
         await revalidateAffected(slug, workspace.id, [workItemId, dependsOnWorkItemId])
         return { status: "saved" }
     } catch (error) {
+        if (failureWorkspaceId) await reportGanttFailure(failureWorkspaceId, slug, relationshipId, "create_dependency", error)
         return errorResult(error)
     }
 }
@@ -222,15 +245,19 @@ export async function removeGanttDependency(
     workItemId: string,
     dependsOnWorkItemId: string,
 ): Promise<GanttMutationResult> {
+    let failureWorkspaceId: string | null = null
     try {
         const { workspace } = await requireGantt(slug, relationshipId)
+        failureWorkspaceId = workspace.id
         const { error } = await supabaseAdmin.from("work_item_dependencies").delete()
             .eq("workspace_id", workspace.id).eq("work_item_id", workItemId)
             .eq("depends_on_work_item_id", dependsOnWorkItemId).eq("source", "manual")
         if (error) throw new Error(error.message)
+        await recordAdminActivity({ workspaceId: workspace.id, category: "gantt", eventKey: "gantt.dependency.removed", summary: "Gantt dependency removed", entityType: "work_item", entityId: workItemId, sourceHref: `/${slug}/relationships/${relationshipId}`, metadata: { relationship_id: relationshipId, depends_on_work_item_id: dependsOnWorkItemId } })
         await revalidateAffected(slug, workspace.id, [workItemId, dependsOnWorkItemId])
         return { status: "saved" }
     } catch (error) {
+        if (failureWorkspaceId) await reportGanttFailure(failureWorkspaceId, slug, relationshipId, "remove_dependency", error)
         return errorResult(error)
     }
 }

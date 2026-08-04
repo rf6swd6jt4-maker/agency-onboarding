@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
+import { recordAdminActivity } from "@/lib/admin/activity"
 import type { LeadgenSourcePlanItem } from "@/lib/leadgen/sources"
 import { recordEvidenceClaim } from "@/lib/leadgen/evidence-scoring"
 import { seedIndustryMappingsWithFallbacks, seedLocationMappingsWithFallbacks } from "@/lib/leadgen/seed-source-fallbacks"
@@ -90,13 +91,28 @@ out center ${limit};`
 }
 
 export async function setLeadgenPollStatus(pollId: string, workspaceId: string, status: string, error?: string | null, reportMaintenance = false) {
-    await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin
         .from("leadgen_polls")
         .update({ status, error: error ?? null, ...(["completed", "failed", "cancelled"].includes(status) ? { completed_at: new Date().toISOString() } : {}) })
         .eq("id", pollId)
         .eq("workspace_id", workspaceId)
+    const { data: workspace } = await supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).maybeSingle()
+    const sourceHref = workspace?.slug ? `/${workspace.slug}/leadgen/poll/${pollId}` : null
+    if (updateError) {
+        await reportPlatformFailure({
+            workspaceId,
+            category: "leadgen",
+            source: "leadgen",
+            operation: "update_poll_status",
+            fingerprint: platformFailureFingerprint(["leadgen", "update_poll_status", updateError.message]),
+            severity: "warning",
+            summary: "Lead Gen could not persist a poll status",
+            diagnostics: { poll_id: pollId, intended_status: status, error: updateError.message },
+            sourceHref,
+        })
+        return
+    }
     if (status === "failed" && error && reportMaintenance) {
-        const { data: workspace } = await supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).maybeSingle()
         await reportPlatformFailure({
             workspaceId,
             category: "leadgen",
@@ -106,9 +122,11 @@ export async function setLeadgenPollStatus(pollId: string, workspaceId: string, 
             severity: "warning",
             summary: "Lead Gen poll could not progress",
             diagnostics: { poll_id: pollId, error },
-            sourceHref: workspace?.slug ? `/${workspace.slug}/leadgen/poll/${pollId}` : null,
+            sourceHref,
         })
+        return
     }
+    await recordAdminActivity({ workspaceId, category: "leadgen", level: status === "failed" || status === "cancelled" ? "warning" : "info", eventKey: `leadgen.poll.${status}`, summary: `Lead Gen poll ${status}`, entityType: "leadgen_poll", entityId: pollId, sourceHref, metadata: { status, detail: error ?? null } })
 }
 
 export async function refreshLeadgenPollCounts(pollId: string, workspaceId: string) {

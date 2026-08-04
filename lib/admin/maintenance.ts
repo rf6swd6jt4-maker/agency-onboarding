@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { recordAdminActivity, type AdminActivityCategory } from "@/lib/admin/activity"
 
 export const MAINTENANCE_CATEGORIES = ["leadgen", "onboarding", "billing", "communications", "integrations", "system_health"] as const
 export type MaintenanceCategory = (typeof MAINTENANCE_CATEGORIES)[number]
@@ -60,6 +61,15 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
     if (!input.workspaceId || !input.fingerprint.trim()) return { ok: false }
     try {
         const occurredAt = input.occurredAt ?? new Date().toISOString()
+        console.error("Platform automation failure", {
+            workspaceId: input.workspaceId,
+            category: input.category,
+            source: input.source,
+            operation: input.operation,
+            fingerprint: input.fingerprint,
+            summary: input.summary,
+            diagnostics: input.diagnostics ?? {},
+        })
         const { data, error } = await supabaseAdmin.rpc("upsert_platform_failure_work_item", {
             p_workspace_id: input.workspaceId,
             p_category: input.category,
@@ -73,14 +83,29 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
             p_source_href: input.sourceHref ?? null,
         })
         const row = Array.isArray(data) ? data[0] : data
-        if (error || !row?.work_item_id) return { ok: false }
+        if (error || !row?.work_item_id) {
+            console.warn("Could not create maintenance Work Item after platform error", { fingerprint: input.fingerprint, message: error?.message })
+            return { ok: false }
+        }
         if (row.created) {
             const officerId = await responsibleOfficer(input.workspaceId, input.category)
             if (officerId) await supabaseAdmin.from("work_item_assignees").insert({ workspace_id: input.workspaceId, work_item_id: row.work_item_id, user_id: officerId })
         }
+        await recordAdminActivity({
+            workspaceId: input.workspaceId,
+            category: (input.category === "system_health" ? "system" : input.category) as AdminActivityCategory,
+            level: "error",
+            eventKey: `${input.source}.${input.operation}.failed`,
+            summary: input.summary,
+            entityType: "maintenance_work_item",
+            entityId: row.work_item_id,
+            sourceHref: input.sourceHref,
+            metadata: { fingerprint: input.fingerprint, diagnostics: input.diagnostics ?? {}, occurrence_time: occurredAt },
+            occurredAt,
+        })
         return { ok: true, workItemId: row.work_item_id }
     } catch (error) {
-        console.error("Could not report platform failure", { fingerprint: input.fingerprint, error })
+        console.warn("Could not create maintenance Work Item after platform error", { fingerprint: input.fingerprint, error })
         return { ok: false }
     }
 }
@@ -96,7 +121,7 @@ export async function reportClientPlatformFailure(input: Omit<PlatformFailureInp
             sourceHref: workspace?.slug && client.relationship_id ? `/${workspace.slug}/relationships/${client.relationship_id}` : null,
         })
     } catch (error) {
-        console.error("Could not resolve client platform failure", { clientId: input.clientId, error })
+        console.warn("Could not resolve client platform failure", { clientId: input.clientId, error })
         return { ok: false }
     }
 }

@@ -7,6 +7,7 @@ import {
 import { handlePaidStripeInvoice } from "@/lib/client-sales/automation"
 import { getStripeWebhookCandidates } from "@/lib/workspace-integrations"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
+import { recordAdminActivity } from "@/lib/admin/activity"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -78,6 +79,8 @@ export async function POST(request: NextRequest) {
         )
     }
 
+    await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.webhook.received", summary: `Stripe event received: ${event.type}`, entityType: "stripe_event", entityId: event.id, metadata: { event_type: event.type, sale_id: saleId } })
+
     if (isPaidInvoiceEvent(event.type)) {
         if (!invoice) {
             await reportStripeAutomationFailure(workspaceId, event.id, "paid_invoice_payload", "Paid invoice event missing invoice object")
@@ -104,6 +107,7 @@ export async function POST(request: NextRequest) {
                 { status: 202 }
             )
         }
+        await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.invoice.paid_processed", summary: "Paid invoice automation processed", entityType: "stripe_event", entityId: event.id, metadata: { sale_id: saleId, skipped: "skipped" in result ? Boolean(result.skipped) : false } })
     } else if (
         event.type === "invoice.payment_failed" ||
         event.type === "invoice.voided" ||
@@ -118,13 +122,11 @@ export async function POST(request: NextRequest) {
         const invoiceId = typeof invoice?.id === "string" ? invoice.id : null
 
         if (invoiceId) {
-            await supabaseAdmin
+            const nextSaleStatus = event.type === "invoice.payment_failed" ? "payment_failed" : "invoice_inactive"
+            const { error: saleUpdateError } = await supabaseAdmin
                 .from("client_sales")
                 .update({
-                    status:
-                        event.type === "invoice.payment_failed"
-                            ? "payment_failed"
-                            : "invoice_inactive",
+                    status: nextSaleStatus,
                     stripe_invoice_status:
                         typeof invoice?.status === "string"
                             ? invoice.status
@@ -133,6 +135,8 @@ export async function POST(request: NextRequest) {
                     updated_at: new Date().toISOString(),
                 })
                 .eq("stripe_invoice_id", invoiceId)
+            if (saleUpdateError) await reportStripeAutomationFailure(workspaceId, event.id, "update_invoice_status", saleUpdateError.message)
+            else await recordAdminActivity({ workspaceId, category: "billing", level: event.type === "invoice.payment_failed" ? "warning" : "info", eventKey: `stripe.invoice.${event.type.split(".").at(-1)}`, summary: `Invoice status updated: ${nextSaleStatus.replace(/_/g, " ")}`, entityType: "stripe_invoice", entityId: invoiceId, metadata: { stripe_event_id: event.id, event_type: event.type, sale_status: nextSaleStatus } })
         }
     }
 

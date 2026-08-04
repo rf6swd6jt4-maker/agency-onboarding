@@ -186,9 +186,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
     }
 
     if (canAccessPrivatePanels) {
-        const [{ data: okrs }, { data: keyResults }] = await Promise.all([
+        const [{ data: okrs }, { data: keyResults }, { data: adminActivity }] = await Promise.all([
             supabaseAdmin.from("workspace_okrs").select("id, title, description, status, period_start, period_end").eq("workspace_id", workspace.id).limit(60),
             supabaseAdmin.from("workspace_okr_key_results").select("id, okr_id, name, description, unit, comparator, baseline_value, target_value").eq("workspace_id", workspace.id).limit(100),
+            supabaseAdmin.from("workspace_admin_activity").select("id, category, level, event_key, summary, entity_type, entity_id, source_href, occurred_at").eq("workspace_id", workspace.id).order("occurred_at", { ascending: false }).limit(100),
         ])
         for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.title, item.description, item.status], query)).slice(0, 6)) {
             results.push(result(`okr-${okr.id}`, "OKR", okr.title, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin/okrs/${okr.id}`, {
@@ -198,6 +199,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
         for (const keyResult of (keyResults ?? []).filter((item) => includesQuery([item.id, item.name, item.description, item.unit, item.comparator], query)).slice(0, 6)) {
             results.push(result(`okr-key-result-${keyResult.id}`, "Key Result", keyResult.name, keyResult.description ?? "Measurable OKR outcome", `/${workspace.slug}/admin/okrs/${keyResult.okr_id}#key-result-${keyResult.id}`, {
                 path: `${workspace.name} > Admin > OKRs`, recordId: shortId(keyResult.id),
+            }))
+        }
+        for (const event of (adminActivity ?? []).filter((item) => includesQuery([item.id, item.category, item.level, item.event_key, item.summary, item.entity_type, item.entity_id], query)).slice(0, 6)) {
+            results.push(result(`admin-activity-${event.id}`, "Admin activity", event.summary, `${event.category} · ${event.level}`, event.source_href ?? `/${workspace.slug}/admin/activity`, {
+                hubHref: `/${workspace.slug}/admin/activity`, path: `${workspace.name} > Admin > Activity`, recordId: shortId(event.id),
             }))
         }
     }

@@ -8,6 +8,8 @@ import {
 } from "@/lib/client-messages/meta-whatsapp"
 import { isConsentConfirmationText } from "@/lib/client-sales/consent"
 import { completePaymentStage } from "@/lib/relationship-workflow"
+import { recordAdminActivity } from "@/lib/admin/activity"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 
 type ClientSale = {
     id: string
@@ -129,10 +131,15 @@ async function addSaleActivity(
         .eq("id", saleId)
 }
 
+async function reportSaleAutomationFailure(sale: Pick<ClientSale, "id" | "workspace_id" | "relationship_id">, operation: string, error: string) {
+    const { data: workspace } = await supabaseAdmin.from("workspaces").select("slug").eq("id", sale.workspace_id).maybeSingle()
+    await reportPlatformFailure({ workspaceId: sale.workspace_id, category: "communications", source: "client_sales", operation, fingerprint: platformFailureFingerprint(["client_sales", operation, error]), severity: "warning", summary: "Client sale automation failed", diagnostics: { sale_id: sale.id, relationship_id: sale.relationship_id, error }, sourceHref: workspace?.slug && sale.relationship_id ? `/${workspace.slug}/relationships/${sale.relationship_id}` : null })
+}
+
 export async function sendSaleConsentTemplate(saleId: string) {
     const { data: sale } = await supabaseAdmin
         .from("client_sales")
-        .select("id, client_phone, status, consent_template_sent_at, raw_payload")
+        .select("id, client_phone, status, consent_template_sent_at, raw_payload, workspace_id, relationship_id, client_id")
         .eq("id", saleId)
         .single()
 
@@ -162,6 +169,8 @@ export async function sendSaleConsentTemplate(saleId: string) {
             })
             .eq("id", saleId)
 
+        await reportSaleAutomationFailure(sale, "send_consent_template", "Missing META_WHATSAPP_CONSENT_TEMPLATE_NAME")
+
         return {
             ok: false,
             error: "Missing META_WHATSAPP_CONSENT_TEMPLATE_NAME",
@@ -185,6 +194,7 @@ export async function sendSaleConsentTemplate(saleId: string) {
         .maybeSingle()
 
     if (claimError) {
+        await reportSaleAutomationFailure(sale, "claim_consent_send", claimError.message)
         return { ok: false, error: claimError.message }
     }
 
@@ -192,7 +202,7 @@ export async function sendSaleConsentTemplate(saleId: string) {
         return { ok: true, skipped: true }
     }
 
-    const { data: messageLog } = await supabaseAdmin
+    const { data: messageLog, error: messageLogError } = await supabaseAdmin
         .from("client_messages")
         .insert({
             direction: "outbound",
@@ -208,6 +218,11 @@ export async function sendSaleConsentTemplate(saleId: string) {
         })
         .select("id")
         .single()
+    if (messageLogError || !messageLog) {
+        const message = messageLogError?.message ?? "Could not create WhatsApp message log"
+        await reportSaleAutomationFailure(sale, "create_consent_message_log", message)
+        return { ok: false, error: message }
+    }
 
     try {
         const templateMessage = await sendMetaWhatsAppTemplate({
@@ -243,6 +258,8 @@ export async function sendSaleConsentTemplate(saleId: string) {
                 .eq("id", saleId),
         ])
 
+        await recordAdminActivity({ workspaceId: sale.workspace_id, category: "communications", eventKey: "whatsapp.consent_template.sent", summary: "WhatsApp consent template sent", entityType: "client_sale", entityId: saleId, metadata: { relationship_id: sale.relationship_id, client_id: sale.client_id, message_log_id: messageLog.id, whatsapp_message_id: whatsappMessageId } })
+
         return {
             ok: true,
             whatsappMessageId,
@@ -269,6 +286,8 @@ export async function sendSaleConsentTemplate(saleId: string) {
                 })
                 .eq("id", saleId),
         ])
+
+        await reportSaleAutomationFailure(sale, "send_consent_template", errorMessage)
 
         return {
             ok: false,

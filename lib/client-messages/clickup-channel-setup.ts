@@ -34,6 +34,7 @@ import {
 } from "@/lib/client-messages/clickup"
 import { downloadOnboardingUpload } from "@/lib/onboarding/uploads"
 import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
+import { recordClientAdminActivity } from "@/lib/admin/activity"
 
 function getChannelId(response: unknown): string | null {
     if (!response || typeof response !== "object") return null
@@ -88,11 +89,13 @@ async function addActivity(
     activityType: string,
     activityText: string
 ) {
-    await supabaseAdmin.from("client_activity").insert({
+    const { error } = await supabaseAdmin.from("client_activity").insert({
         client_id: clientId,
         activity_type: activityType,
         activity_text: activityText,
     })
+    if (error) console.warn("Could not save client activity", { clientId, activityType, message: error.message })
+    await recordClientAdminActivity({ clientId, category: "integrations", level: activityType.includes("failed") ? "error" : activityType.includes("mismatch") || activityType.includes("skipped") ? "warning" : "info", eventKey: `clickup.${activityType.replace(/^clickup_/, "")}`, summary: activityText, entityType: "client", entityId: clientId, metadata: { activity_type: activityType } })
 }
 
 function normalizeClickUpName(value: string) {
@@ -1187,9 +1190,11 @@ export async function deleteClientClickUpResources(clientId: string) {
             deletedLegacySpace,
         }
     } catch (error) {
+        const message = getErrorMessage(error)
+        await reportClientPlatformFailure({ clientId, category: "integrations", source: "clickup", operation: "delete_client_resources", fingerprint: platformFailureFingerprint(["clickup", "delete_resources", message]), severity: "warning", summary: "ClickUp resource cleanup failed", diagnostics: { error: message } })
         return {
             ok: false,
-            error: getErrorMessage(error),
+            error: message,
         }
     }
 }
@@ -1234,6 +1239,7 @@ export async function checkClientClickUpConnection(clientId: string) {
                 : `ClickUp token can see: ${workspaceSummary}. Configured CLICKUP_WORKSPACE_ID: ${configuredWorkspaceId}.`
         )
     } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown ClickUp connection error"
         await addActivity(
             clientId,
             "clickup_connection_failed",
@@ -1241,5 +1247,6 @@ export async function checkClientClickUpConnection(clientId: string) {
                 ? `ClickUp connection failed: ${error.message}`
                 : "ClickUp connection failed"
         )
+        await reportClientPlatformFailure({ clientId, category: "integrations", source: "clickup", operation: "check_connection", fingerprint: platformFailureFingerprint(["clickup", "connection", message]), severity: "warning", summary: "ClickUp connection check failed", diagnostics: { error: message } })
     }
 }

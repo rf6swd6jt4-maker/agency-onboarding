@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { assetHref, onboardingDetailHref, relationshipHubHref, workItemHref } from "@/lib/relationships"
 import { completeWorkflowParents, createOnboardingReviewWork, ensureRelationshipStage } from "@/lib/relationship-workflow"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
+import { recordAdminActivity } from "@/lib/admin/activity"
 import {
     classifyUploadAsset,
     FINAL_ONBOARDING_STEP,
@@ -185,10 +186,6 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
         } catch (error) {
             // An existing session must remain usable even if a legacy data repair
             // cannot run on this request. The next write retries the same repair.
-            console.error("Could not reconcile canonical onboarding work window", {
-                sessionId: session.id,
-                message: error instanceof Error ? error.message : String(error),
-            })
             await reportOnboardingFailure({
                 workspaceId: session.workspace_id,
                 workspaceSlug: workspace.slug,
@@ -300,12 +297,6 @@ async function createCanonicalStepWorkItem(input: {
             // the relationship/dependency repair below using that item instead.
             workItemId = (await findStepWorkItem(input.session.workspace_id, input.session.id, input.step.key))?.id
         } else if (error || !item) {
-            console.error("Could not create canonical onboarding work item", {
-                sessionId: input.session.id,
-                stepKey: input.step.key,
-                code: error?.code,
-                message: error?.message,
-            })
             await reportOnboardingFailure({
                 workspaceId: input.session.workspace_id,
                 workspaceSlug: input.workspaceSlug,
@@ -560,22 +551,32 @@ async function maybeCompleteOnboarding(session: CanonicalOnboardingSession, work
     if (!allDone) return
 
     const now = new Date().toISOString()
-    await supabaseAdmin
+    const { error: completionError } = await supabaseAdmin
         .from("relationship_onboarding_sessions")
         .update({ status: "completed", completed_at: now })
         .eq("id", session.id)
+    if (completionError) {
+        await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_session", error: completionError, diagnostics: { session_id: session.id } })
+        throw new Error("Could not complete onboarding session")
+    }
     // Complete the open onboarding lifecycle stage before materialising the
     // review stage. Review already depends on onboarding, so this gives it the
     // final step's exact completion timestamp rather than its old ghost-creation
     // time when ensureRelationshipStage activates it.
-    const finalItem = items?.at(-1)
-    if (finalItem) await completeWorkflowParents({ workspaceId: session.workspace_id, relationshipId: session.relationship_id, workItemId: finalItem.id })
-    await createOnboardingReviewWork({
-        workspaceId: session.workspace_id,
-        workspaceSlug,
-        relationshipId: session.relationship_id,
-        sessionId: session.id,
-    })
+    try {
+        const finalItem = items?.at(-1)
+        if (finalItem) await completeWorkflowParents({ workspaceId: session.workspace_id, relationshipId: session.relationship_id, workItemId: finalItem.id })
+        await createOnboardingReviewWork({
+            workspaceId: session.workspace_id,
+            workspaceSlug,
+            relationshipId: session.relationship_id,
+            sessionId: session.id,
+        })
+    } catch (error) {
+        await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_workflow", error, diagnostics: { session_id: session.id } })
+        throw error
+    }
+    await recordAdminActivity({ workspaceId: session.workspace_id, category: "onboarding", eventKey: "onboarding.session.completed", summary: "Client completed onboarding", entityType: "onboarding_session", entityId: session.id, sourceHref: onboardingDetailHref(workspaceSlug, session.relationship_id), metadata: { relationship_id: session.relationship_id } })
     revalidatePath(`/${workspaceSlug}/work`)
 }
 
@@ -609,7 +610,11 @@ export async function completeCanonicalStep(token: string, stepKey: string) {
         })
         .eq("id", workItem.id)
         .eq("workspace_id", resolved.session.workspace_id)
-    if (error) throw new Error("Could not save progress")
+    if (error) {
+        await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "complete_step", error, diagnostics: { session_id: resolved.session.id, step_key: stepKey, work_item_id: workItem.id } })
+        throw new Error("Could not save progress")
+    }
+    await recordAdminActivity({ workspaceId: resolved.session.workspace_id, category: "onboarding", eventKey: "onboarding.step.completed", summary: `Client completed onboarding step: ${resolved.completableSteps[stepIndex]?.title ?? stepKey}`, entityType: "work_item", entityId: workItem.id, sourceHref: onboardingDetailHref(resolved.workspace.slug, resolved.session.relationship_id), metadata: { relationship_id: resolved.session.relationship_id, session_id: resolved.session.id, step_key: stepKey } })
     const nextStep = resolved.completableSteps[stepIndex + 1]
     let nextWorkItem: CanonicalStepWorkItem | null = null
     if (nextStep) {
@@ -628,7 +633,10 @@ export async function completeCanonicalStep(token: string, stepKey: string) {
     } else {
             const { error: startError } = await supabaseAdmin.from("work_items").update({ actual_start_at: now, actual_start_has_time: true })
                 .eq("workspace_id", resolved.session.workspace_id).eq("id", nextWorkItem.id).is("actual_start_at", null)
-            if (startError) throw new Error("Could not start the next onboarding step")
+            if (startError) {
+                await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "start_next_step", error: startError, diagnostics: { session_id: resolved.session.id, step_key: nextStep.key, work_item_id: nextWorkItem.id } })
+                throw new Error("Could not start the next onboarding step")
+            }
         }
     }
     const upcomingStep = resolved.completableSteps[stepIndex + 2]
@@ -791,6 +799,8 @@ export async function createRelationshipOnboardingSession({
         })
         .eq("workspace_id", workspaceId)
         .eq("id", relationshipId)
+
+    await recordAdminActivity({ workspaceId, category: "onboarding", eventKey: "onboarding.session.started", summary: "Client onboarding session started", entityType: "onboarding_session", entityId: session.id, sourceHref: onboardingDetailHref(workspaceSlug, relationshipId), actorUserId: createdBy ?? null, metadata: { relationship_id: relationshipId, modules: selectedModules, services: selectedServices, is_test: isTest } })
 
     return {
         id: session.id,
