@@ -3,6 +3,7 @@ import { access, readFile } from "node:fs/promises"
 import test from "node:test"
 import { maintenanceBugTitle, resolveMaintenanceError } from "../lib/admin/error-catalogue.ts"
 import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet } from "../lib/admin/okr-metrics.ts"
+import { okrDisplayTitle } from "../lib/admin/okr-title.ts"
 
 test("OKR progress moves from baseline to target and clamps to 0-100", () => {
     assert.equal(okrKeyResultProgress({ baseline: 100, target: 300, current: 100 }), 0)
@@ -26,6 +27,11 @@ test("overall attainment is an equal-weight average", () => {
     assert.equal(okrAttainment([100, 50, 0]), 50)
 })
 
+test("OKR names are system-generated from type, objective, and deadline", () => {
+    assert.equal(okrDisplayTitle({ objectiveType: "committed", objective: "Reach product-market fit", deadline: "2026-12-31" }), "Committed Objective: Reach product-market fit by 31 Dec 2026")
+    assert.equal(okrDisplayTitle({ objectiveType: "aspirational", objective: "Become the category leader", deadline: "2027-03-01" }), "Aspirational Objective: Become the category leader by 1 Mar 2027")
+})
+
 test("Admin persistence is additive, private, append-only, and concurrency-safe", async () => {
     const migration = await readFile("supabase/migrations/20260804110000_admin_okr_maintenance.sql", "utf8")
     assert.match(migration, /visibility text not null default 'workspace'/)
@@ -38,6 +44,27 @@ test("Admin persistence is additive, private, append-only, and concurrency-safe"
     assert.match(migration, /upsert_platform_failure_work_item/)
     assert.match(migration, /occurrence_count = public\.work_items\.occurrence_count \+ 1/)
     assert.match(migration, /workspace_members_can_read_work_item_relationships/)
+})
+
+test("OKRs store an objective and classification instead of a user-set title", async () => {
+    const [migration, actions, topBar, detail] = await Promise.all([
+        readFile("supabase/migrations/20260804190000_okr_objective_types.sql", "utf8"),
+        readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
+        readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/okrs/[okrId]/page.tsx", "utf8"),
+    ])
+    assert.match(migration, /add column if not exists objective text/)
+    assert.match(migration, /set objective = title/)
+    assert.match(migration, /sync_workspace_okr_system_title/)
+    assert.match(migration, /objective_type in \('aspirational', 'committed'\)/)
+    assert.match(actions, /value\(formData, "objective"\)/)
+    assert.doesNotMatch(actions, /value\(formData, "title"\)[\s\S]{0,500}workspace_okrs/)
+    assert.match(topBar, /Objective<input name="objective"/)
+    assert.match(topBar, />Deadline<input name="period_end"/)
+    assert.match(topBar, /name="objective_type"/)
+    assert.doesNotMatch(detail, /AdminPanelNav|WorkspaceBanner|Back to OKRs/)
+    assert.match(detail, /OKR \{shortId\(okr\.id\)\}/)
+    assert.match(detail, /<h1[^>]*>\{displayTitle\}<\/h1>/)
 })
 
 test("service-role query paths explicitly exclude private work for Staff surfaces", async () => {

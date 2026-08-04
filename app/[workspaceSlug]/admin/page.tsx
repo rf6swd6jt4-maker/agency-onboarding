@@ -4,6 +4,7 @@ import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listWorkspaceOkrs } from "@/lib/admin/okrs"
+import { formatOkrDeadline, okrDisplayTitle, okrTypeLabel } from "@/lib/admin/okr-title"
 import { listAdminWorkItems } from "@/lib/admin/work-items"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
@@ -82,13 +83,15 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                     <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
                         {okrs.length ? okrs.map((okr) => <Link key={okr.id} href={`/${workspace.slug}/admin/okrs/${okr.id}`} className="block border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
                             <div className="flex min-w-0 items-center gap-2">
-                                <p className="truncate font-medium text-neutral-100">{okr.title}</p>
+                                <p className="truncate font-medium text-neutral-100">{okrDisplayTitle({ objectiveType: okr.objective_type, objective: okr.objective, deadline: okr.period_end })}</p>
+                                <SquarePill tone={okr.objective_type === "aspirational" ? "violet" : "sky"} className="shrink-0">{okrTypeLabel(okr.objective_type)}</SquarePill>
                                 <SquarePill tone={statusTone(okr.status)} className="shrink-0 capitalize">{okr.status}</SquarePill>
                                 <span className="ml-auto shrink-0 text-sm font-semibold tabular-nums text-neutral-200">{Math.round(okr.attainment)}%</span>
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
                                 <span>{okr.key_results.length} Key Result{okr.key_results.length === 1 ? "" : "s"}</span>
-                                <span>{okr.period_start} – {okr.period_end}</span>
+                                <span>Starts {formatOkrDeadline(okr.period_start)}</span>
+                                <span>Deadline {formatOkrDeadline(okr.period_end)}</span>
                                 <span>{people.get(okr.owner_user_id) ?? "Admin"}</span>
                                 {okr.description ? <span className="min-w-0 flex-1 truncate">{okr.description}</span> : null}
                             </div>

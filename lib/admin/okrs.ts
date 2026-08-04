@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { okrAttainment, okrKeyResultProgress, okrTargetMet, type OkrMetricComparator, type OkrMetricUnit } from "@/lib/admin/okr-metrics"
+import type { WorkspaceOkrType } from "@/lib/admin/okr-title"
 
 export type WorkspaceOkrStatus = "draft" | "active" | "completed" | "cancelled"
 
@@ -40,7 +41,8 @@ export type OkrKeyResult = {
 export type WorkspaceOkr = {
     id: string
     workspace_id: string
-    title: string
+    objective: string
+    objective_type: WorkspaceOkrType
     description: string | null
     period_start: string
     period_end: string
@@ -61,7 +63,7 @@ function numberValue(value: unknown) {
 
 export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceOkr[]> {
     const { data: okrs, error } = await supabaseAdmin.from("workspace_okrs")
-        .select("id, workspace_id, title, description, period_start, period_end, owner_user_id, status, outcome_note, created_by, created_at, updated_at")
+        .select("id, workspace_id, objective, objective_type, description, period_start, period_end, owner_user_id, status, outcome_note, created_by, created_at, updated_at")
         .eq("workspace_id", workspaceId)
         .order("period_end", { ascending: false })
     if (error || !okrs?.length) return []
@@ -123,6 +125,7 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
         return {
             ...okr,
             status: okr.status as WorkspaceOkrStatus,
+            objective_type: okr.objective_type as WorkspaceOkrType,
             key_results: results,
             attainment: okrAttainment(results.map((result) => result.progress)),
         }

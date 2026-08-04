@@ -14,6 +14,7 @@ import {
     type RelationshipRecord,
 } from "@/lib/relationships"
 import { shortId } from "@/lib/ui/relative-time"
+import { okrDisplayTitle, type WorkspaceOkrType } from "@/lib/admin/okr-title"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, WORKSPACE_PANELS, workspacePanelHref } from "@/lib/workspace-panels"
 import { normalizeWorkspaceRole, type WorkspaceRole } from "@/lib/workspaces"
 
@@ -189,12 +190,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
 
     if (canAccessPrivatePanels) {
         const [{ data: okrs }, { data: keyResults }, { data: adminActivity }] = await Promise.all([
-            supabaseAdmin.from("workspace_okrs").select("id, title, description, status, period_start, period_end").eq("workspace_id", workspace.id).limit(60),
+            supabaseAdmin.from("workspace_okrs").select("id, objective, objective_type, description, status, period_start, period_end").eq("workspace_id", workspace.id).limit(60),
             supabaseAdmin.from("workspace_okr_key_results").select("id, okr_id, name, description, unit, comparator, baseline_value, target_value").eq("workspace_id", workspace.id).limit(100),
             supabaseAdmin.from("workspace_admin_activity").select("id, category, level, event_key, summary, entity_type, entity_id, source_href, occurred_at").eq("workspace_id", workspace.id).order("occurred_at", { ascending: false }).limit(100),
         ])
-        for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.title, item.description, item.status], query)).slice(0, 6)) {
-            results.push(result(`okr-${okr.id}`, "OKR", okr.title, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin/okrs/${okr.id}`, {
+        for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.objective, item.objective_type, item.description, item.status], query)).slice(0, 6)) {
+            const displayTitle = okrDisplayTitle({ objectiveType: okr.objective_type as WorkspaceOkrType, objective: okr.objective, deadline: okr.period_end })
+            results.push(result(`okr-${okr.id}`, "OKR", displayTitle, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin/okrs/${okr.id}`, {
                 path: `${workspace.name} > Admin > OKRs`, recordId: shortId(okr.id),
             }))
         }
