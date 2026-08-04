@@ -22,5 +22,6 @@ on public.workspace_admin_activity(workspace_id, category, level, occurred_at de
 
 alter table public.workspace_admin_activity enable row level security;
 
+drop policy if exists "workspace admins read activity console" on public.workspace_admin_activity;
 create policy "workspace admins read activity console" on public.workspace_admin_activity
 for select using (public.is_workspace_member(workspace_id, array['owner','admin']));
