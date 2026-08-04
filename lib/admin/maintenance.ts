@@ -3,6 +3,8 @@ import { recordAdminActivity, type AdminActivityCategory } from "@/lib/admin/act
 
 export const MAINTENANCE_CATEGORIES = ["leadgen", "onboarding", "billing", "communications", "integrations", "system_health"] as const
 export type MaintenanceCategory = (typeof MAINTENANCE_CATEGORIES)[number]
+export const MAINTENANCE_ROUTE_KEYS = ["global", ...MAINTENANCE_CATEGORIES] as const
+export type MaintenanceRouteKey = (typeof MAINTENANCE_ROUTE_KEYS)[number]
 export type MaintenanceSeverity = "warning" | "critical"
 
 export type PlatformFailureInput = {
@@ -49,9 +51,12 @@ export function platformFailureFingerprint(parts: Array<string | number | null |
 }
 
 async function responsibleOfficer(workspaceId: string, category: MaintenanceCategory) {
-    const { data: route } = await supabaseAdmin.from("workspace_maintenance_routing")
-        .select("responsible_user_id").eq("workspace_id", workspaceId).eq("category", category).maybeSingle()
-    if (route?.responsible_user_id) return route.responsible_user_id
+    const { data: routes } = await supabaseAdmin.from("workspace_maintenance_routing")
+        .select("category, responsible_user_id").eq("workspace_id", workspaceId).in("category", ["global", category])
+    const globalOfficer = routes?.find((route) => route.category === "global")?.responsible_user_id
+    if (globalOfficer) return globalOfficer
+    const categoryOfficer = routes?.find((route) => route.category === category)?.responsible_user_id
+    if (categoryOfficer) return categoryOfficer
     const { data: owner } = await supabaseAdmin.from("workspace_memberships")
         .select("user_id").eq("workspace_id", workspaceId).eq("role", "owner").order("created_at").limit(1).maybeSingle()
     return owner?.user_id ?? null

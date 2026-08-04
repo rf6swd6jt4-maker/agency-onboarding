@@ -105,3 +105,37 @@ test("workspace error screens report authenticated incidents to maintenance and 
     assert.match(endpoint, /requireWorkspace\(workspaceSlug\)/)
     assert.match(endpoint, /reportPlatformFailure/)
 })
+
+test("global officer overrides category routing while preserving category fallbacks", async () => {
+    const [migration, maintenance, settings, settingsActions, maintenancePage, adminPage] = await Promise.all([
+        readFile("supabase/migrations/20260804160000_global_maintenance_officer.sql", "utf8"),
+        readFile("lib/admin/maintenance.ts", "utf8"),
+        readFile("app/[workspaceSlug]/settings/page.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/settings/actions.ts", "utf8"),
+        readFile("app/[workspaceSlug]/admin/maintenance/page.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+    ])
+    assert.match(migration, /'global'.*'leadgen'/s)
+    assert.ok(maintenance.indexOf('route.category === "global"') < maintenance.indexOf("route.category === category"))
+    assert.match(settings, /id="officers"/)
+    assert.match(settings, /The category choices below stay saved and resume automatically/)
+    assert.match(settingsActions, /MAINTENANCE_ROUTE_KEYS/)
+    assert.doesNotMatch(maintenancePage, /Save routing|saveMaintenanceRouting/)
+    assert.match(adminPage, /settings#officers/)
+})
+
+test("Settings and search expose one Lead Gen section without duplicate group headings", async () => {
+    const [settings, search, shell] = await Promise.all([
+        readFile("app/[workspaceSlug]/settings/page.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/search/route.ts", "utf8"),
+        readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+    ])
+    assert.match(settings, /\{ id: "leadgen", label: "Lead Gen"/)
+    assert.doesNotMatch(settings, /\{ id: "leadgen-automation", label:/)
+    assert.doesNotMatch(settings, /title="Lead Gen Automation"|title="Lead Gen Targeting"|title="Lead Gen Sources"/)
+    assert.match(search, /settings-officers/)
+    assert.match(search, /settings-leadgen".*label: "Lead Gen"/)
+    assert.match(search, /\$\{settingsPath\} > Lead Gen > Poll Automation/)
+    assert.match(shell, /settings#officers/)
+    assert.match(shell, /settings#leadgen/)
+})

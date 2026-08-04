@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { recordAdminActivity } from "@/lib/admin/activity"
-import { MAINTENANCE_CATEGORIES, platformFailureFingerprint, reportPlatformFailure, type MaintenanceCategory } from "@/lib/admin/maintenance"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -210,19 +210,4 @@ export async function unlinkOkrAction(slug: string, okrId: string, keyResultId: 
     const { error } = await supabaseAdmin.from("workspace_okr_work_items").delete().eq("workspace_id", workspace.id).eq("key_result_id", keyResultId).eq("work_item_id", workItemId)
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug, `/okrs/${okrId}`))
-}
-
-export async function saveMaintenanceRouting(slug: string, formData: FormData) {
-    const { workspace, user } = await requireWorkspace(slug, "admin")
-    for (const category of MAINTENANCE_CATEGORIES) {
-        const responsibleUserId = value(formData, category)
-        if (!responsibleUserId) {
-            await supabaseAdmin.from("workspace_maintenance_routing").delete().eq("workspace_id", workspace.id).eq("category", category)
-            continue
-        }
-        await requireAdminUser(workspace.id, responsibleUserId)
-        const { error } = await supabaseAdmin.from("workspace_maintenance_routing").upsert({ workspace_id: workspace.id, category: category as MaintenanceCategory, responsible_user_id: responsibleUserId, updated_by: user.id, updated_at: new Date().toISOString() })
-        if (error) throw new Error(error.message)
-    }
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, "/maintenance"))
 }

@@ -11,6 +11,7 @@ import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
+import { listMaintenanceRouting, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel } from "@/lib/admin/maintenance"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, updateWorkspaceUserRole } from "../users/actions"
@@ -25,6 +26,7 @@ import {
     uploadWorkspaceLogo,
     verifyWorkspaceConnection,
     verifyWorkspaceOnboardingDomain,
+    saveWorkspaceOfficers,
 } from "./actions"
 
 export const dynamic = "force-dynamic"
@@ -37,9 +39,8 @@ const settingsSections = [
     { id: "agency-branding", label: "Agency Branding", detail: "Shared client-facing identity" },
     { id: "connections", label: "Connections", detail: "Stripe and WhatsApp" },
     { id: "users", label: "Users", detail: "Access and invitations" },
-    { id: "leadgen-automation", label: "Lead Gen Automation", detail: "Poll cadence and limits" },
-    { id: "leadgen-targeting", label: "Lead Gen Targeting", detail: "Industries and locations" },
-    { id: "leadgen-sources", label: "Lead Gen Sources", detail: "Source readiness and controls" },
+    { id: "officers", label: "Officers", detail: "Maintenance responsibility" },
+    { id: "leadgen", label: "Lead Gen", detail: "Automation, targeting, and sources" },
 ] satisfies SettingsSectionNavItem[]
 
 function UnifiedSection({
@@ -92,6 +93,7 @@ export default async function SettingsPage({ params }: PageProps) {
         membershipsResult,
         integrationResult,
         leadgenSettings,
+        maintenanceRouting,
     ] = await Promise.all([
         workspace.banner_path ? createUploadSignedUrl(workspace.banner_path) : null,
         workspace.logo_path ? createUploadSignedUrl(workspace.logo_path) : null,
@@ -105,6 +107,7 @@ export default async function SettingsPage({ params }: PageProps) {
             .select("provider, enabled, mode, config_hint")
             .eq("workspace_id", workspace.id),
         loadLeadgenSettingsPageData(workspace.id),
+        listMaintenanceRouting(workspace.id),
     ])
 
     const users = await Promise.all((membershipsResult.data ?? []).map(async (membership) => ({
@@ -112,6 +115,8 @@ export default async function SettingsPage({ params }: PageProps) {
         user: (await supabaseAdmin.auth.admin.getUserById(membership.user_id)).data.user,
     })))
     const isOwner = role === "owner"
+    const officerRoutes = new Map(maintenanceRouting.map((route) => [route.category, route.responsible_user_id]))
+    const officers = users.filter((item) => ["owner", "admin"].includes(normalizeWorkspaceRole(item.role) ?? ""))
     const connections = ["stripe", "meta_whatsapp"].map((provider) =>
         integrationResult.data?.find((item) => item.provider === provider)
         ?? { provider, enabled: false, mode: "disabled", config_hint: {} }
@@ -268,12 +273,42 @@ export default async function SettingsPage({ params }: PageProps) {
                             </div>
                         </UnifiedSection>
 
-                        <ManualSettingsForm action={saveLeadgenSettings.bind(null, workspace.slug)} className="space-y-10">
-                            <UnifiedSection
-                                id="leadgen-automation"
-                                title="Lead Gen Automation"
-                                description="Set polling cadence, candidate volume, and owner-evidence defaults."
-                            >
+                        <UnifiedSection
+                            id="officers"
+                            title="Officers"
+                            description="Choose which owner or admin receives maintenance work when platform automations fail."
+                        >
+                            <form action={saveWorkspaceOfficers.bind(null, workspace.slug)} className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
+                                <div className="border-b border-neutral-800 p-4 sm:p-5">
+                                    <label className="block text-sm font-medium text-neutral-200">
+                                        Global officer
+                                        <select name="global" defaultValue={officerRoutes.get("global") ?? ""} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white">
+                                            <option value="">No global override</option>
+                                            {officers.map(({ user: officer, role: officerRole }) => <option key={officer?.id} value={officer?.id}>{officer?.email ?? workspaceRoleLabel(officerRole)} · {workspaceRoleLabel(officerRole)}</option>)}
+                                        </select>
+                                    </label>
+                                    <p className="mt-2 text-xs leading-5 text-neutral-500">When selected, this officer receives all new maintenance Work Items. The category choices below stay saved and resume automatically when the global override is cleared.</p>
+                                </div>
+                                <div className="p-4 sm:p-5">
+                                    <div>
+                                        <h3 className="text-base font-semibold text-neutral-200">Responsible officers</h3>
+                                        <p className="mt-1 text-sm leading-6 text-neutral-500">Used when there is no global officer. Unassigned categories fall back to the workspace owner.</p>
+                                    </div>
+                                    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                                        {MAINTENANCE_CATEGORIES.map((category) => <label key={category} className="text-sm text-neutral-300">{maintenanceCategoryLabel(category)}<select name={category} defaultValue={officerRoutes.get(category) ?? ""} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-white"><option value="">Workspace owner (fallback)</option>{officers.map(({ user: officer, role: officerRole }) => <option key={officer?.id} value={officer?.id}>{officer?.email ?? workspaceRoleLabel(officerRole)} · {workspaceRoleLabel(officerRole)}</option>)}</select></label>)}
+                                    </div>
+                                    <button className="mt-5 inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">Save officers</button>
+                                </div>
+                            </form>
+                        </UnifiedSection>
+
+                        <UnifiedSection
+                            id="leadgen"
+                            title="Lead Gen"
+                            description="Manage poll automation, ICP targeting, source readiness, mappings, and runtime controls."
+                        >
+                            <ManualSettingsForm action={saveLeadgenSettings.bind(null, workspace.slug)} className="space-y-6">
+                            <div id="leadgen-automation" className="scroll-mt-5">
                                 <div data-settings-section="poll-options" className="rounded-xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                                     <input type="hidden" name="settingsScope" value="settings" />
                                     <h3 className="text-lg font-semibold leading-6">Poll Automation</h3>
@@ -306,27 +341,19 @@ export default async function SettingsPage({ params }: PageProps) {
                                     </div>
                                     <SettingsSectionActions section="poll-options" label="poll automation" />
                                 </div>
-                            </UnifiedSection>
+                            </div>
 
-                            <UnifiedSection
-                                id="leadgen-targeting"
-                                title="Lead Gen Targeting"
-                                description="Choose the ICP industries and locations used by the lead-generation pipeline."
-                            >
+                            <div id="leadgen-targeting" className="scroll-mt-5">
                                 <AdaptiveTargetingSettings
                                     industries={leadgenSettings.adaptiveIndustries}
                                     locations={leadgenSettings.adaptiveLocations}
                                     selectedIndustries={leadgenSettings.selectedIndustries}
                                     selectedLocations={leadgenSettings.selectedLocations}
                                 />
-                            </UnifiedSection>
-                        </ManualSettingsForm>
+                            </div>
+                            </ManualSettingsForm>
 
-                        <UnifiedSection
-                            id="leadgen-sources"
-                            title="Lead Gen Sources"
-                            description="Control source categories, source-specific limits, mappings, and runtime readiness."
-                        >
+                            <div id="leadgen-sources" className="mt-6 scroll-mt-5">
                             <ManualSettingsForm action={saveLeadgenSettings.bind(null, workspace.slug)}>
                                 <input type="hidden" name="settingsScope" value="sources" />
                                 <SourceSettingsCard
@@ -335,6 +362,7 @@ export default async function SettingsPage({ params }: PageProps) {
                                     catalogueStats={leadgenSettings.catalogueStats}
                                 />
                             </ManualSettingsForm>
+                            </div>
                         </UnifiedSection>
                         <p className="pt-2 text-center text-xs text-neutral-600">Betelgeze © 2026</p>
                     </div>

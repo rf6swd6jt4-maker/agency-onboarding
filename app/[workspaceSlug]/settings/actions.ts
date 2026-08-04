@@ -9,11 +9,38 @@ import { verifyWorkspaceIntegration } from "@/lib/workspace-integrations"
 import { normalizeOnboardingDomain } from "@/lib/onboarding/custom-domain"
 import { attachOnboardingDomain, removeOnboardingDomain, verifyOnboardingDomain } from "@/lib/onboarding/vercel-domains"
 import { allowDirectUploadsFromDomain, removeDirectUploadsFromDomain } from "@/lib/onboarding/r2-cors"
+import { recordAdminActivity } from "@/lib/admin/activity"
+import { MAINTENANCE_ROUTE_KEYS, type MaintenanceRouteKey } from "@/lib/admin/maintenance"
 
 function refresh(slug: string) {
     revalidatePath(`/${slug}`)
     revalidatePath(`/${slug}/leadgen`)
     revalidatePath(`/${slug}/settings`)
+}
+
+async function requireWorkspaceOfficer(workspaceId: string, userId: string) {
+    const { data } = await supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspaceId).eq("user_id", userId).maybeSingle()
+    if (!data || !["owner", "admin"].includes(data.role)) throw new Error("Choose a workspace owner or admin.")
+}
+
+export async function saveWorkspaceOfficers(slug: string, formData: FormData) {
+    const { workspace, user } = await requireWorkspace(slug, "admin")
+    const selections = MAINTENANCE_ROUTE_KEYS.map((key) => ({ key, userId: String(formData.get(key) ?? "").trim() }))
+    for (const selection of selections) {
+        if (selection.userId) await requireWorkspaceOfficer(workspace.id, selection.userId)
+    }
+    const now = new Date().toISOString()
+    for (const selection of selections) {
+        const query = selection.userId
+            ? supabaseAdmin.from("workspace_maintenance_routing").upsert({ workspace_id: workspace.id, category: selection.key as MaintenanceRouteKey, responsible_user_id: selection.userId, updated_by: user.id, updated_at: now })
+            : supabaseAdmin.from("workspace_maintenance_routing").delete().eq("workspace_id", workspace.id).eq("category", selection.key)
+        const { error } = await query
+        if (error) throw new Error("Could not save responsible officers.")
+    }
+    await recordAdminActivity({ workspaceId: workspace.id, category: "maintenance", eventKey: "maintenance.officers.updated", summary: "Responsible officers were updated", sourceHref: `/${workspace.slug}/settings#officers`, actorUserId: user.id, metadata: Object.fromEntries(selections.map((selection) => [selection.key, selection.userId || null])) })
+    revalidatePath(`/${slug}/settings`)
+    revalidatePath(`/${slug}/admin`)
+    revalidatePath(`/${slug}/admin/maintenance`)
 }
 
 async function assertWorkspaceConnectionIsEditable(workspaceId: string, provider: IntegrationProvider) {
