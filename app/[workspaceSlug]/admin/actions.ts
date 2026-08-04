@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
-import { MAINTENANCE_CATEGORIES, type MaintenanceCategory } from "@/lib/admin/maintenance"
+import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
+import { recordAdminActivity } from "@/lib/admin/activity"
+import { MAINTENANCE_CATEGORIES, platformFailureFingerprint, reportPlatformFailure, type MaintenanceCategory } from "@/lib/admin/maintenance"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -25,14 +27,23 @@ async function requireAdminUser(workspaceId: string, userId: string) {
     if (!data || !["owner", "admin"].includes(data.role)) throw new Error("Choose a workspace owner or admin")
 }
 
-export async function createOkr(slug: string, formData: FormData) {
+export async function createOkrFromModal(slug: string, formData: FormData): Promise<WorkspaceCreateActionState> {
     const { workspace, user } = await requireWorkspace(slug, "admin")
     const title = value(formData, "title")
     const periodStart = value(formData, "period_start")
     const periodEnd = value(formData, "period_end")
     const ownerUserId = value(formData, "owner_user_id") || user.id
-    if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd) || periodEnd < periodStart) throw new Error("Add a valid objective period")
-    await requireAdminUser(workspace.id, ownerUserId)
+    const sourceHref = `/${workspace.slug}/admin?view=okrs`
+    if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd) || periodEnd < periodStart) {
+        await recordAdminActivity({ workspaceId: workspace.id, category: "system", level: "warning", eventKey: "okr.create.validation_failed", summary: "An administrator could not create an OKR because its objective period was invalid", sourceHref, actorUserId: user.id })
+        return { ok: false, error: "Add an objective and a valid start and end date." }
+    }
+    try {
+        await requireAdminUser(workspace.id, ownerUserId)
+    } catch {
+        await recordAdminActivity({ workspaceId: workspace.id, category: "system", level: "warning", eventKey: "okr.create.owner_invalid", summary: "An administrator could not create an OKR because its owner was invalid", sourceHref, actorUserId: user.id })
+        return { ok: false, error: "Choose a workspace owner or admin." }
+    }
     const { data: okr, error } = await supabaseAdmin.from("workspace_okrs").insert({
         workspace_id: workspace.id,
         title,
@@ -43,8 +54,30 @@ export async function createOkr(slug: string, formData: FormData) {
         status: value(formData, "status") === "active" ? "active" : "draft",
         created_by: user.id,
     }).select("id").single()
-    if (error || !okr) throw new Error(error?.message ?? "Could not create OKR")
-    redirect(adminPath(slug, `/okrs/${okr.id}`))
+    if (error || !okr) {
+        const message = error?.message ?? "No OKR was returned after creation"
+        await reportPlatformFailure({
+            workspaceId: workspace.id,
+            category: "system_health",
+            source: "admin_okr",
+            operation: "create",
+            fingerprint: platformFailureFingerprint(["okr", "create", error?.code ?? message]),
+            severity: "warning",
+            summary: "An administrator could not create an OKR",
+            diagnostics: { error: message, code: error?.code ?? null, title },
+            sourceHref,
+        })
+        return { ok: false, error: "We couldn't create this OKR. The failure has been recorded for Admin review." }
+    }
+    await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.created", summary: `OKR created: ${title}`, entityType: "okr", entityId: okr.id, sourceHref: `/${workspace.slug}/admin/okrs/${okr.id}`, actorUserId: user.id, metadata: { status: value(formData, "status") === "active" ? "active" : "draft", period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId } })
+    revalidatePath(adminPath(slug))
+    return { ok: true, href: adminPath(slug, `/okrs/${okr.id}`) }
+}
+
+export async function createOkr(slug: string, formData: FormData) {
+    const result = await createOkrFromModal(slug, formData)
+    if (!result.ok) redirect(adminPath(slug, `?view=okrs&error=${encodeURIComponent(result.error ?? "create-failed")}`))
+    redirect(result.href ?? adminPath(slug, "?view=okrs"))
 }
 
 export async function updateOkr(slug: string, okrId: string, formData: FormData) {

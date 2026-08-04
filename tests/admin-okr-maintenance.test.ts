@@ -74,3 +74,33 @@ test("the private activity console covers core automation producers", async () =
     assert.match(activityPage, /Activity Console/)
     for (const source of [leadgen, onboarding, stripe, whatsapp, gantt]) assert.match(source, /recordAdminActivity|recordClientAdminActivity/)
 })
+
+test("Create OKR uses the shared shell modal and is never preloaded for Staff", async () => {
+    const [adminPage, topBar, topBarClient, actions] = await Promise.all([
+        readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+        readFile("components/workspace/WorkspaceTopBar.tsx", "utf8"),
+        readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
+    ])
+    assert.doesNotMatch(adminPage, /Private workspace operations/)
+    assert.doesNotMatch(adminPage, /action=\{createOkr/)
+    assert.match(topBar, /workspaceRole === "owner" \|\| workspaceRole === "admin"[\s\S]*: \{ data: \[\] \}/)
+    assert.match(topBarClient, /\{canCreateOkr && <button/)
+    assert.match(topBarClient, /openCreate\("okr"\)/)
+    assert.ok(topBarClient.indexOf('openCreate("asset")') < topBarClient.indexOf('openCreate("okr")'))
+    assert.match(actions, /createOkrFromModal[\s\S]*reportPlatformFailure[\s\S]*failure has been recorded for Admin review/)
+})
+
+test("workspace error screens report authenticated incidents to maintenance and Admin Activity", async () => {
+    const [errorPage, globalError, reporter, endpoint] = await Promise.all([
+        readFile("app/error.tsx", "utf8"),
+        readFile("app/global-error.tsx", "utf8"),
+        readFile("components/errors/ErrorBoundaryReporter.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/activity/errors/route.ts", "utf8"),
+    ])
+    assert.match(errorPage, /ErrorBoundaryReporter/)
+    assert.match(globalError, /ErrorBoundaryReporter/)
+    assert.ok(reporter.indexOf("console.error(error)") < reporter.indexOf("fetch("))
+    assert.match(endpoint, /requireWorkspace\(workspaceSlug\)/)
+    assert.match(endpoint, /reportPlatformFailure/)
+})

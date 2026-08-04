@@ -72,6 +72,7 @@ type WorkspaceTabContextStatus = {
 
 type Props = {
     workspace: { id: string; name: string; slug: string }
+    currentUserId: string
     workspaceLogoSrc?: string | null
     username: string
     email: string
@@ -81,8 +82,10 @@ type Props = {
     createRelationshipAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createWorkItemAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createAssetAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
+    createOkrAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     workItemOptions: Array<{ id: string; title: string; status: string }>
     relationshipOptions: Array<{ id: string; label: string }>
+    okrOwnerOptions: Array<{ id: string; label: string; role: string }>
 }
 
 type SearchResult = {
@@ -287,6 +290,10 @@ function AssetsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="8" cy="10" r="1.5" /><path d="m4 17 5-5 4 4 2-2 5 5" /></svg>
 }
 
+function OkrIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /><path d="m14 10 6-6" /><path d="M16 4h4v4" /></svg>
+}
+
 function LibraryIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M5 4v16" /><path d="M10 4v16" /><path d="m15 5 3-1 3 15-3 1-3-15Z" /></svg>
 }
@@ -369,7 +376,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, workItemOptions, relationshipOptions }: Props) {
+function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -426,7 +433,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
     const [searchLoading, setSearchLoading] = useState(false)
     const [searchResults, setSearchResults] = useState<SearchResult[]>([])
     const [searchShortcutLabel, setSearchShortcutLabel] = useState("Ctrl+J")
-    const [createTarget, setCreateTarget] = useState<"relationship" | "work-item" | "asset" | null>(null)
+    const [createTarget, setCreateTarget] = useState<"relationship" | "work-item" | "asset" | "okr" | null>(null)
     const [createError, setCreateError] = useState<string | null>(null)
     const [uploadLabel, setUploadLabel] = useState<string | null>(null)
     const [creationNotice, setCreationNotice] = useState<CreationNotice | null>(null)
@@ -934,13 +941,14 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         if (!tab) return
         const url = new URL(tab.url, window.location.origin)
         const intent = url.searchParams.get("create")
-        if (intent !== "relationship" && intent !== "work-item" && intent !== "asset") return
+        if (intent !== "relationship" && intent !== "work-item" && intent !== "asset" && intent !== "okr") return
+        if (intent === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole)) return
         const key = `${tab.id}:${url.pathname}:${intent}`
         if (createIntentHandledRef.current === key) return
         createIntentHandledRef.current = key
         setCreateTarget(intent)
         setCreateError(null)
-    }, [activeTabId, tabs, tabsHydrated])
+    }, [activeTabId, tabs, tabsHydrated, workspaceRole])
 
     useEffect(() => {
         if (!tabsHydrated) return
@@ -1039,7 +1047,8 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         window.requestAnimationFrame(() => mobileSearchInputRef.current?.focus())
     }
 
-    function openCreate(target: "relationship" | "work-item" | "asset") {
+    function openCreate(target: "relationship" | "work-item" | "asset" | "okr") {
+        if (target === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole)) return
         window.dispatchEvent(new CustomEvent("betelgeze:dropdown-open", { detail: "workspace-create" }))
         setCreateError(null)
         setCreateTarget(target)
@@ -1117,7 +1126,9 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                 ? await createRelationshipAction(formData)
                 : target === "work-item"
                     ? await createWorkItemAction(formData)
-                    : await createAssetAction(formData)
+                    : target === "asset"
+                        ? await createAssetAction(formData)
+                        : await createOkrAction(formData)
             if (!result.ok) {
                 setCreateError(result.error ?? "Could not create this item.")
                 return
@@ -1137,7 +1148,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
             postToTab(tabId, { type: "activate", active: true, refresh: true })
 
             showCreationNotice({
-                label: target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : "Asset added",
+                label: target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : target === "asset" ? "Asset added" : "OKR created",
                 href: result.href,
             })
         })
@@ -1449,6 +1460,9 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
         meta: panel.key === "leadgen" ? LEADGEN_POLLING_SYSTEM_VERSION_LABEL : null,
         disabled: !canAccessWorkspacePanel(panel, workspaceRole),
     }))
+    const canCreateOkr = canAccessPrivateWorkspacePanels(workspaceRole)
+    const okrPeriodStart = new Date().toISOString().slice(0, 10)
+    const okrPeriodEnd = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
     const visibleTabs = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrderRef.current)
@@ -1562,6 +1576,9 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                         <button data-icon-button type="button" onClick={() => openCreate("asset")} aria-label="Add asset" title="Add asset" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
                             <AssetsIcon />
                         </button>
+                        {canCreateOkr && <button data-icon-button type="button" onClick={() => openCreate("okr")} aria-label="Create OKR" title="Create OKR" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
+                            <OkrIcon />
+                        </button>}
                     </div>
                     <AccountMenu username={username} email={email} avatarSrc={avatarSrc} workspaceId={workspace.id} workspaceName={workspace.name} leaveAction={leaveAction} buttonClassName="h-9 w-9" />
                 </div>
@@ -1574,7 +1591,7 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                     <div className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3 sm:px-5">
                         <div>
                             <p className="text-xs text-neutral-500">Create in {workspace.name}</p>
-                            <h2 id="workspace-create-title" className="text-lg font-semibold">{createTarget === "relationship" ? "Add relationship" : createTarget === "work-item" ? "Add work item" : "Add asset"}</h2>
+                            <h2 id="workspace-create-title" className="text-lg font-semibold">{createTarget === "relationship" ? "Add relationship" : createTarget === "work-item" ? "Add work item" : createTarget === "asset" ? "Add asset" : "Create OKR"}</h2>
                         </div>
                         <button data-icon-button type="button" onClick={() => setCreateTarget(null)} aria-label="Close create panel" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-900 hover:text-white">
                             <span aria-hidden="true" className="text-xl leading-none">×</span>
@@ -1604,10 +1621,25 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                             <div className="space-y-5"><section className="space-y-3"><label className="block text-sm text-neutral-300">File<input name="asset_file" type="file" required autoFocus className="mt-1.5 block w-full rounded-lg border border-dashed border-neutral-700 bg-black px-3 py-3 text-sm text-neutral-300 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-black" /></label><label className="block text-sm text-neutral-300">Title<input name="title" placeholder="Defaults to the file name" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label></section><section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Link to relationship<select name="relationship_id" defaultValue="" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">None</option>{relationshipOptions.map((relationship) => <option key={relationship.id} value={relationship.id}>{relationship.label}</option>)}</select></label><label className="block text-sm text-neutral-300">Link to work item<select name="work_item_id" defaultValue="" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">None</option>{workItemOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label></section><label className="block border-t border-neutral-900 pt-4 text-sm text-neutral-300">Description<textarea name="description" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>
                             </div>
                         )}
+                        {createTarget === "okr" && canCreateOkr && (
+                            <div className="space-y-5">
+                                <section className="grid gap-3 sm:grid-cols-2">
+                                    <label className="block text-sm text-neutral-300 sm:col-span-2">Objective<input name="title" required autoFocus placeholder="Increase reliable monthly sales" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label>
+                                    <label className="block text-sm text-neutral-300 sm:col-span-2">Description<textarea name="description" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>
+                                </section>
+                                <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2">
+                                    <label className="block text-sm text-neutral-300">Starts<input name="period_start" type="date" defaultValue={okrPeriodStart} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                    <label className="block text-sm text-neutral-300">Ends<input name="period_end" type="date" defaultValue={okrPeriodEnd} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                    <label className="block text-sm text-neutral-300">Owner<select name="owner_user_id" defaultValue={currentUserId} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white">{okrOwnerOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.label} · {owner.role}</option>)}</select></label>
+                                    <label className="block text-sm text-neutral-300">Initial state<select name="status" defaultValue="draft" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="draft">Draft</option><option value="active">Active</option></select></label>
+                                </section>
+                                <p className="text-xs leading-5 text-neutral-500">Create the objective here, then add measurable Key Results on its detail page.</p>
+                            </div>
+                        )}
                         {createError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{createError}</p>}
                         {uploadLabel && <p className="mt-4 text-sm text-neutral-400">{uploadLabel}</p>}
                         <div className="mt-5 flex justify-end">
-                            <button disabled={isCreating || Boolean(uploadLabel)} className="inline-flex min-h-10 items-center rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-60">{isCreating || uploadLabel ? "Creating..." : createTarget === "relationship" ? "Create relationship" : createTarget === "work-item" ? "Create work item" : "Create asset"}</button>
+                            <button disabled={isCreating || Boolean(uploadLabel)} className="inline-flex min-h-10 items-center rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-60">{isCreating || uploadLabel ? "Creating..." : createTarget === "relationship" ? "Create relationship" : createTarget === "work-item" ? "Create work item" : createTarget === "asset" ? "Create asset" : "Create OKR"}</button>
                         </div>
                     </form>
                 </div>
@@ -1785,6 +1817,10 @@ function WorkspaceTabsShell({ workspace, workspaceLogoSrc, username, email, avat
                         <AssetsIcon />
                         <span>Add asset</span>
                     </button>
+                    {canCreateOkr && <button type="button" onClick={() => { openCreate("okr"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
+                        <OkrIcon />
+                        <span>Create OKR</span>
+                    </button>}
                 </div>
             </nav>
         </aside>

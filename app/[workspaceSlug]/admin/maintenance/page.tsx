@@ -53,7 +53,7 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
         <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
         <div className="mx-auto max-w-7xl pt-5">
             <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-            <header><p className="text-xs uppercase tracking-[0.18em] text-neutral-500">Private workspace operations</p><h1 className="mt-2 text-2xl font-semibold">Platform Maintenance</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">Terminal, actionable automation failures deduplicated into accountable Work Items.</p></header>
+            <header><h1 className="text-2xl font-semibold">Platform Maintenance</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">Terminal, actionable automation failures deduplicated into accountable Work Items.</p></header>
             <AdminPanelNav workspaceSlug={workspace.slug} active="maintenance" />
 
             <section className="mt-6 rounded-2xl border border-neutral-800 bg-black p-5">
