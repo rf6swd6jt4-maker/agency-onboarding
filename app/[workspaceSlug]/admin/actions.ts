@@ -177,7 +177,9 @@ export async function createOkrAction(slug: string, okrId: string, keyResultId: 
     const { data: okr } = await supabaseAdmin.from("workspace_okrs").select("owner_user_id").eq("workspace_id", workspace.id).eq("id", okrId).maybeSingle()
     const { data: keyResult } = await supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle()
     if (!okr || !keyResult || !value(formData, "title")) throw new Error("Add a valid OKR action")
-    const { data: item, error } = await supabaseAdmin.from("work_items").insert({ workspace_id: workspace.id, title: value(formData, "title"), description: value(formData, "description") || null, lifecycle_phase: null, status: "todo", priority: 3, is_key_task: true, area: "admin", kind: "okr_action", visibility: "admins_only", native_kind: "okr_action", created_by: user.id, metadata: { okr_id: okrId, key_result_id: keyResultId } }).select("id").single()
+    const title = value(formData, "title")
+    const description = value(formData, "description")
+    const { data: item, error } = await supabaseAdmin.from("work_items").insert({ workspace_id: workspace.id, title, description: `Admin work: ${description || title}`, lifecycle_phase: null, status: "todo", priority: 3, is_key_task: true, area: "admin", kind: "okr_action", visibility: "admins_only", native_kind: "okr_action", created_by: user.id, metadata: { okr_id: okrId, key_result_id: keyResultId } }).select("id").single()
     if (error || !item) throw new Error(error?.message ?? "Could not create action")
     const { error: linkError } = await supabaseAdmin.from("workspace_okr_work_items").insert({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: item.id, linked_by: user.id })
     if (linkError) {

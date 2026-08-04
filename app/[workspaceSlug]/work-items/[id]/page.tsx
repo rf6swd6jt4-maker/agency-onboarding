@@ -2,6 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
+import { SquarePill } from "@/components/ui"
 import {
     getWorkItem,
     getWorkItemPlanningContext,
@@ -62,10 +63,12 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
-                        <header className="pb-4">
-                            {isAdminItem ? <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-red-400">Private Admin work</p> : null}
-                            <p className="font-mono text-sm text-neutral-500">Work item {shortId(item.id)}</p>
-                            <h1 className="mt-2 text-3xl font-semibold tracking-tight">{item.title}</h1>
+                        <header className="flex items-start gap-4 pb-4">
+                            <div className="min-w-0 flex-1">
+                                <p className="font-mono text-sm text-neutral-500">Work item {shortId(item.id)}</p>
+                                <h1 className="mt-2 text-3xl font-semibold tracking-tight">{item.title}</h1>
+                            </div>
+                            {isAdminItem ? <SquarePill className="mt-1 shrink-0">Admin</SquarePill> : null}
                         </header>
 
                 <InlineWorkItemFields

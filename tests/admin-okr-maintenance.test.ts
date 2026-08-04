@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { access, readFile } from "node:fs/promises"
 import test from "node:test"
+import { maintenanceBugTitle, resolveMaintenanceError } from "../lib/admin/error-catalogue.ts"
 import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet } from "../lib/admin/okr-metrics.ts"
 
 test("OKR progress moves from baseline to target and clamps to 0-100", () => {
@@ -54,10 +55,43 @@ test("service-role query paths explicitly exclude private work for Staff surface
 })
 
 test("maintenance is event-driven and logs to console before creating Work Items", async () => {
-    const maintenance = await readFile("lib/admin/maintenance.ts", "utf8")
+    const [maintenance, migration] = await Promise.all([
+        readFile("lib/admin/maintenance.ts", "utf8"),
+        readFile("supabase/migrations/20260804180000_coded_admin_work_items.sql", "utf8"),
+    ])
     assert.ok(maintenance.indexOf('console.error("Platform automation failure"') < maintenance.indexOf('supabaseAdmin.rpc("upsert_platform_failure_work_item"'))
+    assert.match(maintenance, /resolveMaintenanceError/)
+    assert.match(migration, /format\('Bug: %s - %s'/)
+    assert.match(migration, /'Admin work: ' \|\| p_summary/)
     await assert.rejects(access("vercel.json"))
     await assert.rejects(access("app/api/admin/maintenance/monitor/route.ts"))
+})
+
+test("maintenance errors use stable catalogue codes with specific and broad fallbacks", () => {
+    assert.equal(maintenanceBugTitle(resolveMaintenanceError({ category: "communications", source: "client_sales", operation: "send_consent_template", diagnostics: { error: "Missing META_WHATSAPP_CONSENT_TEMPLATE_NAME" } })), "Bug: BGE-4101 - WhatsApp consent template not configured")
+    assert.equal(resolveMaintenanceError({ category: "communications", source: "client_sales", operation: "send_consent_template", diagnostics: { error: "OAuth token expired" } }).code, "BGE-4103")
+    assert.equal(resolveMaintenanceError({ category: "system_health", source: "next_error_boundary", operation: "app", diagnostics: { error: "column status does not exist; migration missing" } }).code, "BGE-6201")
+    assert.equal(resolveMaintenanceError({ category: "integrations", source: "future_provider", operation: "unknown" }).code, "BGE-9005")
+})
+
+test("Admin Work, OKRs, and Maintenance use compact list rows", async () => {
+    const [adminPage, navigation, maintenancePage, detail, actions] = await Promise.all([
+        readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+        readFile("components/admin/AdminPanelNav.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/maintenance/page.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/page.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
+    ])
+    assert.match(navigation, /key: "work", label: "Work"/)
+    assert.doesNotMatch(navigation, /Overview/)
+    assert.match(adminPage, /listAdminWorkItems/)
+    assert.match(adminPage, /overflow-hidden rounded-2xl border/)
+    assert.doesNotMatch(adminPage, /md:grid-cols-2 xl:grid-cols-3/)
+    assert.doesNotMatch(maintenancePage, /diagnosticSummary|failure_fingerprint|line-clamp-2/)
+    assert.match(maintenancePage, /occurrence/)
+    assert.doesNotMatch(detail, /Private Admin work/)
+    assert.match(detail, /<SquarePill[^>]*>Admin<\/SquarePill>/)
+    assert.match(actions, /description: `Admin work: \$\{description \|\| title\}`/)
 })
 
 test("the private activity console covers core automation producers", async () => {
@@ -132,7 +166,7 @@ test("global officer overrides category routing while preserving category fallba
     assert.match(settingsActions, /reportPlatformFailure/)
     assert.match(settingsActions, /source: "settings_officers"/)
     assert.doesNotMatch(maintenancePage, /Save routing|saveMaintenanceRouting/)
-    assert.match(adminPage, /settings#officers/)
+    assert.match(adminPage, /listAdminWorkItems/)
 })
 
 test("Settings and search expose one Lead Gen section without duplicate group headings", async () => {

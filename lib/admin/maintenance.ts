@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { recordAdminActivity, type AdminActivityCategory } from "@/lib/admin/activity"
+import { maintenanceBugTitle, resolveMaintenanceError } from "@/lib/admin/error-catalogue"
 
 export const MAINTENANCE_CATEGORIES = ["leadgen", "onboarding", "billing", "communications", "integrations", "system_health"] as const
 export type MaintenanceCategory = (typeof MAINTENANCE_CATEGORIES)[number]
@@ -66,14 +67,19 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
     if (!input.workspaceId || !input.fingerprint.trim()) return { ok: false }
     try {
         const occurredAt = input.occurredAt ?? new Date().toISOString()
+        const errorDefinition = resolveMaintenanceError(input)
+        const title = maintenanceBugTitle(errorDefinition)
+        const diagnostics = { ...(input.diagnostics ?? {}), error_code: errorDefinition.code, error_name: errorDefinition.name }
         console.error("Platform automation failure", {
             workspaceId: input.workspaceId,
             category: input.category,
             source: input.source,
             operation: input.operation,
             fingerprint: input.fingerprint,
+            errorCode: errorDefinition.code,
+            title,
             summary: input.summary,
-            diagnostics: input.diagnostics ?? {},
+            diagnostics,
         })
         const { data, error } = await supabaseAdmin.rpc("upsert_platform_failure_work_item", {
             p_workspace_id: input.workspaceId,
@@ -83,7 +89,7 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
             p_fingerprint: input.fingerprint.trim(),
             p_severity: input.severity,
             p_summary: input.summary,
-            p_diagnostics: input.diagnostics ?? {},
+            p_diagnostics: diagnostics,
             p_occurred_at: occurredAt,
             p_source_href: input.sourceHref ?? null,
         })
@@ -105,7 +111,7 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
             entityType: "maintenance_work_item",
             entityId: row.work_item_id,
             sourceHref: input.sourceHref,
-            metadata: { fingerprint: input.fingerprint, diagnostics: input.diagnostics ?? {}, occurrence_time: occurredAt },
+            metadata: { fingerprint: input.fingerprint, error_code: errorDefinition.code, error_name: errorDefinition.name, diagnostics: input.diagnostics ?? {}, occurrence_time: occurredAt },
             occurredAt,
         })
         return { ok: true, workItemId: row.work_item_id }

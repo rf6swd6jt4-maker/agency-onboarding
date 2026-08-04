@@ -1,8 +1,8 @@
 import Link from "next/link"
 
-export function AdminPanelNav({ workspaceSlug, active }: { workspaceSlug: string; active: "overview" | "okrs" | "maintenance" | "activity" }) {
+export function AdminPanelNav({ workspaceSlug, active }: { workspaceSlug: string; active: "work" | "okrs" | "maintenance" | "activity" }) {
     const items = [
-        { key: "overview", label: "Overview", href: `/${workspaceSlug}/admin` },
+        { key: "work", label: "Work", href: `/${workspaceSlug}/admin` },
         { key: "okrs", label: "OKRs", href: `/${workspaceSlug}/admin?view=okrs` },
         { key: "maintenance", label: "Maintenance", href: `/${workspaceSlug}/admin/maintenance` },
         { key: "activity", label: "Activity", href: `/${workspaceSlug}/admin/activity` },

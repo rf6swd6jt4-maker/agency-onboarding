@@ -1,10 +1,11 @@
 import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listMaintenanceWorkItems, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel, type MaintenanceCategory } from "@/lib/admin/maintenance"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
+import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
 
 export const dynamic = "force-dynamic"
@@ -12,16 +13,6 @@ export const dynamic = "force-dynamic"
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
     searchParams: Promise<{ category?: string; state?: string }>
-}
-
-function diagnosticSummary(metadata: Record<string, unknown>) {
-    const diagnostics = metadata.latest_diagnostics
-    if (!diagnostics || typeof diagnostics !== "object" || Array.isArray(diagnostics)) return "No diagnostic summary was recorded."
-    const record = diagnostics as Record<string, unknown>
-    const direct = [record.error, record.detail, record.message].find((value) => typeof value === "string" && value.trim())
-    if (typeof direct === "string") return direct
-    const summary = Object.entries(record).slice(0, 3).map(([key, value]) => `${key.replace(/_/g, " ")}: ${String(value)}`).join(" · ")
-    return summary || "No diagnostic summary was recorded."
 }
 
 export default async function MaintenancePage({ params, searchParams }: PageProps) {
@@ -55,13 +46,25 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
             <section className="mt-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-xl font-semibold">Maintenance queue</h2><p className="mt-1 text-sm text-neutral-500">Repeated fingerprints update one open item; recurrence after resolution creates a new item.</p></div><div className="flex rounded-lg border border-neutral-800 p-1 text-sm"><Link href={filterHref(selectedCategory, "open")} className={`rounded px-3 py-1.5 ${selectedState === "open" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Open</Link><Link href={filterHref(selectedCategory, "resolved")} className={`rounded px-3 py-1.5 ${selectedState === "resolved" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Resolved</Link></div></div>
                 <div className="mt-4 flex gap-2 overflow-x-auto pb-1 text-xs"><Link href={filterHref(null)} className={`shrink-0 rounded-full border px-3 py-1.5 ${!selectedCategory ? "border-neutral-500 text-white" : "border-neutral-800 text-neutral-500"}`}>All categories</Link>{MAINTENANCE_CATEGORIES.map((category) => <Link key={category} href={filterHref(category)} className={`shrink-0 rounded-full border px-3 py-1.5 ${selectedCategory === category ? "border-neutral-500 text-white" : "border-neutral-800 text-neutral-500"}`}>{maintenanceCategoryLabel(category)}</Link>)}</div>
-                <div className="mt-4 space-y-3">{visibleItems.length ? visibleItems.map((item) => {
+                <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-800 bg-black">{visibleItems.length ? visibleItems.map((item) => {
                     const assigneeNames = item.assignee_ids.map((id) => names.get(id) ?? "Admin")
-                    return <article key={item.id} className="rounded-2xl border border-neutral-800 bg-black p-4">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-[11px] font-medium uppercase tracking-wide ${item.severity === "critical" ? "bg-red-400/10 text-red-300" : "bg-yellow-300/10 text-yellow-200"}`}>{item.severity} · {item.priority === 1 ? "urgent" : "high"}</span><span className="text-xs text-neutral-500">{maintenanceCategoryLabel(item.maintenance_category)}</span></div><Link href={`/${workspace.slug}/work-items/${item.id}`} className="mt-3 block text-base font-medium text-neutral-100 hover:underline">{item.title}</Link><p className="mt-2 line-clamp-2 text-sm leading-6 text-neutral-500">{diagnosticSummary(item.metadata)}</p><p className="mt-2 font-mono text-xs text-neutral-700">{shortId(item.id)} · {item.failure_fingerprint}</p></div><dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-3 text-sm lg:w-[27rem]"><div><dt className="text-xs text-neutral-600">Occurrences</dt><dd className="mt-1 text-neutral-300">{item.occurrence_count}</dd></div><div><dt className="text-xs text-neutral-600">Officer</dt><dd className="mt-1 text-neutral-300">{assigneeNames.join(", ") || "Owner fallback pending"}</dd></div><div><dt className="text-xs text-neutral-600">First seen</dt><dd className="mt-1 text-neutral-400">{formatRelativeTime(item.first_occurred_at)}</dd></div><div><dt className="text-xs text-neutral-600">Last seen</dt><dd className="mt-1 text-neutral-400">{formatRelativeTime(item.last_occurred_at)}</dd></div></dl></div>
-                        <div className="mt-3 flex gap-4 border-t border-neutral-900 pt-3 text-sm"><Link href={`/${workspace.slug}/work-items/${item.id}`} className="text-neutral-300 underline underline-offset-4">Open Work Item</Link>{item.native_href ? <Link href={item.native_href} className="text-neutral-500 underline underline-offset-4">Open source</Link> : null}</div>
-                    </article>
-                }) : <p className="rounded-2xl border border-dashed border-neutral-800 bg-black px-4 py-8 text-sm text-neutral-500">No {selectedState} maintenance items match this filter.</p>}</div>
+                    return <div key={item.id} className="border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
+                        <div className="flex min-w-0 items-center gap-2">
+                            <Link href={`/${workspace.slug}/work-items/${item.id}`} className="truncate font-medium text-neutral-100 hover:underline">{item.title}</Link>
+                            <SquarePill tone={item.severity === "critical" ? "red" : "yellow"} className="shrink-0 capitalize">{item.severity}</SquarePill>
+                            <SquarePill className="ml-auto shrink-0">Admin</SquarePill>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+                            <span>{maintenanceCategoryLabel(item.maintenance_category)}</span>
+                            <span>{item.priority === 1 ? "Urgent" : "High"}</span>
+                            <span>{item.occurrence_count} occurrence{item.occurrence_count === 1 ? "" : "s"}</span>
+                            <span>{assigneeNames.join(", ") || "Owner fallback pending"}</span>
+                            <span>First {formatRelativeTime(item.first_occurred_at)}</span>
+                            <span className="ml-auto">Last {formatRelativeTime(item.last_occurred_at)}</span>
+                            {item.native_href ? <Link href={item.native_href} className="text-neutral-400 underline underline-offset-4">Source</Link> : null}
+                        </div>
+                    </div>
+                }) : <p className="px-4 py-8 text-sm text-neutral-500">No {selectedState} maintenance items match this filter.</p>}</div>
             </section>
         </div>
     </main>

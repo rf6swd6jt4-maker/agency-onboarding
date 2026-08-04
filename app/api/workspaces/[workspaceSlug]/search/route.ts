@@ -174,12 +174,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
                 `work-${item.id}`,
                 item.kind === "maintenance" ? "Maintenance" : item.kind === "okr_action" ? "OKR action" : "Work item",
                 item.title,
-                item.description ?? (isPrivate ? "Private Admin work item" : "Workspace work item"),
+                item.description ?? (isPrivate ? "Admin work item" : "Workspace work item"),
                 workItemHref(workspace.slug, item.id),
                 {
                     hubHref: item.native_href?.startsWith("/") ? item.native_href : undefined,
                     path: isPrivate
-                        ? `${workspace.name} > Admin > ${item.kind === "maintenance" ? "Maintenance" : "OKRs"}`
+                        ? `${workspace.name} > Admin > ${item.kind === "maintenance" ? "Maintenance" : "Work"}`
                         : `${workspace.name} > Library > Work Items`,
                     recordId: shortId(item.id),
                 }
