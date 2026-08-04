@@ -107,8 +107,9 @@ test("workspace error screens report authenticated incidents to maintenance and 
 })
 
 test("global officer overrides category routing while preserving category fallbacks", async () => {
-    const [migration, maintenance, settings, settingsActions, maintenancePage, adminPage] = await Promise.all([
+    const [migration, triggerFix, maintenance, settings, settingsActions, maintenancePage, adminPage] = await Promise.all([
         readFile("supabase/migrations/20260804160000_global_maintenance_officer.sql", "utf8"),
+        readFile("supabase/migrations/20260804170000_fix_admin_officer_validation.sql", "utf8"),
         readFile("lib/admin/maintenance.ts", "utf8"),
         readFile("app/[workspaceSlug]/settings/page.tsx", "utf8"),
         readFile("app/[workspaceSlug]/settings/actions.ts", "utf8"),
@@ -116,10 +117,15 @@ test("global officer overrides category routing while preserving category fallba
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
     ])
     assert.match(migration, /'global'.*'leadgen'/s)
+    assert.match(triggerFix, /to_jsonb\(new\)->>'owner_user_id'/)
+    assert.match(triggerFix, /to_jsonb\(new\)->>'responsible_user_id'/)
+    assert.doesNotMatch(triggerFix, /new\.owner_user_id|new\.responsible_user_id/)
     assert.ok(maintenance.indexOf('route.category === "global"') < maintenance.indexOf("route.category === category"))
     assert.match(settings, /id="officers"/)
     assert.match(settings, /The category choices below stay saved and resume automatically/)
     assert.match(settingsActions, /MAINTENANCE_ROUTE_KEYS/)
+    assert.match(settingsActions, /reportPlatformFailure/)
+    assert.match(settingsActions, /source: "settings_officers"/)
     assert.doesNotMatch(maintenancePage, /Save routing|saveMaintenanceRouting/)
     assert.match(adminPage, /settings#officers/)
 })

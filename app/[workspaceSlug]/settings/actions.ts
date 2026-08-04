@@ -1,6 +1,7 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
+import { redirect } from "next/navigation"
 import { requireWorkspace } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { storeWorkspaceImage } from "@/lib/onboarding/uploads"
@@ -10,7 +11,7 @@ import { normalizeOnboardingDomain } from "@/lib/onboarding/custom-domain"
 import { attachOnboardingDomain, removeOnboardingDomain, verifyOnboardingDomain } from "@/lib/onboarding/vercel-domains"
 import { allowDirectUploadsFromDomain, removeDirectUploadsFromDomain } from "@/lib/onboarding/r2-cors"
 import { recordAdminActivity } from "@/lib/admin/activity"
-import { MAINTENANCE_ROUTE_KEYS, type MaintenanceRouteKey } from "@/lib/admin/maintenance"
+import { MAINTENANCE_ROUTE_KEYS, platformFailureFingerprint, reportPlatformFailure, type MaintenanceRouteKey } from "@/lib/admin/maintenance"
 
 function refresh(slug: string) {
     revalidatePath(`/${slug}`)
@@ -35,7 +36,20 @@ export async function saveWorkspaceOfficers(slug: string, formData: FormData) {
             ? supabaseAdmin.from("workspace_maintenance_routing").upsert({ workspace_id: workspace.id, category: selection.key as MaintenanceRouteKey, responsible_user_id: selection.userId, updated_by: user.id, updated_at: now })
             : supabaseAdmin.from("workspace_maintenance_routing").delete().eq("workspace_id", workspace.id).eq("category", selection.key)
         const { error } = await query
-        if (error) throw new Error("Could not save responsible officers.")
+        if (error) {
+            await reportPlatformFailure({
+                workspaceId: workspace.id,
+                category: "system_health",
+                source: "settings_officers",
+                operation: "save",
+                fingerprint: platformFailureFingerprint(["settings", "officers", "save", selection.key, error.code]),
+                severity: "warning",
+                summary: "Responsible officer settings could not be saved",
+                diagnostics: { route_key: selection.key, code: error.code, error: error.message },
+                sourceHref: `/${workspace.slug}/settings#officers`,
+            })
+            redirect(`/${workspace.slug}/settings?officers=save-failed#officers`)
+        }
     }
     await recordAdminActivity({ workspaceId: workspace.id, category: "maintenance", eventKey: "maintenance.officers.updated", summary: "Responsible officers were updated", sourceHref: `/${workspace.slug}/settings#officers`, actorUserId: user.id, metadata: Object.fromEntries(selections.map((selection) => [selection.key, selection.userId || null])) })
     revalidatePath(`/${slug}/settings`)

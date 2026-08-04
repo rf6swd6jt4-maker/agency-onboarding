@@ -82,10 +82,11 @@ function SettingsPlaceholder({
 
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
+    searchParams: Promise<{ officers?: string }>
 }
 
-export default async function SettingsPage({ params }: PageProps) {
-    const { workspaceSlug } = await params
+export default async function SettingsPage({ params, searchParams }: PageProps) {
+    const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
     const { workspace, role, user } = await requireWorkspace(workspaceSlug, "admin")
     const [
         bannerSrc,
@@ -278,6 +279,7 @@ export default async function SettingsPage({ params }: PageProps) {
                             title="Officers"
                             description="Choose which owner or admin receives maintenance work when platform automations fail."
                         >
+                            {query.officers === "save-failed" && <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">The officer settings could not be saved. The failure was recorded in Admin Activity and Maintenance.</p>}
                             <form action={saveWorkspaceOfficers.bind(null, workspace.slug)} className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
                                 <div className="border-b border-neutral-800 p-4 sm:p-5">
                                     <label className="block text-sm font-medium text-neutral-200">
