@@ -196,12 +196,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
         ])
         for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.objective, item.objective_type, item.description, item.status], query)).slice(0, 6)) {
             const displayTitle = okrDisplayTitle({ objectiveType: okr.objective_type as WorkspaceOkrType | null, objective: okr.objective, deadline: okr.period_end })
-            results.push(result(`okr-${okr.id}`, "OKR", displayTitle, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin/okrs/${okr.id}`, {
+            results.push(result(`okr-${okr.id}`, "OKR", displayTitle, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin?view=okrs#okr-${okr.id}`, {
                 path: `${workspace.name} > Admin > OKRs`, recordId: shortId(okr.id),
             }))
         }
         for (const keyResult of (keyResults ?? []).filter((item) => includesQuery([item.id, item.name, item.description, item.unit, item.comparator], query)).slice(0, 6)) {
-            results.push(result(`okr-key-result-${keyResult.id}`, "Key Result", keyResult.name, keyResult.description ?? "Measurable OKR outcome", `/${workspace.slug}/admin/okrs/${keyResult.okr_id}#key-result-${keyResult.id}`, {
+            results.push(result(`okr-key-result-${keyResult.id}`, "Key Result", keyResult.name, keyResult.description ?? "Measurable OKR outcome", `/${workspace.slug}/admin?view=okrs#key-result-${keyResult.id}`, {
                 path: `${workspace.name} > Admin > OKRs`, recordId: shortId(keyResult.id),
             }))
         }

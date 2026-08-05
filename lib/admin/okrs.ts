@@ -19,6 +19,8 @@ export type OkrActionWorkItem = {
     status: string
     priority: number
     description: string | null
+    due_date: string | null
+    assignee_ids: string[]
 }
 
 export type OkrKeyResult = {
@@ -78,9 +80,19 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
             .select("id, key_result_id, value, measured_at, note, provenance, recorded_by")
             .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds).order("measured_at", { ascending: true }).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
         keyResultIds.length ? supabaseAdmin.from("workspace_okr_work_items")
-            .select("key_result_id, work_items!inner(id, title, status, priority, description)")
+            .select("key_result_id, work_items!inner(id, title, status, priority, description, due_date)")
             .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds) : Promise.resolve({ data: [] }),
     ])
+
+    const linkedWorkItemIds = [...new Set((actionLinks ?? []).flatMap((link) => {
+        const linked = Array.isArray(link.work_items) ? link.work_items[0] : link.work_items
+        return linked ? [linked.id] : []
+    }))]
+    const { data: assigneeRows } = linkedWorkItemIds.length
+        ? await supabaseAdmin.from("work_item_assignees").select("work_item_id, user_id").eq("workspace_id", workspaceId).in("work_item_id", linkedWorkItemIds)
+        : { data: [] }
+    const assigneesByWorkItem = new Map<string, string[]>()
+    for (const assignee of assigneeRows ?? []) assigneesByWorkItem.set(assignee.work_item_id, [...(assigneesByWorkItem.get(assignee.work_item_id) ?? []), assignee.user_id])
 
     const measurementsByKeyResult = new Map<string, OkrMeasurement[]>()
     for (const measurement of measurements ?? []) {
@@ -92,7 +104,7 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
     for (const link of actionLinks ?? []) {
         const linked = Array.isArray(link.work_items) ? link.work_items[0] : link.work_items
         if (!linked) continue
-        actionsByKeyResult.set(link.key_result_id, [...(actionsByKeyResult.get(link.key_result_id) ?? []), linked])
+        actionsByKeyResult.set(link.key_result_id, [...(actionsByKeyResult.get(link.key_result_id) ?? []), { ...linked, assignee_ids: assigneesByWorkItem.get(linked.id) ?? [] }])
     }
 
     const keyResultsByOkr = new Map<string, OkrKeyResult[]>()

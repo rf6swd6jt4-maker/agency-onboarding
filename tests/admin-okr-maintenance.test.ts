@@ -49,13 +49,13 @@ test("Admin persistence is additive, private, append-only, and concurrency-safe"
 })
 
 test("OKRs are editable drafts until Commit classifies and locks them", async () => {
-    const [migration, lifecycleMigration, actions, topBar, detail, detailClient] = await Promise.all([
+    const [migration, lifecycleMigration, actions, topBar, detail, workspace] = await Promise.all([
         readFile("supabase/migrations/20260804190000_okr_objective_types.sql", "utf8"),
         readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/okrs/[okrId]/page.tsx", "utf8"),
-        readFile("app/[workspaceSlug]/admin/okrs/[okrId]/OkrDetailClient.tsx", "utf8"),
+        readFile("components/admin/OkrWorkspace.tsx", "utf8"),
     ])
     assert.match(migration, /add column if not exists objective text/)
     assert.match(migration, /set objective = title/)
@@ -73,13 +73,36 @@ test("OKRs are editable drafts until Commit classifies and locks them", async ()
     assert.match(topBar, />Deadline<input name="period_end"/)
     assert.doesNotMatch(topBar, /name="objective_type"/)
     assert.doesNotMatch(topBar, /name="status" defaultValue="draft"/)
-    assert.doesNotMatch(detail, /AdminPanelNav|WorkspaceBanner|Back to OKRs/)
-    assert.match(detail, /OKR \{shortId\(okr\.id\)\}/)
-    assert.match(detail, /okrDisplayTitle/)
-    assert.match(detailClient, /Commit OKR/)
-    assert.match(detailClient, /No Key Results/)
-    assert.match(detailClient, /ProgressRing/)
-    assert.match(detailClient, /Add work item/)
+    assert.match(detail, /redirect\(`\/\$\{workspace\.slug\}\/admin\?view=okrs#okr-\$\{okr\.id\}`\)/)
+    assert.match(workspace, /Commit OKR/)
+    assert.match(workspace, /No Key Results/)
+    assert.match(workspace, /ProgressRing/)
+    assert.match(workspace, /Add work item/)
+    assert.match(workspace, /OkrDefinition/)
+    assert.match(workspace, /DraftKeyResult/)
+})
+
+test("the OKRs tab is the only OKR surface and repeats Objective, Key Result, and work-item hierarchy", async () => {
+    const [adminPage, workspace, search, actions] = await Promise.all([
+        readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+        readFile("components/admin/OkrWorkspace.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/search/route.ts", "utf8"),
+        readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
+    ])
+    assert.match(adminPage, /<OkrWorkspace/)
+    assert.match(adminPage, /objective_type !== "aspirational"/)
+    assert.doesNotMatch(adminPage, /href=\{`\/\$\{workspace\.slug\}\/admin\/okrs/)
+    assert.match(workspace, /okrs\.map\(\(okr\)/)
+    assert.match(workspace, /okr\.key_results\.map\(\(result\)/)
+    assert.match(workspace, /result\.actions\.map\(\(action\)/)
+    assert.match(workspace, /href=\{`\/\$\{workspaceSlug\}\/work-items\/\$\{action\.id\}`\}/)
+    assert.doesNotMatch(workspace, /edit-result|Edit Key Result/)
+    assert.match(workspace, /type: "add-result"/)
+    assert.match(workspace, /type: "add-work"/)
+    assert.match(workspace, /type: "measurement"/)
+    assert.match(search, /admin\?view=okrs#okr-/)
+    assert.match(search, /admin\?view=okrs#key-result-/)
+    assert.match(actions, /return \{ ok: true, href: okrsHref\(slug, `okr-\$\{okr\.id\}`\) \}/)
 })
 
 test("work-item Links combine relationships and committed Key Results", async () => {
@@ -140,7 +163,7 @@ test("maintenance errors use stable catalogue codes with specific and broad fall
     assert.equal(resolveMaintenanceError({ category: "integrations", source: "future_provider", operation: "unknown" }).code, "BGE-9005")
 })
 
-test("Admin Work, OKRs, and Maintenance use compact list rows", async () => {
+test("Admin Work and Maintenance keep compact list rows while OKRs use the unified workspace", async () => {
     const [adminPage, navigation, maintenancePage, detail, actions] = await Promise.all([
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
         readFile("components/admin/AdminPanelNav.tsx", "utf8"),
@@ -151,6 +174,7 @@ test("Admin Work, OKRs, and Maintenance use compact list rows", async () => {
     assert.match(navigation, /key: "work", label: "Work"/)
     assert.doesNotMatch(navigation, /Overview/)
     assert.match(adminPage, /listAdminWorkItems/)
+    assert.match(adminPage, /OkrWorkspace/)
     assert.match(adminPage, /overflow-hidden rounded-2xl border/)
     assert.doesNotMatch(adminPage, /md:grid-cols-2 xl:grid-cols-3/)
     assert.doesNotMatch(maintenancePage, /diagnosticSummary|failure_fingerprint|line-clamp-2/)

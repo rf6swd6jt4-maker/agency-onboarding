@@ -174,6 +174,7 @@ export async function updateWorkItemLinks(slug: string, workItemId: string, rela
     if (allKeyResultIds.length) {
         const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results").select("okr_id").eq("workspace_id", workspace.id).in("id", allKeyResultIds)
         for (const okrId of new Set((keyResults ?? []).map((result) => result.okr_id))) revalidatePath(`/${slug}/admin/okrs/${okrId}`)
+        revalidatePath(`/${slug}/admin`)
     }
     refreshWorkItem(slug, workItemId)
 }

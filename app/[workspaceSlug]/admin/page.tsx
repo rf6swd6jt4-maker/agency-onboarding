@@ -1,10 +1,10 @@
 import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
+import { OkrWorkspace } from "@/components/admin/OkrWorkspace"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listWorkspaceOkrs } from "@/lib/admin/okrs"
-import { formatOkrDeadline, okrDisplayTitle, okrTypeLabel } from "@/lib/admin/okr-title"
 import { listAdminWorkItems } from "@/lib/admin/work-items"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
@@ -19,11 +19,14 @@ type PageProps = {
 }
 
 async function adminPeople(workspaceId: string) {
-    const { data: memberships } = await supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", workspaceId).in("role", ["owner", "admin"])
+    const { data: memberships } = await supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", workspaceId)
     const ids = (memberships ?? []).map((item) => item.user_id)
     const { data: profiles } = ids.length ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", ids) : { data: [] }
     const names = new Map((profiles ?? []).map((profile) => [profile.user_id, profile.username]))
-    return new Map((memberships ?? []).map((membership) => [membership.user_id, names.get(membership.user_id) ?? membership.role]))
+    return {
+        names: new Map((memberships ?? []).map((membership) => [membership.user_id, names.get(membership.user_id) ?? membership.role])),
+        ownerOptions: (memberships ?? []).filter((membership) => membership.role === "owner" || membership.role === "admin").map((membership) => ({ user_id: membership.user_id, role: membership.role, name: names.get(membership.user_id) ?? membership.role })),
+    }
 }
 
 function statusTone(status: string) {
@@ -42,12 +45,18 @@ function workKindLabel(kind: string) {
 export default async function AdminPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
     const { workspace, user } = await requireWorkspace(workspaceSlug, "admin")
-    const [okrs, workItems, people] = await Promise.all([
+    const view = query.view === "okrs" ? "okrs" : "work"
+    const [allOkrs, workItems, people, { data: linkableWorkItems }] = await Promise.all([
         listWorkspaceOkrs(workspace.id),
         listAdminWorkItems(workspace.id),
         adminPeople(workspace.id),
+        view === "okrs" ? supabaseAdmin.from("work_items").select("id, title, status, priority, due_date").eq("workspace_id", workspace.id).order("priority").order("updated_at", { ascending: false }).limit(250) : Promise.resolve({ data: [] }),
     ])
-    const view = query.view === "okrs" ? "okrs" : "work"
+    const okrs = allOkrs.filter((okr) => okr.objective_type !== "aspirational").sort((left, right) => {
+        const leftClosed = left.status === "completed" || left.status === "cancelled" ? 1 : 0
+        const rightClosed = right.status === "completed" || right.status === "cancelled" ? 1 : 0
+        return leftClosed - rightClosed || left.period_end.localeCompare(right.period_end)
+    })
 
     return (
         <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
@@ -63,7 +72,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                 {view === "work" ? (
                     <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
                         {workItems.length ? workItems.map((item) => {
-                            const assignees = item.assignee_ids.map((id) => people.get(id) ?? "Admin")
+                            const assignees = item.assignee_ids.map((id) => people.names.get(id) ?? "Admin")
                             return <Link key={item.id} href={`/${workspace.slug}/work-items/${item.id}`} className="block border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
                                 <div className="flex min-w-0 items-center gap-2">
                                     <p className="truncate font-medium text-neutral-100">{item.title}</p>
@@ -81,23 +90,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                         }) : <div className="p-6"><p className="text-lg font-semibold">No Admin work yet.</p><p className="mt-2 text-sm text-neutral-400">OKR actions and maintenance work items will appear here.</p></div>}
                     </section>
                 ) : (
-                    <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-                        {okrs.length ? okrs.map((okr) => <Link key={okr.id} href={`/${workspace.slug}/admin/okrs/${okr.id}`} className="block border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
-                            <div className="flex min-w-0 items-center gap-2">
-                                <p className="truncate font-medium text-neutral-100">{okrDisplayTitle({ objectiveType: okr.objective_type, objective: okr.objective, deadline: okr.period_end })}</p>
-                                {okr.objective_type ? <SquarePill tone={okr.objective_type === "aspirational" ? "violet" : "sky"} className="shrink-0">{okrTypeLabel(okr.objective_type)}</SquarePill> : null}
-                                <SquarePill tone={statusTone(okr.status)} className="shrink-0 capitalize">{okr.status}</SquarePill>
-                                <span className="ml-auto shrink-0 text-sm font-semibold tabular-nums text-neutral-200">{Math.round(okr.attainment)}%</span>
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
-                                <span>{okr.key_results.length} Key Result{okr.key_results.length === 1 ? "" : "s"}</span>
-                                <span>Starts {formatOkrDeadline(okr.period_start)}</span>
-                                <span>Deadline {formatOkrDeadline(okr.period_end)}</span>
-                                <span>{people.get(okr.owner_user_id) ?? "Admin"}</span>
-                                {okr.description ? <span className="min-w-0 flex-1 truncate">{okr.description}</span> : null}
-                            </div>
-                        </Link>) : <div className="p-6"><p className="text-lg font-semibold">No OKRs yet.</p><p className="mt-2 text-sm text-neutral-400">Use Create OKR from the workspace actions to add one.</p></div>}
-                    </section>
+                    <OkrWorkspace workspaceSlug={workspace.slug} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} />
                 )}
             </div>
         </main>
