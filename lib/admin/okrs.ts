@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { okrAttainment, okrKeyResultProgress, okrTargetMet, type OkrMetricComparator, type OkrMetricUnit } from "@/lib/admin/okr-metrics"
+import type { OkrReportingCadence } from "@/lib/admin/okr-reporting"
 import type { WorkspaceOkrType } from "@/lib/admin/okr-title"
 
 export type WorkspaceOkrStatus = "draft" | "active" | "completed" | "cancelled"
@@ -8,6 +9,7 @@ export type OkrMeasurement = {
     id: string
     value: number
     measured_at: string
+    reported_on: string
     note: string | null
     provenance: "manual"
     recorded_by: string | null
@@ -20,6 +22,8 @@ export type OkrActionWorkItem = {
     priority: number
     description: string | null
     due_date: string | null
+    created_at: string
+    updated_at: string
     assignee_ids: string[]
 }
 
@@ -33,6 +37,8 @@ export type OkrKeyResult = {
     baseline_value: number
     target_value: number
     sort_order: number
+    reporting_cadence: OkrReportingCadence | null
+    reporting_started_on: string | null
     measurements: OkrMeasurement[]
     actions: OkrActionWorkItem[]
     current_value: number
@@ -72,15 +78,15 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
 
     const okrIds = okrs.map((okr) => okr.id)
     const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results")
-        .select("id, workspace_id, okr_id, name, description, unit, currency_code, comparator, baseline_value, target_value, sort_order")
+        .select("id, workspace_id, okr_id, name, description, unit, currency_code, comparator, baseline_value, target_value, sort_order, reporting_cadence, reporting_started_on")
         .eq("workspace_id", workspaceId).in("okr_id", okrIds).order("sort_order").order("created_at")
     const keyResultIds = (keyResults ?? []).map((item) => item.id)
     const [{ data: measurements }, { data: actionLinks }] = await Promise.all([
         keyResultIds.length ? supabaseAdmin.from("workspace_okr_measurements")
-            .select("id, key_result_id, value, measured_at, note, provenance, recorded_by")
-            .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds).order("measured_at", { ascending: true }).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
+            .select("id, key_result_id, value, measured_at, reported_on, note, provenance, recorded_by")
+            .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds).order("reported_on", { ascending: true }).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
         keyResultIds.length ? supabaseAdmin.from("workspace_okr_work_items")
-            .select("key_result_id, work_items!inner(id, title, status, priority, description, due_date)")
+            .select("key_result_id, work_items!inner(id, title, status, priority, description, due_date, created_at, updated_at)")
             .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds) : Promise.resolve({ data: [] }),
     ])
 
@@ -123,6 +129,8 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
             baseline_value: baseline,
             target_value: target,
             sort_order: result.sort_order,
+            reporting_cadence: result.reporting_cadence as OkrReportingCadence | null,
+            reporting_started_on: result.reporting_started_on,
             measurements: resultMeasurements,
             actions: actionsByKeyResult.get(result.id) ?? [],
             current_value: current,

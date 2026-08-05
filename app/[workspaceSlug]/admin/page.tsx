@@ -90,7 +90,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                         }) : <div className="p-6"><p className="text-lg font-semibold">No Admin work yet.</p><p className="mt-2 text-sm text-neutral-400">OKR actions and maintenance work items will appear here.</p></div>}
                     </section>
                 ) : (
-                    <OkrWorkspace workspaceSlug={workspace.slug} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} />
+                    <OkrWorkspace workspaceSlug={workspace.slug} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} today={new Date().toISOString().slice(0, 10)} />
                 )}
             </div>
         </main>

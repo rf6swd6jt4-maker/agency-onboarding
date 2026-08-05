@@ -5,6 +5,7 @@ import { redirect } from "next/navigation"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
+import type { OkrReportingCadence } from "@/lib/admin/okr-reporting"
 import { okrDisplayTitle } from "@/lib/admin/okr-title"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -17,6 +18,12 @@ function numericValue(formData: FormData, key: string) {
     const result = Number(value(formData, key))
     if (!Number.isFinite(result)) throw new Error(`Invalid ${key}`)
     return result
+}
+
+function reportingCadence(formData: FormData): OkrReportingCadence {
+    const cadence = value(formData, "reporting_cadence")
+    if (cadence !== "daily" && cadence !== "weekly" && cadence !== "manual") throw new Error("Choose a reporting cadence")
+    return cadence
 }
 
 function adminPath(slug: string, suffix = "") {
@@ -114,11 +121,22 @@ export async function updateOkr(slug: string, okrId: string, formData: FormData)
     revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }
 
+export async function updateActiveOkrDetails(slug: string, okrId: string, formData: FormData) {
+    const { workspace } = await requireWorkspace(slug, "admin")
+    await requireCommittedOkr(workspace.id, okrId)
+    const ownerUserId = value(formData, "owner_user_id")
+    await requireAdminUser(workspace.id, ownerUserId)
+    const { error } = await supabaseAdmin.from("workspace_okrs").update({ owner_user_id: ownerUserId, description: value(formData, "description") || null }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "active")
+    if (error) throw new Error(error.message)
+    revalidatePath(adminPath(slug))
+}
+
 export async function commitOkr(slug: string, okrId: string) {
     const { workspace, user } = await requireWorkspace(slug, "admin")
     await requireDraftOkr(workspace.id, okrId)
-    const { count } = await supabaseAdmin.from("workspace_okr_key_results").select("id", { count: "exact", head: true }).eq("workspace_id", workspace.id).eq("okr_id", okrId)
-    if (!count) throw new Error("Add at least one Key Result before committing")
+    const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results").select("id, reporting_cadence").eq("workspace_id", workspace.id).eq("okr_id", okrId)
+    if (!keyResults?.length) throw new Error("Add at least one Key Result before committing")
+    if (keyResults.some((result) => !result.reporting_cadence)) throw new Error("Choose a reporting cadence for every Key Result before committing")
     const { error } = await supabaseAdmin.from("workspace_okrs").update({ status: "active", objective_type: "committed" }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "draft")
     if (error) throw new Error(error.message)
     await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.committed", summary: "An OKR was committed and its definition locked", entityType: "okr", entityId: okrId, sourceHref: okrsHref(workspace.slug, `okr-${okrId}`), actorUserId: user.id, metadata: { objective_type: "committed", status: "active" } })
@@ -163,6 +181,7 @@ export async function addOkrKeyResult(slug: string, okrId: string, formData: For
         comparator: comparator === "at_most" ? "at_most" : "at_least",
         baseline_value: numericValue(formData, "baseline_value"),
         target_value: numericValue(formData, "target_value"),
+        reporting_cadence: reportingCadence(formData),
         sort_order: count ?? 0,
     })
     if (error) throw new Error(error.message)
@@ -192,19 +211,40 @@ export async function updateOkrKeyResult(slug: string, okrId: string, keyResultI
         comparator: comparator === "at_most" ? "at_most" : "at_least",
         baseline_value: numericValue(formData, "baseline_value"),
         target_value: numericValue(formData, "target_value"),
+        reporting_cadence: reportingCadence(formData),
     }).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }
 
+export async function updateActiveOkrKeyResultDescription(slug: string, okrId: string, keyResultId: string, formData: FormData) {
+    const { workspace } = await requireWorkspace(slug, "admin")
+    await requireCommittedOkr(workspace.id, okrId)
+    const { error } = await supabaseAdmin.from("workspace_okr_key_results").update({ description: value(formData, "description") || null }).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
+    if (error) throw new Error(error.message)
+    revalidatePath(adminPath(slug))
+}
+
+export async function setOkrKeyResultCadence(slug: string, okrId: string, keyResultId: string, formData: FormData) {
+    const { workspace } = await requireWorkspace(slug, "admin")
+    await requireCommittedOkr(workspace.id, okrId)
+    const { data: keyResult } = await supabaseAdmin.from("workspace_okr_key_results").select("reporting_cadence").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle()
+    if (!keyResult) throw new Error("Key Result not found")
+    if (keyResult.reporting_cadence) throw new Error("Reporting cadence was already set")
+    const { data: updated, error } = await supabaseAdmin.from("workspace_okr_key_results").update({ reporting_cadence: reportingCadence(formData) }).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).is("reporting_cadence", null).select("id").maybeSingle()
+    if (error || !updated) throw new Error(error?.message ?? "Reporting cadence was already set")
+    revalidatePath(adminPath(slug))
+}
+
 export async function addOkrMeasurement(slug: string, okrId: string, keyResultId: string, formData: FormData) {
     const { workspace, user } = await requireWorkspace(slug, "admin")
     await requireCommittedOkr(workspace.id, okrId)
-    const measuredAt = value(formData, "measured_at")
-    if (measuredAt && Number.isNaN(Date.parse(measuredAt))) throw new Error("Add a valid measurement date")
+    const reportedOn = value(formData, "reported_on")
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(reportedOn) || Number.isNaN(Date.parse(`${reportedOn}T00:00:00.000Z`))) throw new Error("Add a valid report date")
+    if (reportedOn > new Date().toISOString().slice(0, 10)) throw new Error("Report date cannot be in the future")
     const { data: keyResult } = await supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle()
     if (!keyResult) throw new Error("Key Result not found")
-    const { error } = await supabaseAdmin.from("workspace_okr_measurements").insert({ workspace_id: workspace.id, key_result_id: keyResultId, value: numericValue(formData, "value"), measured_at: measuredAt ? new Date(measuredAt).toISOString() : new Date().toISOString(), note: value(formData, "note") || null, provenance: "manual", recorded_by: user.id })
+    const { error } = await supabaseAdmin.from("workspace_okr_measurements").insert({ workspace_id: workspace.id, key_result_id: keyResultId, value: numericValue(formData, "value"), reported_on: reportedOn, measured_at: new Date().toISOString(), note: value(formData, "note") || null, provenance: "manual", recorded_by: user.id })
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }

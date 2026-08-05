@@ -48,10 +48,11 @@ test("Admin persistence is additive, private, append-only, and concurrency-safe"
     assert.match(migration, /workspace_members_can_read_work_item_relationships/)
 })
 
-test("OKRs are editable drafts until Commit classifies and locks them", async () => {
-    const [migration, lifecycleMigration, actions, topBar, detail, workspace] = await Promise.all([
+test("OKRs are editable drafts until Commit classifies and selectively locks them", async () => {
+    const [migration, lifecycleMigration, reportingMigration, actions, topBar, detail, workspace] = await Promise.all([
         readFile("supabase/migrations/20260804190000_okr_objective_types.sql", "utf8"),
         readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
+        readFile("supabase/migrations/20260805130000_compact_okr_reporting.sql", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/okrs/[okrId]/page.tsx", "utf8"),
@@ -63,6 +64,12 @@ test("OKRs are editable drafts until Commit classifies and locks them", async ()
     assert.match(migration, /objective_type in \('aspirational', 'committed'\)/)
     assert.match(lifecycleMigration, /alter column objective_type drop not null/)
     assert.match(lifecycleMigration, /new\.status = 'draft'[\s\S]*'Draft Objective: '/)
+    assert.match(reportingMigration, /reporting_cadence text/)
+    assert.match(reportingMigration, /reporting_started_on date/)
+    assert.match(reportingMigration, /reported_on date/)
+    assert.match(reportingMigration, /Choose a reporting cadence for every Key Result before committing/)
+    assert.match(reportingMigration, /new\.description is distinct from old\.description/)
+    assert.match(reportingMigration, /Closed OKRs are read-only/)
     assert.match(actions, /value\(formData, "objective"\)/)
     assert.match(actions, /objective_type: null/)
     assert.match(actions, /status: "draft"/)
@@ -74,12 +81,36 @@ test("OKRs are editable drafts until Commit classifies and locks them", async ()
     assert.doesNotMatch(topBar, /name="objective_type"/)
     assert.doesNotMatch(topBar, /name="status" defaultValue="draft"/)
     assert.match(detail, /redirect\(`\/\$\{workspace\.slug\}\/admin\?view=okrs#okr-\$\{okr\.id\}`\)/)
-    assert.match(workspace, /Commit OKR/)
+    assert.match(workspace, /commitOkr/)
     assert.match(workspace, /No Key Results/)
     assert.match(workspace, /ProgressRing/)
-    assert.match(workspace, /Add work item/)
-    assert.match(workspace, /OkrDefinition/)
-    assert.match(workspace, /DraftKeyResult/)
+    assert.match(workspace, /Add work/)
+    assert.match(workspace, /OkrHeader/)
+    assert.match(workspace, /DraftKeyResultBody/)
+    assert.match(workspace, /updateActiveOkrDetails/)
+    assert.match(workspace, /updateActiveOkrKeyResultDescription/)
+})
+
+test("KR cadence is explicit, locked at commit, and available once for legacy active KRs", async () => {
+    const [migration, actions, workspace, reporting] = await Promise.all([
+        readFile("supabase/migrations/20260805130000_compact_okr_reporting.sql", "utf8"),
+        readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
+        readFile("components/admin/OkrWorkspace.tsx", "utf8"),
+        readFile("lib/admin/okr-reporting.ts", "utf8"),
+    ])
+    assert.match(migration, /reporting_cadence in \('daily', 'weekly', 'manual'\)/)
+    assert.match(migration, /set reporting_cadence = 'manual'[\s\S]*okr\.status in \('completed', 'cancelled'\)/)
+    assert.match(migration, /old\.reporting_cadence is null and new\.reporting_cadence is not null[\s\S]*new\.reporting_started_on := current_date/)
+    assert.match(migration, /Committed Key Result cadence is locked/)
+    assert.match(actions, /reportingCadence\(formData\)/)
+    assert.match(actions, /setOkrKeyResultCadence/)
+    assert.match(actions, /updateActiveOkrDetails/)
+    assert.match(actions, /updateActiveOkrKeyResultDescription/)
+    assert.match(actions, /reported_on: reportedOn/)
+    assert.match(workspace, /Choose cadence…/)
+    assert.match(workspace, /This one-time choice starts accountability today and locks permanently/)
+    assert.match(reporting, /buildOkrReportingDays/)
+    assert.match(reporting, /startOfUtcWeek/)
 })
 
 test("the OKRs tab is the only OKR surface and repeats Objective, Key Result, and work-item hierarchy", async () => {
@@ -100,6 +131,12 @@ test("the OKRs tab is the only OKR surface and repeats Objective, Key Result, an
     assert.match(workspace, /type: "add-result"/)
     assert.match(workspace, /type: "add-work"/)
     assert.match(workspace, /type: "measurement"/)
+    assert.match(workspace, /toggledIds/)
+    assert.match(workspace, /draft \? !toggledIds\.has\(result\.id\) : toggledIds\.has\(result\.id\)/)
+    assert.match(workspace, /AccountabilityTracker/)
+    assert.match(workspace, /TrendChart/)
+    assert.match(workspace, /Added \{formatRelativeTime\(action\.created_at\)\}/)
+    assert.doesNotMatch(workspace, />Draft<\/SquarePill>/)
     assert.match(search, /admin\?view=okrs#okr-/)
     assert.match(search, /admin\?view=okrs#key-result-/)
     assert.match(actions, /return \{ ok: true, href: okrsHref\(slug, `okr-\$\{okr\.id\}`\) \}/)
