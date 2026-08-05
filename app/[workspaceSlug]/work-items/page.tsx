@@ -11,6 +11,7 @@ import {
 } from "@/lib/relationships"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
+import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
 export const dynamic = "force-dynamic"
 
@@ -89,7 +90,7 @@ export default async function WorkItemsPage({ params }: PageProps) {
                                         <span className={`h-2 w-2 rotate-45 ${tone.split(" ")[0]}`} />
                                         <span className={tone.split(" ")[1]}>{item.status}</span>
                                     </div>
-                                    <p className="text-sm text-neutral-500">Priority {item.priority}</p>
+                                    <p className="text-sm text-neutral-500">{workItemPriorityLabel(item.priority)}</p>
                                     <p className="text-sm text-neutral-500 md:text-right">{formatRelativeTime(date)}</p>
                                 </Link>
                             )

@@ -6,19 +6,21 @@ import { useRouter } from "next/navigation"
 import { Assignee, RoundPill, Status } from "@/components/ui"
 import { Avatar } from "@/components/account/Avatar"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
+import { workItemPriorityLabel, workItemPriorityOptions } from "@/lib/work-item-priority"
 import {
     updateWorkItemAssignees,
     updateWorkItemDependencies,
     updateWorkItemDescription,
     updateWorkItemParent,
     updateWorkItemPriority,
-    updateWorkItemRelationships,
+    updateWorkItemLinks,
     updateWorkItemSchedule,
 } from "./actions"
 
 type Person = { user_id: string; username: string; avatar_url: string | null }
 type WorkOption = { id: string; title: string; status: string }
 type RelationshipOption = { id: string; label: string }
+type KeyResultOption = { id: string; code: string; name: string; objective: string }
 let activePopupTrigger: HTMLElement | null = null
 
 type Props = {
@@ -48,6 +50,9 @@ type Props = {
     relationships: RelationshipOption[]
     relationshipOptions: RelationshipOption[]
     relationshipsLocked: boolean
+    keyResults: KeyResultOption[]
+    keyResultOptions: KeyResultOption[]
+    linksLocked: boolean
     priority: number
 }
 
@@ -187,6 +192,7 @@ export function InlineWorkItemFields(props: Props) {
     const [waitForParent, setWaitForParent] = useState(props.waitsForParent || !props.parentId)
     const [dependencyIds, setDependencyIds] = useState(props.manualDependencyIds)
     const [relationshipIds, setRelationshipIds] = useState(props.relationships.map((relationship) => relationship.id))
+    const [keyResultIds, setKeyResultIds] = useState(props.keyResults.map((result) => result.id))
     const [description, setDescription] = useState(props.description ?? "")
     const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
@@ -224,6 +230,7 @@ export function InlineWorkItemFields(props: Props) {
             setWaitForParent(props.waitsForParent || !props.parentId)
             setDependencyIds(props.manualDependencyIds)
             setRelationshipIds(props.relationships.map((relationship) => relationship.id))
+            setKeyResultIds(props.keyResults.map((result) => result.id))
         }
         setOpen((current) => current === name ? null : name)
     }
@@ -239,6 +246,7 @@ export function InlineWorkItemFields(props: Props) {
     const filteredMembers = useMemo(() => props.members.filter((person) => person.username.toLowerCase().includes(query.toLowerCase())), [props.members, query])
     const filteredWork = useMemo(() => props.workOptions.filter((item) => item.title.toLowerCase().includes(query.toLowerCase())), [props.workOptions, query])
     const filteredRelationships = useMemo(() => props.relationshipOptions.filter((relationship) => relationship.label.toLowerCase().includes(query.toLowerCase())), [props.relationshipOptions, query])
+    const filteredKeyResults = useMemo(() => props.keyResultOptions.filter((result) => `${result.code} ${result.name} ${result.objective}`.toLowerCase().includes(query.toLowerCase())), [props.keyResultOptions, query])
 
     return (
         <div className="relative">
@@ -277,8 +285,8 @@ export function InlineWorkItemFields(props: Props) {
                     <div className="contents">
                         <Field label="Parent" icon="parent" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("parent")} className="block max-w-full rounded py-0.5 text-left hover:text-white">{props.parent ? <span className="block truncate">{props.parent.title}</span> : "None"}</button>{open === "parent" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-56 overflow-y-auto p-1"><button type="button" onClick={() => setParentId("")} className="w-full rounded-lg px-1.5 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900">No parent</button>{filteredWork.map((item) => <button type="button" key={item.id} onClick={() => setParentId(item.id)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{parentId === item.id ? "✓" : ""}</span></button>)}</div><label className="flex items-center gap-2 border-t border-neutral-800 px-2.5 py-2 text-xs text-neutral-300"><input type="checkbox" checked={waitForParent} disabled={!parentId} onChange={(event) => setWaitForParent(event.target.checked)} /> Wait for parent</label><PopupFooter pending={pending} onClear={parentId ? () => { setParentId(""); setWaitForParent(false) } : undefined} onSave={() => save(() => updateWorkItemParent(props.workspaceSlug, props.workItemId, parentId || null, Boolean(parentId && waitForParent)))} /></Popup> : null}</div></Field>
                         <Field label="Dependencies" icon="dependency" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("dependencies")} className="max-w-full rounded py-0.5 text-left hover:text-white">{props.dependencies.length ? props.dependencies.map((item) => item.title).join(", ") : "None"}</button>{open === "dependencies" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-64 overflow-y-auto p-1">{filteredWork.map((item) => <button type="button" key={item.id} disabled={item.id === parentId} onClick={() => toggleId(dependencyIds, item.id, setDependencyIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900 disabled:opacity-40"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{dependencyIds.includes(item.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={dependencyIds.length ? () => setDependencyIds([]) : undefined} onSave={() => save(() => updateWorkItemDependencies(props.workspaceSlug, props.workItemId, dependencyIds))} /></Popup> : null}</div></Field>
-                        <Field label="Relationships" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-flex max-w-full flex-wrap gap-1.5"><button data-work-item-popup-trigger type="button" aria-disabled={props.relationshipsLocked} onClick={() => { if (!props.relationshipsLocked) toggle("relationships") }} className={`flex max-w-full flex-wrap gap-1.5 rounded p-0 ${props.relationshipsLocked ? "cursor-not-allowed" : "hover:opacity-90"}`}>{props.relationships.length ? props.relationships.map((relationship) => <RoundPill key={relationship.id} tone="sky">{relationship.label}</RoundPill>) : <span className="text-neutral-600">Workspace only</span>}</button>{open === "relationships" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search relationships…" /><div className="max-h-64 overflow-y-auto p-1">{filteredRelationships.map((relationship) => <button type="button" key={relationship.id} onClick={() => toggleId(relationshipIds, relationship.id, setRelationshipIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{relationship.label}</span><span>{relationshipIds.includes(relationship.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={relationshipIds.length ? () => setRelationshipIds([]) : undefined} onSave={() => save(() => updateWorkItemRelationships(props.workspaceSlug, props.workItemId, relationshipIds))} /></Popup> : null}</div></Field>
-                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 hover:text-white">{["", "Urgent", "High", "Normal", "Low", "Lowest"][props.priority]}</button>{open === "priority" ? <Popup className="w-48"><div className="p-1">{["Urgent", "High", "Normal", "Low", "Lowest"].map((label, index) => <button type="button" key={label} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, index + 1))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{label}</span><span>{props.priority === index + 1 ? "✓" : ""}</span></button>)}</div></Popup> : null}</div></Field>
+                        <Field label="Links" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-flex max-w-full flex-wrap gap-1.5"><button data-work-item-popup-trigger type="button" aria-disabled={props.linksLocked} onClick={() => { if (!props.linksLocked) toggle("links") }} className={`flex max-w-full flex-wrap gap-1.5 rounded p-0 ${props.linksLocked ? "cursor-not-allowed" : "hover:opacity-90"}`}>{props.relationships.map((relationship) => <RoundPill key={`relationship-${relationship.id}`} tone="sky">{relationship.label}</RoundPill>)}{props.keyResults.map((result) => <RoundPill key={`result-${result.id}`} tone="sky">{result.code}</RoundPill>)}{!props.relationships.length && !props.keyResults.length ? <span className="text-neutral-600">None</span> : null}</button>{open === "links" ? <Popup className="w-96"><Search value={query} onChange={setQuery} placeholder="Search relationships or Key Results…" /><div className="max-h-72 overflow-y-auto p-1">{!props.relationshipsLocked ? <><p className="px-1.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Relationships</p>{filteredRelationships.length ? filteredRelationships.map((relationship) => <button type="button" key={relationship.id} onClick={() => toggleId(relationshipIds, relationship.id, setRelationshipIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{relationship.label}</span><span>{relationshipIds.includes(relationship.id) ? "✓" : ""}</span></button>) : <p className="px-1.5 py-2 text-xs text-neutral-600">No relationships found.</p>}</> : null}<p className="px-1.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Committed Key Results</p>{filteredKeyResults.length ? filteredKeyResults.map((result) => <button type="button" key={result.id} onClick={() => toggleId(keyResultIds, result.id, setKeyResultIds)} className="flex w-full items-start gap-3 rounded-lg px-1.5 py-2 text-left hover:bg-neutral-900"><RoundPill tone="sky">{result.code}</RoundPill><span className="min-w-0 flex-1"><span className="block truncate text-sm text-white">{result.name}</span><span className="block truncate text-xs text-neutral-600">{result.objective}</span></span><span className="text-sm">{keyResultIds.includes(result.id) ? "✓" : ""}</span></button>) : <p className="px-1.5 py-2 text-xs text-neutral-600">No committed Key Results found.</p>}</div><PopupFooter pending={pending} onClear={relationshipIds.length || keyResultIds.length ? () => { setRelationshipIds([]); setKeyResultIds([]) } : undefined} onSave={() => save(() => updateWorkItemLinks(props.workspaceSlug, props.workItemId, relationshipIds, keyResultIds))} /></Popup> : null}</div></Field>
+                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPriorityLabel(props.priority)}</button>{open === "priority" ? <Popup className="w-64"><div className="p-1">{workItemPriorityOptions.map((option) => <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, option.value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priority === option.value || option.value === 4 && props.priority === 5 ? "✓" : ""}</span></button>)}</div></Popup> : null}</div></Field>
                     </div>
                     <Field label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
                         <div>

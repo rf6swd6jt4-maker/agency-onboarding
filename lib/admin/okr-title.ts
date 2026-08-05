@@ -6,11 +6,11 @@ export function formatOkrDeadline(deadline: string) {
     return new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(parsed)
 }
 
-export function okrTypeLabel(type: WorkspaceOkrType) {
+export function okrTypeLabel(type: WorkspaceOkrType | null) {
+    if (!type) return "Draft"
     return type === "aspirational" ? "Aspirational" : "Committed"
 }
 
-export function okrDisplayTitle({ objectiveType, objective, deadline }: { objectiveType: WorkspaceOkrType; objective: string; deadline: string }) {
+export function okrDisplayTitle({ objectiveType, objective, deadline }: { objectiveType: WorkspaceOkrType | null; objective: string; deadline: string }) {
     return `${okrTypeLabel(objectiveType)} Objective: ${objective} by ${formatOkrDeadline(deadline)}`
 }
-

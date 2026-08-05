@@ -9,6 +9,7 @@ import { listAdminWorkItems } from "@/lib/admin/work-items"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
+import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
 export const dynamic = "force-dynamic"
 
@@ -71,7 +72,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                                 </div>
                                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
                                     <span>{workKindLabel(item.kind)}</span>
-                                    <span>Priority {item.priority}</span>
+                                    <span>{workItemPriorityLabel(item.priority)}</span>
                                     <span>{assignees.length ? assignees.join(", ") : "Unassigned"}</span>
                                     <span className="font-mono">{shortId(item.id)}</span>
                                     <span className="ml-auto">{formatRelativeTime(item.updated_at)}</span>
@@ -84,7 +85,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                         {okrs.length ? okrs.map((okr) => <Link key={okr.id} href={`/${workspace.slug}/admin/okrs/${okr.id}`} className="block border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
                             <div className="flex min-w-0 items-center gap-2">
                                 <p className="truncate font-medium text-neutral-100">{okrDisplayTitle({ objectiveType: okr.objective_type, objective: okr.objective, deadline: okr.period_end })}</p>
-                                <SquarePill tone={okr.objective_type === "aspirational" ? "violet" : "sky"} className="shrink-0">{okrTypeLabel(okr.objective_type)}</SquarePill>
+                                {okr.objective_type ? <SquarePill tone={okr.objective_type === "aspirational" ? "violet" : "sky"} className="shrink-0">{okrTypeLabel(okr.objective_type)}</SquarePill> : null}
                                 <SquarePill tone={statusTone(okr.status)} className="shrink-0 capitalize">{okr.status}</SquarePill>
                                 <span className="ml-auto shrink-0 text-sm font-semibold tabular-nums text-neutral-200">{Math.round(okr.attainment)}%</span>
                             </div>

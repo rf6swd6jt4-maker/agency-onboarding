@@ -7,6 +7,7 @@ import { listMaintenanceWorkItems, MAINTENANCE_CATEGORIES, maintenanceCategoryLa
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
+import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
 export const dynamic = "force-dynamic"
 
@@ -56,7 +57,7 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
                             <span>{maintenanceCategoryLabel(item.maintenance_category)}</span>
-                            <span>{item.priority === 1 ? "Urgent" : "High"}</span>
+                            <span>{workItemPriorityLabel(item.priority)}</span>
                             <span>{item.occurrence_count} occurrence{item.occurrence_count === 1 ? "" : "s"}</span>
                             <span>{assigneeNames.join(", ") || "Owner fallback pending"}</span>
                             <span>First {formatRelativeTime(item.first_occurred_at)}</span>

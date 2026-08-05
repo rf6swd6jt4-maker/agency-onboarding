@@ -42,7 +42,7 @@ export type WorkspaceOkr = {
     id: string
     workspace_id: string
     objective: string
-    objective_type: WorkspaceOkrType
+    objective_type: WorkspaceOkrType | null
     description: string | null
     period_start: string
     period_end: string
@@ -125,7 +125,7 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
         return {
             ...okr,
             status: okr.status as WorkspaceOkrStatus,
-            objective_type: okr.objective_type as WorkspaceOkrType,
+            objective_type: okr.objective_type as WorkspaceOkrType | null,
             key_results: results,
             attainment: okrAttainment(results.map((result) => result.progress)),
         }
@@ -134,4 +134,39 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
 
 export async function getWorkspaceOkr(workspaceId: string, okrId: string) {
     return (await listWorkspaceOkrs(workspaceId)).find((okr) => okr.id === okrId) ?? null
+}
+
+export type WorkItemKeyResultLink = {
+    id: string
+    name: string
+    objective: string
+    okr_id: string
+}
+
+export async function listActiveWorkspaceKeyResults(workspaceId: string): Promise<WorkItemKeyResultLink[]> {
+    const { data: okrs } = await supabaseAdmin.from("workspace_okrs")
+        .select("id, objective").eq("workspace_id", workspaceId).eq("status", "active").eq("objective_type", "committed")
+    if (!okrs?.length) return []
+    const objectiveById = new Map(okrs.map((okr) => [okr.id, okr.objective]))
+    const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results")
+        .select("id, okr_id, name").eq("workspace_id", workspaceId).in("okr_id", okrs.map((okr) => okr.id)).order("sort_order").order("created_at")
+    return (keyResults ?? []).map((result) => ({
+        id: result.id,
+        name: result.name,
+        objective: objectiveById.get(result.okr_id) ?? "Objective",
+        okr_id: result.okr_id,
+    }))
+}
+
+export async function listWorkItemKeyResultLinks(workspaceId: string, workItemId: string): Promise<WorkItemKeyResultLink[]> {
+    const { data: links } = await supabaseAdmin.from("workspace_okr_work_items")
+        .select("key_result_id").eq("workspace_id", workspaceId).eq("work_item_id", workItemId)
+    if (!links?.length) return []
+    const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results")
+        .select("id, okr_id, name").eq("workspace_id", workspaceId).in("id", links.map((link) => link.key_result_id))
+    if (!keyResults?.length) return []
+    const { data: okrs } = await supabaseAdmin.from("workspace_okrs")
+        .select("id, objective").eq("workspace_id", workspaceId).in("id", [...new Set(keyResults.map((result) => result.okr_id))])
+    const objectiveById = new Map((okrs ?? []).map((okr) => [okr.id, okr.objective]))
+    return keyResults.map((result) => ({ id: result.id, name: result.name, objective: objectiveById.get(result.okr_id) ?? "Objective", okr_id: result.okr_id }))
 }

@@ -195,7 +195,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
             supabaseAdmin.from("workspace_admin_activity").select("id, category, level, event_key, summary, entity_type, entity_id, source_href, occurred_at").eq("workspace_id", workspace.id).order("occurred_at", { ascending: false }).limit(100),
         ])
         for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.objective, item.objective_type, item.description, item.status], query)).slice(0, 6)) {
-            const displayTitle = okrDisplayTitle({ objectiveType: okr.objective_type as WorkspaceOkrType, objective: okr.objective, deadline: okr.period_end })
+            const displayTitle = okrDisplayTitle({ objectiveType: okr.objective_type as WorkspaceOkrType | null, objective: okr.objective, deadline: okr.period_end })
             results.push(result(`okr-${okr.id}`, "OKR", displayTitle, okr.description ?? `${okr.status} objective`, `/${workspace.slug}/admin/okrs/${okr.id}`, {
                 path: `${workspace.name} > Admin > OKRs`, recordId: shortId(okr.id),
             }))

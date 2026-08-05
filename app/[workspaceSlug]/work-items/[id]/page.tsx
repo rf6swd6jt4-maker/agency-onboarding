@@ -13,6 +13,7 @@ import {
     assetHref,
 } from "@/lib/relationships"
 import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
+import { listActiveWorkspaceKeyResults, listWorkItemKeyResultLinks } from "@/lib/admin/okrs"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
 import { InlineWorkItemFields } from "./InlineWorkItemFields"
@@ -41,11 +42,14 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
     if (!item) notFound()
     if (item.visibility === "admins_only" && role === "staff") notFound()
     const isAdminItem = item.area === "admin"
-    const [relationships, assets, planning, relationshipOptions] = await Promise.all([
+    const canSeeOkrs = role !== "staff"
+    const [relationships, assets, planning, relationshipOptions, keyResultLinks, keyResultOptions] = await Promise.all([
         isAdminItem ? Promise.resolve([]) : listWorkItemRelationships(workspace.id, item.id),
         isAdminItem ? Promise.resolve([]) : listWorkItemAssets(workspace.id, item.id),
         getWorkItemPlanningContext(workspace.id, item),
         isAdminItem ? Promise.resolve([]) : listRelationshipsForWorkspace(workspace.id),
+        canSeeOkrs ? listWorkItemKeyResultLinks(workspace.id, item.id) : Promise.resolve([]),
+        canSeeOkrs ? listActiveWorkspaceKeyResults(workspace.id) : Promise.resolve([]),
     ])
     const contextRelationshipId = relationships[0]?.relationship_id
     const contextRelationship = contextRelationshipId ? await getRelationship(workspace.id, contextRelationshipId) : null
@@ -82,6 +86,9 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                     relationships={relationships.map((link) => ({ id: link.relationship_id, label: link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship" }))}
                     relationshipOptions={relationshipOptions.map((relationship) => ({ id: relationship.id, label: relationship.business_name ?? relationship.primary_person_name }))}
                     relationshipsLocked={isAdminItem || item.native_kind === "onboarding_step"} priority={item.priority}
+                    keyResults={keyResultLinks.map((result) => ({ ...result, code: `KR-${shortId(result.id)}` }))}
+                    keyResultOptions={keyResultOptions.map((result) => ({ ...result, code: `KR-${shortId(result.id)}` }))}
+                    linksLocked={item.native_kind === "onboarding_step"}
                 />
 
                 <section className="mt-6 rounded-2xl border border-neutral-800 bg-black p-5">

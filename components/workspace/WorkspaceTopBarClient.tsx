@@ -1636,10 +1636,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                     <label className="block text-sm text-neutral-300">Starts<input name="period_start" type="date" defaultValue={okrPeriodStart} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
                                     <label className="block text-sm text-neutral-300">Deadline<input name="period_end" type="date" defaultValue={okrPeriodEnd} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
                                     <label className="block text-sm text-neutral-300">Owner<select name="owner_user_id" defaultValue={currentUserId} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white">{okrOwnerOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.label} · {owner.role}</option>)}</select></label>
-                                    <label className="block text-sm text-neutral-300">OKR type<select name="objective_type" defaultValue="committed" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="committed">Committed</option><option value="aspirational">Aspirational</option></select></label>
-                                    <label className="block text-sm text-neutral-300">Initial state<select name="status" defaultValue="draft" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="draft">Draft</option><option value="active">Active</option></select></label>
                                 </section>
-                                <p className="text-xs leading-5 text-neutral-500">Create the objective here, then add measurable Key Results on its detail page.</p>
+                                <p className="text-xs leading-5 text-neutral-500">This will be saved as a fully editable draft. Add and review its Key Results on the detail page before committing it.</p>
                             </div>
                         )}
                         {createError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{createError}</p>}

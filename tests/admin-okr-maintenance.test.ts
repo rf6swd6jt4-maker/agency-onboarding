@@ -4,6 +4,7 @@ import test from "node:test"
 import { maintenanceBugTitle, resolveMaintenanceError } from "../lib/admin/error-catalogue.ts"
 import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet } from "../lib/admin/okr-metrics.ts"
 import { okrDisplayTitle } from "../lib/admin/okr-title.ts"
+import { workItemPriorityLabel, workItemPriorityOptions } from "../lib/work-item-priority.ts"
 
 test("OKR progress moves from baseline to target and clamps to 0-100", () => {
     assert.equal(okrKeyResultProgress({ baseline: 100, target: 300, current: 100 }), 0)
@@ -28,6 +29,7 @@ test("overall attainment is an equal-weight average", () => {
 })
 
 test("OKR names are system-generated from type, objective, and deadline", () => {
+    assert.equal(okrDisplayTitle({ objectiveType: null, objective: "Agree the sales plan", deadline: "2026-09-30" }), "Draft Objective: Agree the sales plan by 30 Sept 2026")
     assert.equal(okrDisplayTitle({ objectiveType: "committed", objective: "Reach product-market fit", deadline: "2026-12-31" }), "Committed Objective: Reach product-market fit by 31 Dec 2026")
     assert.equal(okrDisplayTitle({ objectiveType: "aspirational", objective: "Become the category leader", deadline: "2027-03-01" }), "Aspirational Objective: Become the category leader by 1 Mar 2027")
 })
@@ -46,25 +48,62 @@ test("Admin persistence is additive, private, append-only, and concurrency-safe"
     assert.match(migration, /workspace_members_can_read_work_item_relationships/)
 })
 
-test("OKRs store an objective and classification instead of a user-set title", async () => {
-    const [migration, actions, topBar, detail] = await Promise.all([
+test("OKRs are editable drafts until Commit classifies and locks them", async () => {
+    const [migration, lifecycleMigration, actions, topBar, detail, detailClient] = await Promise.all([
         readFile("supabase/migrations/20260804190000_okr_objective_types.sql", "utf8"),
+        readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/okrs/[okrId]/page.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/okrs/[okrId]/OkrDetailClient.tsx", "utf8"),
     ])
     assert.match(migration, /add column if not exists objective text/)
     assert.match(migration, /set objective = title/)
     assert.match(migration, /sync_workspace_okr_system_title/)
     assert.match(migration, /objective_type in \('aspirational', 'committed'\)/)
+    assert.match(lifecycleMigration, /alter column objective_type drop not null/)
+    assert.match(lifecycleMigration, /new\.status = 'draft'[\s\S]*'Draft Objective: '/)
     assert.match(actions, /value\(formData, "objective"\)/)
+    assert.match(actions, /objective_type: null/)
+    assert.match(actions, /status: "draft"/)
+    assert.match(actions, /export async function commitOkr[\s\S]*status: "active", objective_type: "committed"/)
+    assert.match(actions, /requireDraftOkr/)
     assert.doesNotMatch(actions, /value\(formData, "title"\)[\s\S]{0,500}workspace_okrs/)
     assert.match(topBar, /Objective<input name="objective"/)
     assert.match(topBar, />Deadline<input name="period_end"/)
-    assert.match(topBar, /name="objective_type"/)
+    assert.doesNotMatch(topBar, /name="objective_type"/)
+    assert.doesNotMatch(topBar, /name="status" defaultValue="draft"/)
     assert.doesNotMatch(detail, /AdminPanelNav|WorkspaceBanner|Back to OKRs/)
     assert.match(detail, /OKR \{shortId\(okr\.id\)\}/)
-    assert.match(detail, /<h1[^>]*>\{displayTitle\}<\/h1>/)
+    assert.match(detail, /okrDisplayTitle/)
+    assert.match(detailClient, /Commit OKR/)
+    assert.match(detailClient, /No Key Results/)
+    assert.match(detailClient, /ProgressRing/)
+    assert.match(detailClient, /Add work item/)
+})
+
+test("work-item Links combine relationships and committed Key Results", async () => {
+    const [migration, fields, actions, page] = await Promise.all([
+        readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/InlineWorkItemFields.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/actions.ts", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/page.tsx", "utf8"),
+    ])
+    assert.match(migration, /OKR work links must stay inside one workspace/)
+    assert.doesNotMatch(migration, /area = 'admin'[\s\S]*visibility = 'admins_only'/)
+    assert.match(fields, /Field label="Links"/)
+    assert.match(fields, /Committed Key Results/)
+    assert.match(fields, /<RoundPill tone="sky">\{result\.code\}<\/RoundPill>/)
+    assert.match(actions, /export async function updateWorkItemLinks/)
+    assert.match(actions, /Work can only be linked to committed Key Results/)
+    assert.match(page, /listActiveWorkspaceKeyResults/)
+    assert.match(page, /`KR-\$\{shortId\(result\.id\)\}`/)
+})
+
+test("manual work priorities use time-horizon language", () => {
+    assert.deepEqual(workItemPriorityOptions.map((option) => option.label), ["Must do now", "Can be done tomorrow", "Can be done this week", "Backlog"])
+    assert.equal(workItemPriorityLabel(1), "Must do now")
+    assert.equal(workItemPriorityLabel(5), "Backlog")
 })
 
 test("service-role query paths explicitly exclude private work for Staff surfaces", async () => {

@@ -134,22 +134,53 @@ export async function updateWorkItemDependencies(slug: string, workItemId: strin
     refreshWorkItem(slug, workItemId)
 }
 
-export async function updateWorkItemRelationships(slug: string, workItemId: string, relationshipIds: string[]) {
-    const { workspace, item } = await requireWorkItem(slug, workItemId)
-    if (item.area === "admin" || item.visibility === "admins_only") throw new Error("Private Admin work items cannot be linked to relationships")
-    if (item.native_kind === "onboarding_step") throw new Error("Onboarding work-item relationships are managed by onboarding")
+export async function updateWorkItemLinks(slug: string, workItemId: string, relationshipIds: string[], keyResultIds: string[]) {
+    const { workspace, user, item } = await requireWorkItem(slug, workItemId)
+    if (item.native_kind === "onboarding_step") throw new Error("Onboarding work-item links are managed by onboarding")
     const uniqueIds = [...new Set(relationshipIds)]
-    const { data: relationships } = await supabaseAdmin.from("relationships").select("id").eq("workspace_id", workspace.id)
+    const uniqueKeyResultIds = [...new Set(keyResultIds)]
+    if ((item.area === "admin" || item.visibility === "admins_only") && uniqueIds.length) throw new Error("Private Admin work items cannot be linked to relationships")
+    const [{ data: relationships }, { data: existingOkrLinks }] = await Promise.all([
+        supabaseAdmin.from("relationships").select("id").eq("workspace_id", workspace.id),
+        supabaseAdmin.from("workspace_okr_work_items").select("key_result_id").eq("workspace_id", workspace.id).eq("work_item_id", workItemId),
+    ])
     const allowedIds = new Set((relationships ?? []).map((row) => row.id))
     if (uniqueIds.some((id) => !allowedIds.has(id))) throw new Error("Relationships must belong to this workspace")
-    const { error } = await supabaseAdmin.rpc("set_work_item_explicit_relationships", { p_workspace_id: workspace.id, p_work_item_id: workItemId, p_relationship_ids: uniqueIds })
-    if (error) throw new Error(error.message)
+
+    if (uniqueKeyResultIds.length) {
+        const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results").select("id, okr_id").eq("workspace_id", workspace.id).in("id", uniqueKeyResultIds)
+        if ((keyResults ?? []).length !== uniqueKeyResultIds.length) throw new Error("Key Results must belong to this workspace")
+        const okrIds = [...new Set((keyResults ?? []).map((result) => result.okr_id))]
+        const { data: okrs } = await supabaseAdmin.from("workspace_okrs").select("id").eq("workspace_id", workspace.id).eq("status", "active").eq("objective_type", "committed").in("id", okrIds)
+        if ((okrs ?? []).length !== okrIds.length) throw new Error("Work can only be linked to committed Key Results")
+    }
+
+    if (item.area !== "admin" && item.visibility !== "admins_only") {
+        const { error } = await supabaseAdmin.rpc("set_work_item_explicit_relationships", { p_workspace_id: workspace.id, p_work_item_id: workItemId, p_relationship_ids: uniqueIds })
+        if (error) throw new Error(error.message)
+    }
+    const existingKeyResultIds = new Set((existingOkrLinks ?? []).map((link) => link.key_result_id))
+    const addedKeyResultIds = uniqueKeyResultIds.filter((id) => !existingKeyResultIds.has(id))
+    const removedKeyResultIds = [...existingKeyResultIds].filter((id) => !uniqueKeyResultIds.includes(id))
+    if (addedKeyResultIds.length) {
+        const { error: insertError } = await supabaseAdmin.from("workspace_okr_work_items").insert(addedKeyResultIds.map((keyResultId) => ({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: workItemId, linked_by: user.id })))
+        if (insertError) throw new Error(insertError.message)
+    }
+    if (removedKeyResultIds.length) {
+        const { error: deleteError } = await supabaseAdmin.from("workspace_okr_work_items").delete().eq("workspace_id", workspace.id).eq("work_item_id", workItemId).in("key_result_id", removedKeyResultIds)
+        if (deleteError) throw new Error(deleteError.message)
+    }
+    const allKeyResultIds = [...new Set([...(existingOkrLinks ?? []).map((link) => link.key_result_id), ...uniqueKeyResultIds])]
+    if (allKeyResultIds.length) {
+        const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results").select("okr_id").eq("workspace_id", workspace.id).in("id", allKeyResultIds)
+        for (const okrId of new Set((keyResults ?? []).map((result) => result.okr_id))) revalidatePath(`/${slug}/admin/okrs/${okrId}`)
+    }
     refreshWorkItem(slug, workItemId)
 }
 
 export async function updateWorkItemPriority(slug: string, workItemId: string, priority: number) {
     const { workspace } = await requireWorkItem(slug, workItemId)
-    if (!Number.isInteger(priority) || priority < 1 || priority > 5) throw new Error("Invalid priority")
+    if (!Number.isInteger(priority) || priority < 1 || priority > 4) throw new Error("Invalid priority")
     const { error } = await supabaseAdmin.from("work_items").update({ priority }).eq("workspace_id", workspace.id).eq("id", workItemId)
     if (error) throw new Error(error.message)
     refreshWorkItem(slug, workItemId)

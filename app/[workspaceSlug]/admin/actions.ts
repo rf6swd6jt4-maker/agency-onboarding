@@ -5,7 +5,7 @@ import { redirect } from "next/navigation"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
-import { okrDisplayTitle, type WorkspaceOkrType } from "@/lib/admin/okr-title"
+import { okrDisplayTitle } from "@/lib/admin/okr-title"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -28,10 +28,22 @@ async function requireAdminUser(workspaceId: string, userId: string) {
     if (!data || !["owner", "admin"].includes(data.role)) throw new Error("Choose a workspace owner or admin")
 }
 
+async function requireDraftOkr(workspaceId: string, okrId: string) {
+    const { data } = await supabaseAdmin.from("workspace_okrs").select("id, status, owner_user_id").eq("workspace_id", workspaceId).eq("id", okrId).maybeSingle()
+    if (!data) throw new Error("OKR not found")
+    if (data.status !== "draft") throw new Error("Committed OKRs cannot be edited")
+    return data
+}
+
+async function requireCommittedOkr(workspaceId: string, okrId: string) {
+    const { data } = await supabaseAdmin.from("workspace_okrs").select("id, status, owner_user_id, objective_type").eq("workspace_id", workspaceId).eq("id", okrId).maybeSingle()
+    if (!data || data.status !== "active" || data.objective_type !== "committed") throw new Error("Work can only be added to a committed OKR")
+    return data
+}
+
 export async function createOkrFromModal(slug: string, formData: FormData): Promise<WorkspaceCreateActionState> {
     const { workspace, user } = await requireWorkspace(slug, "admin")
     const objective = value(formData, "objective")
-    const objectiveType: WorkspaceOkrType = value(formData, "objective_type") === "aspirational" ? "aspirational" : "committed"
     const periodStart = value(formData, "period_start")
     const periodEnd = value(formData, "period_end")
     const ownerUserId = value(formData, "owner_user_id") || user.id
@@ -49,12 +61,12 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
     const { data: okr, error } = await supabaseAdmin.from("workspace_okrs").insert({
         workspace_id: workspace.id,
         objective,
-        objective_type: objectiveType,
+        objective_type: null,
         description: value(formData, "description") || null,
         period_start: periodStart,
         period_end: periodEnd,
         owner_user_id: ownerUserId,
-        status: value(formData, "status") === "active" ? "active" : "draft",
+        status: "draft",
         created_by: user.id,
     }).select("id").single()
     if (error || !okr) {
@@ -67,13 +79,13 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
             fingerprint: platformFailureFingerprint(["okr", "create", error?.code ?? message]),
             severity: "warning",
             summary: "An administrator could not create an OKR",
-            diagnostics: { error: message, code: error?.code ?? null, objective, objective_type: objectiveType },
+            diagnostics: { error: message, code: error?.code ?? null, objective, status: "draft" },
             sourceHref,
         })
         return { ok: false, error: "We couldn't create this OKR. The failure has been recorded for Admin review." }
     }
-    const displayTitle = okrDisplayTitle({ objectiveType, objective, deadline: periodEnd })
-    await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.created", summary: `OKR created: ${displayTitle}`, entityType: "okr", entityId: okr.id, sourceHref: `/${workspace.slug}/admin/okrs/${okr.id}`, actorUserId: user.id, metadata: { objective_type: objectiveType, status: value(formData, "status") === "active" ? "active" : "draft", period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId } })
+    const displayTitle = okrDisplayTitle({ objectiveType: null, objective, deadline: periodEnd })
+    await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.created", summary: `OKR draft created: ${displayTitle}`, entityType: "okr", entityId: okr.id, sourceHref: `/${workspace.slug}/admin/okrs/${okr.id}`, actorUserId: user.id, metadata: { objective_type: null, status: "draft", period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId } })
     revalidatePath(adminPath(slug))
     return { ok: true, href: adminPath(slug, `/okrs/${okr.id}`) }
 }
@@ -86,20 +98,32 @@ export async function createOkr(slug: string, formData: FormData) {
 
 export async function updateOkr(slug: string, okrId: string, formData: FormData) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
     const objective = value(formData, "objective")
-    const objectiveType: WorkspaceOkrType = value(formData, "objective_type") === "aspirational" ? "aspirational" : "committed"
     const periodStart = value(formData, "period_start")
     const periodEnd = value(formData, "period_end")
     const ownerUserId = value(formData, "owner_user_id")
     if (!objective || periodEnd < periodStart) throw new Error("Add a valid objective and period")
     await requireAdminUser(workspace.id, ownerUserId)
-    const { error } = await supabaseAdmin.from("workspace_okrs").update({ objective, objective_type: objectiveType, description: value(formData, "description") || null, period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId }).eq("workspace_id", workspace.id).eq("id", okrId)
+    const { error } = await supabaseAdmin.from("workspace_okrs").update({ objective, description: value(formData, "description") || null, period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "draft")
     if (error) throw new Error(error.message)
+    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+}
+
+export async function commitOkr(slug: string, okrId: string) {
+    const { workspace, user } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
+    const { count } = await supabaseAdmin.from("workspace_okr_key_results").select("id", { count: "exact", head: true }).eq("workspace_id", workspace.id).eq("okr_id", okrId)
+    if (!count) throw new Error("Add at least one Key Result before committing")
+    const { error } = await supabaseAdmin.from("workspace_okrs").update({ status: "active", objective_type: "committed" }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "draft")
+    if (error) throw new Error(error.message)
+    await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.committed", summary: "An OKR was committed and its definition locked", entityType: "okr", entityId: okrId, sourceHref: `/${workspace.slug}/admin/okrs/${okrId}`, actorUserId: user.id, metadata: { objective_type: "committed", status: "active" } })
     revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }
 
 export async function deleteOkr(slug: string, okrId: string) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okrs").delete().eq("workspace_id", workspace.id).eq("id", okrId)
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug))
@@ -108,6 +132,8 @@ export async function deleteOkr(slug: string, okrId: string) {
 
 export async function setOkrStatus(slug: string, okrId: string, status: "draft" | "active" | "completed" | "cancelled", formData?: FormData) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    if (status === "draft" || status === "active") throw new Error("Use Commit to activate a draft OKR")
+    await requireCommittedOkr(workspace.id, okrId)
     const outcomeNote = formData ? value(formData, "outcome_note") : ""
     if (status === "completed" && !outcomeNote) throw new Error("Record an outcome note before completing the OKR")
     const { error } = await supabaseAdmin.from("workspace_okrs").update({ status, outcome_note: status === "completed" || status === "cancelled" ? outcomeNote || null : null }).eq("workspace_id", workspace.id).eq("id", okrId)
@@ -117,12 +143,11 @@ export async function setOkrStatus(slug: string, okrId: string, status: "draft" 
 
 export async function addOkrKeyResult(slug: string, okrId: string, formData: FormData) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
     const unit = value(formData, "unit")
     const comparator = value(formData, "comparator")
     const name = value(formData, "name")
     if (!name) throw new Error("Add a Key Result name")
-    const { data: okr } = await supabaseAdmin.from("workspace_okrs").select("id").eq("workspace_id", workspace.id).eq("id", okrId).maybeSingle()
-    if (!okr) throw new Error("OKR not found")
     const { count } = await supabaseAdmin.from("workspace_okr_key_results").select("id", { count: "exact", head: true }).eq("okr_id", okrId)
     const { error } = await supabaseAdmin.from("workspace_okr_key_results").insert({
         workspace_id: workspace.id,
@@ -142,6 +167,7 @@ export async function addOkrKeyResult(slug: string, okrId: string, formData: For
 
 export async function deleteOkrKeyResult(slug: string, okrId: string, keyResultId: string) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okr_key_results").delete().eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug, `/okrs/${okrId}`))
@@ -149,6 +175,7 @@ export async function deleteOkrKeyResult(slug: string, okrId: string, keyResultI
 
 export async function updateOkrKeyResult(slug: string, okrId: string, keyResultId: string, formData: FormData) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
     const name = value(formData, "name")
     const unit = value(formData, "unit")
     const comparator = value(formData, "comparator")
@@ -168,6 +195,7 @@ export async function updateOkrKeyResult(slug: string, okrId: string, keyResultI
 
 export async function addOkrMeasurement(slug: string, okrId: string, keyResultId: string, formData: FormData) {
     const { workspace, user } = await requireWorkspace(slug, "admin")
+    await requireCommittedOkr(workspace.id, okrId)
     const measuredAt = value(formData, "measured_at")
     if (measuredAt && Number.isNaN(Date.parse(measuredAt))) throw new Error("Add a valid measurement date")
     const { data: keyResult } = await supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle()
@@ -179,7 +207,7 @@ export async function addOkrMeasurement(slug: string, okrId: string, keyResultId
 
 export async function createOkrAction(slug: string, okrId: string, keyResultId: string, formData: FormData) {
     const { workspace, user } = await requireWorkspace(slug, "admin")
-    const { data: okr } = await supabaseAdmin.from("workspace_okrs").select("owner_user_id").eq("workspace_id", workspace.id).eq("id", okrId).maybeSingle()
+    const okr = await requireCommittedOkr(workspace.id, okrId)
     const { data: keyResult } = await supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle()
     if (!okr || !keyResult || !value(formData, "title")) throw new Error("Add a valid OKR action")
     const title = value(formData, "title")
@@ -201,6 +229,7 @@ export async function createOkrAction(slug: string, okrId: string, keyResultId: 
 
 export async function linkOkrAction(slug: string, okrId: string, keyResultId: string, formData: FormData) {
     const { workspace, user } = await requireWorkspace(slug, "admin")
+    await requireCommittedOkr(workspace.id, okrId)
     const workItemId = value(formData, "work_item_id")
     const [{ data: keyResult }, { data: item }] = await Promise.all([
         supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle(),
@@ -214,6 +243,7 @@ export async function linkOkrAction(slug: string, okrId: string, keyResultId: st
 
 export async function unlinkOkrAction(slug: string, okrId: string, keyResultId: string, workItemId: string) {
     const { workspace } = await requireWorkspace(slug, "admin")
+    await requireCommittedOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okr_work_items").delete().eq("workspace_id", workspace.id).eq("key_result_id", keyResultId).eq("work_item_id", workItemId)
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug, `/okrs/${okrId}`))
