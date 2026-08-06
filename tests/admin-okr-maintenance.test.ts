@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises"
 import test from "node:test"
 import { maintenanceBugTitle, resolveMaintenanceError } from "../lib/admin/error-catalogue.ts"
 import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet } from "../lib/admin/okr-metrics.ts"
-import { okrDisplayTitle } from "../lib/admin/okr-title.ts"
+import { okrDisplayStatus, okrDisplayTitle } from "../lib/admin/okr-title.ts"
 import { workItemPriorityLabel, workItemPriorityOptions } from "../lib/work-item-priority.ts"
 
 test("OKR progress moves from baseline to target and clamps to 0-100", () => {
@@ -32,6 +32,13 @@ test("OKR names are system-generated from type, objective, and deadline", () => 
     assert.equal(okrDisplayTitle({ objectiveType: null, objective: "Agree the sales plan", deadline: "2026-09-30" }), "Draft Objective: Agree the sales plan by 30 Sept 2026")
     assert.equal(okrDisplayTitle({ objectiveType: "committed", objective: "Reach product-market fit", deadline: "2026-12-31" }), "Committed Objective: Reach product-market fit by 31 Dec 2026")
     assert.equal(okrDisplayTitle({ objectiveType: "aspirational", objective: "Become the category leader", deadline: "2027-03-01" }), "Aspirational Objective: Become the category leader by 1 Mar 2027")
+})
+
+test("committed OKRs move into review automatically after their deadline", () => {
+    assert.equal(okrDisplayStatus({ status: "draft", deadline: "2026-08-01", today: "2026-08-06" }), "Draft")
+    assert.equal(okrDisplayStatus({ status: "active", deadline: "2026-08-06", today: "2026-08-06" }), "Committed")
+    assert.equal(okrDisplayStatus({ status: "active", deadline: "2026-08-05", today: "2026-08-06" }), "In review")
+    assert.equal(okrDisplayStatus({ status: "completed", deadline: "2026-08-01", today: "2026-08-06" }), "Completed")
 })
 
 test("Admin persistence is additive, private, append-only, and concurrency-safe", async () => {
@@ -85,8 +92,8 @@ test("OKRs are editable drafts until Commit classifies and selectively locks the
     assert.match(workspace, /No Key Results/)
     assert.match(workspace, /ProgressRing/)
     assert.match(workspace, /Add work/)
-    assert.match(workspace, /OkrHeader/)
-    assert.match(workspace, /DraftKeyResultBody/)
+    assert.match(workspace, /ObjectiveDetails/)
+    assert.match(workspace, /DraftKeyResultForm/)
     assert.match(workspace, /updateActiveOkrDetails/)
     assert.match(workspace, /updateActiveOkrKeyResultDescription/)
 })
@@ -113,7 +120,7 @@ test("KR cadence is explicit, locked at commit, and available once for legacy ac
     assert.match(reporting, /startOfUtcWeek/)
 })
 
-test("the OKRs tab is the only OKR surface and repeats Objective, Key Result, and work-item hierarchy", async () => {
+test("the OKRs tab is a metric table with popup-only Objective and Key Result details", async () => {
     const [adminPage, workspace, search, actions] = await Promise.all([
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
         readFile("components/admin/OkrWorkspace.tsx", "utf8"),
@@ -123,18 +130,31 @@ test("the OKRs tab is the only OKR surface and repeats Objective, Key Result, an
     assert.match(adminPage, /<OkrWorkspace/)
     assert.match(adminPage, /objective_type !== "aspirational"/)
     assert.doesNotMatch(adminPage, /href=\{`\/\$\{workspace\.slug\}\/admin\/okrs/)
-    assert.match(workspace, /okrs\.map\(\(okr\)/)
+    assert.match(workspace, /OkrMetricTable/)
+    assert.match(workspace, /role="table"/)
+    assert.match(workspace, />Key Result</)
+    assert.match(workspace, />Base</)
+    assert.match(workspace, />Current</)
+    assert.match(workspace, />Target</)
+    assert.match(workspace, /okrs\.flatMap\(\(okr\)/)
     assert.match(workspace, /okr\.key_results\.map\(\(result\)/)
     assert.match(workspace, /result\.actions\.map\(\(action\)/)
     assert.match(workspace, /href=\{`\/\$\{workspaceSlug\}\/work-items\/\$\{action\.id\}`\}/)
-    assert.doesNotMatch(workspace, /edit-result|Edit Key Result/)
+    assert.doesNotMatch(workspace, /href=\{`\/\$\{workspaceSlug\}\/admin\/okrs/)
+    assert.match(workspace, /type: "objective"/)
+    assert.match(workspace, /type: "result"/)
+    assert.match(workspace, /type: "add-objective"/)
     assert.match(workspace, /type: "add-result"/)
     assert.match(workspace, /type: "add-work"/)
     assert.match(workspace, /type: "measurement"/)
-    assert.match(workspace, /toggledIds/)
-    assert.match(workspace, /draft \? !toggledIds\.has\(result\.id\) : toggledIds\.has\(result\.id\)/)
+    assert.doesNotMatch(workspace, /toggledIds|aria-expanded/)
+    assert.match(workspace, /ObjectiveDetails/)
+    assert.match(workspace, /KeyResultDetails/)
     assert.match(workspace, /AccountabilityTracker/)
     assert.match(workspace, /TrendChart/)
+    assert.match(workspace, /okrDisplayStatus/)
+    assert.match(workspace, /Add Objective/)
+    assert.match(workspace, /Add Key Result/)
     assert.match(workspace, /Added \{formatRelativeTime\(action\.created_at\)\}/)
     assert.doesNotMatch(workspace, />Draft<\/SquarePill>/)
     assert.match(search, /admin\?view=okrs#okr-/)

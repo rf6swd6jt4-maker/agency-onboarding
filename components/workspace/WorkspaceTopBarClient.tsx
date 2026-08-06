@@ -1637,7 +1637,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                     <label className="block text-sm text-neutral-300">Deadline<input name="period_end" type="date" defaultValue={okrPeriodEnd} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
                                     <label className="block text-sm text-neutral-300">Owner<select name="owner_user_id" defaultValue={currentUserId} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white">{okrOwnerOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.label} · {owner.role}</option>)}</select></label>
                                 </section>
-                                <p className="text-xs leading-5 text-neutral-500">This will be saved as a fully editable draft. Add and review its Key Results on the detail page before committing it.</p>
+                                <p className="text-xs leading-5 text-neutral-500">This will be saved as a fully editable draft. Add and review its Key Results from the OKRs table before committing it.</p>
                             </div>
                         )}
                         {createError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{createError}</p>}

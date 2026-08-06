@@ -2,14 +2,14 @@
 
 import Link from "next/link"
 import { createPortal } from "react-dom"
-import { useMemo, useState, useTransition, type FormEvent, type ReactNode } from "react"
+import { useMemo, useState, useTransition, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import { formatOkrMetricValue, okrGap } from "@/lib/admin/okr-metrics"
-import { buildOkrReportingDays, okrReportingCadenceLabel, type OkrReportingDay } from "@/lib/admin/okr-reporting"
+import { addUtcDays, buildOkrReportingDays, okrReportingCadenceLabel, type OkrReportingDay } from "@/lib/admin/okr-reporting"
 import type { OkrKeyResult, OkrMeasurement, WorkspaceOkr } from "@/lib/admin/okrs"
-import { formatOkrDeadline, okrDisplayTitle } from "@/lib/admin/okr-title"
+import { formatOkrDeadline, okrDisplayStatus, type WorkspaceOkrDisplayStatus } from "@/lib/admin/okr-title"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { workItemPriorityLabel } from "@/lib/work-item-priority"
 import {
@@ -17,6 +17,7 @@ import {
     addOkrMeasurement,
     commitOkr,
     createOkrAction,
+    createOkrFromModal,
     deleteOkr,
     deleteOkrKeyResult,
     linkOkrAction,
@@ -32,12 +33,16 @@ import {
 type Person = { user_id: string; role: string; name: string }
 type WorkItemOption = { id: string; title: string; status: string; priority: number; due_date: string | null }
 type DialogState =
-    | { type: "add-result"; okr: WorkspaceOkr }
-    | { type: "add-work"; okr: WorkspaceOkr; result: OkrKeyResult }
-    | { type: "measurement"; okr: WorkspaceOkr; result: OkrKeyResult }
+    | { type: "objective"; okrId: string }
+    | { type: "result"; okrId: string; resultId: string }
+    | { type: "add-objective" }
+    | { type: "add-result"; okrId: string }
+    | { type: "add-work"; okrId: string; resultId: string }
+    | { type: "measurement"; okrId: string; resultId: string }
 
 type Props = {
     workspaceSlug: string
+    currentUserId: string
     okrs: WorkspaceOkr[]
     ownerOptions: Person[]
     workItems: WorkItemOption[]
@@ -45,14 +50,18 @@ type Props = {
     today: string
 }
 
-const editorClass = "w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm text-neutral-200 outline-none transition hover:border-neutral-800 hover:bg-neutral-950 focus:border-neutral-600 focus:bg-neutral-950 disabled:cursor-default disabled:hover:border-transparent disabled:hover:bg-transparent"
-const modalInputClass = "mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white outline-none focus:border-neutral-500"
-const modalTextareaClass = "mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-sm leading-6 text-white outline-none focus:border-neutral-500"
+type RunAction = (formData: FormData) => Promise<void>
+type AfterAction = DialogState | "close" | undefined
 
-function statusTone(status: string): "grey" | "yellow" | "green" | "red" {
-    if (status === "completed") return "green"
-    if (status === "active") return "yellow"
-    if (status === "cancelled") return "red"
+const tableGrid = "grid grid-cols-[minmax(13rem,1fr)_repeat(3,minmax(5.5rem,0.38fr))]"
+const editorClass = "w-full rounded-md border border-neutral-800 bg-black px-3 text-sm text-neutral-100 outline-none transition focus:border-neutral-500"
+const modalInputClass = `mt-1.5 h-10 ${editorClass}`
+const modalTextareaClass = "mt-1.5 w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm leading-6 text-neutral-100 outline-none transition focus:border-neutral-500"
+
+function lifecycleTone(status: WorkspaceOkrDisplayStatus): "grey" | "yellow" | "green" | "red" {
+    if (status === "Committed" || status === "Completed") return "green"
+    if (status === "In review") return "yellow"
+    if (status === "Cancelled") return "red"
     return "grey"
 }
 
@@ -73,31 +82,29 @@ function displayDate(date: string | null) {
     return date ? formatOkrDeadline(date) : "No deadline"
 }
 
-function DescriptionText({ text, className = "" }: { text: string | null; className?: string }) {
-    const [expanded, setExpanded] = useState(false)
-    if (!text) return null
-    const expandable = text.length > 90
-    return <div className={`flex min-w-0 items-start gap-1.5 ${className}`}>
-        <p className={`min-w-0 text-sm leading-5 text-neutral-500 ${expandable && !expanded ? "truncate" : ""}`}>{text}</p>
-        {expandable ? <button type="button" onClick={() => setExpanded((value) => !value)} className="shrink-0 text-xs leading-5 text-neutral-600 hover:text-neutral-300">{expanded ? "Less" : "More"}</button> : null}
-    </div>
-}
-
-function ProgressRing({ progress }: { progress: number }) {
+function ProgressRing({ progress, compact = false }: { progress: number; compact?: boolean }) {
     const bounded = Math.max(0, Math.min(100, progress))
     const circumference = 2 * Math.PI * 25
-    return <div className="relative h-12 w-12 shrink-0" aria-label={`${Math.round(bounded)} percent attained`}>
-        <svg viewBox="0 0 64 64" className="h-full w-full -rotate-90" aria-hidden="true"><circle cx="32" cy="32" r="25" fill="none" stroke="rgb(38 38 38)" strokeWidth="4.5" /><circle cx="32" cy="32" r="25" fill="none" stroke="white" strokeWidth="4.5" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - bounded / 100)} /></svg>
-        <span className="absolute inset-0 flex items-center justify-center text-[11px] font-semibold tabular-nums text-white">{Math.round(bounded)}%</span>
+    return <div className={`relative shrink-0 ${compact ? "h-9 w-9" : "h-12 w-12"}`} aria-label={`${Math.round(bounded)} percent attained`}>
+        <svg viewBox="0 0 64 64" className="h-full w-full -rotate-90" aria-hidden="true">
+            <circle cx="32" cy="32" r="25" fill="none" stroke="rgb(38 38 38)" strokeWidth={compact ? 5 : 4.5} />
+            <circle cx="32" cy="32" r="25" fill="none" stroke="white" strokeWidth={compact ? 5 : 4.5} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - bounded / 100)} />
+        </svg>
+        <span className={`absolute inset-0 flex items-center justify-center font-semibold tabular-nums text-white ${compact ? "text-[9px]" : "text-[11px]"}`}>{Math.round(bounded)}%</span>
     </div>
 }
 
-function Modal({ title, description, onClose, children }: { title: string; description?: string; onClose: () => void; children: ReactNode }) {
+function Modal({ title, description, error, size = "default", onClose, children }: { title: string; description?: string; error?: string | null; size?: "default" | "medium" | "wide"; onClose: () => void; children: ReactNode }) {
     const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
     if (!parentDocument) return null
-    return createPortal(<div role="dialog" aria-modal="true" aria-label={title} data-work-item-popup className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <div className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
-            <div className="flex items-start gap-4 border-b border-neutral-800 px-5 py-4"><div className="min-w-0 flex-1"><h2 className="text-lg font-semibold text-white">{title}</h2>{description ? <p className="mt-1 text-sm leading-5 text-neutral-500">{description}</p> : null}</div><button type="button" onClick={onClose} aria-label="Close" className="rounded-md px-2 py-1 text-xl text-neutral-500 hover:bg-neutral-900 hover:text-white">×</button></div>
+    const widthClass = size === "wide" ? "max-w-5xl" : size === "medium" ? "max-w-3xl" : "max-w-2xl"
+    return createPortal(<div role="dialog" aria-modal="true" aria-label={title} data-work-item-popup className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+        <div className={`max-h-[calc(100vh-1.5rem)] w-full ${widthClass} overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70 sm:max-h-[calc(100vh-2rem)]`}>
+            <div className="sticky top-0 z-20 flex items-start gap-4 border-b border-neutral-800 bg-neutral-950/95 px-4 py-3 backdrop-blur sm:px-5 sm:py-4">
+                <div className="min-w-0 flex-1"><h2 className="truncate text-lg font-semibold text-white">{title}</h2>{description ? <p className="mt-1 text-sm leading-5 text-neutral-500">{description}</p> : null}</div>
+                <button type="button" onClick={onClose} aria-label="Close" className="rounded-md px-2 py-1 text-xl text-neutral-500 hover:bg-neutral-900 hover:text-white">×</button>
+            </div>
+            {error ? <div role="alert" className="mx-4 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200 sm:mx-5">{error}</div> : null}
             {children}
         </div>
     </div>, parentDocument.body)
@@ -115,63 +122,6 @@ function NewKeyResultFields() {
         <label className="text-sm text-neutral-300 sm:col-span-2">Reporting cadence<select name="reporting_cadence" required defaultValue="" className={modalInputClass}><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select></label>
         {unit === "currency" ? <label className="text-sm text-neutral-300 sm:col-span-2">Currency code<input name="currency_code" defaultValue="USD" maxLength={3} className={`${modalInputClass} uppercase`} /></label> : null}
     </div>
-}
-
-function OkrHeader({ workspaceSlug, okr, ownerOptions, pending, run, runWithoutForm, onComplete }: {
-    workspaceSlug: string
-    okr: WorkspaceOkr
-    ownerOptions: Person[]
-    pending: boolean
-    run: (event: FormEvent<HTMLFormElement>, action: (formData: FormData) => Promise<void>) => void
-    runWithoutForm: (action: () => Promise<void>) => void
-    onComplete: () => void
-}) {
-    const [dirty, setDirty] = useState(false)
-    const draft = okr.status === "draft"
-    const active = okr.status === "active"
-    const editable = draft || active
-    return <form onSubmit={(event) => run(event, draft ? updateOkr.bind(null, workspaceSlug, okr.id) : updateActiveOkrDetails.bind(null, workspaceSlug, okr.id))} onChange={() => setDirty(true)} className="px-3 py-3 sm:px-4">
-        <div className="flex items-start gap-3">
-            <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2"><span className="font-mono text-xs text-neutral-600">OKR-{shortId(okr.id)}</span><Status label={okr.status} tone={statusTone(okr.status)} /></div>
-                {draft ? <div className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5 text-lg font-semibold leading-6 text-neutral-100"><span className="shrink-0">Draft Objective:</span><input name="objective" required defaultValue={okr.objective} aria-label="Objective" className={`${editorClass} min-w-[12rem] flex-1 text-lg font-semibold`} /><span className="flex basis-full items-center gap-1 sm:basis-auto"><span className="shrink-0 text-neutral-500">by</span><input name="period_end" type="date" required defaultValue={okr.period_end} aria-label="Deadline" className={`${editorClass} w-auto text-sm font-medium`} /></span></div> : <h2 className="mt-1.5 text-lg font-semibold leading-6 tracking-tight text-neutral-100">{okrDisplayTitle({ objectiveType: okr.objective_type, objective: okr.objective, deadline: okr.period_end })}</h2>}
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-600">
-                    {editable ? <label className="flex items-center gap-1"><span>Owner</span><select name="owner_user_id" defaultValue={okr.owner_user_id} className={`${editorClass} w-auto py-0 text-xs text-neutral-400`}>{ownerOptions.map((person) => <option key={person.user_id} value={person.user_id}>{person.name}</option>)}</select></label> : <span>{ownerOptions.find((person) => person.user_id === okr.owner_user_id)?.name ?? "Admin"}</span>}
-                    {draft ? <label className="flex items-center gap-1"><span>Starts</span><input name="period_start" type="date" required defaultValue={okr.period_start} className={`${editorClass} w-auto py-0 text-xs text-neutral-400`} /></label> : <span>{formatOkrDeadline(okr.period_start)} → {formatOkrDeadline(okr.period_end)}</span>}
-                    <span>{okr.key_results.length} KR{okr.key_results.length === 1 ? "" : "s"}</span>
-                    <span>Updated {formatRelativeTime(okr.updated_at)}</span>
-                </div>
-                {editable ? <textarea name="description" rows={1} defaultValue={okr.description ?? ""} placeholder="Add Objective context…" className={`${editorClass} mt-1 resize-none text-sm leading-5 text-neutral-500 focus:min-h-16`} /> : <DescriptionText text={okr.description} className="mt-1.5" />}
-            </div>
-            <div className="flex shrink-0 items-center gap-2"><ProgressRing progress={okr.attainment} />{draft ? <div className="flex flex-col items-end gap-1"><button type="button" disabled={pending} onClick={() => runWithoutForm(() => commitOkr(workspaceSlug, okr.id))} className="h-8 rounded-md bg-white px-2.5 text-xs font-medium text-black disabled:opacity-50">Commit</button><button type="button" disabled={pending} onClick={() => runWithoutForm(() => deleteOkr(workspaceSlug, okr.id))} className="text-[11px] text-red-300/60 hover:text-red-200">Delete</button></div> : active ? <button type="button" onClick={onComplete} className="h-8 rounded-md border border-neutral-800 px-2.5 text-xs text-neutral-300 hover:border-neutral-600 hover:text-white">Complete</button> : null}</div>
-        </div>
-        {editable && dirty ? <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={(event) => { event.currentTarget.form?.reset(); setDirty(false) }} className="h-7 px-2 text-xs text-neutral-500 hover:text-white">Cancel</button><button disabled={pending} className="h-7 rounded-md bg-white px-2.5 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div> : null}
-    </form>
-}
-
-function DraftKeyResultBody({ workspaceSlug, okr, result, pending, run, runWithoutForm }: {
-    workspaceSlug: string
-    okr: WorkspaceOkr
-    result: OkrKeyResult
-    pending: boolean
-    run: (event: FormEvent<HTMLFormElement>, action: (formData: FormData) => Promise<void>) => void
-    runWithoutForm: (action: () => Promise<void>) => void
-}) {
-    const [dirty, setDirty] = useState(false)
-    const [unit, setUnit] = useState(result.unit)
-    return <form onSubmit={(event) => run(event, updateOkrKeyResult.bind(null, workspaceSlug, okr.id, result.id))} onChange={() => setDirty(true)} onReset={() => { setDirty(false); setUnit(result.unit) }} className="border-t border-neutral-900 bg-neutral-950/30 px-3 py-3 sm:px-4">
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-6">
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600 md:col-span-2 xl:col-span-2">Key Result<input name="name" required defaultValue={result.name} className={`${editorClass} mt-0.5 -ml-2 text-sm font-medium`} /></label>
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600">Base<input name="baseline_value" type="number" step="any" required defaultValue={result.baseline_value} className={`${editorClass} mt-0.5 -ml-2`} /></label>
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600">Target<input name="target_value" type="number" step="any" required defaultValue={result.target_value} className={`${editorClass} mt-0.5 -ml-2`} /></label>
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600">Unit<select name="unit" value={unit} onChange={(event) => setUnit(event.target.value as OkrKeyResult["unit"])} className={`${editorClass} mt-0.5 -ml-2`}><option value="number">Number</option><option value="percentage">Percentage</option><option value="currency">Currency</option><option value="duration">Duration</option></select></label>
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600">Direction<select name="comparator" defaultValue={result.comparator} className={`${editorClass} mt-0.5 -ml-2`}><option value="at_least">Higher</option><option value="at_most">Lower</option></select></label>
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600 md:col-span-2 xl:col-span-2">Cadence<select name="reporting_cadence" required defaultValue={result.reporting_cadence ?? ""} className={`${editorClass} mt-0.5 -ml-2`}><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select></label>
-            {unit === "currency" ? <label className="text-[11px] uppercase tracking-wide text-neutral-600">Currency<input name="currency_code" defaultValue={result.currency_code ?? "USD"} maxLength={3} className={`${editorClass} mt-0.5 -ml-2 uppercase`} /></label> : null}
-            <label className="text-[11px] uppercase tracking-wide text-neutral-600 md:col-span-2 xl:col-span-4">Description<textarea name="description" rows={1} defaultValue={result.description ?? ""} placeholder="Add KR context…" className={`${editorClass} mt-0.5 -ml-2 resize-none`} /></label>
-        </div>
-        <div className="mt-2 flex items-center justify-between"><p className="text-xs text-neutral-700">Work can be linked after commitment.</p><div className="flex items-center gap-1">{dirty ? <button disabled={pending} className="h-7 rounded-md bg-white px-2.5 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save KR"}</button> : null}<button type="button" disabled={pending} onClick={() => runWithoutForm(() => deleteOkrKeyResult(workspaceSlug, okr.id, result.id))} className="h-7 px-2 text-xs text-red-300/70 hover:text-red-200">Delete</button></div></div>
-    </form>
 }
 
 function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReportingDay<OkrMeasurement>[] }) {
@@ -196,7 +146,7 @@ function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReporting
     </div>
 }
 
-function AccountabilityTracker({ result, people, today, onRecord }: { result: OkrKeyResult; people: Record<string, string>; today: string; onRecord: () => void }) {
+function AccountabilityTracker({ result, people, today, onRecord }: { result: OkrKeyResult; people: Record<string, string>; today: string; onRecord?: () => void }) {
     const days = useMemo(() => buildOkrReportingDays({ cadence: result.reporting_cadence, reportingStartedOn: result.reporting_started_on, measurements: result.measurements, today }), [result.measurements, result.reporting_cadence, result.reporting_started_on, today])
     const [selectedDate, setSelectedDate] = useState<string | null>(null)
     const selected = selectedDate ? days.find((day) => day.date === selectedDate) ?? null : null
@@ -212,8 +162,8 @@ function AccountabilityTracker({ result, people, today, onRecord }: { result: Ok
         future: "border-neutral-900 text-neutral-800",
         none: "border-neutral-800 text-neutral-700",
     }
-    return <section className="border-t border-neutral-900 bg-black/40 px-3 py-3 sm:px-4">
-        <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs font-medium text-neutral-300">Accountability</p><p className="mt-0.5 text-[11px] text-neutral-600">{okrReportingCadenceLabel(result.reporting_cadence)} reporting · trailing 35 days</p></div><button type="button" onClick={onRecord} className="h-8 rounded-md border border-neutral-800 px-2.5 text-xs text-neutral-300 hover:border-neutral-600 hover:text-white">Record progress</button></div>
+    return <section className="border-t border-neutral-800 px-4 py-4 sm:px-5">
+        <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs font-medium text-neutral-300">Accountability</p><p className="mt-0.5 text-[11px] text-neutral-600">{okrReportingCadenceLabel(result.reporting_cadence)} reporting · trailing 35 days</p></div>{onRecord ? <button type="button" onClick={onRecord} className="h-8 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white">Record progress</button> : null}</div>
         <div className="grid gap-4 md:grid-cols-[300px_minmax(300px,1fr)] md:items-start">
             <div className="min-w-0 max-w-[18rem]"><div className="grid grid-cols-7 gap-1">{weekdayLabels.map((label, index) => <span key={`${label}-${index}`} className="pb-0.5 text-center text-[10px] text-neutral-700">{label}</span>)}{days.map((day) => <button key={day.date} type="button" disabled={!day.measurement} onClick={() => setSelectedDate(day.date)} aria-label={`${day.date}: ${day.state}${day.reportCount > 1 ? `, ${day.reportCount} reports` : ""}`} className={`aspect-square min-h-6 rounded border text-[10px] tabular-nums transition ${stateClass[day.state]} ${day.measurement ? "cursor-pointer hover:ring-2 hover:ring-neutral-500" : "cursor-default"}`}>{Number(day.date.slice(-2))}</button>)}</div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-neutral-600"><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-white" />Reported</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-amber-500/70" />Due</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-red-700/70" />Missed</span></div></div>
             <TrendChart result={result} days={days} />
@@ -223,19 +173,19 @@ function AccountabilityTracker({ result, people, today, onRecord }: { result: Ok
 }
 
 function WorkItems({ workspaceSlug, okr, result, people, onAdd, onUnlink }: { workspaceSlug: string; okr: WorkspaceOkr; result: OkrKeyResult; people: Record<string, string>; onAdd: () => void; onUnlink: (workItemId: string) => void }) {
-    return <section className="ml-4 border-t border-neutral-900 sm:ml-8">
-        <div className="flex items-center justify-between gap-3 px-3 py-2 sm:px-4"><p className="text-[11px] font-medium uppercase tracking-wide text-neutral-600">Work items <span className="ml-1 tabular-nums text-neutral-700">{result.actions.length}</span></p>{okr.status === "active" ? <button type="button" onClick={onAdd} className="h-7 rounded-md border border-neutral-800 px-2 text-xs text-neutral-400 hover:border-neutral-600 hover:text-white">Add work</button> : null}</div>
+    return <section className="border-t border-neutral-800">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"><p className="text-xs font-medium text-neutral-300">Work items <span className="ml-1 tabular-nums text-neutral-600">{result.actions.length}</span></p>{okr.status === "active" ? <button type="button" onClick={onAdd} className="h-8 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white">Add work</button> : null}</div>
         {result.actions.length ? <div className="divide-y divide-neutral-900 border-t border-neutral-900">{result.actions.map((action) => {
             const assignees = action.assignee_ids.map((id) => people[id] ?? "Team member")
             const actions = [okr.status === "active" ? { label: "Unlink from Key Result", action: () => onUnlink(action.id), danger: true, confirmMessage: "Unlink this work item from the Key Result? The work item itself will remain." } : null]
-            return <div key={action.id} className="px-3 py-2 sm:px-4">
+            return <div key={action.id} className="px-4 py-2.5 sm:px-5">
                 <div className="xl:hidden">
                     <div className="flex min-w-0 items-center gap-2"><Link href={`/${workspaceSlug}/work-items/${action.id}`} className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-200 hover:text-white hover:underline hover:decoration-neutral-600 hover:underline-offset-4">{action.title}</Link><RoundPill tone={priorityTone(action.priority)}>{workItemPriorityLabel(action.priority)}</RoundPill><SquarePill tone={workStatusTone(action.status)} className="shrink-0 capitalize">{action.status.replace(/_/g, " ")}</SquarePill><ListActionMenu label={`Actions for ${action.title}`} actions={actions} /></div>
-                    <DescriptionText text={action.description} className="mt-0.5" />
+                    {action.description ? <p className="mt-1 truncate text-xs text-neutral-600">{action.description}</p> : null}
                     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-neutral-600"><span className="font-mono text-neutral-700">{shortId(action.id)}</span><span>{assignees.length ? assignees.join(", ") : "Unassigned"}</span><span>Added {formatRelativeTime(action.created_at)}</span><span>Due {displayDate(action.due_date)}</span></div>
                 </div>
-                <div className="hidden min-h-10 grid-cols-[minmax(240px,1fr)_auto_auto_minmax(100px,auto)_auto_auto_32px] items-center gap-3 xl:grid">
-                    <div className="min-w-0"><Link href={`/${workspaceSlug}/work-items/${action.id}`} className="block truncate text-sm font-medium text-neutral-200 hover:text-white hover:underline hover:decoration-neutral-600 hover:underline-offset-4">{action.title}</Link><DescriptionText text={action.description} className="mt-0.5" /></div>
+                <div className="hidden min-h-10 grid-cols-[minmax(220px,1fr)_auto_auto_minmax(100px,auto)_auto_auto_32px] items-center gap-3 xl:grid">
+                    <div className="min-w-0"><Link href={`/${workspaceSlug}/work-items/${action.id}`} className="block truncate text-sm font-medium text-neutral-200 hover:text-white hover:underline hover:decoration-neutral-600 hover:underline-offset-4">{action.title}</Link>{action.description ? <p className="mt-0.5 truncate text-xs text-neutral-600">{action.description}</p> : null}</div>
                     <RoundPill tone={priorityTone(action.priority)}>{workItemPriorityLabel(action.priority)}</RoundPill>
                     <SquarePill tone={workStatusTone(action.status)} className="capitalize">{action.status.replace(/_/g, " ")}</SquarePill>
                     <span className="truncate text-xs text-neutral-600">{assignees.length ? assignees.join(", ") : "Unassigned"}</span>
@@ -244,79 +194,192 @@ function WorkItems({ workspaceSlug, okr, result, people, onAdd, onUnlink }: { wo
                     <ListActionMenu label={`Actions for ${action.title}`} actions={actions} />
                 </div>
             </div>
-        })}</div> : <p className="border-t border-neutral-900 px-3 py-3 text-sm text-neutral-700 sm:px-4">No work items linked.</p>}
+        })}</div> : <p className="border-t border-neutral-900 px-4 py-5 text-sm text-neutral-600 sm:px-5">No work items linked.</p>}
     </section>
 }
 
-function ActiveDescription({ workspaceSlug, okr, result, pending, run }: { workspaceSlug: string; okr: WorkspaceOkr; result: OkrKeyResult; pending: boolean; run: (event: FormEvent<HTMLFormElement>, action: (formData: FormData) => Promise<void>) => void }) {
+function ObjectiveDetails({ workspaceSlug, okr, ownerOptions, today, pending, run, runWithoutForm, onAddResult }: { workspaceSlug: string; okr: WorkspaceOkr; ownerOptions: Person[]; today: string; pending: boolean; run: (event: FormEvent<HTMLFormElement>, action: RunAction, after?: AfterAction) => void; runWithoutForm: (action: () => Promise<void>, after?: AfterAction) => void; onAddResult: () => void }) {
     const [dirty, setDirty] = useState(false)
-    if (okr.status !== "active") return <DescriptionText text={result.description} className="border-t border-neutral-900 px-3 py-2 sm:px-4" />
-    return <form onSubmit={(event) => run(event, updateActiveOkrKeyResultDescription.bind(null, workspaceSlug, okr.id, result.id))} onChange={() => setDirty(true)} className="flex items-start gap-2 border-t border-neutral-900 px-3 py-2 sm:px-4"><textarea name="description" rows={1} defaultValue={result.description ?? ""} placeholder="Add KR context…" className={`${editorClass} min-w-0 flex-1 resize-none text-neutral-500`} />{dirty ? <button disabled={pending} className="mt-0.5 h-7 rounded-md bg-white px-2.5 text-xs font-medium text-black disabled:opacity-50">Save</button> : null}</form>
+    const [completing, setCompleting] = useState(false)
+    const draft = okr.status === "draft"
+    const active = okr.status === "active"
+    const editable = draft || active
+    const lifecycle = okrDisplayStatus({ status: okr.status, deadline: okr.period_end, today })
+    const submitAction = draft ? updateOkr.bind(null, workspaceSlug, okr.id) : updateActiveOkrDetails.bind(null, workspaceSlug, okr.id)
+
+    return <div>
+        <form key={okr.updated_at} onSubmit={(event) => run(event, submitAction)} onChange={() => setDirty(true)} onReset={() => setDirty(false)} className="p-4 sm:p-5">
+            <div className="mb-5 flex items-center gap-3 border-b border-neutral-800 pb-4"><ProgressRing progress={okr.attainment} /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Status label={lifecycle} tone={lifecycleTone(lifecycle)} /><span className="font-mono text-xs text-neutral-600">OKR-{shortId(okr.id)}</span></div><p className="mt-1 text-xs text-neutral-500">{okr.key_results.length} Key Result{okr.key_results.length === 1 ? "" : "s"} · updated {formatRelativeTime(okr.updated_at)}</p></div></div>
+            <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm text-neutral-400 sm:col-span-2">Objective{draft ? <input name="objective" required defaultValue={okr.objective} className={modalInputClass} /> : <span className="mt-1.5 block min-h-10 rounded-md border border-neutral-900 bg-black/40 px-3 py-2 text-sm text-neutral-100">{okr.objective}</span>}</label>
+                <label className="text-sm text-neutral-400">Owner{editable ? <select name="owner_user_id" defaultValue={okr.owner_user_id} className={modalInputClass}>{ownerOptions.map((person) => <option key={person.user_id} value={person.user_id}>{person.name}</option>)}</select> : <span className="mt-1.5 block min-h-10 rounded-md border border-neutral-900 bg-black/40 px-3 py-2 text-sm text-neutral-300">{ownerOptions.find((person) => person.user_id === okr.owner_user_id)?.name ?? "Admin"}</span>}</label>
+                <div className="grid grid-cols-2 gap-3">
+                    <label className="text-sm text-neutral-400">Starts{draft ? <input name="period_start" type="date" required defaultValue={okr.period_start} className={modalInputClass} /> : <span className="mt-1.5 block min-h-10 rounded-md border border-neutral-900 bg-black/40 px-3 py-2 text-sm text-neutral-300">{formatOkrDeadline(okr.period_start)}</span>}</label>
+                    <label className="text-sm text-neutral-400">Deadline{draft ? <input name="period_end" type="date" required defaultValue={okr.period_end} className={modalInputClass} /> : <span className="mt-1.5 block min-h-10 rounded-md border border-neutral-900 bg-black/40 px-3 py-2 text-sm text-neutral-300">{formatOkrDeadline(okr.period_end)}</span>}</label>
+                </div>
+                <label className="text-sm text-neutral-400 sm:col-span-2">Description{editable ? <textarea name="description" rows={3} defaultValue={okr.description ?? ""} placeholder="Add Objective context…" className={modalTextareaClass} /> : <span className="mt-1.5 block rounded-md border border-neutral-900 bg-black/40 px-3 py-2 text-sm leading-6 text-neutral-400">{okr.description || "No description."}</span>}</label>
+            </div>
+            {editable && dirty ? <div className="mt-4 flex justify-end gap-2"><button type="reset" className="h-9 px-3 text-sm text-neutral-500 hover:text-white">Cancel</button><button disabled={pending} className="h-9 rounded-md bg-white px-3 text-sm font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div> : null}
+        </form>
+
+        <section className="border-t border-neutral-800 px-4 py-4 sm:px-5">
+            <div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-medium text-neutral-200">Key Results</h3>{draft ? <button type="button" onClick={onAddResult} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white"><span className="text-base leading-none">+</span> Add Key Result</button> : null}</div>
+            {okr.key_results.length ? <div className="overflow-x-auto rounded-lg border border-neutral-800"><div className={draft ? "min-w-[30rem]" : "min-w-[36rem]"}>
+                <div className={`grid ${draft ? "grid-cols-[minmax(13rem,1fr)_repeat(2,7rem)]" : "grid-cols-[minmax(13rem,1fr)_repeat(3,7rem)]"} border-b border-neutral-800 bg-neutral-900/60 text-[10px] font-medium uppercase tracking-wide text-neutral-600`}><span className="px-3 py-2">Key Result</span><span className="px-3 py-2 text-right">Base</span>{!draft ? <span className="px-3 py-2 text-right">Current</span> : null}<span className="px-3 py-2 text-right">Target</span></div>
+                {okr.key_results.map((result) => {
+                    const currency = result.currency_code ?? "USD"
+                    return <div key={result.id} className={`grid ${draft ? "grid-cols-[minmax(13rem,1fr)_repeat(2,7rem)]" : "grid-cols-[minmax(13rem,1fr)_repeat(3,7rem)]"} border-b border-neutral-900 text-sm last:border-0`}><span className="truncate px-3 py-2.5 text-neutral-200">{result.name}</span><span className="px-3 py-2.5 text-right tabular-nums text-neutral-400">{formatOkrMetricValue(result.baseline_value, result.unit, currency)}</span>{!draft ? <span className="px-3 py-2.5 text-right tabular-nums text-neutral-200">{formatOkrMetricValue(result.current_value, result.unit, currency)}</span> : null}<span className="px-3 py-2.5 text-right tabular-nums text-neutral-400">{formatOkrMetricValue(result.target_value, result.unit, currency)}</span></div>
+                })}
+            </div></div> : <p className="rounded-lg border border-dashed border-neutral-800 px-4 py-6 text-center text-sm text-neutral-600">No Key Results yet.</p>}
+        </section>
+
+        {okr.outcome_note ? <section className="border-t border-neutral-800 px-4 py-4 sm:px-5"><p className="text-xs font-medium uppercase tracking-wide text-neutral-600">Outcome</p><p className="mt-2 text-sm leading-6 text-neutral-400">{okr.outcome_note}</p></section> : null}
+
+        {draft ? <div className="flex items-center justify-between border-t border-neutral-800 px-4 py-3 sm:px-5"><button type="button" disabled={pending} onClick={() => runWithoutForm(() => deleteOkr(workspaceSlug, okr.id), "close")} className="text-xs text-red-300/70 hover:text-red-200">Delete draft</button><button type="button" disabled={pending || !okr.key_results.length} onClick={() => runWithoutForm(() => commitOkr(workspaceSlug, okr.id))} className="h-9 rounded-md bg-white px-3 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40">Commit Objective</button></div> : active ? <div className="border-t border-neutral-800 px-4 py-3 sm:px-5">{completing ? <form onSubmit={(event) => run(event, (formData) => setOkrStatus(workspaceSlug, okr.id, "completed", formData))} className="flex flex-col gap-2 sm:flex-row"><textarea name="outcome_note" required rows={2} autoFocus placeholder="Record the outcome and final assessment…" className={`${modalTextareaClass} mt-0 flex-1`} /><div className="flex items-end gap-2"><button type="button" onClick={() => setCompleting(false)} className="h-9 px-2 text-xs text-neutral-500 hover:text-white">Cancel</button><button disabled={pending} className="h-9 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Confirm completion</button></div></form> : <div className="flex justify-end"><button type="button" onClick={() => setCompleting(true)} className="h-9 rounded-md border border-neutral-700 px-3 text-sm text-neutral-300 hover:border-neutral-500 hover:text-white">Complete Objective</button></div>}</div> : null}
+    </div>
 }
 
-function LegacyCadenceSetup({ workspaceSlug, okr, result, pending, run }: { workspaceSlug: string; okr: WorkspaceOkr; result: OkrKeyResult; pending: boolean; run: (event: FormEvent<HTMLFormElement>, action: (formData: FormData) => Promise<void>) => void }) {
-    return <form onSubmit={(event) => run(event, setOkrKeyResultCadence.bind(null, workspaceSlug, okr.id, result.id))} className="flex flex-col gap-2 border-t border-neutral-900 bg-amber-500/5 px-3 py-3 sm:flex-row sm:items-center sm:px-4"><div className="min-w-0 flex-1"><p className="text-sm font-medium text-neutral-200">Set reporting cadence</p><p className="mt-0.5 text-xs text-neutral-600">This one-time choice starts accountability today and locks permanently.</p></div><select name="reporting_cadence" required defaultValue="" className="h-8 rounded-md border border-neutral-700 bg-black px-2 text-xs text-neutral-200"><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select><button disabled={pending} className="h-8 rounded-md bg-white px-2.5 text-xs font-medium text-black disabled:opacity-50">Set cadence</button></form>
+function DraftKeyResultForm({ workspaceSlug, okr, result, pending, run, runWithoutForm }: { workspaceSlug: string; okr: WorkspaceOkr; result: OkrKeyResult; pending: boolean; run: (event: FormEvent<HTMLFormElement>, action: RunAction, after?: AfterAction) => void; runWithoutForm: (action: () => Promise<void>, after?: AfterAction) => void }) {
+    const [dirty, setDirty] = useState(false)
+    const [unit, setUnit] = useState(result.unit)
+    return <form key={`${result.id}-${result.name}-${result.baseline_value}-${result.target_value}-${result.reporting_cadence}`} onSubmit={(event) => run(event, updateOkrKeyResult.bind(null, workspaceSlug, okr.id, result.id))} onChange={() => setDirty(true)} onReset={() => { setDirty(false); setUnit(result.unit) }} className="p-4 sm:p-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-sm text-neutral-400 sm:col-span-2">Key Result<input name="name" required defaultValue={result.name} className={modalInputClass} /></label>
+            <label className="text-sm text-neutral-400">Base<input name="baseline_value" type="number" step="any" required defaultValue={result.baseline_value} className={modalInputClass} /></label>
+            <label className="text-sm text-neutral-400">Target<input name="target_value" type="number" step="any" required defaultValue={result.target_value} className={modalInputClass} /></label>
+            <label className="text-sm text-neutral-400">Unit<select name="unit" value={unit} onChange={(event) => setUnit(event.target.value as OkrKeyResult["unit"])} className={modalInputClass}><option value="number">Number</option><option value="percentage">Percentage</option><option value="currency">Currency</option><option value="duration">Duration</option></select></label>
+            <label className="text-sm text-neutral-400">Direction<select name="comparator" defaultValue={result.comparator} className={modalInputClass}><option value="at_least">Higher is better</option><option value="at_most">Lower is better</option></select></label>
+            <label className="text-sm text-neutral-400">Reporting cadence<select name="reporting_cadence" required defaultValue={result.reporting_cadence ?? ""} className={modalInputClass}><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select></label>
+            {unit === "currency" ? <label className="text-sm text-neutral-400">Currency code<input name="currency_code" defaultValue={result.currency_code ?? "USD"} maxLength={3} className={`${modalInputClass} uppercase`} /></label> : null}
+            <label className="text-sm text-neutral-400 sm:col-span-2">Description<textarea name="description" rows={3} defaultValue={result.description ?? ""} placeholder="Add Key Result context…" className={modalTextareaClass} /></label>
+        </div>
+        <div className="mt-5 flex items-center justify-between border-t border-neutral-800 pt-4"><button type="button" disabled={pending} onClick={() => runWithoutForm(() => deleteOkrKeyResult(workspaceSlug, okr.id, result.id), { type: "objective", okrId: okr.id })} className="text-xs text-red-300/70 hover:text-red-200">Delete Key Result</button>{dirty ? <div className="flex items-center gap-2"><button type="reset" className="h-9 px-2 text-sm text-neutral-500 hover:text-white">Cancel</button><button disabled={pending} className="h-9 rounded-md bg-white px-3 text-sm font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div> : null}</div>
+    </form>
 }
 
-export function OkrWorkspace({ workspaceSlug, okrs, ownerOptions, workItems, people, today }: Props) {
+function ActiveKeyResultDetails({ workspaceSlug, okr, result, people, today, pending, run, runWithoutForm, onRecord, onAddWork }: { workspaceSlug: string; okr: WorkspaceOkr; result: OkrKeyResult; people: Record<string, string>; today: string; pending: boolean; run: (event: FormEvent<HTMLFormElement>, action: RunAction, after?: AfterAction) => void; runWithoutForm: (action: () => Promise<void>, after?: AfterAction) => void; onRecord: () => void; onAddWork: () => void }) {
+    const [dirty, setDirty] = useState(false)
+    const currency = result.currency_code ?? "USD"
+    const gap = okrGap(result.comparator, result.current_value, result.target_value)
+    return <div>
+        <div className="grid grid-cols-2 border-b border-neutral-800 sm:grid-cols-4">
+            {[{ label: "Base", value: result.baseline_value }, { label: "Current", value: result.current_value }, { label: "Target", value: result.target_value }, { label: result.target_met ? "Result" : "Remaining", value: result.target_met ? null : gap }].map((metric, index) => <div key={metric.label} className={`px-4 py-3 sm:px-5 ${index % 2 ? "border-l border-neutral-800" : ""} ${index > 1 ? "border-t border-neutral-800 sm:border-t-0" : ""} ${index === 2 ? "sm:border-l" : ""}`}><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">{metric.label}</p><p className="mt-1 text-sm font-medium tabular-nums text-neutral-200">{metric.value === null ? "Target reached" : formatOkrMetricValue(metric.value, result.unit, currency)}</p></div>)}
+        </div>
+        {okr.status === "active" ? <form key={`${result.id}-${result.description}`} onSubmit={(event) => run(event, updateActiveOkrKeyResultDescription.bind(null, workspaceSlug, okr.id, result.id))} onChange={() => setDirty(true)} onReset={() => setDirty(false)} className="px-4 py-4 sm:px-5"><label className="text-sm text-neutral-400">Description<textarea name="description" rows={3} defaultValue={result.description ?? ""} placeholder="Add Key Result context…" className={modalTextareaClass} /></label>{dirty ? <div className="mt-3 flex justify-end gap-2"><button type="reset" className="h-8 px-2 text-xs text-neutral-500 hover:text-white">Cancel</button><button disabled={pending} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Save</button></div> : null}</form> : <div className="px-4 py-4 sm:px-5"><p className="text-xs font-medium uppercase tracking-wide text-neutral-600">Description</p><p className="mt-2 text-sm leading-6 text-neutral-400">{result.description || "No description."}</p></div>}
+        {okr.status === "active" && !result.reporting_cadence ? <form onSubmit={(event) => run(event, setOkrKeyResultCadence.bind(null, workspaceSlug, okr.id, result.id))} className="flex flex-col gap-2 border-t border-amber-500/20 bg-amber-500/5 px-4 py-4 sm:flex-row sm:items-center sm:px-5"><div className="min-w-0 flex-1"><p className="text-sm font-medium text-neutral-200">Set reporting cadence</p><p className="mt-0.5 text-xs text-neutral-600">This one-time choice starts accountability today and locks permanently.</p></div><select name="reporting_cadence" required defaultValue="" className="h-9 rounded-md border border-neutral-700 bg-black px-2 text-xs text-neutral-200"><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select><button disabled={pending} className="h-9 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Set cadence</button></form> : result.reporting_cadence && result.reporting_started_on ? <AccountabilityTracker result={result} people={people} today={today} onRecord={okr.status === "active" ? onRecord : undefined} /> : null}
+        <WorkItems workspaceSlug={workspaceSlug} okr={okr} result={result} people={people} onAdd={onAddWork} onUnlink={(workItemId) => runWithoutForm(() => unlinkOkrAction(workspaceSlug, okr.id, result.id, workItemId))} />
+    </div>
+}
+
+function KeyResultDetails(props: Parameters<typeof ActiveKeyResultDetails>[0] & { onDelete?: () => void }) {
+    const { okr, result } = props
+    if (okr.status === "draft") return <DraftKeyResultForm workspaceSlug={props.workspaceSlug} okr={okr} result={result} pending={props.pending} run={props.run} runWithoutForm={props.runWithoutForm} />
+    return <ActiveKeyResultDetails {...props} />
+}
+
+function OkrMetricTable({ okrs, today, onObjective, onResult, onAddObjective, onAddResult }: { okrs: WorkspaceOkr[]; today: string; onObjective: (okrId: string) => void; onResult: (okrId: string, resultId: string) => void; onAddObjective: () => void; onAddResult: (okrId: string) => void }) {
+    function activateRow(event: KeyboardEvent<HTMLDivElement>, action: () => void) {
+        if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return
+        event.preventDefault()
+        action()
+    }
+    return <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
+        <div role="table" aria-label="Objectives and Key Result metrics" className="overflow-x-auto">
+            <div className="min-w-[38rem]">
+                <div role="row" className={`${tableGrid} h-10 border-b border-neutral-800 bg-neutral-950 text-[11px] font-medium uppercase tracking-wide text-neutral-500`}>
+                    <div role="columnheader" className="sticky left-0 z-20 flex items-center bg-neutral-950 px-4">Key Result</div>
+                    <div role="columnheader" className="flex items-center justify-end border-l border-neutral-900 px-4">Base</div>
+                    <div role="columnheader" className="flex items-center justify-end border-l border-neutral-900 px-4">Current</div>
+                    <div role="columnheader" className="flex items-center justify-end border-l border-neutral-900 px-4">Target</div>
+                </div>
+                {okrs.length ? okrs.flatMap((okr) => {
+                    const lifecycle = okrDisplayStatus({ status: okr.status, deadline: okr.period_end, today })
+                    return [<div id={`okr-${okr.id}`} key={`objective-${okr.id}`} role="row" tabIndex={0} aria-label={`Open Objective ${okr.objective}`} onClick={() => onObjective(okr.id)} onKeyDown={(event) => activateRow(event, () => onObjective(okr.id))} className={`${tableGrid} group h-14 cursor-pointer scroll-mt-28 border-b border-neutral-800 bg-neutral-900/65 outline-none transition hover:bg-neutral-800/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
+                        <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center gap-2 bg-neutral-900 px-4 transition group-hover:bg-neutral-800">
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-white">{okr.objective}</span>
+                            <Status label={lifecycle} tone={lifecycleTone(lifecycle)} />
+                            {okr.status === "draft" ? <button type="button" aria-label={`Add Key Result to ${okr.objective}`} onClick={(event) => { event.stopPropagation(); onAddResult(okr.id) }} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-neutral-700 text-base text-neutral-300 hover:border-neutral-500 hover:bg-neutral-700 hover:text-white">+</button> : null}
+                        </div>
+                        <div role="cell" className="col-span-3 flex items-center justify-end border-l border-neutral-800 px-4"><ProgressRing progress={okr.attainment} compact /></div>
+                    </div>, ...okr.key_results.map((result) => {
+                        const currency = result.currency_code ?? "USD"
+                        return <div id={`key-result-${result.id}`} key={result.id} role="row" tabIndex={0} aria-label={`Open Key Result ${result.name}`} onClick={() => onResult(okr.id, result.id)} onKeyDown={(event) => activateRow(event, () => onResult(okr.id, result.id))} className={`${tableGrid} group h-14 cursor-pointer scroll-mt-28 border-b border-neutral-900 bg-black outline-none transition last:border-b-0 hover:bg-neutral-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
+                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-black px-4 pl-8 transition group-hover:bg-neutral-950"><span className="truncate text-sm font-medium text-neutral-200">{result.name}</span></div>
+                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-4 text-sm tabular-nums text-neutral-500">{formatOkrMetricValue(result.baseline_value, result.unit, currency)}</div>
+                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-4 text-sm font-medium tabular-nums text-neutral-200">{formatOkrMetricValue(result.current_value, result.unit, currency)}</div>
+                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-4 text-sm tabular-nums text-neutral-400">{formatOkrMetricValue(result.target_value, result.unit, currency)}</div>
+                        </div>
+                    })]
+                }) : <div role="row" className={`${tableGrid} h-14 border-b border-neutral-900`}><div role="cell" className="col-span-4 flex items-center justify-center px-4 text-sm text-neutral-600">No Objectives yet.</div></div>}
+            </div>
+        </div>
+        <div className="flex h-12 items-center justify-end border-t border-neutral-800 px-3"><button type="button" onClick={onAddObjective} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:bg-neutral-900 hover:text-white"><span className="text-base leading-none">+</span> Add Objective</button></div>
+    </div>
+}
+
+export function OkrWorkspace({ workspaceSlug, currentUserId, okrs, ownerOptions, workItems, people, today }: Props) {
     const router = useRouter()
     const [dialog, setDialog] = useState<DialogState | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [completionId, setCompletionId] = useState<string | null>(null)
-    const [toggledIds, setToggledIds] = useState<Set<string>>(() => new Set())
     const [pending, startTransition] = useTransition()
 
-    function run(event: FormEvent<HTMLFormElement>, action: (formData: FormData) => Promise<void>, close = false) {
+    const selectedOkr = dialog && "okrId" in dialog ? okrs.find((okr) => okr.id === dialog.okrId) ?? null : null
+    const selectedResult = dialog && "resultId" in dialog && selectedOkr ? selectedOkr.key_results.find((result) => result.id === dialog.resultId) ?? null : null
+
+    function showDialog(next: DialogState | null) {
+        setError(null)
+        setDialog(next)
+    }
+
+    function run(event: FormEvent<HTMLFormElement>, action: RunAction, after?: AfterAction) {
         event.preventDefault()
         const formData = new FormData(event.currentTarget)
         setError(null)
         startTransition(async () => {
-            try { await action(formData); if (close) setDialog(null); router.refresh() }
-            catch (cause) { setError(cause instanceof Error ? cause.message : "This change could not be saved") }
+            try {
+                await action(formData)
+                if (after === "close") setDialog(null)
+                else if (after) setDialog(after)
+                router.refresh()
+            } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "This change could not be saved")
+            }
         })
     }
 
-    function runWithoutForm(action: () => Promise<void>) {
+    function runWithoutForm(action: () => Promise<void>, after?: AfterAction) {
         setError(null)
         startTransition(async () => {
-            try { await action(); router.refresh() }
-            catch (cause) { setError(cause instanceof Error ? cause.message : "This change could not be saved") }
+            try {
+                await action()
+                if (after === "close") setDialog(null)
+                else if (after) setDialog(after)
+                router.refresh()
+            } catch (cause) {
+                setError(cause instanceof Error ? cause.message : "This change could not be saved")
+            }
         })
     }
 
-    if (!okrs.length) return <section className="mt-5 rounded-xl border border-dashed border-neutral-800 bg-black px-5 py-9 text-center"><p className="font-medium text-neutral-200">No committed Objectives or drafts yet.</p><p className="mt-1 text-sm text-neutral-500">Use Add OKR from the workspace actions to create the first draft.</p></section>
-
     return <div className="mt-5">
-        {error ? <div role="alert" className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
-        <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">{okrs.map((okr) => {
-            const draft = okr.status === "draft"
-            return <section id={`okr-${okr.id}`} key={okr.id} className="scroll-mt-28 border-b border-neutral-800 last:border-0">
-                <OkrHeader key={okr.updated_at} workspaceSlug={workspaceSlug} okr={okr} ownerOptions={ownerOptions} pending={pending} run={run} runWithoutForm={runWithoutForm} onComplete={() => setCompletionId((current) => current === okr.id ? null : okr.id)} />
-                {completionId === okr.id ? <form onSubmit={(event) => run(event, (formData) => setOkrStatus(workspaceSlug, okr.id, "completed", formData))} className="flex flex-col gap-2 border-t border-neutral-900 bg-neutral-950/50 px-3 py-2.5 sm:flex-row sm:px-4"><textarea name="outcome_note" required rows={2} autoFocus placeholder="Record the outcome and final assessment…" className={`${modalTextareaClass} mt-0 flex-1`} /><button disabled={pending} className="h-9 self-end rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Confirm completion</button></form> : null}
-                {okr.outcome_note ? <p className="border-t border-neutral-900 px-3 py-2 text-sm leading-5 text-neutral-500 sm:px-4"><span className="mr-2 text-[11px] uppercase tracking-wide text-neutral-700">Outcome</span>{okr.outcome_note}</p> : null}
-                <div className="flex items-center justify-between gap-3 border-t border-neutral-800 bg-neutral-950/40 px-3 py-2 sm:px-4"><p className="text-xs font-medium text-neutral-400">Key Results <span className="ml-1 tabular-nums text-neutral-700">{okr.key_results.length}</span></p>{draft ? <button type="button" onClick={() => setDialog({ type: "add-result", okr })} className="h-7 rounded-md border border-neutral-800 px-2 text-xs text-neutral-400 hover:border-neutral-600 hover:text-white">Add KR</button> : null}</div>
-                <div>{okr.key_results.length ? okr.key_results.map((result) => {
-                    const expanded = draft ? !toggledIds.has(result.id) : toggledIds.has(result.id)
-                    const currency = result.currency_code ?? "USD"
-                    const latest = result.measurements.at(-1)
-                    const gap = okrGap(result.comparator, result.current_value, result.target_value)
-                    return <article id={`key-result-${result.id}`} key={result.id} className="ml-3 scroll-mt-28 border-t border-neutral-900 first:border-t-0 sm:ml-6">
-                        <div className="flex items-start gap-2 px-3 py-2.5 sm:px-4">
-                            <button type="button" onClick={() => setToggledIds((current) => { const next = new Set(current); if (next.has(result.id)) next.delete(result.id); else next.add(result.id); return next })} aria-expanded={expanded} aria-label={`${expanded ? "Collapse" : "Expand"} ${result.name}`} className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-600 hover:bg-neutral-900 hover:text-white"><span className={`transition-transform ${expanded ? "rotate-90" : ""}`}>›</span></button>
-                            <div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"><span className="font-mono text-[11px] text-neutral-700">KR-{shortId(result.id)}</span><h3 className="min-w-0 truncate text-sm font-medium text-neutral-100">{result.name}</h3><SquarePill tone={result.reporting_cadence ? "neutral" : "yellow"}>{okrReportingCadenceLabel(result.reporting_cadence)}</SquarePill></div><DescriptionText text={result.description} className="mt-0.5" /><div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-600"><span>{formatOkrMetricValue(result.current_value, result.unit, currency)} → {formatOkrMetricValue(result.target_value, result.unit, currency)}</span><span className="font-medium text-neutral-300">{Math.round(result.progress)}%</span><span>{result.actions.length} work item{result.actions.length === 1 ? "" : "s"}</span><span>{latest ? `Reported ${formatRelativeTime(latest.measured_at)}` : "No reports"}</span></div></div>
-                        </div>
-                        {expanded ? <div>{draft ? <DraftKeyResultBody key={`${result.id}-${result.name}-${result.description}-${result.baseline_value}-${result.target_value}-${result.unit}-${result.comparator}-${result.reporting_cadence}`} workspaceSlug={workspaceSlug} okr={okr} result={result} pending={pending} run={run} runWithoutForm={runWithoutForm} /> : <><ActiveDescription key={`${result.id}-${result.description}`} workspaceSlug={workspaceSlug} okr={okr} result={result} pending={pending} run={run} />{okr.status === "active" && !result.reporting_cadence ? <LegacyCadenceSetup workspaceSlug={workspaceSlug} okr={okr} result={result} pending={pending} run={run} /> : result.reporting_cadence && result.reporting_started_on ? <AccountabilityTracker result={result} people={people} today={today} onRecord={() => setDialog({ type: "measurement", okr, result })} /> : null}<div className="grid border-t border-neutral-900 grid-cols-2 sm:grid-cols-4"><div className="px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-neutral-700">Base</p><p className="mt-0.5 text-sm text-neutral-300">{formatOkrMetricValue(result.baseline_value, result.unit, currency)}</p></div><div className="border-l border-neutral-900 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-neutral-700">Current</p><p className="mt-0.5 text-sm text-neutral-300">{formatOkrMetricValue(result.current_value, result.unit, currency)}</p></div><div className="border-t border-neutral-900 px-3 py-2 sm:border-l sm:border-t-0"><p className="text-[10px] uppercase tracking-wide text-neutral-700">Target</p><p className="mt-0.5 text-sm text-neutral-300">{formatOkrMetricValue(result.target_value, result.unit, currency)}</p></div><div className="border-l border-t border-neutral-900 px-3 py-2 sm:border-t-0"><p className="text-[10px] uppercase tracking-wide text-neutral-700">{result.target_met ? "Result" : "Remaining"}</p><p className="mt-0.5 text-sm text-neutral-300">{result.target_met ? "Target reached" : formatOkrMetricValue(gap, result.unit, currency)}</p></div></div><WorkItems workspaceSlug={workspaceSlug} okr={okr} result={result} people={people} onAdd={() => setDialog({ type: "add-work", okr, result })} onUnlink={(workItemId) => runWithoutForm(() => unlinkOkrAction(workspaceSlug, okr.id, result.id, workItemId))} /></>}</div> : null}
-                    </article>
-                }) : <div className="ml-3 px-3 py-5 text-sm text-neutral-700 sm:ml-6 sm:px-4">No Key Results yet.{draft ? " Add the first measurable result before committing." : ""}</div>}</div>
-            </section>
-        })}</div>
+        {!dialog && error ? <div role="alert" className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
+        <OkrMetricTable okrs={okrs} today={today} onObjective={(okrId) => showDialog({ type: "objective", okrId })} onResult={(okrId, resultId) => showDialog({ type: "result", okrId, resultId })} onAddObjective={() => showDialog({ type: "add-objective" })} onAddResult={(okrId) => showDialog({ type: "add-result", okrId })} />
 
-        {dialog?.type === "add-result" ? <Modal title="Add Key Result" description="Define the starting point, target, and reporting cadence." onClose={() => setDialog(null)}><form onSubmit={(event) => run(event, addOkrKeyResult.bind(null, workspaceSlug, dialog.okr.id), true)} className="p-5"><NewKeyResultFields /><div className="mt-5 flex justify-end"><button disabled={pending} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Adding…" : "Add Key Result"}</button></div></form></Modal> : null}
-        {dialog?.type === "measurement" ? <Modal title={`Record progress for KR-${shortId(dialog.result.id)}`} description={`${dialog.result.name} · current ${formatOkrMetricValue(dialog.result.current_value, dialog.result.unit, dialog.result.currency_code ?? "USD")}`} onClose={() => setDialog(null)}><form onSubmit={(event) => run(event, addOkrMeasurement.bind(null, workspaceSlug, dialog.okr.id, dialog.result.id), true)} className="grid gap-3 p-5 sm:grid-cols-2"><label className="text-sm text-neutral-300">Current value<input name="value" type="number" step="any" required autoFocus defaultValue={dialog.result.current_value} className={modalInputClass} /></label><label className="text-sm text-neutral-300">Report date<input name="reported_on" type="date" required defaultValue={today} className={modalInputClass} /></label><label className="text-sm text-neutral-300 sm:col-span-2">Note <span className="text-neutral-600">(optional)</span><textarea name="note" rows={2} className={modalTextareaClass} /></label><div className="flex justify-end sm:col-span-2"><button disabled={pending} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Recording…" : "Record progress"}</button></div></form></Modal> : null}
-        {dialog?.type === "add-work" ? (() => {
-            const linkedIds = new Set(dialog.result.actions.map((action) => action.id))
+        {dialog?.type === "objective" && selectedOkr ? <Modal title={selectedOkr.objective} description="Objective details" error={error} size="medium" onClose={() => showDialog(null)}><ObjectiveDetails key={`${selectedOkr.id}-${selectedOkr.updated_at}`} workspaceSlug={workspaceSlug} okr={selectedOkr} ownerOptions={ownerOptions} today={today} pending={pending} run={run} runWithoutForm={runWithoutForm} onAddResult={() => showDialog({ type: "add-result", okrId: selectedOkr.id })} /></Modal> : null}
+
+        {dialog?.type === "result" && selectedOkr && selectedResult ? <Modal title={selectedResult.name} description={`Key Result · ${okrReportingCadenceLabel(selectedResult.reporting_cadence)} reporting`} error={error} size="wide" onClose={() => showDialog(null)}><KeyResultDetails workspaceSlug={workspaceSlug} okr={selectedOkr} result={selectedResult} people={people} today={today} pending={pending} run={run} runWithoutForm={runWithoutForm} onRecord={() => showDialog({ type: "measurement", okrId: selectedOkr.id, resultId: selectedResult.id })} onAddWork={() => showDialog({ type: "add-work", okrId: selectedOkr.id, resultId: selectedResult.id })} /></Modal> : null}
+
+        {dialog?.type === "add-objective" ? <Modal title="Add Objective" description="Create a fully editable draft." error={error} onClose={() => showDialog(null)}><form onSubmit={(event) => run(event, async (formData) => { const result = await createOkrFromModal(workspaceSlug, formData); if (!result.ok) throw new Error(result.error ?? "This Objective could not be created") }, "close")} className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5"><label className="text-sm text-neutral-300 sm:col-span-2">Objective<input name="objective" required autoFocus placeholder="Increase reliable monthly sales" className={modalInputClass} /></label><label className="text-sm text-neutral-300 sm:col-span-2">Description <span className="text-neutral-600">(optional)</span><textarea name="description" rows={2} className={modalTextareaClass} /></label><label className="text-sm text-neutral-300">Starts<input name="period_start" type="date" defaultValue={today} required className={modalInputClass} /></label><label className="text-sm text-neutral-300">Deadline<input name="period_end" type="date" defaultValue={addUtcDays(today, 90)} required className={modalInputClass} /></label><label className="text-sm text-neutral-300 sm:col-span-2">Owner<select name="owner_user_id" defaultValue={ownerOptions.some((owner) => owner.user_id === currentUserId) ? currentUserId : ownerOptions[0]?.user_id} className={modalInputClass}>{ownerOptions.map((owner) => <option key={owner.user_id} value={owner.user_id}>{owner.name} · {owner.role}</option>)}</select></label><div className="mt-2 flex justify-end sm:col-span-2"><button disabled={pending} className="h-10 rounded-md bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Creating…" : "Add Objective"}</button></div></form></Modal> : null}
+
+        {dialog?.type === "add-result" && selectedOkr ? <Modal title="Add Key Result" description={`Add a measurable result to ${selectedOkr.objective}.`} error={error} onClose={() => showDialog({ type: "objective", okrId: selectedOkr.id })}><form onSubmit={(event) => run(event, addOkrKeyResult.bind(null, workspaceSlug, selectedOkr.id), { type: "objective", okrId: selectedOkr.id })} className="p-4 sm:p-5"><NewKeyResultFields /><div className="mt-5 flex justify-end"><button disabled={pending} className="h-10 rounded-md bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Adding…" : "Add Key Result"}</button></div></form></Modal> : null}
+
+        {dialog?.type === "measurement" && selectedOkr && selectedResult ? <Modal title="Record progress" description={`${selectedResult.name} · current ${formatOkrMetricValue(selectedResult.current_value, selectedResult.unit, selectedResult.currency_code ?? "USD")}`} error={error} onClose={() => showDialog({ type: "result", okrId: selectedOkr.id, resultId: selectedResult.id })}><form onSubmit={(event) => run(event, addOkrMeasurement.bind(null, workspaceSlug, selectedOkr.id, selectedResult.id), { type: "result", okrId: selectedOkr.id, resultId: selectedResult.id })} className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5"><label className="text-sm text-neutral-300">Current value<input name="value" type="number" step="any" required autoFocus defaultValue={selectedResult.current_value} className={modalInputClass} /></label><label className="text-sm text-neutral-300">Report date<input name="reported_on" type="date" required defaultValue={today} className={modalInputClass} /></label><label className="text-sm text-neutral-300 sm:col-span-2">Note <span className="text-neutral-600">(optional)</span><textarea name="note" rows={2} className={modalTextareaClass} /></label><div className="flex justify-end sm:col-span-2"><button disabled={pending} className="h-10 rounded-md bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Recording…" : "Record progress"}</button></div></form></Modal> : null}
+
+        {dialog?.type === "add-work" && selectedOkr && selectedResult ? (() => {
+            const linkedIds = new Set(selectedResult.actions.map((action) => action.id))
             const available = workItems.filter((item) => !linkedIds.has(item.id))
-            return <Modal title={`Add work to KR-${shortId(dialog.result.id)}`} description="Create a private Admin work item or link existing work from this workspace." onClose={() => setDialog(null)}><div className="grid gap-5 p-5 md:grid-cols-2"><form onSubmit={(event) => run(event, createOkrAction.bind(null, workspaceSlug, dialog.okr.id, dialog.result.id), true)}><h3 className="font-medium">Create work item</h3><label className="mt-3 block text-sm text-neutral-300">Title<input name="title" required autoFocus placeholder="What needs to happen?" className={modalInputClass} /></label><label className="mt-3 block text-sm text-neutral-300">Description <span className="text-neutral-600">(optional)</span><textarea name="description" rows={3} className={modalTextareaClass} /></label><button disabled={pending} className="mt-4 h-10 w-full rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-50">Create and link</button></form><form onSubmit={(event) => run(event, linkOkrAction.bind(null, workspaceSlug, dialog.okr.id, dialog.result.id), true)} className="border-t border-neutral-800 pt-5 md:border-l md:border-t-0 md:pl-5 md:pt-0"><h3 className="font-medium">Link existing work</h3>{available.length ? <><label className="mt-3 block text-sm text-neutral-300">Work item<select name="work_item_id" className={modalInputClass}>{available.map((item) => <option key={item.id} value={item.id}>{item.title} · {workItemPriorityLabel(item.priority)}</option>)}</select></label><button disabled={pending} className="mt-4 h-10 w-full rounded-lg border border-neutral-700 px-3 text-sm text-neutral-200 disabled:opacity-50">Link work item</button></> : <p className="mt-3 text-sm leading-6 text-neutral-600">Every available work item is already linked to this Key Result.</p>}</form></div></Modal>
+            const returnTo: DialogState = { type: "result", okrId: selectedOkr.id, resultId: selectedResult.id }
+            return <Modal title="Add work" description={`Create or link work for ${selectedResult.name}.`} error={error} onClose={() => showDialog(returnTo)}><div className="grid gap-5 p-4 sm:p-5 md:grid-cols-2"><form onSubmit={(event) => run(event, createOkrAction.bind(null, workspaceSlug, selectedOkr.id, selectedResult.id), returnTo)}><h3 className="font-medium">Create work item</h3><label className="mt-3 block text-sm text-neutral-300">Title<input name="title" required autoFocus placeholder="What needs to happen?" className={modalInputClass} /></label><label className="mt-3 block text-sm text-neutral-300">Description <span className="text-neutral-600">(optional)</span><textarea name="description" rows={3} className={modalTextareaClass} /></label><button disabled={pending} className="mt-4 h-10 w-full rounded-md bg-white px-3 text-sm font-medium text-black disabled:opacity-50">Create and link</button></form><form onSubmit={(event) => run(event, linkOkrAction.bind(null, workspaceSlug, selectedOkr.id, selectedResult.id), returnTo)} className="border-t border-neutral-800 pt-5 md:border-l md:border-t-0 md:pl-5 md:pt-0"><h3 className="font-medium">Link existing work</h3>{available.length ? <><label className="mt-3 block text-sm text-neutral-300">Work item<select name="work_item_id" className={modalInputClass}>{available.map((item) => <option key={item.id} value={item.id}>{item.title} · {workItemPriorityLabel(item.priority)}</option>)}</select></label><button disabled={pending} className="mt-4 h-10 w-full rounded-md border border-neutral-700 px-3 text-sm text-neutral-200 disabled:opacity-50">Link work item</button></> : <p className="mt-3 text-sm leading-6 text-neutral-600">Every available work item is already linked to this Key Result.</p>}</form></div></Modal>
         })() : null}
     </div>
 }
