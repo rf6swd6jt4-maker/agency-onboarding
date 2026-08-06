@@ -51,6 +51,7 @@ export type WorkspaceOkr = {
     workspace_id: string
     objective: string
     objective_type: WorkspaceOkrType | null
+    is_test: boolean
     description: string | null
     period_start: string
     period_end: string
@@ -71,7 +72,7 @@ function numberValue(value: unknown) {
 
 export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceOkr[]> {
     const { data: okrs, error } = await supabaseAdmin.from("workspace_okrs")
-        .select("id, workspace_id, objective, objective_type, description, period_start, period_end, owner_user_id, status, outcome_note, created_by, created_at, updated_at")
+        .select("id, workspace_id, objective, objective_type, is_test, description, period_start, period_end, owner_user_id, status, outcome_note, created_by, created_at, updated_at")
         .eq("workspace_id", workspaceId)
         .order("period_end", { ascending: false })
     if (error || !okrs?.length) return []
@@ -146,6 +147,7 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
             ...okr,
             status: okr.status as WorkspaceOkrStatus,
             objective_type: okr.objective_type as WorkspaceOkrType | null,
+            is_test: Boolean(okr.is_test),
             key_results: results,
             attainment: okrAttainment(results.map((result) => result.progress)),
         }

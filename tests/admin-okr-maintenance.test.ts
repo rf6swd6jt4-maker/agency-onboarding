@@ -56,10 +56,11 @@ test("Admin persistence is additive, private, append-only, and concurrency-safe"
 })
 
 test("OKRs are editable drafts until Commit classifies and selectively locks them", async () => {
-    const [migration, lifecycleMigration, reportingMigration, actions, topBar, detail, workspace] = await Promise.all([
+    const [migration, lifecycleMigration, reportingMigration, testModeMigration, actions, topBar, detail, workspace] = await Promise.all([
         readFile("supabase/migrations/20260804190000_okr_objective_types.sql", "utf8"),
         readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
         readFile("supabase/migrations/20260805130000_compact_okr_reporting.sql", "utf8"),
+        readFile("supabase/migrations/20260806160000_okr_test_mode.sql", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/okrs/[okrId]/page.tsx", "utf8"),
@@ -77,8 +78,13 @@ test("OKRs are editable drafts until Commit classifies and selectively locks the
     assert.match(reportingMigration, /Choose a reporting cadence for every Key Result before committing/)
     assert.match(reportingMigration, /new\.description is distinct from old\.description/)
     assert.match(reportingMigration, /Closed OKRs are read-only/)
+    assert.match(testModeMigration, /is_test boolean not null default false/)
+    assert.match(testModeMigration, /Display-only Test marker/)
+    assert.match(testModeMigration, /old\.status <> 'draft' and new\.is_test is distinct from old\.is_test/)
+    assert.match(testModeMigration, /before update of is_test/)
     assert.match(actions, /value\(formData, "objective"\)/)
     assert.match(actions, /objective_type: null/)
+    assert.match(actions, /is_test: isTest/)
     assert.match(actions, /status: "draft"/)
     assert.match(actions, /export async function commitOkr[\s\S]*status: "active", objective_type: "committed"/)
     assert.match(actions, /requireDraftOkr/)
@@ -155,6 +161,13 @@ test("the OKRs tab is a metric table with popup-only Objective and Key Result de
     assert.match(workspace, /ObjectiveDetails/)
     assert.match(workspace, /KeyResultDetails/)
     assert.match(workspace, /AccountabilityTracker/)
+    assert.match(workspace, /draft \? "Starts" : "Started"/)
+    assert.match(workspace, /name="is_test"/)
+    assert.match(workspace, /<SquarePill>Test<\/SquarePill>/)
+    assert.match(workspace, /selectedReports\.map\(\(measurement\)/)
+    assert.match(workspace, /size="compact"/)
+    assert.match(workspace, />Recorded by</)
+    assert.match(workspace, />Notes</)
     assert.match(workspace, /TrendChart/)
     assert.match(workspace, /okrDisplayStatus/)
     assert.match(workspace, /Add Objective/)

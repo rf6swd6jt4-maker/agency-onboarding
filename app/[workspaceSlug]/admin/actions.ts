@@ -58,6 +58,7 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
     const periodStart = value(formData, "period_start")
     const periodEnd = value(formData, "period_end")
     const ownerUserId = value(formData, "owner_user_id") || user.id
+    const isTest = value(formData, "is_test") === "true"
     const sourceHref = `/${workspace.slug}/admin?view=okrs`
     if (!objective || !/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd) || periodEnd < periodStart) {
         await recordAdminActivity({ workspaceId: workspace.id, category: "system", level: "warning", eventKey: "okr.create.validation_failed", summary: "An administrator could not create an OKR because its objective period was invalid", sourceHref, actorUserId: user.id })
@@ -73,6 +74,7 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
         workspace_id: workspace.id,
         objective,
         objective_type: null,
+        is_test: isTest,
         description: value(formData, "description") || null,
         period_start: periodStart,
         period_end: periodEnd,
@@ -96,7 +98,7 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
         return { ok: false, error: "We couldn't create this OKR. The failure has been recorded for Admin review." }
     }
     const displayTitle = okrDisplayTitle({ objectiveType: null, objective, deadline: periodEnd })
-    await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.created", summary: `OKR draft created: ${displayTitle}`, entityType: "okr", entityId: okr.id, sourceHref: okrsHref(workspace.slug, `okr-${okr.id}`), actorUserId: user.id, metadata: { objective_type: null, status: "draft", period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId } })
+    await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.created", summary: `OKR draft created: ${displayTitle}`, entityType: "okr", entityId: okr.id, sourceHref: okrsHref(workspace.slug, `okr-${okr.id}`), actorUserId: user.id, metadata: { objective_type: null, is_test: isTest, status: "draft", period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId } })
     revalidatePath(adminPath(slug))
     return { ok: true, href: okrsHref(slug, `okr-${okr.id}`) }
 }
