@@ -53,7 +53,7 @@ type Props = {
 type RunAction = (formData: FormData) => Promise<void>
 type AfterAction = DialogState | "close" | undefined
 
-const tableGrid = "grid grid-cols-[9rem_repeat(3,6.5rem)] sm:grid-cols-[minmax(13rem,1fr)_repeat(3,minmax(5.5rem,0.38fr))]"
+const tableGrid = "grid grid-cols-[minmax(0,1fr)_repeat(2,5.25rem)] sm:grid-cols-[minmax(13rem,1fr)_repeat(3,minmax(5.5rem,0.38fr))]"
 const editorClass = "w-full rounded-md border border-neutral-800 bg-black px-3 text-sm text-neutral-100 outline-none transition focus:border-neutral-500"
 const modalInputClass = `mt-1.5 h-10 ${editorClass}`
 const modalTextareaClass = "mt-1.5 w-full rounded-md border border-neutral-800 bg-black px-3 py-2 text-sm leading-6 text-neutral-100 outline-none transition focus:border-neutral-500"
@@ -284,33 +284,33 @@ function OkrMetricTable({ okrs, today, onObjective, onResult, onAddObjective, on
         action()
     }
     return <div className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
-        <div role="table" aria-label="Objectives and Key Result metrics" className="overflow-x-auto">
-            <div className="min-w-[28.5rem] sm:min-w-[38rem]">
+        <div role="table" aria-label="Objectives and Key Result metrics" className="overflow-x-hidden sm:overflow-x-auto">
+            <div className="w-full sm:min-w-[38rem]">
                 <div role="row" className={`${tableGrid} h-10 border-b border-neutral-800 bg-neutral-950 text-[11px] font-medium uppercase tracking-wide text-neutral-500`}>
                     <div role="columnheader" className="sticky left-0 z-20 flex items-center bg-neutral-950 px-3 sm:px-4">Key Result</div>
-                    <div role="columnheader" className="flex items-center justify-end border-l border-neutral-900 px-2 sm:px-4">Base</div>
+                    <div role="columnheader" className="hidden items-center justify-end border-l border-neutral-900 px-4 sm:flex">Base</div>
                     <div role="columnheader" className="flex items-center justify-end border-l border-neutral-900 px-2 sm:px-4">Current</div>
                     <div role="columnheader" className="flex items-center justify-end border-l border-neutral-900 px-2 sm:px-4">Target</div>
                 </div>
                 {okrs.length ? okrs.flatMap((okr) => {
                     const lifecycle = okrDisplayStatus({ status: okr.status, deadline: okr.period_end, today })
-                    return [<div id={`okr-${okr.id}`} key={`objective-${okr.id}`} role="row" tabIndex={0} aria-label={`Open Objective ${okr.objective}`} onClick={() => onObjective(okr.id)} onKeyDown={(event) => activateRow(event, () => onObjective(okr.id))} className={`${tableGrid} group h-14 cursor-pointer scroll-mt-28 border-b border-neutral-800 bg-neutral-900/65 outline-none transition hover:bg-neutral-800/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
-                        <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center gap-1.5 bg-neutral-900 px-3 transition group-hover:bg-neutral-800 sm:gap-2 sm:px-4">
-                            <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-white sm:text-sm">{okr.objective}</span><span className="mt-0.5 inline-flex sm:hidden"><Status label={lifecycle} tone={lifecycleTone(lifecycle)} /></span></span>
+                    return [<div id={`okr-${okr.id}`} key={`objective-${okr.id}`} role="row" tabIndex={0} aria-label={`Open Objective ${okr.objective}`} onClick={() => onObjective(okr.id)} onKeyDown={(event) => activateRow(event, () => onObjective(okr.id))} className={`${tableGrid} group min-h-14 cursor-pointer scroll-mt-28 border-b border-neutral-800 bg-neutral-900/65 outline-none transition hover:bg-neutral-800/80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
+                        <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center gap-1.5 bg-neutral-900 px-3 py-2 transition group-hover:bg-neutral-800 sm:gap-2 sm:px-4">
+                            <span className="min-w-0 flex-1"><span className="block break-words text-[13px] font-semibold leading-5 text-white sm:truncate sm:text-sm">{okr.objective}</span><span className="mt-0.5 inline-flex sm:hidden"><Status label={lifecycle} tone={lifecycleTone(lifecycle)} /></span></span>
                             <span className="hidden shrink-0 sm:inline-flex"><Status label={lifecycle} tone={lifecycleTone(lifecycle)} /></span>
                             {okr.status === "draft" ? <button type="button" aria-label={`Add Key Result to ${okr.objective}`} onClick={(event) => { event.stopPropagation(); onAddResult(okr.id) }} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-neutral-700 text-base text-neutral-300 hover:border-neutral-500 hover:bg-neutral-700 hover:text-white">+</button> : null}
                         </div>
-                        <div role="cell" className="col-span-3 flex items-center justify-end border-l border-neutral-800 px-2 sm:px-4"><ProgressRing progress={okr.attainment} compact /></div>
+                        <div role="cell" className="col-span-2 flex items-center justify-end border-l border-neutral-800 px-2 sm:col-span-3 sm:px-4"><ProgressRing progress={okr.attainment} compact /></div>
                     </div>, ...okr.key_results.map((result) => {
                         const currency = result.currency_code ?? "USD"
-                        return <div id={`key-result-${result.id}`} key={result.id} role="row" tabIndex={0} aria-label={`Open Key Result ${result.name}`} onClick={() => onResult(okr.id, result.id)} onKeyDown={(event) => activateRow(event, () => onResult(okr.id, result.id))} className={`${tableGrid} group h-14 cursor-pointer scroll-mt-28 border-b border-neutral-900 bg-black outline-none transition last:border-b-0 hover:bg-neutral-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
-                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-black px-3 pl-5 transition group-hover:bg-neutral-950 sm:px-4 sm:pl-8"><span className="truncate text-[13px] font-medium text-neutral-200 sm:text-sm">{result.name}</span></div>
-                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-sm tabular-nums text-neutral-500 sm:px-4">{formatOkrMetricValue(result.baseline_value, result.unit, currency)}</div>
-                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-sm font-medium tabular-nums text-neutral-200 sm:px-4">{formatOkrMetricValue(result.current_value, result.unit, currency)}</div>
-                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-sm tabular-nums text-neutral-400 sm:px-4">{formatOkrMetricValue(result.target_value, result.unit, currency)}</div>
+                        return <div id={`key-result-${result.id}`} key={result.id} role="row" tabIndex={0} aria-label={`Open Key Result ${result.name}`} onClick={() => onResult(okr.id, result.id)} onKeyDown={(event) => activateRow(event, () => onResult(okr.id, result.id))} className={`${tableGrid} group min-h-14 cursor-pointer scroll-mt-28 border-b border-neutral-900 bg-black outline-none transition last:border-b-0 hover:bg-neutral-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
+                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-black px-3 py-2 pl-4 transition group-hover:bg-neutral-950 sm:px-4 sm:pl-8"><span className="break-words text-[13px] font-medium leading-5 text-neutral-200 sm:truncate sm:text-sm">{result.name}</span></div>
+                            <div role="cell" className="hidden items-center justify-end border-l border-neutral-900 px-4 text-sm tabular-nums text-neutral-500 sm:flex">{formatOkrMetricValue(result.baseline_value, result.unit, currency)}</div>
+                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-xs font-medium tabular-nums text-neutral-200 sm:px-4 sm:text-sm">{formatOkrMetricValue(result.current_value, result.unit, currency)}</div>
+                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-xs tabular-nums text-neutral-400 sm:px-4 sm:text-sm">{formatOkrMetricValue(result.target_value, result.unit, currency)}</div>
                         </div>
                     })]
-                }) : <div role="row" className={`${tableGrid} h-14 border-b border-neutral-900`}><div role="cell" className="col-span-4 flex items-center justify-center px-4 text-sm text-neutral-600">No Objectives yet.</div></div>}
+                }) : <div role="row" className={`${tableGrid} h-14 border-b border-neutral-900`}><div role="cell" className="col-span-3 flex items-center justify-center px-4 text-sm text-neutral-600 sm:col-span-4">No Objectives yet.</div></div>}
             </div>
         </div>
         <div className="flex h-12 items-center justify-end border-t border-neutral-800 px-3"><button type="button" onClick={onAddObjective} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:bg-neutral-900 hover:text-white"><span className="text-base leading-none">+</span> Add Objective</button></div>
