@@ -136,6 +136,8 @@ test("the OKRs tab is a metric table with popup-only Objective and Key Result de
     assert.match(workspace, />Base</)
     assert.match(workspace, />Current</)
     assert.match(workspace, />Target</)
+    assert.match(workspace, /grid-cols-\[9rem_repeat\(3,6\.5rem\)\]/)
+    assert.match(workspace, /min-w-\[28\.5rem\]/)
     assert.match(workspace, /okrs\.flatMap\(\(okr\)/)
     assert.match(workspace, /okr\.key_results\.map\(\(result\)/)
     assert.match(workspace, /result\.actions\.map\(\(action\)/)
