@@ -99,23 +99,32 @@ function MetricEditor({ label, context, value, displayValue, pending, onSubmit, 
     const [open, setOpen] = useState(false)
     const [draft, setDraft] = useState(String(value))
     const rootRef = useRef<HTMLDivElement>(null)
+    const formRef = useRef<HTMLFormElement>(null)
 
     useEffect(() => {
         if (!open) return
-        const closeOutside = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false) }
-        const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setOpen(false) }
+        const closeOutside = (event: PointerEvent) => {
+            if (rootRef.current?.contains(event.target as Node)) return
+            if (draft === String(value)) setOpen(false)
+            else if (formRef.current?.checkValidity()) formRef.current.requestSubmit()
+        }
+        const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+            if (event.key !== "Escape") return
+            setDraft(String(value))
+            setOpen(false)
+        }
         document.addEventListener("pointerdown", closeOutside)
         document.addEventListener("keydown", closeOnEscape)
         return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape) }
-    }, [open])
+    }, [draft, open, value])
 
     const inputWidth = `${Math.max(7, Math.min(18, draft.length + 2))}ch`
     return <div ref={rootRef} className={`relative inline-flex justify-end ${className}`} onClick={(event) => event.stopPropagation()}>
         <button type="button" aria-label={`Edit ${label} for ${context}`} aria-expanded={open} onClick={() => { setDraft(String(value)); setOpen((current) => !current) }} className="rounded px-1 py-1 tabular-nums underline decoration-dotted decoration-neutral-700 underline-offset-4 transition hover:bg-neutral-900 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/70">{displayValue}</button>
-        {open ? <form onSubmit={(event) => { setOpen(false); onSubmit(event) }} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") setOpen(false) }} className="absolute bottom-full right-0 z-40 mb-1.5 rounded-lg border border-neutral-700 bg-neutral-950 p-2 shadow-xl shadow-black/70">
+        {open ? <form ref={formRef} onSubmit={(event) => { if (draft === String(value)) event.preventDefault(); else onSubmit(event); setOpen(false) }} onKeyDown={(event) => event.stopPropagation()} className="absolute bottom-full right-0 z-40 mb-1.5 rounded-lg border border-neutral-700 bg-neutral-950 p-2 shadow-xl shadow-black/70">
             {hiddenInputs}
             <label className="block text-left text-[10px] font-medium uppercase tracking-wide text-neutral-500">{label}</label>
-            <div className="mt-1 flex items-center gap-1.5"><input name="value" type="number" step="any" required autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} style={{ width: inputWidth }} className="h-8 max-w-[calc(100vw-6rem)] rounded-md border border-neutral-700 bg-black px-2 text-right text-sm tabular-nums text-white outline-none transition focus:border-neutral-400" /><button disabled={pending} aria-label={`Save ${label}`} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-sm font-semibold text-black disabled:opacity-50">✓</button></div>
+            <input name="value" aria-label={`${label} value for ${context}`} type="number" step="any" required autoFocus disabled={pending} value={draft} onChange={(event) => setDraft(event.target.value)} style={{ width: inputWidth }} className="mt-1 h-8 max-w-[calc(100vw-4rem)] rounded-md border border-neutral-700 bg-black px-2 text-right text-sm tabular-nums text-white outline-none transition focus:border-neutral-400 disabled:opacity-60" />
         </form> : null}
     </div>
 }
