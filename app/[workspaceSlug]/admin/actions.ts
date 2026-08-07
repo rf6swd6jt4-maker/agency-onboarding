@@ -219,6 +219,18 @@ export async function updateOkrKeyResult(slug: string, okrId: string, keyResultI
     revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }
 
+export async function updateDraftOkrKeyResultMetric(slug: string, okrId: string, keyResultId: string, metric: "baseline_value" | "target_value", formData: FormData) {
+    const { workspace } = await requireWorkspace(slug, "admin")
+    await requireDraftOkr(workspace.id, okrId)
+    const { data: keyResult } = await supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle()
+    if (!keyResult) throw new Error("Key Result not found")
+    const metricValue = numericValue(formData, "value")
+    const update = metric === "baseline_value" ? { baseline_value: metricValue } : { target_value: metricValue }
+    const { error } = await supabaseAdmin.from("workspace_okr_key_results").update(update).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
+    if (error) throw new Error(error.message)
+    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+}
+
 export async function updateActiveOkrKeyResultDescription(slug: string, okrId: string, keyResultId: string, formData: FormData) {
     const { workspace } = await requireWorkspace(slug, "admin")
     await requireCommittedOkr(workspace.id, okrId)

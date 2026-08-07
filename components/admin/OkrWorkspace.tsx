@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { createPortal } from "react-dom"
-import { useMemo, useState, useTransition, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
@@ -26,6 +26,7 @@ import {
     unlinkOkrAction,
     updateActiveOkrDetails,
     updateActiveOkrKeyResultDescription,
+    updateDraftOkrKeyResultMetric,
     updateOkr,
     updateOkrKeyResult,
 } from "@/app/[workspaceSlug]/admin/actions"
@@ -91,6 +92,31 @@ function ProgressRing({ progress, compact = false }: { progress: number; compact
             <circle cx="32" cy="32" r="25" fill="none" stroke="white" strokeWidth={compact ? 5 : 4.5} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - bounded / 100)} />
         </svg>
         <span className={`absolute inset-0 flex items-center justify-center font-semibold tabular-nums text-white ${compact ? "text-[9px]" : "text-[11px]"}`}>{Math.round(bounded)}%</span>
+    </div>
+}
+
+function MetricEditor({ label, context, value, displayValue, pending, onSubmit, hiddenInputs, className = "" }: { label: string; context: string; value: number; displayValue: string; pending: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; hiddenInputs?: ReactNode; className?: string }) {
+    const [open, setOpen] = useState(false)
+    const [draft, setDraft] = useState(String(value))
+    const rootRef = useRef<HTMLDivElement>(null)
+
+    useEffect(() => {
+        if (!open) return
+        const closeOutside = (event: PointerEvent) => { if (!rootRef.current?.contains(event.target as Node)) setOpen(false) }
+        const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setOpen(false) }
+        document.addEventListener("pointerdown", closeOutside)
+        document.addEventListener("keydown", closeOnEscape)
+        return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape) }
+    }, [open])
+
+    const inputWidth = `${Math.max(7, Math.min(18, draft.length + 2))}ch`
+    return <div ref={rootRef} className={`relative inline-flex justify-end ${className}`} onClick={(event) => event.stopPropagation()}>
+        <button type="button" aria-label={`Edit ${label} for ${context}`} aria-expanded={open} onClick={() => { setDraft(String(value)); setOpen((current) => !current) }} className="rounded px-1 py-1 tabular-nums underline decoration-dotted decoration-neutral-700 underline-offset-4 transition hover:bg-neutral-900 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/70">{displayValue}</button>
+        {open ? <form onSubmit={(event) => { setOpen(false); onSubmit(event) }} onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") setOpen(false) }} className="absolute bottom-full right-0 z-40 mb-1.5 rounded-lg border border-neutral-700 bg-neutral-950 p-2 shadow-xl shadow-black/70">
+            {hiddenInputs}
+            <label className="block text-left text-[10px] font-medium uppercase tracking-wide text-neutral-500">{label}</label>
+            <div className="mt-1 flex items-center gap-1.5"><input name="value" type="number" step="any" required autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} style={{ width: inputWidth }} className="h-8 max-w-[calc(100vw-6rem)] rounded-md border border-neutral-700 bg-black px-2 text-right text-sm tabular-nums text-white outline-none transition focus:border-neutral-400" /><button disabled={pending} aria-label={`Save ${label}`} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-sm font-semibold text-black disabled:opacity-50">✓</button></div>
+        </form> : null}
     </div>
 }
 
@@ -274,7 +300,7 @@ function KeyResultDetails(props: Parameters<typeof ActiveKeyResultDetails>[0] & 
     return <ActiveKeyResultDetails {...props} />
 }
 
-function OkrMetricTable({ okrs, today, onObjective, onResult, onAddObjective, onAddResult }: { okrs: WorkspaceOkr[]; today: string; onObjective: (okrId: string) => void; onResult: (okrId: string, resultId: string) => void; onAddObjective: () => void; onAddResult: (okrId: string) => void }) {
+function OkrMetricTable({ workspaceSlug, okrs, today, pending, run, onObjective, onResult, onAddObjective, onAddResult }: { workspaceSlug: string; okrs: WorkspaceOkr[]; today: string; pending: boolean; run: (event: FormEvent<HTMLFormElement>, action: RunAction, after?: AfterAction) => void; onObjective: (okrId: string) => void; onResult: (okrId: string, resultId: string) => void; onAddObjective: () => void; onAddResult: (okrId: string) => void }) {
     function activateRow(event: KeyboardEvent<HTMLDivElement>, action: () => void) {
         if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return
         event.preventDefault()
@@ -300,11 +326,15 @@ function OkrMetricTable({ okrs, today, onObjective, onResult, onAddObjective, on
                         <div role="cell" className="col-span-2 flex items-center justify-end gap-2 border-l border-neutral-800 px-2 sm:col-span-3 sm:px-4">{okr.is_test ? <SquarePill tone="yellow">Test</SquarePill> : null}<ProgressRing progress={okr.attainment} compact /></div>
                     </div>, ...okr.key_results.map((result) => {
                         const currency = result.currency_code ?? "USD"
+                        const baseline = formatOkrMetricValue(result.baseline_value, result.unit, currency)
+                        const current = formatOkrMetricValue(result.current_value, result.unit, currency)
+                        const target = formatOkrMetricValue(result.target_value, result.unit, currency)
+                        const draft = okr.status === "draft"
                         return <div id={`key-result-${result.id}`} key={result.id} role="row" tabIndex={0} aria-label={`Open Key Result ${result.name}`} onClick={() => onResult(okr.id, result.id)} onKeyDown={(event) => activateRow(event, () => onResult(okr.id, result.id))} className={`${tableGrid} group min-h-14 cursor-pointer scroll-mt-28 border-b border-neutral-900 bg-black outline-none transition last:border-b-0 hover:bg-neutral-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
                             <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-black px-3 py-2 pl-4 transition group-hover:bg-neutral-950 sm:px-4 sm:pl-8"><span className="break-words text-[13px] font-medium leading-5 text-neutral-200 sm:truncate sm:text-sm">{result.name}</span></div>
-                            <div role="cell" className="hidden items-center justify-end border-l border-neutral-900 px-4 text-sm tabular-nums text-neutral-500 sm:flex">{formatOkrMetricValue(result.baseline_value, result.unit, currency)}</div>
-                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-xs font-medium tabular-nums text-neutral-200 sm:px-4 sm:text-sm">{formatOkrMetricValue(result.current_value, result.unit, currency)}</div>
-                            <div role="cell" className="flex items-center justify-end border-l border-neutral-900 px-2 text-xs tabular-nums text-neutral-400 sm:px-4 sm:text-sm">{formatOkrMetricValue(result.target_value, result.unit, currency)}</div>
+                            <div role="cell" className="relative hidden items-center justify-end border-l border-neutral-900 px-4 text-sm tabular-nums text-neutral-500 sm:flex">{draft ? <MetricEditor label="Base" context={result.name} value={result.baseline_value} displayValue={baseline} pending={pending} onSubmit={(event) => run(event, updateDraftOkrKeyResultMetric.bind(null, workspaceSlug, okr.id, result.id, "baseline_value"))} /> : baseline}</div>
+                            <div role="cell" className="relative flex items-center justify-end border-l border-neutral-900 px-2 text-xs font-medium tabular-nums text-neutral-200 sm:px-4 sm:text-sm">{draft ? <><MetricEditor label="Base" context={result.name} value={result.baseline_value} displayValue={baseline} pending={pending} onSubmit={(event) => run(event, updateDraftOkrKeyResultMetric.bind(null, workspaceSlug, okr.id, result.id, "baseline_value"))} className="sm:hidden" /><span className="hidden sm:inline">{current}</span></> : okr.status === "active" ? <MetricEditor label="Current" context={result.name} value={result.current_value} displayValue={current} pending={pending} hiddenInputs={<input type="hidden" name="reported_on" value={today} />} onSubmit={(event) => run(event, addOkrMeasurement.bind(null, workspaceSlug, okr.id, result.id))} /> : current}</div>
+                            <div role="cell" className="relative flex items-center justify-end border-l border-neutral-900 px-2 text-xs tabular-nums text-neutral-400 sm:px-4 sm:text-sm">{draft ? <MetricEditor label="Target" context={result.name} value={result.target_value} displayValue={target} pending={pending} onSubmit={(event) => run(event, updateDraftOkrKeyResultMetric.bind(null, workspaceSlug, okr.id, result.id, "target_value"))} /> : target}</div>
                         </div>
                     }), ...(okr.status === "draft" ? [<div key={`add-result-${okr.id}`} role="row" className={`${tableGrid} h-10 border-b border-neutral-800 bg-black sm:hidden`}><div role="cell" className="col-span-3 flex items-center justify-end px-2"><button type="button" aria-label={`Add Key Result to ${okr.objective}`} onClick={() => onAddResult(okr.id)} className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-neutral-500 transition hover:bg-neutral-900 hover:text-white"><span className="text-base leading-none">+</span> Add Key Result</button></div></div>] : [])]
                 }) : <div role="row" className={`${tableGrid} h-14 border-b border-neutral-900`}><div role="cell" className="col-span-3 flex items-center justify-center px-4 text-sm text-neutral-600 sm:col-span-4">No Objectives yet.</div></div>}
@@ -360,7 +390,7 @@ export function OkrWorkspace({ workspaceSlug, currentUserId, okrs, ownerOptions,
 
     return <div className="mt-5">
         {!dialog && error ? <div role="alert" className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</div> : null}
-        <OkrMetricTable okrs={okrs} today={today} onObjective={(okrId) => showDialog({ type: "objective", okrId })} onResult={(okrId, resultId) => showDialog({ type: "result", okrId, resultId })} onAddObjective={() => showDialog({ type: "add-objective" })} onAddResult={(okrId) => showDialog({ type: "add-result", okrId })} />
+        <OkrMetricTable workspaceSlug={workspaceSlug} okrs={okrs} today={today} pending={pending} run={run} onObjective={(okrId) => showDialog({ type: "objective", okrId })} onResult={(okrId, resultId) => showDialog({ type: "result", okrId, resultId })} onAddObjective={() => showDialog({ type: "add-objective" })} onAddResult={(okrId) => showDialog({ type: "add-result", okrId })} />
 
         {dialog?.type === "objective" && selectedOkr ? <Modal title={selectedOkr.objective} description="Objective details" error={error} size="medium" onClose={() => showDialog(null)}><ObjectiveDetails key={`${selectedOkr.id}-${selectedOkr.updated_at}`} workspaceSlug={workspaceSlug} okr={selectedOkr} ownerOptions={ownerOptions} today={today} pending={pending} run={run} runWithoutForm={runWithoutForm} onAddResult={() => showDialog({ type: "add-result", okrId: selectedOkr.id })} /></Modal> : null}
 
