@@ -105,6 +105,13 @@ function MetricEditor({ label, context, value, displayValue, pending, onSubmit, 
         if (!open) return
         const closeOutside = (event: PointerEvent) => {
             if (rootRef.current?.contains(event.target as Node)) return
+            const consumeClick = (clickEvent: globalThis.MouseEvent) => {
+                clickEvent.preventDefault()
+                clickEvent.stopPropagation()
+                window.clearTimeout(clearConsumeClick)
+            }
+            document.addEventListener("click", consumeClick, { capture: true, once: true })
+            const clearConsumeClick = window.setTimeout(() => document.removeEventListener("click", consumeClick, true), 500)
             if (draft === String(value)) setOpen(false)
             else if (formRef.current?.checkValidity()) formRef.current.requestSubmit()
         }
@@ -339,8 +346,8 @@ function OkrMetricTable({ workspaceSlug, okrs, today, pending, run, onObjective,
                         const current = formatOkrMetricValue(result.current_value, result.unit, currency)
                         const target = formatOkrMetricValue(result.target_value, result.unit, currency)
                         const draft = okr.status === "draft"
-                        return <div id={`key-result-${result.id}`} key={result.id} role="row" tabIndex={0} aria-label={`Open Key Result ${result.name}`} onClick={() => onResult(okr.id, result.id)} onKeyDown={(event) => activateRow(event, () => onResult(okr.id, result.id))} className={`${tableGrid} group min-h-14 cursor-pointer scroll-mt-28 border-b border-neutral-900 bg-black outline-none transition last:border-b-0 hover:bg-neutral-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
-                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-black px-3 py-2 pl-4 transition group-hover:bg-neutral-950 sm:px-4 sm:pl-8"><span className="break-words text-[13px] font-medium leading-5 text-neutral-200 sm:truncate sm:text-sm">{result.name}</span></div>
+                        return <div id={`key-result-${result.id}`} key={result.id} role="row" tabIndex={0} aria-label={`Open Key Result ${result.name}`} onClick={() => onResult(okr.id, result.id)} onKeyDown={(event) => activateRow(event, () => onResult(okr.id, result.id))} className={`${tableGrid} group min-h-12 cursor-pointer scroll-mt-28 border-b border-neutral-900 bg-black outline-none transition last:border-b-0 hover:bg-neutral-950 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/60`}>
+                            <div role="rowheader" className="sticky left-0 z-10 flex min-w-0 items-center bg-black px-3 py-1.5 pl-4 transition group-hover:bg-neutral-950 sm:px-4 sm:pl-8"><span className="break-words text-[13px] font-medium leading-5 text-neutral-200 sm:truncate sm:text-sm">{result.name}</span></div>
                             <div role="cell" className="relative hidden items-center justify-end border-l border-neutral-900 px-4 text-sm tabular-nums text-neutral-500 sm:flex">{draft ? <MetricEditor label="Base" context={result.name} value={result.baseline_value} displayValue={baseline} pending={pending} onSubmit={(event) => run(event, updateDraftOkrKeyResultMetric.bind(null, workspaceSlug, okr.id, result.id, "baseline_value"))} /> : baseline}</div>
                             <div role="cell" className="relative flex items-center justify-end border-l border-neutral-900 px-2 text-xs font-medium tabular-nums text-neutral-200 sm:px-4 sm:text-sm">{draft ? <><MetricEditor label="Base" context={result.name} value={result.baseline_value} displayValue={baseline} pending={pending} onSubmit={(event) => run(event, updateDraftOkrKeyResultMetric.bind(null, workspaceSlug, okr.id, result.id, "baseline_value"))} className="sm:hidden" /><span className="hidden sm:inline">{current}</span></> : okr.status === "active" ? <MetricEditor label="Current" context={result.name} value={result.current_value} displayValue={current} pending={pending} hiddenInputs={<input type="hidden" name="reported_on" value={today} />} onSubmit={(event) => run(event, addOkrMeasurement.bind(null, workspaceSlug, okr.id, result.id))} /> : current}</div>
                             <div role="cell" className="relative flex items-center justify-end border-l border-neutral-900 px-2 text-xs tabular-nums text-neutral-400 sm:px-4 sm:text-sm">{draft ? <MetricEditor label="Target" context={result.name} value={result.target_value} displayValue={target} pending={pending} onSubmit={(event) => run(event, updateDraftOkrKeyResultMetric.bind(null, workspaceSlug, okr.id, result.id, "target_value"))} /> : target}</div>
