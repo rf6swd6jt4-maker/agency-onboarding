@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildOkrReportingDays, latestOkrMeasurementsByDay, okrReportingWindow, startOfUtcWeek } from "../lib/admin/okr-reporting.ts"
+import { buildOkrReportingDays, latestOkrMeasurementsByDay, okrReportingPeriod, okrReportingPeriodIndex, okrReportingWindow, startOfUtcWeek } from "../lib/admin/okr-reporting.ts"
 
 const today = "2026-08-05"
 
@@ -13,6 +13,19 @@ test("the accountability window contains the trailing 35 dates ending today", ()
     assert.equal(dates.length, 35)
     assert.equal(dates[0], "2026-07-02")
     assert.equal(dates.at(-1), today)
+})
+
+test("reporting periods are fixed 35-day windows anchored to the Objective start", () => {
+    assert.deepEqual(okrReportingPeriod("2026-08-01", 0).slice(0, 2), ["2026-08-01", "2026-08-02"])
+    assert.equal(okrReportingPeriod("2026-08-01", 0).at(-1), "2026-09-04")
+    assert.equal(okrReportingPeriod("2026-08-01", 1)[0], "2026-09-05")
+    assert.equal(okrReportingPeriodIndex("2026-08-01", "2026-09-04"), 0)
+    assert.equal(okrReportingPeriodIndex("2026-08-01", "2026-09-05"), 1)
+})
+
+test("an anchored reporting window keeps future dates visible", () => {
+    const days = buildOkrReportingDays({ cadence: "daily", reportingStartedOn: "2026-08-01", measurements: [], today: "2026-08-05", windowStart: "2026-08-01", length: 7 })
+    assert.deepEqual(days.map((day) => day.state), ["missed", "missed", "missed", "missed", "due", "future", "future"])
 })
 
 test("daily cadence distinguishes before, reported, missed, and due dates", () => {

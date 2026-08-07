@@ -44,6 +44,16 @@ export function okrReportingWindow(today: string, length = 35) {
     return Array.from({ length }, (_, index) => addUtcDays(today, index - length + 1))
 }
 
+export function okrReportingPeriod(startDate: string, periodIndex: number, length = 35) {
+    const periodStart = addUtcDays(startDate, Math.max(0, periodIndex) * length)
+    return Array.from({ length }, (_, index) => addUtcDays(periodStart, index))
+}
+
+export function okrReportingPeriodIndex(startDate: string, today: string, length = 35) {
+    const elapsedDays = Math.floor((dateFromKey(today).getTime() - dateFromKey(startDate).getTime()) / DAY_MS)
+    return Math.max(0, Math.floor(elapsedDays / length))
+}
+
 export function latestOkrMeasurementsByDay<T extends OkrReportingMeasurement>(measurements: T[]) {
     const grouped = new Map<string, T[]>()
     for (const measurement of measurements) grouped.set(measurement.reported_on, [...(grouped.get(measurement.reported_on) ?? []), measurement])
@@ -60,19 +70,25 @@ export function buildOkrReportingDays<T extends OkrReportingMeasurement>({
     measurements,
     today,
     length = 35,
+    windowStart,
 }: {
     cadence: OkrReportingCadence | null
     reportingStartedOn: string | null
     measurements: T[]
     today: string
     length?: number
+    windowStart?: string
 }): OkrReportingDay<T>[] {
     const { grouped, latest } = latestOkrMeasurementsByDay(measurements)
     const reportedWeeks = new Set(measurements
         .filter((measurement) => !reportingStartedOn || measurement.reported_on >= reportingStartedOn)
         .map((measurement) => startOfUtcWeek(measurement.reported_on)))
 
-    return okrReportingWindow(today, length).map((date) => {
+    const dates = windowStart
+        ? Array.from({ length }, (_, index) => addUtcDays(windowStart, index))
+        : okrReportingWindow(today, length)
+
+    return dates.map((date) => {
         const measurement = latest.get(date) ?? null
         const reportCount = grouped.get(date)?.length ?? 0
         let state: OkrReportingDayState = "none"

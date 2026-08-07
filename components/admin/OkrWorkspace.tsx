@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import { formatOkrMetricValue, okrGap } from "@/lib/admin/okr-metrics"
-import { addUtcDays, buildOkrReportingDays, okrReportingCadenceLabel, type OkrReportingDay } from "@/lib/admin/okr-reporting"
+import { addUtcDays, buildOkrReportingDays, okrReportingCadenceLabel, okrReportingPeriod, okrReportingPeriodIndex, type OkrReportingDay } from "@/lib/admin/okr-reporting"
 import type { OkrKeyResult, OkrMeasurement, WorkspaceOkr } from "@/lib/admin/okrs"
 import { formatOkrDeadline, okrDisplayStatus, type WorkspaceOkrDisplayStatus } from "@/lib/admin/okr-title"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
@@ -167,29 +167,56 @@ function NewKeyResultFields() {
 }
 
 function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReportingDay<OkrMeasurement>[] }) {
-    const plotted = days.flatMap((day, index) => day.measurement ? [{ index, value: day.measurement.value }] : [])
+    const [activeIndex, setActiveIndex] = useState<number | null>(null)
+    const plotted = days.flatMap((day, index) => day.measurement ? [{ index, date: day.date, value: day.measurement.value }] : [])
     const values = [result.baseline_value, result.target_value, ...plotted.map((point) => point.value)]
     const rawMin = Math.min(...values)
     const rawMax = Math.max(...values)
     const span = rawMax - rawMin || 1
     const min = rawMin - span * 0.08
     const max = rawMax + span * 0.08
-    const x = (index: number) => 8 + index * (304 / Math.max(1, days.length - 1))
-    const y = (value: number) => 82 - ((value - min) / (max - min)) * 70
-    const points = plotted.map((point) => `${x(point.index)},${y(point.value)}`).join(" ")
+    const chartWidth = 480
+    const chartBottom = 136
+    const x = (index: number) => 4 + index * ((chartWidth - 8) / Math.max(1, days.length - 1))
+    const y = (value: number) => 122 - ((value - min) / (max - min)) * 108
+    const runs = plotted.reduce<typeof plotted[]>((groups, point) => {
+        const current = groups.at(-1)
+        const previous = current?.at(-1)
+        const crossedMiss = previous ? days.slice(previous.index + 1, point.index).some((day) => day.state === "missed") : false
+        if (!current || crossedMiss) groups.push([point])
+        else current.push(point)
+        return groups
+    }, [])
+    const unchanged = plotted.filter((point, index) => {
+        const previous = plotted[index - 1]
+        return previous && previous.value === point.value && !days.slice(previous.index + 1, point.index).some((day) => day.state === "missed")
+    })
+    const activePoint = activeIndex === null ? null : plotted.find((point) => point.index === activeIndex) ?? null
+    const dateLabel = (date: string) => new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))
+    const labelIndexes = [0, Math.floor((days.length - 1) / 2), days.length - 1]
+    const gradientId = `trend-fill-${result.id}`
     return <div className="min-w-0">
-        <div className="mb-1 flex items-center justify-between text-[11px] text-neutral-600"><span>35-day trend</span><span>Target {formatOkrMetricValue(result.target_value, result.unit, result.currency_code ?? "USD")}</span></div>
-        <svg viewBox="0 0 320 90" className="h-[90px] w-full overflow-visible" role="img" aria-label={`${result.name} measurement trend`}>
-            <line x1="8" x2="312" y1={y(result.target_value)} y2={y(result.target_value)} stroke="rgb(82 82 82)" strokeDasharray="4 4" />
-            {plotted.length > 1 ? <polyline points={points} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /> : null}
-            {plotted.map((point) => <circle key={point.index} cx={x(point.index)} cy={y(point.value)} r="3" fill="white" />)}
+        <svg viewBox={`0 0 ${chartWidth} 166`} className="h-44 w-full overflow-visible sm:h-52" role="img" aria-label={`${result.name} measurement trend`} onPointerLeave={() => setActiveIndex(null)}>
+            <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="white" stopOpacity="0.2" /><stop offset="100%" stopColor="white" stopOpacity="0" /></linearGradient></defs>
+            <line x1="4" x2={chartWidth - 4} y1={y(result.baseline_value)} y2={y(result.baseline_value)} stroke="rgb(38 38 38)" />
+            <line x1="4" x2={chartWidth - 4} y1={y(result.target_value)} y2={y(result.target_value)} stroke="rgb(82 82 82)" strokeDasharray="5 5" />
+            {days.map((day, index) => day.state === "missed" ? <line key={`miss-${day.date}`} x1={x(index)} x2={x(index)} y1={chartBottom - 5} y2={chartBottom} stroke="rgb(185 28 28)" strokeWidth="2" strokeLinecap="round" /> : null)}
+            {runs.map((run, index) => run.length > 1 ? <g key={`run-${index}`}><polygon points={`${x(run[0].index)},${chartBottom} ${run.map((point) => `${x(point.index)},${y(point.value)}`).join(" ")} ${x(run.at(-1)!.index)},${chartBottom}`} fill={`url(#${gradientId})`} /><polyline points={run.map((point) => `${x(point.index)},${y(point.value)}`).join(" ")} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></g> : null)}
+            {unchanged.map((point) => <line key={`same-${point.date}`} x1={x(point.index) - 4} x2={x(point.index) + 4} y1={y(point.value)} y2={y(point.value)} stroke="rgb(163 163 163)" strokeWidth="4" strokeLinecap="round" />)}
+            {plotted.map((point) => <rect key={`hit-${point.date}`} x={x(point.index) - 8} y="4" width="16" height={chartBottom - 4} fill="transparent" tabIndex={0} className="outline-none" aria-label={`${dateLabel(point.date)}: ${formatOkrMetricValue(point.value, result.unit, result.currency_code ?? "USD")}`} onPointerEnter={() => setActiveIndex(point.index)} onPointerDown={() => setActiveIndex(point.index)} onFocus={() => setActiveIndex(point.index)} onBlur={() => setActiveIndex(null)} />)}
+            {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.index)} cy={y(activePoint.value)} r="4" fill="white" stroke="black" strokeWidth="2" /><rect x={Math.max(4, Math.min(chartWidth - 132, x(activePoint.index) - 64))} y={Math.max(4, y(activePoint.value) - 42)} width="128" height="34" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={Math.max(12, Math.min(chartWidth - 124, x(activePoint.index) - 56))} y={Math.max(17, y(activePoint.value) - 27)} fill="rgb(163 163 163)" fontSize="9">{dateLabel(activePoint.date)}</text><text x={Math.max(12, Math.min(chartWidth - 124, x(activePoint.index) - 56))} y={Math.max(29, y(activePoint.value) - 15)} fill="white" fontSize="10" fontWeight="600">{formatOkrMetricValue(activePoint.value, result.unit, result.currency_code ?? "USD")}</text></g> : null}
+            {!plotted.length ? <text x={chartWidth / 2} y="76" textAnchor="middle" fill="rgb(64 64 64)" fontSize="11">No reports in this period</text> : null}
+            {labelIndexes.map((index, position) => <text key={days[index].date} x={x(index)} y="160" textAnchor={position === 0 ? "start" : position === 2 ? "end" : "middle"} fill="rgb(82 82 82)" fontSize="9">{dateLabel(days[index].date)}</text>)}
         </svg>
-        {!plotted.length ? <p className="-mt-12 text-center text-xs text-neutral-700">No reports in this window</p> : null}
     </div>
 }
 
-function AccountabilityTracker({ result, people, today, onRecord }: { result: OkrKeyResult; people: Record<string, string>; today: string; onRecord?: () => void }) {
-    const days = useMemo(() => buildOkrReportingDays({ cadence: result.reporting_cadence, reportingStartedOn: result.reporting_started_on, measurements: result.measurements, today }), [result.measurements, result.reporting_cadence, result.reporting_started_on, today])
+function AccountabilityTracker({ result, people, today, startDate, onRecord }: { result: OkrKeyResult; people: Record<string, string>; today: string; startDate: string; onRecord?: () => void }) {
+    const latestPeriodIndex = okrReportingPeriodIndex(startDate, today)
+    const [periodIndex, setPeriodIndex] = useState(latestPeriodIndex)
+    const periodDates = okrReportingPeriod(startDate, periodIndex)
+    const periodStart = periodDates[0]
+    const days = useMemo(() => buildOkrReportingDays({ cadence: result.reporting_cadence, reportingStartedOn: result.reporting_started_on, measurements: result.measurements, today, windowStart: periodStart }), [periodStart, result.measurements, result.reporting_cadence, result.reporting_started_on, today])
     const [selectedDate, setSelectedDate] = useState<string | null>(null)
     const selectedReports = selectedDate ? result.measurements.filter((measurement) => measurement.reported_on === selectedDate).sort((left, right) => right.measured_at.localeCompare(left.measured_at)) : []
     const weekdayLabels = days.slice(0, 7).map((day) => new Intl.DateTimeFormat("en-IE", { weekday: "narrow", timeZone: "UTC" }).format(new Date(`${day.date}T00:00:00Z`)))
@@ -201,10 +228,11 @@ function AccountabilityTracker({ result, people, today, onRecord }: { result: Ok
         future: "border-neutral-900 text-neutral-800",
         none: "border-neutral-800 text-neutral-700",
     }
-    return <section className="border-t border-neutral-800 px-4 py-4 sm:px-5">
-        <div className="mb-3 flex items-center justify-between gap-3"><div><p className="text-xs font-medium text-neutral-300">Accountability</p><p className="mt-0.5 text-[11px] text-neutral-600">{okrReportingCadenceLabel(result.reporting_cadence)} reporting · trailing 35 days</p></div>{onRecord ? <button type="button" onClick={onRecord} className="h-8 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white">Record progress</button> : null}</div>
-        <div className="grid gap-4 md:grid-cols-[300px_minmax(300px,1fr)] md:items-start">
-            <div className="min-w-0 max-w-[18rem]"><div className="grid grid-cols-7 gap-1">{weekdayLabels.map((label, index) => <span key={`${label}-${index}`} className="pb-0.5 text-center text-[10px] text-neutral-700">{label}</span>)}{days.map((day) => <button key={day.date} type="button" disabled={!day.measurement} onClick={() => setSelectedDate(day.date)} aria-label={`${day.date}: ${day.state}${day.reportCount > 1 ? `, ${day.reportCount} reports` : ""}`} className={`aspect-square min-h-6 rounded border text-[10px] tabular-nums transition ${stateClass[day.state]} ${day.measurement ? "cursor-pointer hover:ring-2 hover:ring-neutral-500" : "cursor-default"}`}>{Number(day.date.slice(-2))}</button>)}</div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-neutral-600"><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-white" />Reported</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-amber-500/70" />Due</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-red-700/70" />Missed</span></div></div>
+    const changePeriod = (next: number) => { setSelectedDate(null); setPeriodIndex(next) }
+    return <section className="border-t border-neutral-800 px-4 py-4 sm:px-5 sm:py-5">
+        <div className="mb-4 flex items-center justify-between gap-3"><p className="text-sm font-medium text-neutral-300">Accountability</p>{onRecord ? <button type="button" onClick={onRecord} className="h-8 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white">Record progress</button> : null}</div>
+        <div className="grid gap-5 md:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.4fr)] md:items-start xl:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="min-w-0"><div className="mb-2 flex h-7 items-center justify-between"><span className="text-[10px] text-neutral-600">{formatOkrDeadline(days[0].date)} – {formatOkrDeadline(days.at(-1)!.date)}</span>{latestPeriodIndex > 0 ? <div className="flex items-center gap-1"><button type="button" disabled={periodIndex === 0} onClick={() => changePeriod(periodIndex - 1)} aria-label="Previous reporting period" className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-800 text-sm text-neutral-500 hover:border-neutral-600 hover:text-white disabled:cursor-default disabled:opacity-25">‹</button><button type="button" disabled={periodIndex === latestPeriodIndex} onClick={() => changePeriod(periodIndex + 1)} aria-label="Next reporting period" className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-800 text-sm text-neutral-500 hover:border-neutral-600 hover:text-white disabled:cursor-default disabled:opacity-25">›</button></div> : null}</div><div className="grid grid-cols-7 gap-1">{weekdayLabels.map((label, index) => <span key={`${label}-${index}`} className="pb-0.5 text-center text-[10px] text-neutral-700">{label}</span>)}{days.map((day) => <button key={day.date} type="button" disabled={!day.measurement} onClick={() => setSelectedDate(day.date)} aria-label={`${day.date}: ${day.state}${day.reportCount > 1 ? `, ${day.reportCount} reports` : ""}`} className={`aspect-square min-h-7 rounded border text-[10px] tabular-nums transition ${stateClass[day.state]} ${day.measurement ? "cursor-pointer hover:ring-2 hover:ring-neutral-500" : "cursor-default"}`}>{Number(day.date.slice(-2))}</button>)}</div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-neutral-600"><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-white" />Reported</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-amber-500/70" />Due</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-red-700/70" />Missed</span></div></div>
             <TrendChart result={result} days={days} />
         </div>
         {selectedDate && selectedReports.length ? <Modal title={formatOkrDeadline(selectedDate)} description={`${result.name} · ${selectedReports.length} report${selectedReports.length === 1 ? "" : "s"}`} size="compact" onClose={() => setSelectedDate(null)}><div className="divide-y divide-neutral-800">{selectedReports.map((measurement) => <div key={measurement.id} className="p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Value</p><p className="mt-1 text-xl font-semibold tabular-nums text-white">{formatOkrMetricValue(measurement.value, result.unit, result.currency_code ?? "USD")}</p></div><div className="text-right"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Recorded by</p><p className="mt-1 text-sm text-neutral-300">{people[measurement.recorded_by ?? ""] ?? "Admin"}</p></div></div><div className="mt-4 rounded-lg border border-neutral-800 bg-black/40 px-3 py-2.5"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Notes</p><p className="mt-1 text-sm leading-6 text-neutral-300">{measurement.note || "No notes recorded."}</p></div></div>)}</div></Modal> : null}
@@ -305,7 +333,7 @@ function ActiveKeyResultDetails({ workspaceSlug, okr, result, people, today, pen
             {[{ label: "Base", value: result.baseline_value }, { label: "Current", value: result.current_value }, { label: "Target", value: result.target_value }, { label: result.target_met ? "Result" : "Remaining", value: result.target_met ? null : gap }].map((metric, index) => <div key={metric.label} className={`px-4 py-3 sm:px-5 ${index % 2 ? "border-l border-neutral-800" : ""} ${index > 1 ? "border-t border-neutral-800 sm:border-t-0" : ""} ${index === 2 ? "sm:border-l" : ""}`}><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">{metric.label}</p><p className="mt-1 text-sm font-medium tabular-nums text-neutral-200">{metric.value === null ? "Target reached" : formatOkrMetricValue(metric.value, result.unit, currency)}</p></div>)}
         </div>
         {okr.status === "active" ? <form key={`${result.id}-${result.description}`} onSubmit={(event) => run(event, updateActiveOkrKeyResultDescription.bind(null, workspaceSlug, okr.id, result.id))} onChange={() => setDirty(true)} onReset={() => setDirty(false)} className="px-4 py-4 sm:px-5"><label className="text-sm text-neutral-400">Description<textarea name="description" rows={3} defaultValue={result.description ?? ""} placeholder="Add Key Result context…" className={modalTextareaClass} /></label>{dirty ? <div className="mt-3 flex justify-end gap-2"><button type="reset" className="h-8 px-2 text-xs text-neutral-500 hover:text-white">Cancel</button><button disabled={pending} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Save</button></div> : null}</form> : <div className="px-4 py-4 sm:px-5"><p className="text-xs font-medium uppercase tracking-wide text-neutral-600">Description</p><p className="mt-2 text-sm leading-6 text-neutral-400">{result.description || "No description."}</p></div>}
-        {okr.status === "active" && !result.reporting_cadence ? <form onSubmit={(event) => run(event, setOkrKeyResultCadence.bind(null, workspaceSlug, okr.id, result.id))} className="flex flex-col gap-2 border-t border-amber-500/20 bg-amber-500/5 px-4 py-4 sm:flex-row sm:items-center sm:px-5"><div className="min-w-0 flex-1"><p className="text-sm font-medium text-neutral-200">Set reporting cadence</p><p className="mt-0.5 text-xs text-neutral-600">This one-time choice starts accountability today and locks permanently.</p></div><select name="reporting_cadence" required defaultValue="" className="h-9 rounded-md border border-neutral-700 bg-black px-2 text-xs text-neutral-200"><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select><button disabled={pending} className="h-9 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Set cadence</button></form> : result.reporting_cadence && result.reporting_started_on ? <AccountabilityTracker result={result} people={people} today={today} onRecord={okr.status === "active" ? onRecord : undefined} /> : null}
+        {okr.status === "active" && !result.reporting_cadence ? <form onSubmit={(event) => run(event, setOkrKeyResultCadence.bind(null, workspaceSlug, okr.id, result.id))} className="flex flex-col gap-2 border-t border-amber-500/20 bg-amber-500/5 px-4 py-4 sm:flex-row sm:items-center sm:px-5"><div className="min-w-0 flex-1"><p className="text-sm font-medium text-neutral-200">Set reporting cadence</p><p className="mt-0.5 text-xs text-neutral-600">This one-time choice starts accountability today and locks permanently.</p></div><select name="reporting_cadence" required defaultValue="" className="h-9 rounded-md border border-neutral-700 bg-black px-2 text-xs text-neutral-200"><option value="" disabled>Choose cadence…</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="manual">Manual</option></select><button disabled={pending} className="h-9 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">Set cadence</button></form> : result.reporting_cadence && result.reporting_started_on ? <AccountabilityTracker result={result} people={people} today={today} startDate={okr.period_start} onRecord={okr.status === "active" ? onRecord : undefined} /> : null}
         <WorkItems workspaceSlug={workspaceSlug} okr={okr} result={result} people={people} onAdd={onAddWork} onUnlink={(workItemId) => runWithoutForm(() => unlinkOkrAction(workspaceSlug, okr.id, result.id, workItemId))} />
     </div>
 }
