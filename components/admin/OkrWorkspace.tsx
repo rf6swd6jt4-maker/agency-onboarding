@@ -167,46 +167,56 @@ function NewKeyResultFields() {
 }
 
 function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReportingDay<OkrMeasurement>[] }) {
-    const [activeIndex, setActiveIndex] = useState<number | null>(null)
-    const plotted = days.flatMap((day, index) => day.measurement ? [{ index, date: day.date, value: day.measurement.value }] : [])
-    const values = [result.baseline_value, result.target_value, ...plotted.map((point) => point.value)]
+    const [activeId, setActiveId] = useState<string | null>(null)
+    const dayIndexes = new Map(days.map((day, index) => [day.date, index]))
+    const reportsByDay = new Map<string, OkrMeasurement[]>()
+    for (const measurement of result.measurements) {
+        if (!dayIndexes.has(measurement.reported_on)) continue
+        reportsByDay.set(measurement.reported_on, [...(reportsByDay.get(measurement.reported_on) ?? []), measurement])
+    }
+    const plotted = [...reportsByDay.entries()].sort(([left], [right]) => left.localeCompare(right)).flatMap(([date, measurements]) => {
+        const dayIndex = dayIndexes.get(date)!
+        const ordered = [...measurements].sort((left, right) => left.measured_at.localeCompare(right.measured_at))
+        return ordered.map((measurement, index) => ({
+            id: measurement.id,
+            date,
+            measuredAt: measurement.measured_at,
+            value: measurement.value,
+            position: Math.min(days.length - 1, dayIndex + (ordered.length === 1 ? 0.5 : 0.15 + index * (0.7 / (ordered.length - 1)))),
+        }))
+    })
+    const carryMeasurement = [...result.measurements].filter((measurement) => measurement.reported_on < days[0].date).sort((left, right) => left.reported_on.localeCompare(right.reported_on) || left.measured_at.localeCompare(right.measured_at)).at(-1)
+    const carryValue = carryMeasurement?.value ?? result.baseline_value
+    const series = [{ id: "carry", date: days[0].date, measuredAt: "", value: carryValue, position: 0 }, ...plotted]
+    const values = series.map((point) => point.value)
     const rawMin = Math.min(...values)
     const rawMax = Math.max(...values)
-    const span = rawMax - rawMin || 1
-    const min = rawMin - span * 0.08
-    const max = rawMax + span * 0.08
+    const span = rawMax - rawMin || Math.max(Math.abs(rawMax) * 0.1, 1)
+    const min = rawMin - span * 0.12
+    const max = rawMax + span * 0.12
     const chartWidth = 480
-    const chartBottom = 136
-    const x = (index: number) => 4 + index * ((chartWidth - 8) / Math.max(1, days.length - 1))
-    const y = (value: number) => 122 - ((value - min) / (max - min)) * 108
-    const runs = plotted.reduce<typeof plotted[]>((groups, point) => {
-        const current = groups.at(-1)
-        const previous = current?.at(-1)
-        const crossedMiss = previous ? days.slice(previous.index + 1, point.index).some((day) => day.state === "missed") : false
-        if (!current || crossedMiss) groups.push([point])
-        else current.push(point)
-        return groups
-    }, [])
+    const chartBottom = 198
+    const x = (position: number) => 4 + position * ((chartWidth - 8) / Math.max(1, days.length - 1))
+    const y = (value: number) => 178 - ((value - min) / (max - min)) * 158
     const unchanged = plotted.filter((point, index) => {
         const previous = plotted[index - 1]
-        return previous && previous.value === point.value && !days.slice(previous.index + 1, point.index).some((day) => day.state === "missed")
+        return previous && previous.value === point.value
     })
-    const activePoint = activeIndex === null ? null : plotted.find((point) => point.index === activeIndex) ?? null
+    const activePoint = activeId === null ? null : plotted.find((point) => point.id === activeId) ?? null
     const dateLabel = (date: string) => new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))
+    const timeLabel = (measuredAt: string) => new Intl.DateTimeFormat("en-IE", { hour: "2-digit", minute: "2-digit" }).format(new Date(measuredAt))
     const labelIndexes = [0, Math.floor((days.length - 1) / 2), days.length - 1]
     const gradientId = `trend-fill-${result.id}`
     return <div className="min-w-0">
-        <svg viewBox={`0 0 ${chartWidth} 166`} className="h-44 w-full overflow-visible sm:h-52" role="img" aria-label={`${result.name} measurement trend`} onPointerLeave={() => setActiveIndex(null)}>
+        <svg viewBox={`0 0 ${chartWidth} 240`} className="aspect-[2/1] w-full overflow-visible" role="img" aria-label={`${result.name} measurement trend`} onPointerLeave={() => setActiveId(null)}>
             <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="white" stopOpacity="0.2" /><stop offset="100%" stopColor="white" stopOpacity="0" /></linearGradient></defs>
-            <line x1="4" x2={chartWidth - 4} y1={y(result.baseline_value)} y2={y(result.baseline_value)} stroke="rgb(38 38 38)" />
-            <line x1="4" x2={chartWidth - 4} y1={y(result.target_value)} y2={y(result.target_value)} stroke="rgb(82 82 82)" strokeDasharray="5 5" />
-            {days.map((day, index) => day.state === "missed" ? <line key={`miss-${day.date}`} x1={x(index)} x2={x(index)} y1={chartBottom - 5} y2={chartBottom} stroke="rgb(185 28 28)" strokeWidth="2" strokeLinecap="round" /> : null)}
-            {runs.map((run, index) => run.length > 1 ? <g key={`run-${index}`}><polygon points={`${x(run[0].index)},${chartBottom} ${run.map((point) => `${x(point.index)},${y(point.value)}`).join(" ")} ${x(run.at(-1)!.index)},${chartBottom}`} fill={`url(#${gradientId})`} /><polyline points={run.map((point) => `${x(point.index)},${y(point.value)}`).join(" ")} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></g> : null)}
-            {unchanged.map((point) => <line key={`same-${point.date}`} x1={x(point.index) - 4} x2={x(point.index) + 4} y1={y(point.value)} y2={y(point.value)} stroke="rgb(163 163 163)" strokeWidth="4" strokeLinecap="round" />)}
-            {plotted.map((point) => <rect key={`hit-${point.date}`} x={x(point.index) - 8} y="4" width="16" height={chartBottom - 4} fill="transparent" tabIndex={0} className="outline-none" aria-label={`${dateLabel(point.date)}: ${formatOkrMetricValue(point.value, result.unit, result.currency_code ?? "USD")}`} onPointerEnter={() => setActiveIndex(point.index)} onPointerDown={() => setActiveIndex(point.index)} onFocus={() => setActiveIndex(point.index)} onBlur={() => setActiveIndex(null)} />)}
-            {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.index)} cy={y(activePoint.value)} r="4" fill="white" stroke="black" strokeWidth="2" /><rect x={Math.max(4, Math.min(chartWidth - 132, x(activePoint.index) - 64))} y={Math.max(4, y(activePoint.value) - 42)} width="128" height="34" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={Math.max(12, Math.min(chartWidth - 124, x(activePoint.index) - 56))} y={Math.max(17, y(activePoint.value) - 27)} fill="rgb(163 163 163)" fontSize="9">{dateLabel(activePoint.date)}</text><text x={Math.max(12, Math.min(chartWidth - 124, x(activePoint.index) - 56))} y={Math.max(29, y(activePoint.value) - 15)} fill="white" fontSize="10" fontWeight="600">{formatOkrMetricValue(activePoint.value, result.unit, result.currency_code ?? "USD")}</text></g> : null}
+            {days.map((day, index) => day.state === "missed" ? <rect key={`miss-${day.date}`} x={x(index) - 5} y="10" width="10" height={chartBottom - 10} rx="3" fill="rgb(127 29 29)" opacity="0.12" /> : null)}
+            {plotted.length ? <><polygon points={`${x(series[0].position)},${chartBottom} ${series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} ${x(series.at(-1)!.position)},${chartBottom}`} fill={`url(#${gradientId})`} /><polyline points={series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></> : null}
+            {unchanged.map((point) => <line key={`same-${point.id}`} x1={x(point.position) - 4} x2={x(point.position) + 4} y1={y(point.value)} y2={y(point.value)} stroke="rgb(163 163 163)" strokeWidth="4" strokeLinecap="round" />)}
+            {plotted.map((point) => <rect key={`hit-${point.id}`} x={x(point.position) - 4} y="4" width="8" height={chartBottom - 4} fill="transparent" tabIndex={0} className="outline-none" aria-label={`${dateLabel(point.date)} at ${timeLabel(point.measuredAt)}: ${formatOkrMetricValue(point.value, result.unit, result.currency_code ?? "USD")}`} onPointerEnter={() => setActiveId(point.id)} onPointerDown={() => setActiveId(point.id)} onFocus={() => setActiveId(point.id)} onBlur={() => setActiveId(null)} />)}
+            {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.position)} cy={y(activePoint.value)} r="4" fill="white" stroke="black" strokeWidth="2" /><rect x={Math.max(4, Math.min(chartWidth - 152, x(activePoint.position) - 74))} y={Math.max(4, y(activePoint.value) - 44)} width="148" height="36" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={Math.max(12, Math.min(chartWidth - 144, x(activePoint.position) - 66))} y={Math.max(18, y(activePoint.value) - 29)} fill="rgb(163 163 163)" fontSize="9">{dateLabel(activePoint.date)} · {timeLabel(activePoint.measuredAt)}</text><text x={Math.max(12, Math.min(chartWidth - 144, x(activePoint.position) - 66))} y={Math.max(31, y(activePoint.value) - 16)} fill="white" fontSize="10" fontWeight="600">{formatOkrMetricValue(activePoint.value, result.unit, result.currency_code ?? "USD")}</text></g> : null}
             {!plotted.length ? <text x={chartWidth / 2} y="76" textAnchor="middle" fill="rgb(64 64 64)" fontSize="11">No reports in this period</text> : null}
-            {labelIndexes.map((index, position) => <text key={days[index].date} x={x(index)} y="160" textAnchor={position === 0 ? "start" : position === 2 ? "end" : "middle"} fill="rgb(82 82 82)" fontSize="9">{dateLabel(days[index].date)}</text>)}
+            {labelIndexes.map((index, position) => <text key={days[index].date} x={x(index)} y="230" textAnchor={position === 0 ? "start" : position === 2 ? "end" : "middle"} fill="rgb(82 82 82)" fontSize="9">{dateLabel(days[index].date)}</text>)}
         </svg>
     </div>
 }
@@ -219,6 +229,7 @@ function AccountabilityTracker({ result, people, today, startDate, onRecord }: {
     const days = useMemo(() => buildOkrReportingDays({ cadence: result.reporting_cadence, reportingStartedOn: result.reporting_started_on, measurements: result.measurements, today, windowStart: periodStart }), [periodStart, result.measurements, result.reporting_cadence, result.reporting_started_on, today])
     const [selectedDate, setSelectedDate] = useState<string | null>(null)
     const selectedReports = selectedDate ? result.measurements.filter((measurement) => measurement.reported_on === selectedDate).sort((left, right) => right.measured_at.localeCompare(left.measured_at)) : []
+    const reportTime = (measuredAt: string) => new Intl.DateTimeFormat("en-IE", { hour: "2-digit", minute: "2-digit" }).format(new Date(measuredAt))
     const weekdayLabels = days.slice(0, 7).map((day) => new Intl.DateTimeFormat("en-IE", { weekday: "narrow", timeZone: "UTC" }).format(new Date(`${day.date}T00:00:00Z`)))
     const stateClass: Record<OkrReportingDay["state"], string> = {
         reported: "border-white bg-white text-black",
@@ -235,7 +246,7 @@ function AccountabilityTracker({ result, people, today, startDate, onRecord }: {
             <div className="min-w-0"><div className="mb-2 flex h-7 items-center justify-between"><span className="text-[10px] text-neutral-600">{formatOkrDeadline(days[0].date)} – {formatOkrDeadline(days.at(-1)!.date)}</span>{latestPeriodIndex > 0 ? <div className="flex items-center gap-1"><button type="button" disabled={periodIndex === 0} onClick={() => changePeriod(periodIndex - 1)} aria-label="Previous reporting period" className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-800 text-sm text-neutral-500 hover:border-neutral-600 hover:text-white disabled:cursor-default disabled:opacity-25">‹</button><button type="button" disabled={periodIndex === latestPeriodIndex} onClick={() => changePeriod(periodIndex + 1)} aria-label="Next reporting period" className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-800 text-sm text-neutral-500 hover:border-neutral-600 hover:text-white disabled:cursor-default disabled:opacity-25">›</button></div> : null}</div><div className="grid grid-cols-7 gap-1">{weekdayLabels.map((label, index) => <span key={`${label}-${index}`} className="pb-0.5 text-center text-[10px] text-neutral-700">{label}</span>)}{days.map((day) => <button key={day.date} type="button" disabled={!day.measurement} onClick={() => setSelectedDate(day.date)} aria-label={`${day.date}: ${day.state}${day.reportCount > 1 ? `, ${day.reportCount} reports` : ""}`} className={`aspect-square min-h-7 rounded border text-[10px] tabular-nums transition ${stateClass[day.state]} ${day.measurement ? "cursor-pointer hover:ring-2 hover:ring-neutral-500" : "cursor-default"}`}>{Number(day.date.slice(-2))}</button>)}</div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-neutral-600"><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-white" />Reported</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-amber-500/70" />Due</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-red-700/70" />Missed</span></div></div>
             <TrendChart result={result} days={days} />
         </div>
-        {selectedDate && selectedReports.length ? <Modal title={formatOkrDeadline(selectedDate)} description={`${result.name} · ${selectedReports.length} report${selectedReports.length === 1 ? "" : "s"}`} size="compact" onClose={() => setSelectedDate(null)}><div className="divide-y divide-neutral-800">{selectedReports.map((measurement) => <div key={measurement.id} className="p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Value</p><p className="mt-1 text-xl font-semibold tabular-nums text-white">{formatOkrMetricValue(measurement.value, result.unit, result.currency_code ?? "USD")}</p></div><div className="text-right"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Recorded by</p><p className="mt-1 text-sm text-neutral-300">{people[measurement.recorded_by ?? ""] ?? "Admin"}</p></div></div><div className="mt-4 rounded-lg border border-neutral-800 bg-black/40 px-3 py-2.5"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Notes</p><p className="mt-1 text-sm leading-6 text-neutral-300">{measurement.note || "No notes recorded."}</p></div></div>)}</div></Modal> : null}
+        {selectedDate && selectedReports.length ? <Modal title={formatOkrDeadline(selectedDate)} description={`${result.name} · ${selectedReports.length} report${selectedReports.length === 1 ? "" : "s"}`} size="compact" onClose={() => setSelectedDate(null)}><div className="divide-y divide-neutral-800">{selectedReports.map((measurement) => <div key={measurement.id} className="p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Value</p><p className="mt-1 text-xl font-semibold tabular-nums text-white">{formatOkrMetricValue(measurement.value, result.unit, result.currency_code ?? "USD")}</p></div><div className="text-right"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Recorded</p><p className="mt-1 text-sm font-medium tabular-nums text-neutral-200"><time dateTime={measurement.measured_at}>{reportTime(measurement.measured_at)}</time></p><p className="mt-0.5 text-xs text-neutral-500">by {people[measurement.recorded_by ?? ""] ?? "Admin"}</p></div></div><div className="mt-4 rounded-lg border border-neutral-800 bg-black/40 px-3 py-2.5"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Notes</p><p className="mt-1 text-sm leading-6 text-neutral-300">{measurement.note || "No notes recorded."}</p></div></div>)}</div></Modal> : null}
     </section>
 }
 
