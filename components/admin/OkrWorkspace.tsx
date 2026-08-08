@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent, ty
 import { useRouter } from "next/navigation"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
-import { formatOkrMetricValue, okrGap } from "@/lib/admin/okr-metrics"
+import { formatOkrMetricValue, okrGap, okrTrendScale } from "@/lib/admin/okr-metrics"
 import { addUtcDays, buildOkrReportingDays, okrReportingCadenceLabel, okrReportingPeriod, okrReportingPeriodIndex, type OkrReportingDay } from "@/lib/admin/okr-reporting"
 import type { OkrKeyResult, OkrMeasurement, WorkspaceOkr } from "@/lib/admin/okrs"
 import { formatOkrDeadline, okrDisplayStatus, type WorkspaceOkrDisplayStatus } from "@/lib/admin/okr-title"
@@ -188,16 +188,17 @@ function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReporting
     const carryMeasurement = [...result.measurements].filter((measurement) => measurement.reported_on < days[0].date).sort((left, right) => left.reported_on.localeCompare(right.reported_on) || left.measured_at.localeCompare(right.measured_at)).at(-1)
     const carryValue = carryMeasurement?.value ?? result.baseline_value
     const series = [{ id: "carry", date: days[0].date, measuredAt: "", value: carryValue, position: 0 }, ...plotted]
-    const values = series.map((point) => point.value)
-    const rawMin = Math.min(...values)
-    const rawMax = Math.max(...values)
-    const span = rawMax - rawMin || Math.max(Math.abs(rawMax) * 0.1, 1)
-    const min = rawMin - span * 0.12
-    const max = rawMax + span * 0.12
-    const chartWidth = 480
-    const chartBottom = 198
-    const x = (position: number) => 4 + position * ((chartWidth - 8) / Math.max(1, days.length - 1))
-    const y = (value: number) => 178 - ((value - min) / (max - min)) * 158
+    const { min, max, showZero } = okrTrendScale({ baseline: result.baseline_value, target: result.target_value, values: series.map((point) => point.value), comparator: result.comparator })
+    const latestMissedEnd = days.reduce((latest, day, index) => day.state === "missed" ? index + 1 : latest, 0)
+    const domainEnd = Math.max(1, plotted.at(-1)?.position ?? 0, latestMissedEnd)
+    const activityEndIndex = Math.min(days.length - 1, Math.max(0, Math.ceil(domainEnd) - 1))
+    const chartWidth = 560
+    const plotLeft = 8
+    const plotRight = 454
+    const plotTop = 16
+    const plotBottom = 198
+    const x = (position: number) => plotLeft + Math.min(position, domainEnd) * ((plotRight - plotLeft) / domainEnd)
+    const y = (value: number) => plotBottom - ((value - min) / (max - min)) * (plotBottom - plotTop)
     const unchanged = plotted.filter((point, index) => {
         const previous = plotted[index - 1]
         return previous && previous.value === point.value
@@ -205,18 +206,29 @@ function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReporting
     const activePoint = activeId === null ? null : plotted.find((point) => point.id === activeId) ?? null
     const dateLabel = (date: string) => new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))
     const timeLabel = (measuredAt: string) => new Intl.DateTimeFormat("en-IE", { hour: "2-digit", minute: "2-digit" }).format(new Date(measuredAt))
-    const labelIndexes = [0, Math.floor((days.length - 1) / 2), days.length - 1]
+    const labelPoints = [
+        { index: 0, position: 0, anchor: "start" as const },
+        { index: Math.floor(activityEndIndex / 2), position: domainEnd / 2, anchor: "middle" as const },
+        { index: activityEndIndex, position: domainEnd, anchor: "end" as const },
+    ].filter((point, index, points) => points.findIndex((candidate) => candidate.index === point.index) === index)
+    const axisTicks = [
+        { id: "base", label: "Base", value: result.baseline_value },
+        { id: "target", label: "Target", value: result.target_value },
+        ...(showZero && result.baseline_value !== 0 && result.target_value !== 0 ? [{ id: "zero", label: "", value: 0 }] : []),
+    ]
     const gradientId = `trend-fill-${result.id}`
     return <div className="min-w-0">
-        <svg viewBox={`0 0 ${chartWidth} 240`} className="aspect-[2/1] w-full overflow-visible" role="img" aria-label={`${result.name} measurement trend`} onPointerLeave={() => setActiveId(null)}>
+        <svg viewBox={`0 0 ${chartWidth} 232`} className="aspect-[2.4/1] w-full overflow-visible" role="img" aria-label={`${result.name} measurement trend`} onPointerLeave={() => setActiveId(null)}>
             <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="white" stopOpacity="0.2" /><stop offset="100%" stopColor="white" stopOpacity="0" /></linearGradient></defs>
-            {days.map((day, index) => day.state === "missed" ? <rect key={`miss-${day.date}`} x={x(index) - 5} y="10" width="10" height={chartBottom - 10} rx="3" fill="rgb(127 29 29)" opacity="0.12" /> : null)}
-            {plotted.length ? <><polygon points={`${x(series[0].position)},${chartBottom} ${series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} ${x(series.at(-1)!.position)},${chartBottom}`} fill={`url(#${gradientId})`} /><polyline points={series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></> : null}
+            {axisTicks.map((tick) => <g key={tick.id}><line x1={plotLeft} x2={plotRight} y1={y(tick.value)} y2={y(tick.value)} stroke={tick.id === "target" ? "rgb(82 82 82)" : "rgb(38 38 38)"} strokeWidth="1" strokeDasharray={tick.id === "target" ? "4 5" : undefined} /><line x1={plotRight} x2={plotRight + 5} y1={y(tick.value)} y2={y(tick.value)} stroke="rgb(82 82 82)" /><text x={plotRight + 10} y={y(tick.value) + 3} fill={tick.id === "target" ? "rgb(212 212 212)" : "rgb(115 115 115)"} fontSize="9">{tick.label ? `${tick.label} ` : ""}{formatOkrMetricValue(tick.value, result.unit, result.currency_code ?? "USD")}</text></g>)}
+            <line x1={plotRight} x2={plotRight} y1={plotTop} y2={plotBottom} stroke="rgb(38 38 38)" />
+            {days.slice(0, activityEndIndex + 1).map((day, index) => day.state === "missed" ? <rect key={`miss-${day.date}`} x={x(index)} y={plotTop} width={Math.max(3, x(index + 1) - x(index))} height={plotBottom - plotTop} fill="rgb(127 29 29)" opacity="0.1" /> : null)}
+            {plotted.length ? <><polygon points={`${x(series[0].position)},${plotBottom} ${series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} ${x(series.at(-1)!.position)},${plotBottom}`} fill={`url(#${gradientId})`} /><polyline points={series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></> : null}
             {unchanged.map((point) => <line key={`same-${point.id}`} x1={x(point.position) - 4} x2={x(point.position) + 4} y1={y(point.value)} y2={y(point.value)} stroke="rgb(163 163 163)" strokeWidth="4" strokeLinecap="round" />)}
-            {plotted.map((point) => <rect key={`hit-${point.id}`} x={x(point.position) - 4} y="4" width="8" height={chartBottom - 4} fill="transparent" tabIndex={0} className="outline-none" aria-label={`${dateLabel(point.date)} at ${timeLabel(point.measuredAt)}: ${formatOkrMetricValue(point.value, result.unit, result.currency_code ?? "USD")}`} onPointerEnter={() => setActiveId(point.id)} onPointerDown={() => setActiveId(point.id)} onFocus={() => setActiveId(point.id)} onBlur={() => setActiveId(null)} />)}
-            {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.position)} cy={y(activePoint.value)} r="4" fill="white" stroke="black" strokeWidth="2" /><rect x={Math.max(4, Math.min(chartWidth - 152, x(activePoint.position) - 74))} y={Math.max(4, y(activePoint.value) - 44)} width="148" height="36" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={Math.max(12, Math.min(chartWidth - 144, x(activePoint.position) - 66))} y={Math.max(18, y(activePoint.value) - 29)} fill="rgb(163 163 163)" fontSize="9">{dateLabel(activePoint.date)} · {timeLabel(activePoint.measuredAt)}</text><text x={Math.max(12, Math.min(chartWidth - 144, x(activePoint.position) - 66))} y={Math.max(31, y(activePoint.value) - 16)} fill="white" fontSize="10" fontWeight="600">{formatOkrMetricValue(activePoint.value, result.unit, result.currency_code ?? "USD")}</text></g> : null}
-            {!plotted.length ? <text x={chartWidth / 2} y="76" textAnchor="middle" fill="rgb(64 64 64)" fontSize="11">No reports in this period</text> : null}
-            {labelIndexes.map((index, position) => <text key={days[index].date} x={x(index)} y="230" textAnchor={position === 0 ? "start" : position === 2 ? "end" : "middle"} fill="rgb(82 82 82)" fontSize="9">{dateLabel(days[index].date)}</text>)}
+            {plotted.map((point) => <rect key={`hit-${point.id}`} x={x(point.position) - 5} y={plotTop} width="10" height={plotBottom - plotTop} fill="transparent" tabIndex={0} className="outline-none" aria-label={`${dateLabel(point.date)} at ${timeLabel(point.measuredAt)}: ${formatOkrMetricValue(point.value, result.unit, result.currency_code ?? "USD")}`} onPointerEnter={() => setActiveId(point.id)} onPointerDown={() => setActiveId(point.id)} onFocus={() => setActiveId(point.id)} onBlur={() => setActiveId(null)} />)}
+            {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.position)} cy={y(activePoint.value)} r="4" fill="white" stroke="black" strokeWidth="2" /><rect x={Math.max(plotLeft, Math.min(plotRight - 148, x(activePoint.position) - 74))} y={Math.max(plotTop, y(activePoint.value) - 44)} width="148" height="36" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={Math.max(plotLeft + 8, Math.min(plotRight - 140, x(activePoint.position) - 66))} y={Math.max(plotTop + 14, y(activePoint.value) - 29)} fill="rgb(163 163 163)" fontSize="9">{dateLabel(activePoint.date)} · {timeLabel(activePoint.measuredAt)}</text><text x={Math.max(plotLeft + 8, Math.min(plotRight - 140, x(activePoint.position) - 66))} y={Math.max(plotTop + 27, y(activePoint.value) - 16)} fill="white" fontSize="10" fontWeight="600">{formatOkrMetricValue(activePoint.value, result.unit, result.currency_code ?? "USD")}</text></g> : null}
+            {!plotted.length ? <text x={(plotLeft + plotRight) / 2} y="76" textAnchor="middle" fill="rgb(64 64 64)" fontSize="11">No reports in this period</text> : null}
+            {labelPoints.map((point) => <text key={`${days[point.index].date}-${point.anchor}`} x={x(point.position)} y="222" textAnchor={point.anchor} fill="rgb(82 82 82)" fontSize="9">{dateLabel(days[point.index].date)}</text>)}
         </svg>
     </div>
 }

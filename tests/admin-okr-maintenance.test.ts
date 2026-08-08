@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { access, readFile } from "node:fs/promises"
 import test from "node:test"
 import { maintenanceBugTitle, resolveMaintenanceError } from "../lib/admin/error-catalogue.ts"
-import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet } from "../lib/admin/okr-metrics.ts"
+import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet, okrTrendScale } from "../lib/admin/okr-metrics.ts"
 import { okrDisplayStatus, okrDisplayTitle } from "../lib/admin/okr-title.ts"
 import { workItemPriorityLabel, workItemPriorityOptions } from "../lib/work-item-priority.ts"
 
@@ -21,6 +21,13 @@ test("at-least and at-most targets calculate target state and remaining gap", ()
     assert.equal(okrTargetMet("at_most", 5, 5), true)
     assert.equal(okrTargetMet("at_most", 7, 5), false)
     assert.equal(okrGap("at_most", 7, 5), 2)
+})
+
+test("OKR trend scales preserve direction, reverse-progress room, zero, and target overshoot", () => {
+    assert.deepEqual(okrTrendScale({ baseline: 100, target: 500, values: [100, 310], comparator: "at_least" }), { min: 0, max: 500, showZero: true })
+    assert.deepEqual(okrTrendScale({ baseline: 100, target: 500, values: [100, 550], comparator: "at_least" }), { min: 0, max: 570, showZero: true })
+    assert.deepEqual(okrTrendScale({ baseline: 100, target: 50, values: [100, 70], comparator: "at_most" }), { min: 50, max: 110, showZero: false })
+    assert.deepEqual(okrTrendScale({ baseline: 100, target: 50, values: [100, 1], comparator: "at_most" }), { min: 0, max: 110, showZero: true })
 })
 
 test("overall attainment is an equal-weight average", () => {
