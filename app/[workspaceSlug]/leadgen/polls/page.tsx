@@ -1,20 +1,20 @@
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
-import { BetelgezeStatusMark } from "@/components/brand/BetelgezeStatusMark"
 import { LeadgenTabs } from "@/components/leadgen/LeadgenTabs"
 import { NewPollButton } from "@/components/leadgen/NewPollButton"
 import { PollDuration } from "@/components/leadgen/PollDuration"
 import { PollsAutoRefresh } from "@/components/leadgen/PollsAutoRefresh"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
-import { ListCreatorAvatar } from "@/components/list/ListCreatorAvatar"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
-import { MobileCardActionSurface } from "@/components/list/MobileCardActionSurface"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { SquarePill } from "@/components/ui/SquarePill"
+import { Status } from "@/components/ui/Status"
+import type { StatusTone } from "@/components/ui/status-styles"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { sourceLabel } from "@/lib/leadgen/sources"
 import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { compactText, formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
-import Link from "next/link"
 import { cancelLeadgenPoll, removeLeadgenPoll, retryLeadgenPoll } from "../actions"
 
 export const dynamic = "force-dynamic"
@@ -49,12 +49,12 @@ type EvidenceClaim = {
     claim_kind: string
 }
 
-const statusStyles: Record<PollStatus, { label: string; mark: string; text: string }> = {
-    queued: { label: "Initialising", mark: "bg-neutral-400", text: "text-neutral-300" },
-    running: { label: "In progress", mark: "bg-yellow-300", text: "text-yellow-200" },
-    completed: { label: "Successful", mark: "bg-emerald-300", text: "text-emerald-200" },
-    failed: { label: "Failed", mark: "bg-red-300", text: "text-red-200" },
-    cancelled: { label: "Cancelled", mark: "bg-red-300", text: "text-red-200" },
+const statusStyles: Record<PollStatus, { label: string; tone: StatusTone }> = {
+    queued: { label: "Initialising", tone: "grey" },
+    running: { label: "In progress", tone: "yellow" },
+    completed: { label: "Successful", tone: "green" },
+    failed: { label: "Failed", tone: "red" },
+    cancelled: { label: "Cancelled", tone: "red" },
 }
 
 function statusMeta(status: string) {
@@ -173,7 +173,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                 </div>)}
             </div>
 
-            <section className="mt-5 space-y-3 2xl:space-y-0 2xl:rounded-2xl 2xl:border 2xl:border-neutral-800 2xl:bg-black">
+            <List ariaLabel="Lead generation polls">
                 {polls.length ? polls.map((poll) => {
                     const meta = statusMeta(poll.status)
                     const live = ["queued", "running"].includes(poll.status)
@@ -186,9 +186,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                     const hasConsoleEntry = poll.status === "failed" || failedTasks.length > 0
                         || failedInvestigations.length > 0
                     const creator = poll.requested_by ? creatorById.get(poll.requested_by) : null
-                    const statusMark = <span className={`inline-flex items-center gap-2 text-sm ${meta.text}`}><BetelgezeStatusMark className={meta.mark} />{meta.label}</span>
                     const duration = <span className="font-mono text-sm text-neutral-500"><PollDuration startedAt={poll.started_at} createdAt={poll.created_at} completedAt={poll.completed_at} live={live} /></span>
-                    const triggerPill = <span className="w-fit rounded-md border border-neutral-800 px-2 py-1 text-[11px] uppercase tracking-wide text-neutral-400">{poll.trigger === "manual" ? "Manual" : "Automated"}</span>
                     const pollHref = `/${workspace.slug}/leadgen/poll/${poll.id}`
                     const pollActions = [
                         { label: "Open poll", href: pollHref },
@@ -197,49 +195,34 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                         live ? { label: "Cancel", action: cancelLeadgenPoll.bind(null, workspace.slug, poll.id), danger: true, confirmMessage: "Cancel this running poll?" } : {},
                         { label: "Remove", action: removeLeadgenPoll.bind(null, workspace.slug, poll.id), danger: true },
                     ]
-                    return <div key={poll.id} className="2xl:border-b 2xl:border-neutral-900 2xl:last:border-0">
-                        <MobileCardActionSurface actions={pollActions} className={`rounded-2xl border border-neutral-800 bg-black 2xl:hidden ${poll.status === "failed" ? "bg-red-950/[0.08]" : ""}`}>
-                            <div className="flex items-center justify-between gap-3 rounded-t-2xl border-b border-neutral-900 bg-neutral-900/35 px-3.5 py-2.5">
-                                <Link href={pollHref} className="min-w-0 truncate text-base font-medium text-neutral-100 underline decoration-neutral-500 underline-offset-4 hover:text-white">
-                                    {sourceNames(poll.source_snapshot, poll.source_count)} poll
-                                </Link>
-                                <span className="flex shrink-0 items-center gap-2">{statusMark}{duration}</span>
-                            </div>
-                            <div className="flex items-center gap-3 px-3.5 py-2.5">
-                                <p className="text-sm text-neutral-500"><span className="text-neutral-200">{taskStats.completedQueries}</span>/<span className="text-neutral-200">{taskStats.sourceQueries}</span> seed</p>
-                                <p className="text-sm text-neutral-500"><span className="text-neutral-200">{taskStats.rawReturned}</span> raw</p>
-                                <p className="text-sm text-neutral-500"><span className="text-neutral-200">{claimStats.matched}</span>/<span className="text-neutral-200">{claimStats.checks}</span> checks</p>
-                                <p className="font-mono text-sm text-neutral-500">{shortId(poll.id)}</p>
-                                <div className="ml-auto flex shrink-0 items-center gap-2 pr-2">
-                                    <p className="whitespace-nowrap text-sm text-neutral-500">{formatRelativeTime(poll.created_at)}</p>
-                                    <ListCreatorAvatar src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} className="h-7 w-7 shrink-0" />
-                                </div>
-                            </div>
-                        </MobileCardActionSurface>
-                        <div className={`hidden min-h-14 gap-3 px-4 py-2.5 2xl:grid 2xl:grid-cols-[minmax(190px,1fr)_94px_170px_160px_130px_100px_120px_32px] 2xl:items-center ${poll.status === "failed" ? "bg-red-950/[0.08]" : ""}`}>
-                        <div className="min-w-0">
-                            <p className="truncate text-base font-medium text-neutral-100">{sourceNames(poll.source_snapshot, poll.source_count)} poll</p>
-                        </div>
-                        {triggerPill}
-                        <div className="flex items-center justify-end gap-3 md:justify-start">
-                            {statusMark}
-                            {duration}
-                        </div>
-                        <p className="text-sm text-neutral-500"><span className="text-neutral-200">{taskStats.rawReturned}</span> raw · <span className="text-neutral-200">{claimStats.checks}</span> checks</p>
-                        <p className="text-sm text-neutral-500"><span className="text-neutral-200">{claimStats.ownerClaims}</span> owner claims · <span className="text-neutral-200">{poll.qualified_count}</span> qualified</p>
-                        <p className="font-mono text-sm text-neutral-500">{shortId(poll.id)}</p>
-                        <div className="flex items-center justify-end gap-3">
-                            <p className="whitespace-nowrap text-sm text-neutral-500">{formatRelativeTime(poll.created_at)}</p>
-                            <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Created by" date={new Date(poll.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
-                        </div>
-                        <ListActionMenu actions={pollActions} />
-                    </div>
-                    </div>
+                    return <ListItem key={poll.id} className={poll.status === "failed" ? "bg-red-950/[0.08]" : ""}>
+                        <ListPrimaryRow>
+                            <ListTitle href={pollHref} className="flex-1">{sourceNames(poll.source_snapshot, poll.source_count)} poll</ListTitle>
+                            <SquarePill>{poll.trigger === "manual" ? "Manual" : "Automated"}</SquarePill>
+                            <span className="ml-auto flex shrink-0 items-center gap-3">
+                                <Status label={meta.label} tone={meta.tone} />
+                                {duration}
+                            </span>
+                        </ListPrimaryRow>
+                        <ListSecondaryRow>
+                            <span className="text-neutral-500"><span className="text-neutral-200">{taskStats.completedQueries}</span>/<span className="text-neutral-200">{taskStats.sourceQueries}</span> seed</span>
+                            <span className="text-neutral-500"><span className="text-neutral-200">{taskStats.rawReturned}</span> raw</span>
+                            <span className="text-neutral-500"><span className="text-neutral-200">{claimStats.matched}</span>/<span className="text-neutral-200">{claimStats.checks}</span> checks</span>
+                            <span className="text-neutral-500"><span className="text-neutral-200">{claimStats.ownerClaims}</span> owner claims</span>
+                            <span className="text-neutral-500"><span className="text-neutral-200">{poll.qualified_count}</span> qualified</span>
+                            <ListTrailing>
+                                <span className="font-mono text-neutral-500">{shortId(poll.id)}</span>
+                                <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(poll.created_at)}</span>
+                                <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Created by" date={new Date(poll.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
+                                <ListActionMenu actions={pollActions} />
+                            </ListTrailing>
+                        </ListSecondaryRow>
+                    </ListItem>
                 }) : <div className="p-5">
                     <h3 className="text-xl font-semibold">Run your first test poll.</h3>
                     <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-400">This will queue a poll record and run the configured sources.</p>
                 </div>}
-            </section>
+            </List>
 
             {polls.some((poll) => poll.status === "failed" || (tasksByPoll[poll.id] ?? []).some((task) => task.error || task.status === "failed") || (investigationsByPoll[poll.id] ?? []).some((task) => task.error || task.status === "failed")) && <section className="mt-5 rounded-2xl border border-neutral-800 bg-black">
                 <div className="border-b border-neutral-800 px-5 py-4">
@@ -253,7 +236,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                     const firstError = poll.error ?? failedTasks.find((task) => task.error)?.error ?? failedInvestigations.find((task) => task.error)?.error ?? "Poll failed without a task-level error. Retry the poll; if this repeats, the source worker could not create or read its source tasks."
                     const pollMeta = statusMeta(poll.status === "failed" ? "failed" : failedTasks[0]?.status ?? "failed")
                     return <div id={`poll-console-${poll.id}`} key={poll.id} className="grid min-h-14 scroll-mt-24 gap-3 border-b border-neutral-900 px-4 py-3 last:border-0 md:grid-cols-[140px_minmax(0,1fr)_120px] md:items-center">
-                        <span className={`inline-flex items-center gap-2 text-sm ${pollMeta.text}`}><BetelgezeStatusMark className={pollMeta.mark} />{pollMeta.label}</span>
+                        <Status label={pollMeta.label} tone={pollMeta.tone} />
                         <details className="min-w-0 text-sm">
                             <summary className="cursor-pointer truncate text-red-300">{compactText(firstError, 220)}</summary>
                             <div className="mt-2 space-y-2">

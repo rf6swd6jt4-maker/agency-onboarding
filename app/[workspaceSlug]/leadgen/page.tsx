@@ -3,7 +3,9 @@ import { LeadgenTabs } from "@/components/leadgen/LeadgenTabs"
 import { NewPollButton } from "@/components/leadgen/NewPollButton"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListAutoRefresh } from "@/components/list/ListAutoRefresh"
-import { MobileCardActionSurface } from "@/components/list/MobileCardActionSurface"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
+import { Status } from "@/components/ui/Status"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
@@ -92,7 +94,7 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                 </div>)}
             </div>
 
-            <section className="mt-5 space-y-3 2xl:space-y-0 2xl:rounded-2xl 2xl:border 2xl:border-neutral-800 2xl:bg-black">
+            <List ariaLabel="Qualified leads">
                 {companies.length ? companies.map((company) => {
                     const sourceUrl = company.website_url ?? company.profile_url ?? null
                     const bestPhone = company.owner_phone
@@ -102,41 +104,33 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                     const industry = String(company.industry_value ?? "—").replace(/_/g, " ")
                     const scoreLine = `Score ${company.lead_score ?? 0} · owner ${company.owner_identity_points ?? 0}/${company.owner_phone_points ?? 0}`
                     const copyLine = `${ownerName}: ${bestPhone ?? "No owner phone"} - ${company.display_name}, ${industry}, ${location}. ${scoreLine}`
-                    const phoneStatus = <span className={`inline-flex items-center gap-2 text-sm ${bestPhone ? "text-emerald-200" : "text-neutral-400"}`}><span className={`h-2 w-2 rotate-45 ${bestPhone ? "bg-emerald-300" : "bg-neutral-500"}`} />{bestPhone ? "Callable" : "No phone"}</span>
                     const relationshipId = relationshipByCompanyId.get(company.id)
+                    const leadHref = relationshipId ? relationshipHubHref(workspace.slug, relationshipId) : sourceUrl
                     const leadActions = [
                         relationshipId ? { label: "Open relationship", href: relationshipHubHref(workspace.slug, relationshipId) } : { label: "Create relationship", action: promoteLeadgenCompanyToRelationship.bind(null, workspace.slug, company.id) },
                         sourceUrl ? { label: "Open source", href: sourceUrl, external: true } : {},
                         { label: "Copy lead details", copyText: copyLine },
                         { label: "Remove", action: removeLeadgenCompany.bind(null, workspace.slug, company.id), danger: true },
                     ]
-                    return <div key={company.id} className="2xl:border-b 2xl:border-neutral-900 2xl:last:border-0">
-                        <MobileCardActionSurface actions={leadActions} className="rounded-2xl border border-neutral-800 bg-black 2xl:hidden">
-                            <div className="flex items-center justify-between gap-3 rounded-t-2xl border-b border-neutral-900 bg-neutral-900/35 px-3.5 py-2.5">
-                                <p className="min-w-0 flex-1 truncate text-base font-medium text-neutral-100">{titleLine}</p>
-                                {phoneStatus}
-                            </div>
-                            <div className="flex items-center gap-3 px-3.5 py-2.5">
-                                <p className="truncate text-sm text-neutral-200">{bestPhone || "No phone"}</p>
-                                <p className="min-w-0 flex-1 truncate text-sm text-neutral-400">{industry}</p>
-                                <p className="font-mono text-sm text-neutral-500">{shortId(company.id)}</p>
-                                <p className="text-sm whitespace-nowrap text-neutral-500">{formatRelativeTime(company.created_at)}</p>
-                            </div>
-                        </MobileCardActionSurface>
-                    <div className="hidden min-h-14 gap-3 px-4 py-2.5 2xl:grid 2xl:grid-cols-[minmax(210px,1.1fr)_150px_minmax(190px,0.9fr)_130px_110px_110px_120px_120px_32px] 2xl:items-center">
-                        <div className="min-w-0">
-                            <p className="truncate text-base font-medium text-neutral-100">{titleLine}</p>
-                        </div>
-                        {phoneStatus}
-                        <p className="truncate text-sm text-neutral-200">{bestPhone || "No phone"}</p>
-                        <p className="truncate text-sm capitalize text-neutral-400">{company.source_key}</p>
-                        <p className="truncate text-sm text-neutral-400">{String(company.industry_value ?? "—").replace(/_/g, " ")}</p>
-                        <p className="font-mono text-sm text-neutral-500">{company.lead_score ?? 0} pts</p>
-                        <p className="truncate font-mono text-sm text-neutral-500">{shortId(company.id)}</p>
-                        <p className="whitespace-nowrap text-right text-sm text-neutral-500">{formatRelativeTime(company.created_at)}</p>
-                        <ListActionMenu actions={leadActions} />
-                    </div>
-                    </div>
+                    return <ListItem key={company.id}>
+                        <ListPrimaryRow>
+                            <ListTitle href={leadHref} external={!relationshipId && Boolean(sourceUrl)} className="flex-1">{titleLine}</ListTitle>
+                            <Status label={bestPhone ? "Callable" : "No phone"} tone={bestPhone ? "green" : "grey"} className="ml-auto shrink-0" />
+                        </ListPrimaryRow>
+                        <ListSecondaryRow>
+                            <span className="truncate text-neutral-200">{bestPhone || "No phone"}</span>
+                            <span className="truncate capitalize text-neutral-400">{company.source_key}</span>
+                            <span className="truncate text-neutral-400">{industry}</span>
+                            <span className="truncate text-neutral-500">{location}</span>
+                            <span className="font-mono text-neutral-500">{company.lead_score ?? 0} pts</span>
+                            <ListTrailing>
+                                <span className="font-mono text-neutral-500">{shortId(company.id)}</span>
+                                <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(company.created_at)}</span>
+                                <ListCreatorBadge username={null} label="Added by" date={new Date(company.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
+                                <ListActionMenu actions={leadActions} />
+                            </ListTrailing>
+                        </ListSecondaryRow>
+                    </ListItem>
                 }) : <div className="grid gap-4 p-5 lg:grid-cols-[1.1fr_0.9fr]">
                     <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-5">
                         <h3 className="text-xl font-semibold">{latestPoll ? "This poll did not return qualified leads." : "No real companies have been collected yet."}</h3>
@@ -151,7 +145,7 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                         </ul>
                     </div>
                 </div>}
-            </section>
+            </List>
             <p className="mt-10 text-center text-xs text-neutral-600">Betelgeze © 2026</p>
         </div>
     </main>

@@ -106,6 +106,88 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 - When the design changes, update `components/ui`, this document, and existing uses together.
 - A local exception must include a code comment explaining why the shared primitive cannot represent it.
 
+## List
+
+`List` is the canonical presentation for a collection of comparable records that people need to scan, open, and act on. Leads, polls, and relationships are the reference implementations. A list is not a gallery, settings form, navigation rail, timeline, disclosure log, or nested planning structure such as OKRs.
+
+### Anatomy
+
+Use the primitives in `components/list/List.tsx`:
+
+```tsx
+<List ariaLabel="Polls">
+    <ListItem>
+        <ListPrimaryRow>
+            <ListTitle href={itemHref}>Item name</ListTitle>
+            {/* categorical labels */}
+            <Status label="In progress" tone="yellow" className="ml-auto" />
+        </ListPrimaryRow>
+        <ListSecondaryRow>
+            {/* flexible domain metadata */}
+            <ListTrailing>
+                {/* ID, time, creator, actions */}
+            </ListTrailing>
+        </ListSecondaryRow>
+    </ListItem>
+</List>
+```
+
+- `List` owns the consolidated black surface, `rounded-2xl` outer corners, neutral border, clipping, and list semantics.
+- `ListItem` owns the divider between records and the restrained hover highlight. Do not wrap every item in its own floating card.
+- `ListPrimaryRow` is the identity and state band. It has the subtly tinted surface and internal divider.
+- `ListSecondaryRow` is the supporting-information band. It can wrap when space is constrained.
+- `ListTitle` is the primary identity, always placed first and given the flexible width. Link it whenever the record has a canonical destination. It truncates rather than displacing state or actions.
+- `ListTrailing` is the stable audit/action cluster at the end of the supporting row.
+
+### Information order
+
+The primary row follows this order:
+
+1. Primary item name on the left.
+2. Stable categorical labels immediately after the name, such as `Test`, `Manual`, or `RelationshipStage`.
+3. Exactly one operational `Status` aligned to the right. A compact companion such as poll duration may sit beside it.
+
+The secondary row follows this order:
+
+1. Domain-specific supporting information in descending importance.
+2. Measurements, contact routes, source information, or assigned-item pills where relevant.
+3. `ListTrailing`, ordered as short ID, relevant relative time, creator, then overflow actions.
+
+The meaning of the time may vary—created, updated, or latest activity—but its position and subdued treatment do not. Use the creator tooltip to disclose whether an item was created or added and its exact timestamp.
+
+### Content and density
+
+- Lists are intentionally two rows. Do not flatten them into a dense one-row table at wide breakpoints.
+- Keep the primary row calm. It contains identity, categorical labels, and one operational status—not general metadata.
+- The secondary row is flexible rather than column-prescriptive. Omit unavailable fields cleanly; do not render empty column placeholders.
+- Use `text-sm` and neutral supporting colours. Reserve `text-base font-medium` for the primary name.
+- Use the shared `Status`, pill, stage, creator, and action components. Do not recreate their appearance locally.
+- Use short, scannable values. Longer explanation belongs on the detail page or in an intentionally designed preview field.
+- Keep one obvious primary destination and move secondary operations into `ListActionMenu`.
+
+### Responsive behaviour
+
+- Preserve the same two semantic rows at every breakpoint.
+- Both rows may wrap, but their information order must remain unchanged.
+- The title receives flexible space and truncates first.
+- Statuses, labels, the trailing cluster, and actions remain legible and must not be squeezed into overlapping columns.
+- The outer list remains one consolidated collection on mobile and desktop; do not switch between separate cards and a table at an arbitrary breakpoint.
+
+### Interaction and exceptional state
+
+- Every `ListItem` receives the shared subtle hover background so the active record is easy to track across a wide row.
+- A linked title is the default navigation affordance. Do not make a non-link row appear clickable unless the entire row is implemented as an accessible link.
+- The overflow menu is always the final element. Destructive operations remain inside it and keep their confirmation behaviour.
+- A genuine failed or critical record may add a very faint semantic wash to `ListItem`, but this must not replace its `Status` or alter the standard geometry.
+
+### Reference mappings
+
+- Lead: owner and company; callability status; phone, source, industry, location, score; ID, created time, Betelgeze creator, actions.
+- Poll: source summary; manual/automated label; poll status and duration; pipeline counts; ID, created time, creator, actions.
+- Relationship: person and business; Test and lifecycle labels; work status; role, contact routes, location and assigned services; ID, updated time, creator, actions.
+
+When a new list cannot fit this anatomy, first determine whether it is actually a list. Do not extend the standard merely to make galleries, timelines, settings rows, evidence disclosures, or nested planning structures resemble one.
+
 ## TrendChart
 
 `TrendChart` is the canonical compact time-series graph. It owns the chart geometry, white trend line, fading area gradient, axes, emphasized reference ticks, optional red exception bands, responsive labels, and keyboard/pointer tooltip behaviour. Feature code supplies normalized positions, numeric values, and already-formatted labels; it must not recreate the SVG treatment locally.

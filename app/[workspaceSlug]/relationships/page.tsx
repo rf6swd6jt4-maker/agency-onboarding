@@ -1,9 +1,8 @@
 import Link from "next/link"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
-import { ListCreatorAvatar } from "@/components/list/ListCreatorAvatar"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
-import { MobileCardActionSurface } from "@/components/list/MobileCardActionSurface"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { RelationshipStage, RoundPill, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { SERVICES } from "@/lib/onboarding/services"
@@ -142,7 +141,7 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                     </nav>
                 </section>
 
-                <section className="mt-5 space-y-3 2xl:space-y-0 2xl:overflow-hidden 2xl:rounded-2xl 2xl:border 2xl:border-neutral-800 2xl:bg-black">
+                <List ariaLabel="Relationships">
                     {visibleRelationships.length ? (
                         visibleRelationships.map((relationship) => {
                             const location = relationshipLocationLabel(relationship)
@@ -168,60 +167,29 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                 relationship.primary_email ? { label: "Copy email", copyText: relationship.primary_email } : {},
                             ]
                             return (
-                                <div key={relationship.id} className="2xl:border-b 2xl:border-neutral-900 2xl:last:border-0">
-                                    <MobileCardActionSurface actions={relationshipActions} label={`Open actions for ${relationship.primary_person_name}`} className="rounded-2xl border border-neutral-800 bg-black 2xl:hidden">
-                                        <div className="flex items-center gap-2 rounded-t-2xl border-b border-neutral-900 bg-neutral-900/35 px-3.5 py-2.5">
-                                            <Link href={relationshipHref} className="min-w-0 max-w-[45%] truncate text-base font-medium text-neutral-100 underline decoration-neutral-600 underline-offset-4 hover:text-white">
-                                                {relationshipTitle}
-                                            </Link>
-                                            {isTest ? <SquarePill tone="yellow" className="ml-2">Test</SquarePill> : null}
-                                            <span className="ml-2 shrink-0">{workStatus}</span>
-                                            <RelationshipStage phase={relationship.lifecycle_phase} className="ml-auto shrink-0" />
-                                        </div>
-                                        <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5">
-                                            {relationship.primary_contact_role ? <span className="mr-1 shrink-0 text-sm text-neutral-400">{relationship.primary_contact_role}</span> : null}
-                                            {smsPhone ? <p className="truncate text-sm text-neutral-200">SMS: {smsPhone}</p> : null}
-                                            {effectiveWhatsappPhone ? <p className="truncate text-sm text-neutral-400">WA: {effectiveWhatsappPhone}</p> : null}
-                                            {!smsPhone && !effectiveWhatsappPhone ? <p className="text-sm text-neutral-500">No phone</p> : null}
-                                            {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
-                                            <div className="ml-auto flex shrink-0 items-center gap-3">
-                                                <p className="font-mono text-sm text-neutral-500">{shortId(relationship.id)}</p>
-                                                <p className="whitespace-nowrap text-sm text-neutral-500">{formatRelativeTime(relationship.updated_at)}</p>
-                                                <ListCreatorAvatar src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} className="h-7 w-7 shrink-0" />
-                                            </div>
-                                        </div>
-                                    </MobileCardActionSurface>
-
-                                    <div className="hidden min-h-14 gap-3 px-4 py-2.5 2xl:grid 2xl:grid-cols-[minmax(360px,1.4fr)_minmax(230px,1fr)_minmax(180px,0.8fr)_150px_190px_32px] 2xl:items-center">
-                                        <div className="min-w-0">
-                                            <div className="flex min-w-0 items-center gap-3">
-                                                <Link href={relationshipHref} className="truncate text-base font-medium text-neutral-100 hover:text-white hover:underline hover:decoration-neutral-600 hover:underline-offset-4">
-                                                    {relationshipTitle}
-                                                </Link>
-                                                {isTest ? <SquarePill tone="yellow" className="ml-2">Test</SquarePill> : null}
-                                                <span className="ml-2 shrink-0">{workStatus}</span>
-                                            </div>
-                                            {relationship.primary_contact_role ? <p className="mt-1 truncate text-sm text-neutral-400">{relationship.primary_contact_role}</p> : null}
-                                        </div>
-                                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-                                            {smsPhone ? <p className="truncate text-sm text-neutral-200">SMS: {smsPhone}</p> : null}
-                                            {effectiveWhatsappPhone ? <p className="truncate text-sm text-neutral-400">WA: {effectiveWhatsappPhone}</p> : null}
-                                            {!smsPhone && !effectiveWhatsappPhone ? <p className="text-sm text-neutral-500">No phone</p> : null}
-                                            {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
-                                        </div>
-                                        <div className="min-w-0">
-                                            <p className="truncate text-sm text-neutral-300">{relationship.primary_email ?? "No email saved"}</p>
-                                            <p className="truncate text-xs capitalize text-neutral-600">{location ?? "Location unset"}</p>
-                                        </div>
+                                <ListItem key={relationship.id}>
+                                    <ListPrimaryRow>
+                                        <ListTitle href={relationshipHref} className="flex-1">{relationshipTitle}</ListTitle>
+                                        {isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}
                                         <RelationshipStage phase={relationship.lifecycle_phase} />
-                                        <div className="flex items-center justify-end gap-3">
-                                            <p className="font-mono text-sm text-neutral-500">{shortId(relationship.id)}</p>
-                                            <p className="whitespace-nowrap text-sm text-neutral-500">{formatRelativeTime(relationship.updated_at)}</p>
+                                        <span className="ml-auto shrink-0">{workStatus}</span>
+                                    </ListPrimaryRow>
+                                    <ListSecondaryRow>
+                                        {relationship.primary_contact_role ? <span className="shrink-0 text-neutral-400">{relationship.primary_contact_role}</span> : null}
+                                        {smsPhone ? <span className="truncate text-neutral-200">SMS: {smsPhone}</span> : null}
+                                        {effectiveWhatsappPhone ? <span className="truncate text-neutral-400">WA: {effectiveWhatsappPhone}</span> : null}
+                                        {!smsPhone && !effectiveWhatsappPhone ? <span className="text-neutral-500">No phone</span> : null}
+                                        <span className="truncate text-neutral-400">{relationship.primary_email ?? "No email saved"}</span>
+                                        <span className="truncate capitalize text-neutral-500">{location ?? "Location unset"}</span>
+                                        {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                        <ListTrailing>
+                                            <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
+                                            <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(relationship.updated_at)}</span>
                                             <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Added by" date={new Date(relationship.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
-                                        </div>
-                                        <ListActionMenu actions={relationshipActions} />
-                                    </div>
-                                </div>
+                                            <ListActionMenu actions={relationshipActions} />
+                                        </ListTrailing>
+                                    </ListSecondaryRow>
+                                </ListItem>
                             )
                         })
                     ) : (
@@ -232,7 +200,7 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                             </p>
                         </div>
                     )}
-                </section>
+                </List>
             </div>
         </main>
     )
