@@ -110,7 +110,7 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 
 `TrendChart` is the canonical compact time-series graph. It owns the chart geometry, white trend line, fading area gradient, axes, emphasized reference ticks, optional red exception bands, responsive labels, and keyboard/pointer tooltip behaviour. Feature code supplies normalized positions, numeric values, and already-formatted labels; it must not recreate the SVG treatment locally.
 
-Use the neutral white line for ordinary measurements and activity volume. Red bands mark exceptional or missed periods behind the series; they do not change the meaning of the measured line itself.
+Use the neutral white line for ordinary measurements and activity volume. Use `tone="red"` only when the series itself measures errors or critical failures; it changes both the line and its gradient. Red bands mark exceptional or missed periods behind another series and do not change the meaning of the measured line itself.
 
 ```tsx
 <TrendChart

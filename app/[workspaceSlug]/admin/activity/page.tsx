@@ -1,8 +1,10 @@
 import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { TrendChart } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
-import { ADMIN_ACTIVITY_CATEGORIES, adminActivityCategoryLabel, listAdminActivity, type AdminActivityCategory, type AdminActivityLevel } from "@/lib/admin/activity"
+import { ADMIN_ACTIVITY_CATEGORIES, adminActivityCategoryLabel, listAdminActivity, listAdminActivitySince, type AdminActivityCategory, type AdminActivityLevel } from "@/lib/admin/activity"
+import { buildAdminActivityMetrics, type AdminActivityMetric } from "@/lib/admin/activity-metrics"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -18,10 +20,41 @@ function metadataSummary(metadata: Record<string, unknown>) {
     return Object.entries(metadata).filter(([, value]) => value !== null && value !== undefined && typeof value !== "object").slice(0, 4).map(([key, value]) => `${key.replace(/_/g, " ")}: ${String(value)}`).join(" · ")
 }
 
+function metricValue(metric: AdminActivityMetric, value: number) {
+    return metric.unit === "percentage" ? `${value.toFixed(value > 0 && value < 10 ? 1 : 0)}%` : Math.round(value).toLocaleString("en-IE")
+}
+
+function metricTime(value: string, detailed = false) {
+    return new Intl.DateTimeFormat("en-IE", detailed
+        ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Dublin" }
+        : { weekday: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Dublin" }
+    ).format(new Date(value))
+}
+
+function ActivityMetricCard({ metric }: { metric: AdminActivityMetric }) {
+    const maximum = Math.max(1, ...metric.points.map((point) => point.value))
+    const labelIndexes = [0, Math.floor((metric.points.length - 1) / 2), metric.points.length - 1]
+    return <article className="min-w-0 rounded-xl border border-neutral-800 bg-black px-4 pb-3 pt-4">
+        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="text-sm font-medium text-neutral-200">{metric.title}</h2><p className="mt-1 min-h-10 text-xs leading-5 text-neutral-600">{metric.description}</p></div><div className="shrink-0 text-right"><p className={`text-2xl font-semibold tabular-nums ${metric.tone === "red" ? "text-red-400" : "text-white"}`}>{metricValue(metric, metric.currentValue)}</p><p className="mt-0.5 text-[10px] text-neutral-600">Current hour</p></div></div>
+        <div className="mt-2"><TrendChart
+            ariaLabel={`${metric.title} over the last 24 hours`}
+            points={metric.points.map((point, index) => ({ id: `${metric.key}-${point.startsAt}`, position: index, value: point.value, ariaLabel: `${metricTime(point.startsAt, true)}: ${metricValue(metric, point.value)}`, tooltipLabel: metricTime(point.startsAt, true), tooltipValue: metricValue(metric, point.value) }))}
+            domainEnd={metric.points.length - 1}
+            min={0}
+            max={maximum}
+            labels={labelIndexes.map((index, labelIndex) => ({ id: `${metric.key}-label-${index}`, position: index, label: metricTime(metric.points[index].startsAt), anchor: labelIndex === 0 ? "start" as const : labelIndex === labelIndexes.length - 1 ? "end" as const : "middle" as const }))}
+            tone={metric.tone}
+        /></div>
+    </article>
+}
+
 export default async function AdminActivityPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
     const { workspace, user } = await requireWorkspace(workspaceSlug, "admin")
-    const events = await listAdminActivity(workspace.id)
+    const now = new Date()
+    const metricSince = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+    const [events, metricEvents] = await Promise.all([listAdminActivity(workspace.id, 500), listAdminActivitySince(workspace.id, metricSince)])
+    const metrics = buildAdminActivityMetrics(metricEvents, now)
     const actorIds = [...new Set(events.map((event) => event.actor_user_id).filter((id): id is string => Boolean(id)))]
     const { data: profiles } = actorIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", actorIds) : { data: [] }
     const actorNames = new Map((profiles ?? []).map((profile) => [profile.user_id, profile.username]))
@@ -43,7 +76,9 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
             <header><h1 className="text-2xl font-semibold">Activity Console</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">A workspace-wide operational trail for onboarding, billing, communications, Lead Gen, integrations, and Gantt automation.</p></header>
             <AdminPanelNav workspaceSlug={workspace.slug} active="activity" />
 
-            <section className="mt-6"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-xl font-semibold">Event stream</h2><p className="mt-1 text-sm text-neutral-500">New events appear as the underlying operation completes or fails.</p></div><div className="flex rounded-lg border border-neutral-800 p-1 text-sm"><Link href={filterHref(category, null)} className={`rounded px-3 py-1.5 ${!level ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>All</Link>{(["info", "warning", "error"] as const).map((item) => <Link key={item} href={filterHref(category, item)} className={`rounded px-3 py-1.5 capitalize ${level === item ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>{item}</Link>)}</div></div>
+            <section className="mt-6" aria-label="Activity trends"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <ActivityMetricCard key={metric.key} metric={metric} />)}</div><p className="mt-2 text-[11px] text-neutral-700">Rolling 24 hours in hourly buckets. Reloading this tab includes the latest recorded activity.</p></section>
+
+            <section className="mt-7"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-xl font-semibold">Event stream</h2><p className="mt-1 text-sm text-neutral-500">New events appear as the underlying operation completes or fails.</p></div><div className="flex rounded-lg border border-neutral-800 p-1 text-sm"><Link href={filterHref(category, null)} className={`rounded px-3 py-1.5 ${!level ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>All</Link>{(["info", "warning", "error"] as const).map((item) => <Link key={item} href={filterHref(category, item)} className={`rounded px-3 py-1.5 capitalize ${level === item ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>{item}</Link>)}</div></div>
                 <div className="mt-4 flex gap-2 overflow-x-auto pb-1 text-xs"><Link href={filterHref(null)} className={`shrink-0 rounded-full border px-3 py-1.5 ${!category ? "border-neutral-500 text-white" : "border-neutral-800 text-neutral-500"}`}>All activities</Link>{ADMIN_ACTIVITY_CATEGORIES.map((item) => <Link key={item} href={filterHref(item)} className={`shrink-0 rounded-full border px-3 py-1.5 ${category === item ? "border-neutral-500 text-white" : "border-neutral-800 text-neutral-500"}`}>{adminActivityCategoryLabel(item)}</Link>)}</div>
                 <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-800 bg-black">{visibleEvents.length ? visibleEvents.map((event) => {
                     const details = metadataSummary(event.metadata)

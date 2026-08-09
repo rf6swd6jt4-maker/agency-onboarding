@@ -258,7 +258,7 @@ export async function sendSaleConsentTemplate(saleId: string) {
                 .eq("id", saleId),
         ])
 
-        await recordAdminActivity({ workspaceId: sale.workspace_id, category: "communications", eventKey: "whatsapp.consent_template.sent", summary: "WhatsApp consent template sent", entityType: "client_sale", entityId: saleId, metadata: { relationship_id: sale.relationship_id, client_id: sale.client_id, message_log_id: messageLog.id, whatsapp_message_id: whatsappMessageId } })
+        await recordAdminActivity({ workspaceId: sale.workspace_id, category: "communications", eventKey: "whatsapp.consent_template.sent", summary: "WhatsApp consent template sent", entityType: "client_sale", entityId: saleId, direction: "outbound", metadata: { relationship_id: sale.relationship_id, client_id: sale.client_id, message_log_id: messageLog.id, whatsapp_message_id: whatsappMessageId } })
 
         return {
             ok: true,

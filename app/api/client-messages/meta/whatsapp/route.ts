@@ -369,7 +369,7 @@ async function handleStatusUpdate({
             })
         }
     } else if (message?.client_id) {
-        await recordClientAdminActivity({ clientId: message.client_id, category: "communications", eventKey: `whatsapp.message.${messageStatus}`, summary: `WhatsApp message ${messageStatus}`, entityType: "client_message", entityId: message.id, metadata: { provider_message_id: messageId, status: messageStatus } })
+        await recordClientAdminActivity({ clientId: message.client_id, category: "communications", eventKey: `whatsapp.message.${messageStatus}`, summary: `WhatsApp message ${messageStatus}`, entityType: "client_message", entityId: message.id, direction: "inbound", metadata: { provider_message_id: messageId, status: messageStatus } })
     }
 }
 
@@ -668,6 +668,8 @@ async function handleInboundMessage({
                 : "Could not record inbound WhatsApp message"
         )
     }
+
+    await recordClientAdminActivity({ clientId: channel.client_id, category: "communications", eventKey: "whatsapp.webhook.received", summary: "WhatsApp message received", entityType: "client_message", entityId: insertedMessage.id, direction: "inbound", metadata: { provider_message_id: messageId, message_type: message.type ?? "unknown" } })
 
     let content: InboundMessageContent | null = null
 

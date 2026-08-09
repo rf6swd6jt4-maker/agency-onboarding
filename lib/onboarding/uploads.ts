@@ -6,6 +6,7 @@ import {
     S3Client,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { recordAdminActivity } from "@/lib/admin/activity"
 import { getRequiredEnv } from "@/lib/env"
 import { getUploadKind, StoredUpload } from "@/lib/onboarding/forms"
 
@@ -376,6 +377,8 @@ export async function storeClientMessageMedia({
             ContentType: contentType || "application/octet-stream",
         })
     )
+
+    if (workspaceId) await recordAdminActivity({ workspaceId, category: "communications", eventKey: "r2.media.stored", summary: "Client message media stored in R2", entityType: "client_message_media", entityId: mediaId, direction: "outbound", metadata: { client_id: clientId, content_type: contentType } })
 
     return {
         path,

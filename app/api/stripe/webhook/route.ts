@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
         )
     }
 
-    await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.webhook.received", summary: `Stripe event received: ${event.type}`, entityType: "stripe_event", entityId: event.id, metadata: { event_type: event.type, sale_id: saleId } })
+    await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.webhook.received", summary: `Stripe event received: ${event.type}`, entityType: "stripe_event", entityId: event.id, direction: "inbound", metadata: { event_type: event.type, sale_id: saleId } })
 
     if (isPaidInvoiceEvent(event.type)) {
         if (!invoice) {

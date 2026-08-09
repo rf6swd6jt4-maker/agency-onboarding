@@ -95,7 +95,7 @@ async function addActivity(
         activity_text: activityText,
     })
     if (error) console.warn("Could not save client activity", { clientId, activityType, message: error.message })
-    await recordClientAdminActivity({ clientId, category: "integrations", level: activityType.includes("failed") ? "error" : activityType.includes("mismatch") || activityType.includes("skipped") ? "warning" : "info", eventKey: `clickup.${activityType.replace(/^clickup_/, "")}`, summary: activityText, entityType: "client", entityId: clientId, metadata: { activity_type: activityType } })
+    await recordClientAdminActivity({ clientId, category: "integrations", level: activityType.includes("failed") ? "error" : activityType.includes("mismatch") || activityType.includes("skipped") ? "warning" : "info", eventKey: `clickup.${activityType.replace(/^clickup_/, "")}`, summary: activityText, entityType: "client", entityId: clientId, direction: "outbound", metadata: { activity_type: activityType } })
 }
 
 function normalizeClickUpName(value: string) {

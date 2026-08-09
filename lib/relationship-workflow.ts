@@ -4,6 +4,7 @@ import { SERVICES } from "@/lib/onboarding/services"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import { normalizeMessageAddress } from "@/lib/client-messages/addresses"
+import { recordAdminActivity } from "@/lib/admin/activity"
 
 type WorkflowRole = "task" | "lifecycle_stage" | "service_group" | "review" | "automation"
 type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
@@ -524,6 +525,7 @@ export async function sendRelationshipInvoice(input: {
         daysUntilDue: 7,
         secretKey: config.secret_key,
     })
+    await recordAdminActivity({ workspaceId: input.workspaceId, category: "billing", eventKey: "stripe.invoice.sent", summary: "Stripe invoice sent", entityType: "stripe_invoice", entityId: invoice.invoiceId, direction: "outbound", actorUserId: input.actorId, metadata: { relationship_id: input.relationshipId, sale_id: sale.id } })
     await Promise.all([
         supabaseAdmin.from("client_sales").update({ status: "invoice_sent", stripe_customer_id: invoice.customerId, stripe_invoice_id: invoice.invoiceId, stripe_invoice_status: invoice.invoiceStatus, stripe_hosted_invoice_url: invoice.hostedInvoiceUrl, stripe_invoice_pdf: invoice.invoicePdf, raw_payload: invoice.rawInvoice }).eq("id", sale.id),
         completeWorkflowItem(input.workspaceId, input.workItemId),

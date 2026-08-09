@@ -384,8 +384,9 @@ test("Admin Work and Maintenance keep compact list rows while OKRs use the unifi
 })
 
 test("the private activity console covers core automation producers", async () => {
-    const [migration, activityPage, leadgen, onboarding, stripe, whatsapp, gantt] = await Promise.all([
+    const [migration, activityMetrics, activityPage, leadgen, onboarding, stripe, whatsapp, gantt] = await Promise.all([
         readFile("supabase/migrations/20260804123000_admin_activity_console.sql", "utf8"),
+        readFile("lib/admin/activity-metrics.ts", "utf8"),
         readFile("app/[workspaceSlug]/admin/activity/page.tsx", "utf8"),
         readFile("lib/leadgen/osm-worker.ts", "utf8"),
         readFile("lib/onboarding/canonical.ts", "utf8"),
@@ -396,6 +397,11 @@ test("the private activity console covers core automation producers", async () =
     assert.ok(migration.indexOf('drop policy if exists "workspace admins read activity console"') < migration.indexOf('create policy "workspace admins read activity console"'))
     assert.match(migration, /workspace admins read activity console/)
     assert.match(activityPage, /Activity Console/)
+    for (const graph of ["Requests", "Internal Calls", "External Calls", "Error rate"]) assert.match(activityMetrics, new RegExp(graph))
+    assert.match(activityPage, /buildAdminActivityMetrics/)
+    assert.match(activityPage, /listAdminActivitySince/)
+    assert.match(activityPage, /tone=\{metric\.tone\}/)
+    assert.match(activityPage, /Event stream/)
     for (const source of [leadgen, onboarding, stripe, whatsapp, gantt]) assert.match(source, /recordAdminActivity|recordClientAdminActivity/)
 })
 

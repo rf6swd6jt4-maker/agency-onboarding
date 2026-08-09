@@ -249,7 +249,7 @@ export async function sendLoggedClickUpMessageToWhatsApp({
             })
             .eq("id", messageLog?.id)
 
-        await recordClientAdminActivity({ clientId: channel.client_id, category: "communications", eventKey: "whatsapp.message.sent", summary: "WhatsApp message sent by ClickUp automation", entityType: "client_message", entityId: messageLog?.id ?? whatsappMessageId ?? null, metadata: { whatsapp_message_id: whatsappMessageId ?? null, clickup_message_id: messageId ?? null } })
+        await recordClientAdminActivity({ clientId: channel.client_id, category: "communications", eventKey: "whatsapp.message.sent", summary: "WhatsApp message sent by ClickUp automation", entityType: "client_message", entityId: messageLog?.id ?? whatsappMessageId ?? null, direction: "outbound", metadata: { whatsapp_message_id: whatsappMessageId ?? null, clickup_message_id: messageId ?? null } })
 
         return {
             ok: true,
@@ -354,7 +354,7 @@ export async function sendClickUpMessageEditToWhatsApp({
             })
             .eq("id", existingMessage.id)
 
-        await recordClientAdminActivity({ clientId: channel.client_id, category: "communications", eventKey: "whatsapp.message.edit_sent", summary: "WhatsApp message edit sent by ClickUp automation", entityType: "client_message", entityId: existingMessage.id, metadata: { whatsapp_message_id: editWhatsAppMessageId, clickup_message_id: messageId } })
+        await recordClientAdminActivity({ clientId: channel.client_id, category: "communications", eventKey: "whatsapp.message.edit_sent", summary: "WhatsApp message edit sent by ClickUp automation", entityType: "client_message", entityId: existingMessage.id, direction: "outbound", metadata: { whatsapp_message_id: editWhatsAppMessageId, clickup_message_id: messageId } })
 
         return {
             handled: true,

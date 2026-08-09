@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 export const ADMIN_ACTIVITY_CATEGORIES = ["onboarding", "leadgen", "billing", "communications", "gantt", "integrations", "maintenance", "system"] as const
 export type AdminActivityCategory = (typeof ADMIN_ACTIVITY_CATEGORIES)[number]
 export type AdminActivityLevel = "info" | "warning" | "error"
+export type AdminActivityDirection = "outbound" | "inbound"
 
 export type AdminActivityEventInput = {
     workspaceId: string | null | undefined
@@ -16,6 +17,7 @@ export type AdminActivityEventInput = {
     actorUserId?: string | null
     metadata?: Record<string, unknown>
     occurredAt?: string
+    direction?: AdminActivityDirection
 }
 
 export type AdminActivityEvent = {
@@ -51,7 +53,7 @@ export async function recordAdminActivity(input: AdminActivityEventInput) {
             entity_id: input.entityId ?? null,
             source_href: input.sourceHref ?? null,
             actor_user_id: input.actorUserId ?? null,
-            metadata: input.metadata ?? {},
+            metadata: input.direction ? { ...(input.metadata ?? {}), request_direction: input.direction } : input.metadata ?? {},
             occurred_at: input.occurredAt ?? new Date().toISOString(),
         })
         if (error) console.warn("Could not record Admin activity", { eventKey: input.eventKey, message: error.message })
@@ -87,4 +89,22 @@ export async function listAdminActivity(workspaceId: string, limit = 250): Promi
         .limit(Math.max(1, Math.min(500, limit)))
     if (error) return []
     return (data ?? []) as AdminActivityEvent[]
+}
+
+export async function listAdminActivitySince(workspaceId: string, since: string): Promise<AdminActivityEvent[]> {
+    const pageSize = 1000
+    const events: AdminActivityEvent[] = []
+    for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabaseAdmin.from("workspace_admin_activity")
+            .select("id, category, level, event_key, summary, entity_type, entity_id, source_href, actor_user_id, metadata, occurred_at, created_at")
+            .eq("workspace_id", workspaceId)
+            .gte("occurred_at", since)
+            .order("occurred_at", { ascending: false })
+            .order("id", { ascending: false })
+            .range(from, from + pageSize - 1)
+        if (error) return events
+        const page = (data ?? []) as AdminActivityEvent[]
+        events.push(...page)
+        if (page.length < pageSize) return events
+    }
 }
