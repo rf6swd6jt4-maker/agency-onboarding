@@ -120,10 +120,10 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 ```
 
 - A panel home route uses the home tab or list name: `Work Queue`, never `Admin`; `Leads`, never `Lead Gen`.
-- The description directly explains the active tab's content, ordering, or purpose. It must not summarize every capability in the parent panel. Begin with stable copy that identifies the list; a following sentence may adapt to the current list contents.
+- The description directly explains the active tab's content, ordering, or purpose. It must not summarize every capability in the parent panel. Begin with stable copy that identifies the list; a following sentence may adapt to the current list contents. Desktop descriptions occupy one visual line and truncate when necessary, so put the stable information first; mobile descriptions may wrap.
 - When the panel contains multiple tabs, `PanelTabs` occupy a dedicated row immediately beneath the description and above `QuickStats`, filters, or tab content. They remain horizontally scrollable on mobile.
-- The title-to-description gap is always fixed. On desktop the description occupies a stable two-line-minimum slot with its copy aligned to the top; sibling tabs therefore keep actions and tabs at the same vertical position without creating extra space between a one-line description and its title.
-- Optional primary actions occupy the header's right-hand action slot on desktop and anchor to the bottom of that stable description slot. This prevents actions and tabs jumping vertically when descriptions differ by one line.
+- The title-to-description gap is always `0.5rem` (`mt-2`). Do not reserve blank description lines or add a minimum height to the description slot.
+- Optional primary actions occupy the header's right-hand action slot on desktop. The action row bottom-aligns with the actual bottom of the description line, not with an artificial header height.
 - Put one principal action in this slot, such as `New Poll` or `Start new relationship`. Supplementary metadata may sit immediately before it, but the primary action remains the final, rightmost control.
 - On mobile the action slot follows the description and uses the full available width without displacing the title or tab row.
 - Do not place tab navigation beside the title, inside the action slot, below statistics, or in page-local wrappers with different spacing.
@@ -138,6 +138,8 @@ The standard vertical order is:
 4. The list itself.
 
 Do not place filters above quick statistics when both are present.
+
+Every immediate step in that order uses the same `1.25rem` (`mt-5`) top gap. Measure it from the actual bottom of the preceding element: the description and primary action share one bottom line, then tabs, stats, rails, or direct content begin from that line. Do not use page-local `mt-6`, reserved description height, spacer blocks, or margins that make one tab breathe differently from its siblings.
 
 A list tab must not insert a page-specific summary, capacity note, explanatory paragraph, owner roll-up, or other bespoke information block between these standard elements. Put stable explanatory copy in the tab description, append genuinely useful dynamic context to that description, express a compact measurement through `QuickStats`, or omit it. Transactional errors and actionable warnings use the platform's approved notice treatment and are not list summaries.
 
