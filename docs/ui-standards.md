@@ -105,3 +105,20 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 - Extend a shared primitive when a new stable variant is required. Do not invent a one-off treatment in a page.
 - When the design changes, update `components/ui`, this document, and existing uses together.
 - A local exception must include a code comment explaining why the shared primitive cannot represent it.
+
+## TrendChart
+
+`TrendChart` is the canonical compact time-series graph. It owns the chart geometry, white trend line, fading area gradient, axes, emphasized reference ticks, optional red exception bands, responsive labels, and keyboard/pointer tooltip behaviour. Feature code supplies normalized positions, numeric values, and already-formatted labels; it must not recreate the SVG treatment locally.
+
+Use the neutral white line for ordinary measurements and activity volume. Red bands mark exceptional or missed periods behind the series; they do not change the meaning of the measured line itself.
+
+```tsx
+<TrendChart
+    ariaLabel="Messages sent over the last 30 days"
+    points={points}
+    startPoint={{ position: 0, value: previousValue }}
+    domainEnd={30}
+    min={0}
+    max={100}
+/>
+```

@@ -5,7 +5,7 @@ import { createPortal } from "react-dom"
 import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent, type KeyboardEvent, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
-import { RoundPill, SquarePill, Status } from "@/components/ui"
+import { RoundPill, SquarePill, Status, TrendChart } from "@/components/ui"
 import { formatOkrMetricValue, okrGap, okrTrendScale } from "@/lib/admin/okr-metrics"
 import { addUtcDays, buildOkrReportingDays, okrReportingCadenceLabel, okrReportingPeriod, okrReportingPeriodIndex, type OkrReportingDay } from "@/lib/admin/okr-reporting"
 import type { OkrKeyResult, OkrMeasurement, WorkspaceOkr } from "@/lib/admin/okrs"
@@ -175,8 +175,7 @@ function OkrWorkEstimateFields({ result }: { result: OkrKeyResult }) {
     </div>
 }
 
-function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReportingDay<OkrMeasurement>[] }) {
-    const [activeId, setActiveId] = useState<string | null>(null)
+function KeyResultTrendChart({ result, days }: { result: OkrKeyResult; days: OkrReportingDay<OkrMeasurement>[] }) {
     const dayIndexes = new Map(days.map((day, index) => [day.date, index]))
     const reportsByDay = new Map<string, OkrMeasurement[]>()
     for (const measurement of result.measurements) {
@@ -196,23 +195,10 @@ function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReporting
     })
     const carryMeasurement = [...result.measurements].filter((measurement) => measurement.reported_on < days[0].date).sort((left, right) => left.reported_on.localeCompare(right.reported_on) || left.measured_at.localeCompare(right.measured_at)).at(-1)
     const carryValue = carryMeasurement?.value ?? result.baseline_value
-    const series = [{ id: "carry", date: days[0].date, measuredAt: "", value: carryValue, position: 0 }, ...plotted]
-    const { min, max, showZero } = okrTrendScale({ baseline: result.baseline_value, target: result.target_value, values: series.map((point) => point.value), comparator: result.comparator })
+    const { min, max, showZero } = okrTrendScale({ baseline: result.baseline_value, target: result.target_value, values: [carryValue, ...plotted.map((point) => point.value)], comparator: result.comparator })
     const latestMissedEnd = days.reduce((latest, day, index) => day.state === "missed" ? index + 1 : latest, 0)
     const domainEnd = Math.max(1, plotted.at(-1)?.position ?? 0, latestMissedEnd)
     const activityEndIndex = Math.min(days.length - 1, Math.max(0, Math.ceil(domainEnd) - 1))
-    const chartWidth = 560
-    const plotLeft = 8
-    const plotRight = 490
-    const plotTop = 16
-    const plotBottom = 198
-    const x = (position: number) => plotLeft + Math.min(position, domainEnd) * ((plotRight - plotLeft) / domainEnd)
-    const y = (value: number) => plotBottom - ((value - min) / (max - min)) * (plotBottom - plotTop)
-    const unchanged = plotted.filter((point, index) => {
-        const previous = plotted[index - 1]
-        return previous && previous.value === point.value
-    })
-    const activePoint = activeId === null ? null : plotted.find((point) => point.id === activeId) ?? null
     const dateLabel = (date: string) => new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`))
     const timeLabel = (measuredAt: string) => new Intl.DateTimeFormat("en-IE", { hour: "2-digit", minute: "2-digit" }).format(new Date(measuredAt))
     const labelPoints = [
@@ -220,26 +206,31 @@ function TrendChart({ result, days }: { result: OkrKeyResult; days: OkrReporting
         { index: Math.floor(activityEndIndex / 2), position: domainEnd / 2, anchor: "middle" as const },
         { index: activityEndIndex, position: domainEnd, anchor: "end" as const },
     ].filter((point, index, points) => points.findIndex((candidate) => candidate.index === point.index) === index)
-    const axisTicks = [
-        { id: "base", value: result.baseline_value },
-        { id: "target", value: result.target_value },
-        ...(showZero && result.baseline_value !== 0 && result.target_value !== 0 ? [{ id: "zero", value: 0 }] : []),
-    ]
-    const gradientId = `trend-fill-${result.id}`
-    return <div className="min-w-0">
-        <svg viewBox={`0 0 ${chartWidth} 232`} className="aspect-[2.4/1] w-full overflow-visible" role="img" aria-label={`${result.name} measurement trend`} onPointerLeave={() => setActiveId(null)}>
-            <defs><linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="white" stopOpacity="0.2" /><stop offset="100%" stopColor="white" stopOpacity="0" /></linearGradient></defs>
-            {axisTicks.map((tick) => <g key={tick.id}><line x1={plotLeft} x2={plotRight} y1={y(tick.value)} y2={y(tick.value)} stroke={tick.id === "target" ? "rgb(82 82 82)" : "rgb(38 38 38)"} strokeWidth="1" strokeDasharray={tick.id === "target" ? "4 5" : undefined} /><line x1={plotRight} x2={plotRight + 5} y1={y(tick.value)} y2={y(tick.value)} stroke="rgb(82 82 82)" /><text x={plotRight + 10} y={y(tick.value) + 4} fill={tick.id === "target" ? "rgb(212 212 212)" : "rgb(115 115 115)"} className="text-[12px] sm:text-[9px]">{formatOkrMetricValue(tick.value, result.unit, result.currency_code ?? "USD")}</text></g>)}
-            <line x1={plotRight} x2={plotRight} y1={plotTop} y2={plotBottom} stroke="rgb(38 38 38)" />
-            {days.slice(0, activityEndIndex + 1).map((day, index) => day.state === "missed" ? <rect key={`miss-${day.date}`} x={x(index)} y={plotTop} width={Math.max(3, x(index + 1) - x(index))} height={plotBottom - plotTop} fill="rgb(127 29 29)" opacity="0.1" /> : null)}
-            {plotted.length ? <><polygon points={`${x(series[0].position)},${plotBottom} ${series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} ${x(series.at(-1)!.position)},${plotBottom}`} fill={`url(#${gradientId})`} /><polyline points={series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></> : null}
-            {unchanged.map((point) => <line key={`same-${point.id}`} x1={x(point.position) - 4} x2={x(point.position) + 4} y1={y(point.value)} y2={y(point.value)} stroke="rgb(163 163 163)" strokeWidth="4" strokeLinecap="round" />)}
-            {plotted.map((point) => <rect key={`hit-${point.id}`} x={x(point.position) - 5} y={plotTop} width="10" height={plotBottom - plotTop} fill="transparent" tabIndex={0} className="outline-none" aria-label={`${dateLabel(point.date)} at ${timeLabel(point.measuredAt)}: ${formatOkrMetricValue(point.value, result.unit, result.currency_code ?? "USD")}`} onPointerEnter={() => setActiveId(point.id)} onPointerDown={() => setActiveId(point.id)} onFocus={() => setActiveId(point.id)} onBlur={() => setActiveId(null)} />)}
-            {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.position)} cy={y(activePoint.value)} r="4" fill="white" stroke="black" strokeWidth="2" /><rect x={Math.max(plotLeft, Math.min(plotRight - 168, x(activePoint.position) - 84))} y={Math.max(plotTop, y(activePoint.value) - 52)} width="168" height="44" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={Math.max(plotLeft + 9, Math.min(plotRight - 159, x(activePoint.position) - 75))} y={Math.max(plotTop + 17, y(activePoint.value) - 35)} fill="rgb(163 163 163)" className="text-[12px] sm:text-[9px]">{dateLabel(activePoint.date)} · {timeLabel(activePoint.measuredAt)}</text><text x={Math.max(plotLeft + 9, Math.min(plotRight - 159, x(activePoint.position) - 75))} y={Math.max(plotTop + 35, y(activePoint.value) - 17)} fill="white" fontWeight="600" className="text-[14px] sm:text-[10px]">{formatOkrMetricValue(activePoint.value, result.unit, result.currency_code ?? "USD")}</text></g> : null}
-            {!plotted.length ? <text x={(plotLeft + plotRight) / 2} y="76" textAnchor="middle" fill="rgb(64 64 64)" fontSize="11">No reports in this period</text> : null}
-            {labelPoints.map((point) => <text key={`${days[point.index].date}-${point.anchor}`} x={x(point.position)} y="222" textAnchor={point.anchor} fill="rgb(82 82 82)" className="text-[12px] sm:text-[9px]">{dateLabel(days[point.index].date)}</text>)}
-        </svg>
-    </div>
+    const metricValue = (value: number) => formatOkrMetricValue(value, result.unit, result.currency_code ?? "USD")
+    return <TrendChart
+        ariaLabel={`${result.name} measurement trend`}
+        points={plotted.map((point, index) => ({
+            id: point.id,
+            position: point.position,
+            value: point.value,
+            ariaLabel: `${dateLabel(point.date)} at ${timeLabel(point.measuredAt)}: ${metricValue(point.value)}`,
+            tooltipLabel: `${dateLabel(point.date)} · ${timeLabel(point.measuredAt)}`,
+            tooltipValue: metricValue(point.value),
+            unchanged: Boolean(plotted[index - 1] && plotted[index - 1].value === point.value),
+        }))}
+        startPoint={{ position: 0, value: carryValue }}
+        domainEnd={domainEnd}
+        min={min}
+        max={max}
+        ticks={[
+            { id: "base", value: result.baseline_value, label: metricValue(result.baseline_value) },
+            { id: "target", value: result.target_value, label: metricValue(result.target_value), emphasized: true },
+            ...(showZero && result.baseline_value !== 0 && result.target_value !== 0 ? [{ id: "zero", value: 0, label: metricValue(0) }] : []),
+        ]}
+        bands={days.slice(0, activityEndIndex + 1).flatMap((day, index) => day.state === "missed" ? [{ id: `miss-${day.date}`, start: index, end: index + 1, tone: "red" as const }] : [])}
+        labels={labelPoints.map((point) => ({ id: `${days[point.index].date}-${point.anchor}`, position: point.position, anchor: point.anchor, label: dateLabel(days[point.index].date) }))}
+        emptyLabel="No reports in this period"
+    />
 }
 
 function AccountabilityTracker({ result, people, today, startDate, onRecord }: { result: OkrKeyResult; people: Record<string, string>; today: string; startDate: string; onRecord?: () => void }) {
@@ -265,7 +256,7 @@ function AccountabilityTracker({ result, people, today, startDate, onRecord }: {
         <div className="mb-4 flex items-center justify-between gap-3"><p className="text-sm font-medium text-neutral-300">Accountability</p>{onRecord ? <button type="button" onClick={onRecord} className="h-8 rounded-md border border-neutral-700 px-2.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-white">Record progress</button> : null}</div>
         <div className="grid gap-5 md:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.4fr)] md:items-start xl:grid-cols-[360px_minmax(0,1fr)]">
             <div className="min-w-0"><div className="mb-2 flex h-7 items-center justify-between"><span className="text-[10px] text-neutral-600">{formatOkrDeadline(days[0].date)} – {formatOkrDeadline(days.at(-1)!.date)}</span>{latestPeriodIndex > 0 ? <div className="flex items-center gap-1"><button type="button" disabled={periodIndex === 0} onClick={() => changePeriod(periodIndex - 1)} aria-label="Previous reporting period" className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-800 text-sm text-neutral-500 hover:border-neutral-600 hover:text-white disabled:cursor-default disabled:opacity-25">‹</button><button type="button" disabled={periodIndex === latestPeriodIndex} onClick={() => changePeriod(periodIndex + 1)} aria-label="Next reporting period" className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-800 text-sm text-neutral-500 hover:border-neutral-600 hover:text-white disabled:cursor-default disabled:opacity-25">›</button></div> : null}</div><div className="grid grid-cols-7 gap-1">{weekdayLabels.map((label, index) => <span key={`${label}-${index}`} className="pb-0.5 text-center text-[10px] text-neutral-700">{label}</span>)}{days.map((day) => <button key={day.date} type="button" disabled={!day.measurement} onClick={() => setSelectedDate(day.date)} aria-label={`${day.date}: ${day.state}${day.reportCount > 1 ? `, ${day.reportCount} reports` : ""}`} className={`aspect-square min-h-7 rounded border text-[10px] tabular-nums transition ${stateClass[day.state]} ${day.measurement ? "cursor-pointer hover:ring-2 hover:ring-neutral-500" : "cursor-default"}`}>{Number(day.date.slice(-2))}</button>)}</div><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-neutral-600"><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-white" />Reported</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-amber-500/70" />Due</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm border border-red-700/70" />Missed</span></div></div>
-            <TrendChart result={result} days={days} />
+            <KeyResultTrendChart result={result} days={days} />
         </div>
         {selectedDate && selectedReports.length ? <Modal title={formatOkrDeadline(selectedDate)} description={`${result.name} · ${selectedReports.length} report${selectedReports.length === 1 ? "" : "s"}`} size="compact" onClose={() => setSelectedDate(null)}><div className="divide-y divide-neutral-800">{selectedReports.map((measurement) => <div key={measurement.id} className="p-4 sm:p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Value</p><p className="mt-1 text-xl font-semibold tabular-nums text-white">{formatOkrMetricValue(measurement.value, result.unit, result.currency_code ?? "USD")}</p></div><div className="text-right"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Recorded</p><p className="mt-1 text-sm font-medium tabular-nums text-neutral-200"><time dateTime={measurement.measured_at}>{reportTime(measurement.measured_at)}</time></p><p className="mt-0.5 text-xs text-neutral-500">by {people[measurement.recorded_by ?? ""] ?? "Admin"}</p></div></div><div className="mt-4 rounded-lg border border-neutral-800 bg-black/40 px-3 py-2.5"><p className="text-[10px] font-medium uppercase tracking-wide text-neutral-600">Notes</p><p className="mt-1 text-sm leading-6 text-neutral-300">{measurement.note || "No notes recorded."}</p></div></div>)}</div></Modal> : null}
     </section>

@@ -137,9 +137,10 @@ test("KR cadence is explicit, locked at commit, and available once for legacy ac
 })
 
 test("the OKRs tab is a metric table with popup-only Objective and Key Result details", async () => {
-    const [adminPage, workspace, search, actions] = await Promise.all([
+    const [adminPage, workspace, trendChart, search, actions] = await Promise.all([
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
         readFile("components/admin/OkrWorkspace.tsx", "utf8"),
+        readFile("components/ui/TrendChart.tsx", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/search/route.ts", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
     ])
@@ -176,17 +177,18 @@ test("the OKRs tab is a metric table with popup-only Objective and Key Result de
     assert.match(workspace, /startDate=\{okr\.period_start\}/)
     assert.match(workspace, /Previous reporting period/)
     assert.match(workspace, /Next reporting period/)
-    assert.match(workspace, /<linearGradient id=\{gradientId\}/)
+    assert.match(workspace, /<TrendChart/)
+    assert.match(trendChart, /<linearGradient id=\{gradientId\}/)
     assert.match(workspace, /const reportsByDay = new Map/)
     assert.match(workspace, /const carryMeasurement =/)
-    assert.match(workspace, /const series = \[\{ id: "carry"/)
-    assert.match(workspace, /const plotRight = 490/)
-    assert.match(workspace, /className="text-\[12px\] sm:text-\[9px\]"/)
-    assert.match(workspace, /className="text-\[14px\] sm:text-\[10px\]"/)
+    assert.match(workspace, /startPoint=\{\{ position: 0, value: carryValue \}\}/)
+    assert.match(trendChart, /const plotRight = 490/)
+    assert.match(trendChart, /className="text-\[12px\] sm:text-\[9px\]"/)
+    assert.match(trendChart, /className="text-\[14px\] sm:text-\[10px\]"/)
     assert.doesNotMatch(workspace, /tick\.label/)
-    assert.match(workspace, /const unchanged = plotted\.filter/)
-    assert.match(workspace, /onPointerEnter=\{\(\) => setActiveId\(point\.id\)\}/)
-    assert.match(workspace, /day\.state === "missed" \? <rect/)
+    assert.match(workspace, /unchanged: Boolean\(plotted\[index - 1\]/)
+    assert.match(trendChart, /onPointerEnter=\{\(\) => setActiveId\(point\.id\)\}/)
+    assert.match(workspace, /day\.state === "missed" \? \[\{ id: `miss-/)
     assert.match(workspace, /reportTime\(measurement\.measured_at\)/)
     assert.match(workspace, /<time dateTime=\{measurement\.measured_at\}>/)
     assert.doesNotMatch(workspace, /y1=\{y\(result\.target_value\)\}|y1=\{y\(result\.baseline_value\)\}/)
