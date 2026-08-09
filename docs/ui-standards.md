@@ -121,14 +121,17 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 
 - A panel home route uses the home tab or list name: `Work Queue`, never `Admin`; `Leads`, never `Lead Gen`.
 - The description directly explains the active tab's content, ordering, or purpose. It must not summarize every capability in the parent panel.
-- Optional primary actions align right on desktop and remain reachable without displacing the title on mobile.
-- `PanelTabs` sit immediately beneath the title block and remain horizontally scrollable on mobile.
+- When the panel contains multiple tabs, `PanelTabs` occupy a dedicated row immediately beneath the description and above `QuickStats`, filters, or tab content. They remain horizontally scrollable on mobile.
+- Optional primary actions occupy the header's right-hand action slot on desktop. The bottom edge of the primary action aligns with the bottom line of the description, which is a stable two-line-minimum slot across sibling tabs. This prevents actions and tabs jumping vertically when descriptions differ by one line.
+- Put one principal action in this slot, such as `New Poll` or `Start new relationship`. Supplementary metadata may sit immediately before it, but the primary action remains the final, rightmost control.
+- On mobile the action slot follows the description and uses the full available width without displacing the title or tab row.
+- Do not place tab navigation beside the title, inside the action slot, below statistics, or in page-local wrappers with different spacing.
 - A tab containing a list has exactly one page heading. Do not repeat the list name or add another explanatory list header between the panel tabs and the list.
 - If a tab changes its principal content through a tab query such as Admin Work/OKRs, the heading and description change with the selected tab.
 
 The standard vertical order is:
 
-1. `PanelTabHeader`, including `PanelTabs` when the panel has tabs.
+1. `PanelTabHeader`: title and description/action row, then `PanelTabs` when the panel has tabs.
 2. `QuickStats` or another approved analytical summary.
 3. One or more `FilterRail` rows.
 4. Contextual warnings or operational notes when genuinely needed.
