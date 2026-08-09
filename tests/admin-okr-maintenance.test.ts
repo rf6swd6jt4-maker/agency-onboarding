@@ -263,6 +263,30 @@ test("manual work priorities use time-horizon language", () => {
     assert.equal(workItemPriorityLabel(5), "Backlog")
 })
 
+test("the one-time OKR reset is exact, idempotent, and fails closed around repurposed work", async () => {
+    const [migration, finalization] = await Promise.all([
+        readFile("supabase/migrations/20260809130000_clear_existing_okr_test_data.sql", "utf8"),
+        readFile("supabase/migrations/20260809131000_finalize_okr_work_estimates.sql", "utf8"),
+    ])
+    assert.match(migration, /Fixed IDs make this migration idempotent/)
+    assert.equal((migration.match(/::uuid/g) ?? []).length, 5)
+    assert.match(migration, /additional linked work; review the reset migration/)
+    assert.match(migration, /item\.area is distinct from 'admin' or item\.kind is distinct from 'okr_action' or item\.visibility is distinct from 'admins_only'/)
+    assert.match(migration, /work_item_relationships/)
+    assert.match(migration, /asset_work_items/)
+    assert.match(migration, /disable trigger enforce_draft_okr_key_result_definition/)
+    assert.equal((migration.match(/enable trigger enforce_draft_okr_key_result_definition/g) ?? []).length, 2)
+    assert.match(migration, /exception when others then[\s\S]*enable trigger enforce_draft_okr_key_result_definition[\s\S]*raise;/)
+    assert.ok(migration.indexOf("delete from public.workspace_okrs") < migration.indexOf("delete from public.work_items"))
+    assert.match(migration, /Key Results, measurements, and OKR-work links cascade from the OKRs/)
+    assert.doesNotMatch(migration, /delete from public\.workspace_okrs\s*;/)
+    assert.doesNotMatch(migration, /delete from public\.work_items\s*;/)
+    assert.match(finalization, /validate constraint workspace_okr_work_items_expected_movement_check/)
+    assert.match(finalization, /validate constraint workspace_okr_work_items_impact_hypothesis_check/)
+    assert.match(finalization, /alter column expected_movement set not null/)
+    assert.match(finalization, /alter column impact_hypothesis set not null/)
+})
+
 test("service-role query paths explicitly exclude private work for Staff surfaces", async () => {
     const [relationships, topBar, search, detail] = await Promise.all([
         readFile("lib/relationships.ts", "utf8"),
