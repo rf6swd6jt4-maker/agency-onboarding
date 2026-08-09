@@ -1,6 +1,6 @@
 export type AdminQueueWorkStatus = "todo" | "doing" | "waiting" | "blocked" | "done" | "canceled"
 export type AdminQueueWorkKind = "standard" | "okr_action" | "maintenance"
-export type AdminQueueDurationSource = "learned" | "admin_history" | "default"
+export type AdminQueueDurationSource = "assignee_history" | "learned" | "admin_history" | "default"
 
 export type AdminQueueWorkInput = {
     id: string
@@ -8,6 +8,7 @@ export type AdminQueueWorkInput = {
     status: AdminQueueWorkStatus
     priority: number
     priority_override: number | null
+    execution_owner_id: string | null
     kind: AdminQueueWorkKind
     severity: string | null
     planned_start_date: string | null
@@ -69,7 +70,7 @@ export type AdminQueueContribution = {
 export type AdminQueueResult = {
     work_item_id: string
     queue_position: number | null
-    queue_reason: "forced" | "continuation" | "impact" | "enables" | "obligation" | "backlog" | "blocked" | "waiting" | "future" | "completed"
+    queue_reason: "forced" | "continuation" | "impact" | "enables" | "obligation" | "backlog" | "blocked" | "waiting" | "unassigned" | "future" | "completed"
     queue_label: string
     predicted_duration_hours: number
     conservative_duration_hours: number
@@ -226,20 +227,35 @@ function predictedDurations(items: AdminQueueWorkInput[], now: Date) {
         if (item.status !== "done" || !item.actual_start_at || !item.actual_completed_at) return []
         const duration = workingHoursBetween(item.actual_start_at, item.actual_completed_at)
         if (duration <= 0) return []
-        return [{ kind: item.kind, duration: clamp(duration, MIN_DURATION_HOURS, MAX_DURATION_HOURS) }]
+        return [{ kind: item.kind, ownerId: item.execution_owner_id, duration: clamp(duration, MIN_DURATION_HOURS, MAX_DURATION_HOURS) }]
     })
     const allDurations = completed.map((item) => item.duration)
     const globalMedian = percentile(allDurations, 0.5) || DEFAULT_DURATION_HOURS
     const globalConservative = Math.max(globalMedian, percentile(allDurations, 0.8) || DEFAULT_CONSERVATIVE_DURATION_HOURS)
     const byKind = new Map<AdminQueueWorkKind, number[]>()
-    for (const item of completed) byKind.set(item.kind, [...(byKind.get(item.kind) ?? []), item.duration])
+    const byOwner = new Map<string, number[]>()
+    const byOwnerKind = new Map<string, number[]>()
+    for (const item of completed) {
+        byKind.set(item.kind, [...(byKind.get(item.kind) ?? []), item.duration])
+        if (item.ownerId) {
+            byOwner.set(item.ownerId, [...(byOwner.get(item.ownerId) ?? []), item.duration])
+            const ownerKind = `${item.ownerId}:${item.kind}`
+            byOwnerKind.set(ownerKind, [...(byOwnerKind.get(ownerKind) ?? []), item.duration])
+        }
+    }
 
     return new Map(items.map((item) => {
-        const cohort = byKind.get(item.kind) ?? []
-        const predictedTotal = clamp(geometricBlend(percentile(cohort, 0.5), globalMedian, cohort.length), MIN_DURATION_HOURS, MAX_DURATION_HOURS)
-        const conservativeTotal = clamp(Math.max(predictedTotal, geometricBlend(percentile(cohort, 0.8), globalConservative, cohort.length)), MIN_DURATION_HOURS, MAX_DURATION_HOURS)
+        const kindCohort = byKind.get(item.kind) ?? []
+        const kindMedian = geometricBlend(percentile(kindCohort, 0.5), globalMedian, kindCohort.length)
+        const kindConservative = geometricBlend(percentile(kindCohort, 0.8), globalConservative, kindCohort.length)
+        const ownerCohort = item.execution_owner_id ? byOwner.get(item.execution_owner_id) ?? [] : []
+        const ownerMedian = geometricBlend(percentile(ownerCohort, 0.5), kindMedian, ownerCohort.length)
+        const ownerConservative = geometricBlend(percentile(ownerCohort, 0.8), kindConservative, ownerCohort.length)
+        const ownerKindCohort = item.execution_owner_id ? byOwnerKind.get(`${item.execution_owner_id}:${item.kind}`) ?? [] : []
+        const predictedTotal = clamp(geometricBlend(percentile(ownerKindCohort, 0.5), ownerMedian, ownerKindCohort.length), MIN_DURATION_HOURS, MAX_DURATION_HOURS)
+        const conservativeTotal = clamp(Math.max(predictedTotal, geometricBlend(percentile(ownerKindCohort, 0.8), ownerConservative, ownerKindCohort.length)), MIN_DURATION_HOURS, MAX_DURATION_HOURS)
         const elapsed = item.status === "doing" && item.actual_start_at ? workingHoursBetween(item.actual_start_at, now) : 0
-        const source: AdminQueueDurationSource = cohort.length >= 3 ? "learned" : allDurations.length ? "admin_history" : "default"
+        const source: AdminQueueDurationSource = ownerKindCohort.length >= 3 || ownerCohort.length >= 3 ? "assignee_history" : kindCohort.length >= 3 ? "learned" : allDurations.length ? "admin_history" : "default"
         return [item.id, {
             predicted: clamp(predictedTotal - elapsed, MIN_DURATION_HOURS, MAX_DURATION_HOURS),
             conservative: clamp(conservativeTotal - elapsed, MIN_DURATION_HOURS, MAX_DURATION_HOURS),
@@ -546,11 +562,6 @@ export function buildAdminWorkQueue({
         result.queue_reason = reason
         result.queue_label = label
         const projectedFinish = addWorkingHours(cursor, durations.get(selected.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS)
-        const safeStart = latestSafeStart.get(selected.id)
-        const horizon = safeStart ? addWorkingHours(safeStart, durations.get(selected.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS) : null
-        result.projected_start = cursor.toISOString()
-        result.projected_finish = projectedFinish.toISOString()
-        result.projected_lateness_hours = horizon && projectedFinish > horizon ? workingHoursBetween(horizon, projectedFinish) : 0
         remaining.delete(selected.id)
         simulatedComplete.add(selected.id)
         for (const contribution of contributionModelsByItem.get(selected.id) ?? []) {
@@ -578,6 +589,52 @@ export function buildAdminWorkQueue({
             result.queue_reason = "blocked"
             result.queue_label = "Waiting for dependencies"
         }
+    }
+
+    const ownerAvailableAt = new Map<string, Date>()
+    const projectedFinishByItem = new Map<string, Date>()
+    const rankedResults = [...resultById.values()].filter((result) => result.queue_position !== null).sort((left, right) => left.queue_position! - right.queue_position!)
+    for (const result of rankedResults) {
+        const item = itemById.get(result.work_item_id)!
+        result.projected_start = null
+        result.projected_finish = null
+        result.projected_lateness_hours = 0
+        if (!item.execution_owner_id) {
+            result.queue_reason = "unassigned"
+            result.queue_label = "Needs owner"
+            continue
+        }
+
+        const ownerReady = ownerAvailableAt.get(item.execution_owner_id) ?? now
+        const prerequisites = prerequisitesByItem.get(item.id) ?? []
+        if (prerequisites.some((dependencyId) => openIds.has(dependencyId) && !projectedFinishByItem.has(dependencyId))) {
+            result.queue_reason = "blocked"
+            result.queue_label = "Waiting for forecast"
+            continue
+        }
+        const dependencyReady = prerequisites.reduce((latest, dependencyId) => {
+            const finish = projectedFinishByItem.get(dependencyId)
+            return finish && finish > latest ? finish : latest
+        }, now)
+        const plannedReady = item.planned_start_date ? new Date(`${item.planned_start_date}T09:00:00.000Z`) : now
+        const projectedStart = normalizeForward(new Date(Math.max(now.getTime(), ownerReady.getTime(), dependencyReady.getTime(), plannedReady.getTime())))
+        const duration = durations.get(item.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS
+        const projectedFinish = addWorkingHours(projectedStart, duration)
+        const safeStart = latestSafeStart.get(item.id)
+        const horizon = safeStart ? addWorkingHours(safeStart, duration) : null
+        result.projected_start = projectedStart.toISOString()
+        result.projected_finish = projectedFinish.toISOString()
+        result.projected_lateness_hours = horizon && projectedFinish > horizon ? workingHoursBetween(horizon, projectedFinish) : 0
+        if (item.kind !== "maintenance" || item.severity !== "critical") {
+            if (result.projected_lateness_hours > 0) {
+                result.queue_reason = "forced"
+                result.queue_label = "Deadline at risk"
+            } else if (result.queue_reason === "forced") {
+                result.queue_label = "Do next"
+            }
+        }
+        ownerAvailableAt.set(item.execution_owner_id, projectedFinish)
+        projectedFinishByItem.set(item.id, projectedFinish)
     }
 
     return items.map((item) => resultById.get(item.id)!).sort((left, right) => {

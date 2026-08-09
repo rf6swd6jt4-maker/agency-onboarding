@@ -13,8 +13,10 @@ import { workItemPriorityLabel } from "@/lib/work-item-priority"
 type QueueNotice = { kind: "completed"; undo: WorkItemCompletionUndo } | { kind: "error"; message: string }
 
 function queueTone(item: AdminWorkItem): StatusTone {
+    if (item.priority_override === 1) return "red"
+    if (item.priority_override === 2) return "yellow"
     if (item.queue_reason === "forced") return "red"
-    if (item.queue_reason === "blocked" || item.queue_reason === "waiting") return "yellow"
+    if (item.queue_reason === "blocked" || item.queue_reason === "waiting" || item.queue_reason === "unassigned") return "yellow"
     if (item.queue_reason === "impact" || item.queue_reason === "enables") return "green"
     return "grey"
 }
@@ -62,7 +64,8 @@ function queueExplanation(item: AdminWorkItem) {
     }
     if (item.enables_work_item_title) return `${prefix} · required before ${item.enables_work_item_title} can begin`
     if (item.blocked_by_titles.length) return `${prefix} · waiting for ${item.blocked_by_titles.join(", ")}`
-    if (item.queue_reason === "forced") return `${prefix} · the projected plan has passed this item's latest safe start`
+    if (item.queue_reason === "forced" && item.projected_lateness_hours > 0) return `${prefix} · the projected plan has passed this item's latest safe start`
+    if (item.queue_reason === "forced") return `${prefix} · must start now to protect its timing constraint`
     if (item.queue_reason === "obligation") return `${prefix} · protects the next operational deadline`
     if (item.queue_reason === "continuation") return `${prefix} · finishes work that is already in progress`
     return `${prefix} · ordered by timing, dependencies, and available capacity`
@@ -70,7 +73,7 @@ function queueExplanation(item: AdminWorkItem) {
 
 function queueForecast(item: AdminWorkItem) {
     const finish = formatProjectedTime(item.projected_finish)
-    if (!finish) return item.queue_reason === "future" ? "Scheduled to start later" : null
+    if (!finish) return !item.execution_owner_id ? "Assign owner to forecast" : item.queue_reason === "future" ? "Scheduled to start later" : null
     if (item.projected_lateness_hours > 0) return `Finish ${finish} · ${formatHours(item.projected_lateness_hours)} beyond capacity`
     return `Finish ${finish}`
 }
@@ -86,7 +89,9 @@ function QueueRow({ item, workspaceSlug, names, pending, onComplete }: {
     pending: boolean
     onComplete: (item: AdminWorkItem) => void
 }) {
-    const assignees = item.assignee_ids.map((id) => names[id] ?? "Admin")
+    const ownerName = item.execution_owner_id ? names[item.execution_owner_id] ?? "Admin" : null
+    const collaborators = item.assignee_ids.filter((id) => id !== item.execution_owner_id).map((id) => names[id] ?? "Admin")
+    const assignees = [...(ownerName ? [ownerName] : []), ...collaborators]
     const priority = priorityPresentation(item)
     const forecast = queueForecast(item)
     const effort = item.predicted_duration_hours === item.conservative_duration_hours
@@ -113,8 +118,8 @@ function QueueRow({ item, workspaceSlug, names, pending, onComplete }: {
                     <Link href={`/${workspaceSlug}/work-items/${item.id}`} className="min-w-0 truncate font-medium text-neutral-100 hover:text-white hover:underline hover:underline-offset-4">{item.title}</Link>
                     <Status label={priority.label} tone={queueTone(item)} className="text-xs sm:text-sm" />
                     <span className="text-xs text-neutral-400 sm:text-right">{effort}</span>
-                    <div className="flex -space-x-1 sm:justify-end" aria-label={assignees.length ? `Assigned to ${assignees.join(", ")}` : "Unassigned"}>
-                        {assignees.slice(0, 2).map((name, index) => <span key={`${name}-${index}`} className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-[10px] font-semibold text-neutral-300">{initials(name)}</span>)}
+                    <div className="flex -space-x-1 sm:justify-end" aria-label={ownerName ? `Owned by ${ownerName}${collaborators.length ? ` with ${collaborators.join(", ")}` : ""}` : "Unassigned"}>
+                        {assignees.slice(0, 2).map((name, index) => <span key={`${name}-${index}`} className={`inline-flex h-7 w-7 items-center justify-center rounded-full border bg-neutral-900 text-[10px] font-semibold text-neutral-300 ${index === 0 && ownerName ? "border-white" : "border-neutral-700"}`}>{initials(name)}</span>)}
                         {!assignees.length ? <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-neutral-700 text-xs text-neutral-600">—</span> : null}
                     </div>
                 </div>
@@ -144,12 +149,13 @@ function QueueNotice({ notice, pending, onUndo }: { notice: QueueNotice; pending
     )
 }
 
-export function AdminWorkQueue({ items, workspaceSlug, names }: { items: AdminWorkItem[]; workspaceSlug: string; names: Record<string, string> }) {
+export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: { items: AdminWorkItem[]; workspaceSlug: string; currentUserId: string; names: Record<string, string> }) {
     const router = useRouter()
     const [pending, startTransition] = useTransition()
     const [pendingId, setPendingId] = useState<string | null>(null)
     const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set())
     const [notice, setNotice] = useState<QueueNotice | null>(null)
+    const [view, setView] = useState<"business" | "mine">("business")
 
     useEffect(() => {
         if (!notice) return
@@ -158,12 +164,26 @@ export function AdminWorkQueue({ items, workspaceSlug, names }: { items: AdminWo
     }, [notice])
 
     const openItems = useMemo(() => items.filter((item) => !hiddenIds.has(item.id) && item.status !== "done" && item.status !== "canceled"), [hiddenIds, items])
-    const ranked = openItems.filter((item) => item.queue_position !== null)
-    const deferred = openItems.filter((item) => item.queue_position === null)
+    const visibleItems = useMemo(() => view === "mine" ? openItems.filter((item) => item.execution_owner_id === currentUserId) : openItems, [currentUserId, openItems, view])
+    const ranked = visibleItems.filter((item) => item.queue_position !== null)
+    const deferred = visibleItems.filter((item) => item.queue_position === null)
     const reservedHours = ranked.reduce((total, item) => total + item.conservative_duration_hours, 0)
     const lateItems = ranked.filter((item) => item.projected_lateness_hours > 0)
     const furthestLateness = Math.max(0, ...lateItems.map((item) => item.projected_lateness_hours))
-    const hasOkrMovement = openItems.some((item) => item.contributions.length > 0)
+    const hasOkrMovement = visibleItems.some((item) => item.contributions.length > 0)
+    const ownerSummaries = (() => {
+        const summaries = new Map<string, { count: number; hours: number; lateness: number }>()
+        for (const item of ranked) {
+            if (!item.execution_owner_id) continue
+            const current = summaries.get(item.execution_owner_id) ?? { count: 0, hours: 0, lateness: 0 }
+            summaries.set(item.execution_owner_id, {
+                count: current.count + 1,
+                hours: current.hours + item.conservative_duration_hours,
+                lateness: Math.max(current.lateness, item.projected_lateness_hours),
+            })
+        }
+        return [...summaries.entries()].map(([ownerId, summary]) => ({ ownerId, name: names[ownerId] ?? "Admin", ...summary }))
+    })()
 
     function complete(item: AdminWorkItem) {
         setPendingId(item.id)
@@ -201,10 +221,11 @@ export function AdminWorkQueue({ items, workspaceSlug, names }: { items: AdminWo
             <header className="border-b border-neutral-800 px-4 py-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                     <h2 className="font-semibold text-neutral-100">Work queue</h2>
-                    <p className="text-xs text-neutral-500">{ranked.length} actionable · {formatHours(reservedHours)} reserved{lateItems.length ? ` · ${lateItems.length} projected late` : ""}</p>
+                    <div className="flex items-center gap-3"><div className="flex rounded-lg border border-neutral-800 p-0.5 text-xs"><button type="button" onClick={() => setView("business")} className={`rounded-md px-2.5 py-1 ${view === "business" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Business</button><button type="button" onClick={() => setView("mine")} className={`rounded-md px-2.5 py-1 ${view === "mine" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>My work</button></div><p className="text-xs text-neutral-500">{ranked.length} actionable · {formatHours(reservedHours)} reserved{lateItems.length ? ` · ${lateItems.length} projected late` : ""}</p></div>
                 </div>
+                {view === "business" && ownerSummaries.length ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">{ownerSummaries.map((owner) => <span key={owner.ownerId}>{owner.name}: {owner.count} item{owner.count === 1 ? "" : "s"} · {formatHours(owner.hours)}{owner.lateness > 0 ? <span className="text-red-300"> · {formatHours(owner.lateness)} late</span> : ""}</span>)}</div> : null}
                 {lateItems.length ? <p className="mt-2 text-sm text-red-300">The current plan exceeds available capacity by up to {formatHours(furthestLateness)}. The affected finish forecasts are marked below.</p> : null}
-                {!hasOkrMovement && openItems.length ? <p className="mt-2 text-sm text-neutral-500">No committed KR movement is active in this queue, so ordering is based on timing, dependencies, operational severity, and capacity.</p> : null}
+                {!hasOkrMovement && visibleItems.length ? <p className="mt-2 text-sm text-neutral-500">No committed KR movement is active in this queue, so ordering is based on timing, dependencies, operational severity, and capacity.</p> : null}
             </header>
 
             {ranked.length ? ranked.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} pending={pending && pendingId === item.id} onComplete={complete} />) : <p className="px-4 py-5 text-sm text-neutral-400">There is no actionable Admin work right now.</p>}

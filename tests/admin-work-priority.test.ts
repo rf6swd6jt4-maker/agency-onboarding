@@ -11,6 +11,7 @@ function work(id: string, overrides: Partial<AdminQueueWorkInput> = {}): AdminQu
         status: "todo",
         priority: 4,
         priority_override: null,
+        execution_owner_id: "owner-a",
         kind: "okr_action",
         severity: null,
         planned_start_date: null,
@@ -124,7 +125,7 @@ test("a manual priority override replaces the system timing seed", () => {
 
     const overridden = queue({ items: [work("override", { priority: 4, priority_override: 1 }), work("impact")], okrs: [objective], links: [highImpactLink] })
     assert.equal(overridden[0].work_item_id, "override")
-    assert.equal(overridden[0].queue_label, "Deadline at risk")
+    assert.equal(overridden[0].queue_label, "Do next")
 })
 
 test("queue results expose conservative finish forecasts and working-hour lateness", () => {
@@ -142,6 +143,65 @@ test("queue results expose conservative finish forecasts and working-hour latene
     assert.equal(results[1].projected_lateness_hours, 0)
     assert.equal(results[2].projected_finish, "2026-08-12T11:00:00.000Z")
     assert.equal(results[2].projected_lateness_hours, 2)
+})
+
+test("different execution owners are forecast in parallel without changing global rank", () => {
+    const results = queue({
+        items: [
+            work("a-first", { execution_owner_id: "owner-a", created_at: "2026-08-01T09:00:00.000Z" }),
+            work("b-first", { execution_owner_id: "owner-b", created_at: "2026-08-02T09:00:00.000Z" }),
+            work("a-second", { execution_owner_id: "owner-a", created_at: "2026-08-03T09:00:00.000Z" }),
+        ],
+    })
+    assert.deepEqual(results.map((item) => item.work_item_id), ["a-first", "b-first", "a-second"])
+    assert.equal(results[0].projected_start, NOW)
+    assert.equal(results[1].projected_start, NOW)
+    assert.equal(results[0].projected_finish, "2026-08-10T15:00:00.000Z")
+    assert.equal(results[1].projected_finish, "2026-08-10T15:00:00.000Z")
+    assert.equal(results[2].projected_start, "2026-08-10T15:00:00.000Z")
+})
+
+test("duration forecasts learn from the execution owner's own history", () => {
+    const history = [
+        work("a-1", { status: "done", execution_owner_id: "owner-a", actual_start_at: "2026-07-20T09:00:00.000Z", actual_completed_at: "2026-07-20T10:00:00.000Z" }),
+        work("a-2", { status: "done", execution_owner_id: "owner-a", actual_start_at: "2026-07-21T09:00:00.000Z", actual_completed_at: "2026-07-21T10:00:00.000Z" }),
+        work("a-3", { status: "done", execution_owner_id: "owner-a", actual_start_at: "2026-07-22T09:00:00.000Z", actual_completed_at: "2026-07-22T10:00:00.000Z" }),
+        work("b-1", { status: "done", execution_owner_id: "owner-b", actual_start_at: "2026-07-20T09:00:00.000Z", actual_completed_at: "2026-07-20T17:00:00.000Z" }),
+        work("b-2", { status: "done", execution_owner_id: "owner-b", actual_start_at: "2026-07-21T09:00:00.000Z", actual_completed_at: "2026-07-21T17:00:00.000Z" }),
+        work("b-3", { status: "done", execution_owner_id: "owner-b", actual_start_at: "2026-07-22T09:00:00.000Z", actual_completed_at: "2026-07-22T17:00:00.000Z" }),
+    ]
+    const results = queue({
+        items: [
+            work("owner-a-next", { execution_owner_id: "owner-a" }),
+            work("owner-b-next", { execution_owner_id: "owner-b" }),
+            ...history,
+        ],
+    })
+    const ownerA = results.find((item) => item.work_item_id === "owner-a-next")!
+    const ownerB = results.find((item) => item.work_item_id === "owner-b-next")!
+    assert.equal(ownerA.duration_source, "assignee_history")
+    assert.equal(ownerB.duration_source, "assignee_history")
+    assert.ok(ownerA.predicted_duration_hours < ownerB.predicted_duration_hours)
+})
+
+test("a cross-owner dependency delays the dependent until its prerequisite forecast finishes", () => {
+    const results = queue({
+        items: [
+            work("prerequisite", { execution_owner_id: "owner-a" }),
+            work("dependent", { execution_owner_id: "owner-b" }),
+        ],
+        dependencies: [{ work_item_id: "dependent", depends_on_work_item_id: "prerequisite" }],
+    })
+    assert.equal(results[0].work_item_id, "prerequisite")
+    assert.equal(results[1].work_item_id, "dependent")
+    assert.equal(results[1].projected_start, results[0].projected_finish)
+})
+
+test("unowned operational work keeps its global rank but has no invented forecast", () => {
+    const results = queue({ items: [work("unowned", { execution_owner_id: null })] })
+    assert.equal(results[0].queue_position, 1)
+    assert.equal(results[0].projected_start, null)
+    assert.equal(results[0].projected_finish, null)
 })
 
 test("tomorrow still means the next workday when the queue is viewed after today's workday", () => {

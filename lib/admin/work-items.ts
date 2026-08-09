@@ -34,6 +34,7 @@ function queueWorkInput(item: Record<string, unknown>): AdminQueueWorkInput {
         status,
         priority: Number(item.priority ?? 4),
         priority_override: typeof item.priority_override === "number" ? item.priority_override : item.priority_override === null ? null : Number.isFinite(Number(item.priority_override)) ? Number(item.priority_override) : null,
+        execution_owner_id: typeof item.execution_owner_id === "string" ? item.execution_owner_id : null,
         kind,
         severity: typeof item.severity === "string" ? item.severity : null,
         planned_start_date: typeof item.planned_start_date === "string" ? item.planned_start_date : null,
@@ -48,7 +49,7 @@ function queueWorkInput(item: Record<string, unknown>): AdminQueueWorkInput {
 
 export async function listAdminWorkItems(workspaceId: string, okrs: WorkspaceOkr[], now = new Date()): Promise<AdminWorkItem[]> {
     const { data: itemRows, error } = await supabaseAdmin.from("work_items")
-        .select("id, title, description, status, priority, priority_override, kind, severity, planned_start_date, due_date, due_time, actual_start_at, actual_completed_at, created_at, updated_at")
+        .select("id, title, description, status, priority, priority_override, execution_owner_id, kind, severity, planned_start_date, due_date, due_time, actual_start_at, actual_completed_at, created_at, updated_at")
         .eq("workspace_id", workspaceId)
         .eq("area", "admin")
         .eq("visibility", "admins_only")

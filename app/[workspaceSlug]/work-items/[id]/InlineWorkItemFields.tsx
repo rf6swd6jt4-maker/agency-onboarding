@@ -49,6 +49,7 @@ type Props = {
     actualCompletedHasTime: boolean
     description: string | null
     assignees: Person[]
+    executionOwnerId: string | null
     creator: Person | null
     members: Person[]
     parent: WorkOption | null
@@ -198,6 +199,7 @@ export function InlineWorkItemFields(props: Props) {
     const [dueDate, setDueDate] = useState(dateInputValue(completed ? props.actualCompletedAt : props.dueDate))
     const [dueTime, setDueTime] = useState(timeInputValue(completed && props.actualCompletedHasTime ? props.actualCompletedAt : completed ? null : props.dueTime))
     const [assigneeIds, setAssigneeIds] = useState(props.assignees.map((person) => person.user_id))
+    const [executionOwnerId, setExecutionOwnerId] = useState(props.executionOwnerId)
     const [parentId, setParentId] = useState(props.parentId ?? "")
     const [waitForParent, setWaitForParent] = useState(props.waitsForParent || !props.parentId)
     const [dependencyIds, setDependencyIds] = useState(props.manualDependencyIds)
@@ -236,6 +238,7 @@ export function InlineWorkItemFields(props: Props) {
             setDueDate(dateInputValue(completed ? props.actualCompletedAt : props.dueDate))
             setDueTime(timeInputValue(completed && props.actualCompletedHasTime ? props.actualCompletedAt : completed ? null : props.dueTime))
             setAssigneeIds(props.assignees.map((person) => person.user_id))
+            setExecutionOwnerId(props.executionOwnerId)
             setParentId(props.parentId ?? "")
             setWaitForParent(props.waitsForParent || !props.parentId)
             setDependencyIds(props.manualDependencyIds)
@@ -253,6 +256,17 @@ export function InlineWorkItemFields(props: Props) {
         })
     }
     function toggleId(values: string[], id: string, setter: (values: string[]) => void) { setter(values.includes(id) ? values.filter((value) => value !== id) : [...values, id]) }
+    function toggleAssignee(id: string) {
+        setAssigneeIds((current) => {
+            if (current.includes(id)) {
+                const next = current.filter((value) => value !== id)
+                if (executionOwnerId === id) setExecutionOwnerId(next[0] ?? null)
+                return next
+            }
+            if (!executionOwnerId) setExecutionOwnerId(id)
+            return [...current, id]
+        })
+    }
     function toggleKeyResult(id: string) {
         setKeyResultEstimates((current) => current.some((link) => link.keyResultId === id)
             ? current.filter((link) => link.keyResultId !== id)
@@ -262,6 +276,10 @@ export function InlineWorkItemFields(props: Props) {
         setKeyResultEstimates((current) => current.map((link) => link.keyResultId === id ? { ...link, ...change } : link))
     }
     function saveLinks() {
+        if (keyResultEstimates.length && !props.executionOwnerId) {
+            setError("Choose an execution owner before linking this work item to a Key Result")
+            return
+        }
         if (keyResultEstimates.some((link) => !Number.isFinite(Number(link.expectedMovement)) || Number(link.expectedMovement) <= 0)) {
             setError("Every linked Key Result needs a positive expected movement")
             return
@@ -304,9 +322,9 @@ export function InlineWorkItemFields(props: Props) {
                         <Field label="Assigned to" icon="user" className="lg:col-start-1 lg:row-start-3">
                             <div className="relative inline-flex max-w-full flex-wrap gap-1.5">
                                 <button data-work-item-popup-trigger type="button" onClick={() => toggle("assignees")} className="flex max-w-full flex-wrap gap-1.5 rounded p-0 hover:opacity-90">
-                                    {props.assignees.length ? props.assignees.map((person) => <Assignee key={person.user_id} name={person.username} avatarSrc={person.avatar_url} />) : <span className="text-neutral-600">Unassigned</span>}
+                                    {props.assignees.length ? [...props.assignees].sort((left, right) => Number(right.user_id === props.executionOwnerId) - Number(left.user_id === props.executionOwnerId)).map((person) => <span key={person.user_id} className="inline-flex items-center gap-1"><Assignee name={person.username} avatarSrc={person.avatar_url} />{person.user_id === props.executionOwnerId ? <span className="text-[10px] uppercase tracking-wide text-neutral-500">Owner</span> : null}</span>) : <span className="text-neutral-600">Unassigned</span>}
                                 </button>
-                                {open === "assignees" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search users…" /><div className="max-h-64 overflow-y-auto p-1">{filteredMembers.map((person) => <button type="button" key={person.user_id} onClick={() => toggleId(assigneeIds, person.user_id, setAssigneeIds)} className="flex w-full items-center gap-2 rounded-lg px-1.5 py-2 text-left hover:bg-neutral-900"><Avatar src={person.avatar_url} name={person.username} className="h-7 w-7" /><span className="min-w-0 flex-1 truncate text-sm">{person.username}</span><span className="text-sm text-neutral-500">{assigneeIds.includes(person.user_id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={assigneeIds.length ? () => setAssigneeIds([]) : undefined} onSave={() => save(() => updateWorkItemAssignees(props.workspaceSlug, props.workItemId, assigneeIds))} /></Popup> : null}
+                                {open === "assignees" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search users…" /><p className="border-b border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-500">The execution owner drives completion forecasts. Additional assignees are collaborators.</p><div className="max-h-64 overflow-y-auto p-1">{filteredMembers.map((person) => { const assigned = assigneeIds.includes(person.user_id); const owner = executionOwnerId === person.user_id; return <div key={person.user_id} className="flex items-center gap-1 rounded-lg hover:bg-neutral-900"><button type="button" onClick={() => toggleAssignee(person.user_id)} className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-2 text-left"><Avatar src={person.avatar_url} name={person.username} className="h-7 w-7" /><span className="min-w-0 flex-1 truncate text-sm">{person.username}</span><span className="text-sm text-neutral-500">{assigned ? "✓" : ""}</span></button>{assigned ? <button type="button" onClick={() => setExecutionOwnerId(person.user_id)} className={`mr-1 rounded px-2 py-1 text-[11px] ${owner ? "bg-neutral-800 text-white" : "text-neutral-500 hover:text-white"}`}>{owner ? "Owner" : "Make owner"}</button> : null}</div> })}</div><PopupFooter pending={pending} onClear={assigneeIds.length ? () => { setAssigneeIds([]); setExecutionOwnerId(null) } : undefined} onSave={() => save(() => updateWorkItemAssignees(props.workspaceSlug, props.workItemId, assigneeIds, executionOwnerId))} /></Popup> : null}
                             </div>
                         </Field>
                         <Field label="Created by" icon="user" className="lg:col-start-1 lg:row-start-4">{props.creator ? <Assignee name={props.creator.username} avatarSrc={props.creator.avatar_url} /> : <span className="text-neutral-600">System or imported</span>}</Field>

@@ -98,9 +98,10 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
             console.warn("Could not create maintenance Work Item after platform error", { fingerprint: input.fingerprint, message: error?.message })
             return { ok: false }
         }
-        if (row.created) {
-            const officerId = await responsibleOfficer(input.workspaceId, input.category)
-            if (officerId) await supabaseAdmin.from("work_item_assignees").insert({ workspace_id: input.workspaceId, work_item_id: row.work_item_id, user_id: officerId })
+        const officerId = await responsibleOfficer(input.workspaceId, input.category)
+        if (officerId) {
+            await supabaseAdmin.from("work_item_assignees").upsert({ workspace_id: input.workspaceId, work_item_id: row.work_item_id, user_id: officerId }, { onConflict: "work_item_id,user_id" })
+            await supabaseAdmin.from("work_items").update({ execution_owner_id: officerId }).eq("workspace_id", input.workspaceId).eq("id", row.work_item_id).is("execution_owner_id", null)
         }
         await recordAdminActivity({
             workspaceId: input.workspaceId,

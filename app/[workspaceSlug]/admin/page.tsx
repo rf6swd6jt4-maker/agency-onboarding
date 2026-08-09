@@ -38,7 +38,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
     ])
     const [workItems, { data: linkableWorkItems }] = await Promise.all([
         listAdminWorkItems(workspace.id, allOkrs, now),
-        view === "okrs" ? supabaseAdmin.from("work_items").select("id, title, status, priority, due_date").eq("workspace_id", workspace.id).order("priority").order("updated_at", { ascending: false }).limit(250) : Promise.resolve({ data: [] }),
+        view === "okrs" ? supabaseAdmin.from("work_items").select("id, title, status, priority, due_date, execution_owner_id").eq("workspace_id", workspace.id).order("priority").order("updated_at", { ascending: false }).limit(250) : Promise.resolve({ data: [] }),
     ])
     const okrs = allOkrs.filter((okr) => okr.objective_type !== "aspirational").map((okr) => ({
         ...okr,
@@ -68,7 +68,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                 <AdminPanelNav workspaceSlug={workspace.slug} active={view} />
 
                 {view === "work" ? (
-                    <AdminWorkQueue items={workItems} workspaceSlug={workspace.slug} names={Object.fromEntries(people.names)} />
+                    <AdminWorkQueue items={workItems} workspaceSlug={workspace.slug} currentUserId={user.id} names={Object.fromEntries(people.names)} />
                 ) : (
                     <OkrWorkspace workspaceSlug={workspace.slug} currentUserId={user.id} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} today={now.toISOString().slice(0, 10)} />
                 )}

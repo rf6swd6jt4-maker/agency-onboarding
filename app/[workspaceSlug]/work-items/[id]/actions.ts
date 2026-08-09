@@ -8,7 +8,7 @@ import { workItemHref } from "@/lib/relationships"
 async function requireWorkItem(slug: string, workItemId: string) {
     const context = await requireWorkspace(slug, "admin")
     const { data: item } = await supabaseAdmin.from("work_items")
-        .select("id, status, native_kind, parent_work_item_id, area, visibility, actual_completed_at, actual_completed_has_time, updated_at")
+        .select("id, status, native_kind, parent_work_item_id, area, visibility, execution_owner_id, actual_completed_at, actual_completed_has_time, updated_at")
         .eq("workspace_id", context.workspace.id).eq("id", workItemId).maybeSingle()
     if (!item) throw new Error("Work item not found")
     return { ...context, item }
@@ -63,19 +63,26 @@ export async function updateWorkItemDescription(slug: string, workItemId: string
     refreshWorkItem(slug, workItemId)
 }
 
-export async function updateWorkItemAssignees(slug: string, workItemId: string, assigneeIds: string[]) {
+export async function updateWorkItemAssignees(slug: string, workItemId: string, assigneeIds: string[], executionOwnerId: string | null) {
     const { workspace, user, item } = await requireWorkItem(slug, workItemId)
-    const uniqueIds = [...new Set(assigneeIds)]
+    const uniqueIds = [...new Set([...assigneeIds, ...(executionOwnerId ? [executionOwnerId] : [])])]
     let membersQuery = supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id)
     if (item.visibility === "admins_only") membersQuery = membersQuery.in("role", ["owner", "admin"])
     const { data: members } = await membersQuery
     const memberIds = new Set((members ?? []).map((row) => row.user_id))
     if (uniqueIds.some((id) => !memberIds.has(id))) throw new Error("Assignees must belong to this workspace")
-    await supabaseAdmin.from("work_item_assignees").delete().eq("workspace_id", workspace.id).eq("work_item_id", workItemId)
+    const { count: keyResultLinkCount } = await supabaseAdmin.from("workspace_okr_work_items").select("key_result_id", { count: "exact", head: true }).eq("workspace_id", workspace.id).eq("work_item_id", workItemId)
+    if (keyResultLinkCount && !executionOwnerId) throw new Error("KR-linked work requires an execution owner")
     if (uniqueIds.length) {
-        const { error } = await supabaseAdmin.from("work_item_assignees").insert(uniqueIds.map((userId) => ({ workspace_id: workspace.id, work_item_id: workItemId, user_id: userId, assigned_by: user.id })))
+        const { error } = await supabaseAdmin.from("work_item_assignees").upsert(uniqueIds.map((userId) => ({ workspace_id: workspace.id, work_item_id: workItemId, user_id: userId, assigned_by: user.id })), { onConflict: "work_item_id,user_id" })
         if (error) throw new Error(error.message)
     }
+    const { error: ownerError } = await supabaseAdmin.from("work_items").update({ execution_owner_id: executionOwnerId }).eq("workspace_id", workspace.id).eq("id", workItemId)
+    if (ownerError) throw new Error(ownerError.message)
+    let removedQuery = supabaseAdmin.from("work_item_assignees").delete().eq("workspace_id", workspace.id).eq("work_item_id", workItemId)
+    if (uniqueIds.length) removedQuery = removedQuery.not("user_id", "in", `(${uniqueIds.join(",")})`)
+    const { error: removeError } = await removedQuery
+    if (removeError) throw new Error(removeError.message)
     refreshWorkItem(slug, workItemId)
 }
 
@@ -145,6 +152,7 @@ export async function updateWorkItemLinks(slug: string, workItemId: string, rela
         impactHypothesis: String(link.impactHypothesis ?? "").trim(),
     }])).values()]
     const uniqueKeyResultIds = normalizedKeyResultLinks.map((link) => link.keyResultId)
+    if (uniqueKeyResultIds.length && !item.execution_owner_id) throw new Error("Choose an execution owner before linking this work item to a Key Result")
     if (normalizedKeyResultLinks.some((link) => !Number.isFinite(link.expectedMovement) || link.expectedMovement <= 0)) throw new Error("Every linked Key Result needs a positive expected movement")
     if (normalizedKeyResultLinks.some((link) => !link.impactHypothesis)) throw new Error("Every linked Key Result needs an impact hypothesis")
     if ((item.area === "admin" || item.visibility === "admins_only") && uniqueIds.length) throw new Error("Private Admin work items cannot be linked to relationships")

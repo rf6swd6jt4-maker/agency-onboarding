@@ -276,6 +276,25 @@ test("manual priority overrides are nullable and independent from the system see
     assert.match(fields, /System generated lets the queue decide/)
 })
 
+test("KR-linked work requires one execution owner while collaborators remain separate", async () => {
+    const [migration, adminActions, workActions, fields, queue] = await Promise.all([
+        readFile("supabase/migrations/20260809150000_multi_owner_admin_queue.sql", "utf8"),
+        readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/actions.ts", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/InlineWorkItemFields.tsx", "utf8"),
+        readFile("components/admin/AdminWorkQueue.tsx", "utf8"),
+    ])
+    assert.match(migration, /add column if not exists execution_owner_id uuid/)
+    assert.match(migration, /KR-linked work requires an execution owner/)
+    assert.match(migration, /validate_okr_work_execution_owner/)
+    assert.match(adminActions, /execution_owner_id: executionOwnerId/)
+    assert.match(adminActions, /Choose an execution owner for this work item before linking/)
+    assert.match(workActions, /keyResultLinkCount && !executionOwnerId/)
+    assert.match(fields, /execution owner drives completion forecasts/)
+    assert.match(queue, /Business/)
+    assert.match(queue, /My work/)
+})
+
 test("the one-time OKR reset is exact, idempotent, and fails closed around repurposed work", async () => {
     const [migration, finalization] = await Promise.all([
         readFile("supabase/migrations/20260809130000_clear_existing_okr_test_data.sql", "utf8"),
