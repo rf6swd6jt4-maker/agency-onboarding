@@ -5,6 +5,7 @@ import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListAutoRefresh } from "@/components/list/ListAutoRefresh"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { Status } from "@/components/ui/Status"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -113,6 +114,7 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                         { label: "Remove", action: removeLeadgenCompany.bind(null, workspace.slug, company.id), danger: true },
                     ]
                     return <ListItem key={company.id}>
+                        <MobileListActionSurface actions={leadActions} label={`Open actions for ${titleLine}`}>
                         <ListPrimaryRow>
                             <ListTitle href={leadHref} external={!relationshipId && Boolean(sourceUrl)} className="flex-1">{titleLine}</ListTitle>
                             <Status label={bestPhone ? "Callable" : "No phone"} tone={bestPhone ? "green" : "grey"} className="ml-auto shrink-0" />
@@ -124,12 +126,13 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                             <span className="hidden min-w-0 truncate text-neutral-500 lg:inline">{location}</span>
                             <span className="hidden shrink-0 font-mono text-neutral-500 sm:inline">{company.lead_score ?? 0} pts</span>
                             <ListTrailing>
-                                <span className="hidden font-mono text-neutral-500 sm:inline">{shortId(company.id)}</span>
+                                <span className="font-mono text-neutral-500">{shortId(company.id)}</span>
                                 <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(company.created_at)}</span>
                                 <ListCreatorBadge username={null} label="Added by" date={new Date(company.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
-                                <ListActionMenu actions={leadActions} />
+                                <ListActionMenu actions={leadActions} className="hidden sm:block" />
                             </ListTrailing>
                         </ListSecondaryRow>
+                        </MobileListActionSurface>
                     </ListItem>
                 }) : <div className="grid gap-4 p-5 lg:grid-cols-[1.1fr_0.9fr]">
                     <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-5">

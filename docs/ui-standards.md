@@ -112,22 +112,24 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 
 ### Anatomy
 
-Use the primitives in `components/list/List.tsx`:
+Use the primitives in `components/list`:
 
 ```tsx
 <List ariaLabel="Polls">
     <ListItem>
-        <ListPrimaryRow>
-            <ListTitle href={itemHref}>Item name</ListTitle>
-            {/* categorical labels */}
-            <Status label="In progress" tone="yellow" className="ml-auto" />
-        </ListPrimaryRow>
-        <ListSecondaryRow>
-            {/* flexible domain metadata */}
-            <ListTrailing>
-                {/* ID, time, creator, actions */}
-            </ListTrailing>
-        </ListSecondaryRow>
+        <MobileListActionSurface actions={actions}>
+            <ListPrimaryRow>
+                <ListTitle href={itemHref}>Item name</ListTitle>
+                {/* categorical labels */}
+                <Status label="In progress" tone="yellow" className="ml-auto" />
+            </ListPrimaryRow>
+            <ListSecondaryRow>
+                {/* flexible domain metadata */}
+                <ListTrailing>
+                    {/* ID, time, creator, desktop actions */}
+                </ListTrailing>
+            </ListSecondaryRow>
+        </MobileListActionSurface>
     </ListItem>
 </List>
 ```
@@ -171,18 +173,21 @@ The meaning of the time may vary—created, updated, or latest activity—but it
 - Each semantic row is exactly one visual line high. Neither text nor a UI element may wrap beneath another item inside that row; a two-line primary or secondary band is not permitted.
 - The title receives flexible space and truncates first. Primary labels, stages, and statuses are single-line, non-wrapping elements.
 - On the secondary row, preserve the most important domain value on mobile and progressively reveal lower-priority values at `sm`, `md`, `lg`, and `xl`. Do not attempt to retain every desktop field by wrapping it.
-- Mobile priority is: one useful contact or core measurement, then the relative time, creator, and actions. The short ID is hidden below `sm`; secondary contact routes, descriptive metadata, locations, and assigned-item pills appear only when the available breakpoint can accommodate them on the same line.
+- Mobile priority is: the short ID, one useful non-sensitive core measurement where appropriate, then the relative time and creator. The short ID is always visible. Secondary descriptive metadata, locations, and assigned-item pills appear only when the available breakpoint can accommodate them on the same line.
+- Relationship phone numbers, WhatsApp numbers, and email addresses are never shown in the mobile list. They return at their documented wider breakpoints and remain available as copy actions in the mobile action popup.
 - Truncation is for flexible text values such as names, phone numbers, email addresses, and locations. Fixed semantic controls—`Status`, `RelationshipStage`, pills, creator, and actions—must remain intact rather than compressing or splitting.
 - When several values share a band, order them by importance so overflow removes the least important information first. Do not use horizontal scrolling to expose ordinary list metadata.
 - The outer list remains one consolidated collection on mobile and desktop; do not switch between separate cards and a table at an arbitrary breakpoint.
+- Mobile rows use slightly tighter vertical padding than desktop rows. Preserve the shared `py-2 sm:py-2.5` rhythm rather than overriding row height per feature.
 
 The two divider colours are deliberately different: the darker `border-neutral-900` separates the primary and secondary bands within one record, while the stronger `border-neutral-800` separates records and matches the list perimeter. This alternating rhythm must remain visible on mobile and desktop.
 
 ### Interaction and exceptional state
 
 - Every `ListItem` receives the shared subtle hover background so the active record is easy to track across a wide row.
-- A linked title is the default navigation affordance. Do not make a non-link row appear clickable unless the entire row is implemented as an accessible link.
-- The overflow menu is always the final element. Destructive operations remain inside it and keep their confirmation behaviour.
+- On mobile, `MobileListActionSurface` makes the entire item one accessible action target. Tapping anywhere opens the item's action popup; it does not navigate immediately. The canonical `Open …` action is first, followed by secondary and destructive actions.
+- The three-dot `ListActionMenu` is hidden on mobile. From `sm` upward, the action surface disappears, the linked title is the default navigation affordance, and the three-dot menu is restored as the final element.
+- Destructive operations remain inside the action popup and keep their confirmation behaviour at every breakpoint.
 - A genuine failed or critical record may add a very faint semantic wash to `ListItem`, but this must not replace its `Status` or alter the standard geometry.
 
 ### Reference mappings

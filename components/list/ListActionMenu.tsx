@@ -15,7 +15,7 @@ export type ListAction = {
 
 const REMOVE_WARNING = "Remove this item from Betelgeze? This keeps the interface clean, but the action may not be reversible from this screen."
 
-export function ListActionMenu({ actions, label = "Open item actions" }: { actions: Array<Partial<ListAction> | null | undefined | false>; label?: string }) {
+export function ListActionMenu({ actions, label = "Open item actions", className = "" }: { actions: Array<Partial<ListAction> | null | undefined | false>; label?: string; className?: string }) {
     const [open, setOpen] = useState(false)
     const [position, setPosition] = useState<{ top: number; right: number } | null>(null)
     const menuId = useId()
@@ -68,7 +68,7 @@ export function ListActionMenu({ actions, label = "Open item actions" }: { actio
     }, [menuId, open, updatePosition])
 
     if (visibleActions.length === 0) {
-        return <span className="inline-flex h-8 w-8 items-center justify-center text-neutral-700">
+        return <span className={`inline-flex h-8 w-8 items-center justify-center text-neutral-700 ${className}`}>
             <span aria-hidden="true" className="flex items-center gap-0.5">
                 <span className="h-1 w-1 rounded-full bg-current" />
                 <span className="h-1 w-1 rounded-full bg-current" />
@@ -88,7 +88,7 @@ export function ListActionMenu({ actions, label = "Open item actions" }: { actio
         })
     }
 
-    return <div ref={menuRef} className="relative shrink-0">
+    return <div ref={menuRef} className={`relative shrink-0 ${className}`}>
         <button ref={buttonRef} type="button" onClick={toggle} aria-label={label} aria-expanded={open} aria-haspopup="menu" className="inline-flex h-8 w-8 items-center justify-center text-white hover:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-white/30">
             <span aria-hidden="true" className="flex items-center gap-0.5">
                 <span className="h-1 w-1 rounded-full bg-current" />

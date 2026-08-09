@@ -6,6 +6,7 @@ import { PollsAutoRefresh } from "@/components/leadgen/PollsAutoRefresh"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { SquarePill } from "@/components/ui/SquarePill"
 import { Status } from "@/components/ui/Status"
 import type { StatusTone } from "@/components/ui/status-styles"
@@ -196,6 +197,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                         { label: "Remove", action: removeLeadgenPoll.bind(null, workspace.slug, poll.id), danger: true },
                     ]
                     return <ListItem key={poll.id} className={poll.status === "failed" ? "bg-red-950/[0.08]" : ""}>
+                        <MobileListActionSurface actions={pollActions} label={`Open actions for ${sourceNames(poll.source_snapshot, poll.source_count)} poll`}>
                         <ListPrimaryRow>
                             <ListTitle href={pollHref} className="flex-1">{sourceNames(poll.source_snapshot, poll.source_count)} poll</ListTitle>
                             <SquarePill className="shrink-0">{poll.trigger === "manual" ? "Manual" : "Automated"}</SquarePill>
@@ -211,12 +213,13 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                             <span className="hidden shrink-0 text-neutral-500 lg:inline"><span className="text-neutral-200">{claimStats.ownerClaims}</span> owner claims</span>
                             <span className="shrink-0 text-neutral-500"><span className="text-neutral-200">{poll.qualified_count}</span> qualified</span>
                             <ListTrailing>
-                                <span className="hidden font-mono text-neutral-500 sm:inline">{shortId(poll.id)}</span>
+                                <span className="font-mono text-neutral-500">{shortId(poll.id)}</span>
                                 <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(poll.created_at)}</span>
                                 <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Created by" date={new Date(poll.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
-                                <ListActionMenu actions={pollActions} />
+                                <ListActionMenu actions={pollActions} className="hidden sm:block" />
                             </ListTrailing>
                         </ListSecondaryRow>
+                        </MobileListActionSurface>
                     </ListItem>
                 }) : <div className="p-5">
                     <h3 className="text-xl font-semibold">Run your first test poll.</h3>

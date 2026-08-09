@@ -3,6 +3,7 @@ import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { RelationshipStage, RoundPill, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { SERVICES } from "@/lib/onboarding/services"
@@ -168,6 +169,7 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                             ]
                             return (
                                 <ListItem key={relationship.id}>
+                                    <MobileListActionSurface actions={relationshipActions} label={`Open actions for ${relationshipTitle}`}>
                                     <ListPrimaryRow>
                                         <ListTitle href={relationshipHref} className="flex-1">{relationshipTitle}</ListTitle>
                                         {isTest ? <SquarePill tone="yellow" className="shrink-0">Test</SquarePill> : null}
@@ -176,19 +178,20 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                     </ListPrimaryRow>
                                     <ListSecondaryRow>
                                         {relationship.primary_contact_role ? <span className="hidden shrink-0 text-neutral-400 lg:inline">{relationship.primary_contact_role}</span> : null}
-                                        {smsPhone ? <span className="min-w-0 truncate text-neutral-200">SMS: {smsPhone}</span> : null}
-                                        {effectiveWhatsappPhone ? <span className={`min-w-0 truncate text-neutral-400 ${smsPhone ? "hidden sm:inline" : ""}`}>WA: {effectiveWhatsappPhone}</span> : null}
-                                        {!smsPhone && !effectiveWhatsappPhone ? <span className="min-w-0 truncate text-neutral-500">No phone</span> : null}
+                                        {smsPhone ? <span className="hidden min-w-0 truncate text-neutral-200 sm:inline">SMS: {smsPhone}</span> : null}
+                                        {effectiveWhatsappPhone ? <span className="hidden min-w-0 truncate text-neutral-400 sm:inline">WA: {effectiveWhatsappPhone}</span> : null}
+                                        {!smsPhone && !effectiveWhatsappPhone ? <span className="hidden min-w-0 truncate text-neutral-500 sm:inline">No phone</span> : null}
                                         <span className="hidden min-w-0 truncate text-neutral-400 md:inline">{relationship.primary_email ?? "No email saved"}</span>
                                         <span className="hidden min-w-0 truncate capitalize text-neutral-500 lg:inline">{location ?? "Location unset"}</span>
                                         {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald" className="hidden xl:inline-flex">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
                                         <ListTrailing>
-                                            <span className="hidden font-mono text-neutral-500 sm:inline">{shortId(relationship.id)}</span>
+                                            <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
                                             <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(relationship.updated_at)}</span>
                                             <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Added by" date={new Date(relationship.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
-                                            <ListActionMenu actions={relationshipActions} />
+                                            <ListActionMenu actions={relationshipActions} className="hidden sm:block" />
                                         </ListTrailing>
                                     </ListSecondaryRow>
+                                    </MobileListActionSurface>
                                 </ListItem>
                             )
                         })

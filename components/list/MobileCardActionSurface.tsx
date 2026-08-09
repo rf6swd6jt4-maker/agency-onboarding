@@ -11,11 +11,13 @@ export function MobileCardActionSurface({
     children,
     className,
     label = "Open item actions",
+    mobileListSurface = false,
 }: {
     actions: Array<Partial<ListAction> | null | undefined | false>
     children: ReactNode
     className: string
     label?: string
+    mobileListSurface?: boolean
 }) {
     const [open, setOpen] = useState(false)
     const [position, setPosition] = useState<{ top: number; right: number } | null>(null)
@@ -102,8 +104,29 @@ export function MobileCardActionSurface({
         }
     }
 
-    return <div ref={surfaceRef} className={className} role="button" tabIndex={0} aria-label={label} onClick={handleClick} onKeyDown={handleKeyDown}>
+    function handleMobileListClick() {
+        if (ignoreNextCardClick.current) {
+            ignoreNextCardClick.current = false
+            return
+        }
+        if (open) {
+            setOpen(false)
+            return
+        }
+        openMenu()
+    }
+
+    return <div
+        ref={surfaceRef}
+        className={`${mobileListSurface ? "relative" : ""} ${className}`}
+        role={mobileListSurface ? undefined : "button"}
+        tabIndex={mobileListSurface ? undefined : 0}
+        aria-label={mobileListSurface ? undefined : label}
+        onClick={mobileListSurface ? undefined : handleClick}
+        onKeyDown={mobileListSurface ? undefined : handleKeyDown}
+    >
         {children}
+        {mobileListSurface ? <button type="button" aria-label={label} aria-expanded={open} aria-haspopup="menu" className="absolute inset-0 z-10 sm:hidden" onClick={handleMobileListClick} /> : null}
         {open && <div ref={menuRef} role="menu" style={position ? { top: position.top, right: position.right } : undefined} className="fixed z-[9999] w-[calc(100vw-2rem)] max-w-52 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
             {visibleActions.map((item) => {
                 const itemClassName = `block min-h-9 w-full px-3 py-2 text-left text-sm ${item.danger ? "text-red-300 hover:bg-red-950/40" : "text-neutral-200 hover:bg-neutral-900"}`
@@ -144,4 +167,8 @@ export function MobileCardActionSurface({
             })}
         </div>}
     </div>
+}
+
+export function MobileListActionSurface({ actions, children, label }: { actions: Array<Partial<ListAction> | null | undefined | false>; children: ReactNode; label?: string }) {
+    return <MobileCardActionSurface actions={actions} label={label} className="" mobileListSurface>{children}</MobileCardActionSurface>
 }

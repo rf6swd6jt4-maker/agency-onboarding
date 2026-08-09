@@ -10,11 +10,11 @@ export function ListItem({ children, className = "" }: { children: ReactNode; cl
 }
 
 export function ListPrimaryRow({ children, className = "" }: { children: ReactNode; className?: string }) {
-    return <div className={`flex min-w-0 flex-nowrap items-center gap-3 overflow-hidden whitespace-nowrap border-b border-neutral-900 bg-neutral-900/35 px-3.5 py-2.5 sm:px-4 ${className}`}>{children}</div>
+    return <div className={`flex min-w-0 flex-nowrap items-center gap-3 overflow-hidden whitespace-nowrap border-b border-neutral-900 bg-neutral-900/35 px-3.5 py-2 sm:px-4 sm:py-2.5 ${className}`}>{children}</div>
 }
 
 export function ListSecondaryRow({ children, className = "" }: { children: ReactNode; className?: string }) {
-    return <div className={`flex min-w-0 flex-nowrap items-center gap-3 overflow-hidden whitespace-nowrap px-3.5 py-2.5 text-sm sm:px-4 ${className}`}>{children}</div>
+    return <div className={`flex min-w-0 flex-nowrap items-center gap-3 overflow-hidden whitespace-nowrap px-3.5 py-2 text-sm sm:px-4 sm:py-2.5 ${className}`}>{children}</div>
 }
 
 export function ListTitle({ children, href, external = false, className = "" }: { children: ReactNode; href?: string | null; external?: boolean; className?: string }) {
