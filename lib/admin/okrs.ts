@@ -25,6 +25,8 @@ export type OkrActionWorkItem = {
     created_at: string
     updated_at: string
     assignee_ids: string[]
+    expected_movement: number | null
+    impact_hypothesis: string | null
 }
 
 export type OkrKeyResult = {
@@ -87,7 +89,7 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
             .select("id, key_result_id, value, measured_at, reported_on, note, provenance, recorded_by")
             .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds).order("reported_on", { ascending: true }).order("created_at", { ascending: true }) : Promise.resolve({ data: [] }),
         keyResultIds.length ? supabaseAdmin.from("workspace_okr_work_items")
-            .select("key_result_id, work_items!inner(id, title, status, priority, description, due_date, created_at, updated_at)")
+            .select("key_result_id, expected_movement, impact_hypothesis, work_items!inner(id, title, status, priority, description, due_date, created_at, updated_at)")
             .eq("workspace_id", workspaceId).in("key_result_id", keyResultIds) : Promise.resolve({ data: [] }),
     ])
 
@@ -111,7 +113,12 @@ export async function listWorkspaceOkrs(workspaceId: string): Promise<WorkspaceO
     for (const link of actionLinks ?? []) {
         const linked = Array.isArray(link.work_items) ? link.work_items[0] : link.work_items
         if (!linked) continue
-        actionsByKeyResult.set(link.key_result_id, [...(actionsByKeyResult.get(link.key_result_id) ?? []), { ...linked, assignee_ids: assigneesByWorkItem.get(linked.id) ?? [] }])
+        actionsByKeyResult.set(link.key_result_id, [...(actionsByKeyResult.get(link.key_result_id) ?? []), {
+            ...linked,
+            assignee_ids: assigneesByWorkItem.get(linked.id) ?? [],
+            expected_movement: link.expected_movement === null ? null : numberValue(link.expected_movement),
+            impact_hypothesis: link.impact_hypothesis,
+        }])
     }
 
     const keyResultsByOkr = new Map<string, OkrKeyResult[]>()
@@ -163,6 +170,11 @@ export type WorkItemKeyResultLink = {
     name: string
     objective: string
     okr_id: string
+    unit: OkrMetricUnit
+    currency_code: string | null
+    comparator: OkrMetricComparator
+    expected_movement: number | null
+    impact_hypothesis: string | null
 }
 
 export async function listActiveWorkspaceKeyResults(workspaceId: string): Promise<WorkItemKeyResultLink[]> {
@@ -171,24 +183,43 @@ export async function listActiveWorkspaceKeyResults(workspaceId: string): Promis
     if (!okrs?.length) return []
     const objectiveById = new Map(okrs.map((okr) => [okr.id, okr.objective]))
     const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results")
-        .select("id, okr_id, name").eq("workspace_id", workspaceId).in("okr_id", okrs.map((okr) => okr.id)).order("sort_order").order("created_at")
+        .select("id, okr_id, name, unit, currency_code, comparator").eq("workspace_id", workspaceId).in("okr_id", okrs.map((okr) => okr.id)).order("sort_order").order("created_at")
     return (keyResults ?? []).map((result) => ({
         id: result.id,
         name: result.name,
         objective: objectiveById.get(result.okr_id) ?? "Objective",
         okr_id: result.okr_id,
+        unit: result.unit as OkrMetricUnit,
+        currency_code: result.currency_code,
+        comparator: result.comparator as OkrMetricComparator,
+        expected_movement: null,
+        impact_hypothesis: null,
     }))
 }
 
 export async function listWorkItemKeyResultLinks(workspaceId: string, workItemId: string): Promise<WorkItemKeyResultLink[]> {
     const { data: links } = await supabaseAdmin.from("workspace_okr_work_items")
-        .select("key_result_id").eq("workspace_id", workspaceId).eq("work_item_id", workItemId)
+        .select("key_result_id, expected_movement, impact_hypothesis").eq("workspace_id", workspaceId).eq("work_item_id", workItemId)
     if (!links?.length) return []
+    const linkByResult = new Map(links.map((link) => [link.key_result_id, link]))
     const { data: keyResults } = await supabaseAdmin.from("workspace_okr_key_results")
-        .select("id, okr_id, name").eq("workspace_id", workspaceId).in("id", links.map((link) => link.key_result_id))
+        .select("id, okr_id, name, unit, currency_code, comparator").eq("workspace_id", workspaceId).in("id", links.map((link) => link.key_result_id))
     if (!keyResults?.length) return []
     const { data: okrs } = await supabaseAdmin.from("workspace_okrs")
         .select("id, objective").eq("workspace_id", workspaceId).in("id", [...new Set(keyResults.map((result) => result.okr_id))])
     const objectiveById = new Map((okrs ?? []).map((okr) => [okr.id, okr.objective]))
-    return keyResults.map((result) => ({ id: result.id, name: result.name, objective: objectiveById.get(result.okr_id) ?? "Objective", okr_id: result.okr_id }))
+    return keyResults.map((result) => {
+        const link = linkByResult.get(result.id)
+        return {
+            id: result.id,
+            name: result.name,
+            objective: objectiveById.get(result.okr_id) ?? "Objective",
+            okr_id: result.okr_id,
+            unit: result.unit as OkrMetricUnit,
+            currency_code: result.currency_code,
+            comparator: result.comparator as OkrMetricComparator,
+            expected_movement: link?.expected_movement === null || link?.expected_movement === undefined ? null : numberValue(link.expected_movement),
+            impact_hypothesis: link?.impact_hypothesis ?? null,
+        }
+    })
 }

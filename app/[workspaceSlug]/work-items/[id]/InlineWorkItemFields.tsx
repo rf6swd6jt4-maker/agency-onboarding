@@ -20,7 +20,17 @@ import {
 type Person = { user_id: string; username: string; avatar_url: string | null }
 type WorkOption = { id: string; title: string; status: string }
 type RelationshipOption = { id: string; label: string }
-type KeyResultOption = { id: string; code: string; name: string; objective: string }
+type KeyResultOption = {
+    id: string
+    code: string
+    name: string
+    objective: string
+    unit: "number" | "percentage" | "currency" | "duration"
+    currency_code: string | null
+    expected_movement: number | null
+    impact_hypothesis: string | null
+}
+type KeyResultEstimate = { keyResultId: string; expectedMovement: string; impactHypothesis: string }
 let activePopupTrigger: HTMLElement | null = null
 
 type Props = {
@@ -192,7 +202,7 @@ export function InlineWorkItemFields(props: Props) {
     const [waitForParent, setWaitForParent] = useState(props.waitsForParent || !props.parentId)
     const [dependencyIds, setDependencyIds] = useState(props.manualDependencyIds)
     const [relationshipIds, setRelationshipIds] = useState(props.relationships.map((relationship) => relationship.id))
-    const [keyResultIds, setKeyResultIds] = useState(props.keyResults.map((result) => result.id))
+    const [keyResultEstimates, setKeyResultEstimates] = useState<KeyResultEstimate[]>(props.keyResults.map((result) => ({ keyResultId: result.id, expectedMovement: result.expected_movement === null ? "" : String(result.expected_movement), impactHypothesis: result.impact_hypothesis ?? "" })))
     const [description, setDescription] = useState(props.description ?? "")
     const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
@@ -230,7 +240,7 @@ export function InlineWorkItemFields(props: Props) {
             setWaitForParent(props.waitsForParent || !props.parentId)
             setDependencyIds(props.manualDependencyIds)
             setRelationshipIds(props.relationships.map((relationship) => relationship.id))
-            setKeyResultIds(props.keyResults.map((result) => result.id))
+            setKeyResultEstimates(props.keyResults.map((result) => ({ keyResultId: result.id, expectedMovement: result.expected_movement === null ? "" : String(result.expected_movement), impactHypothesis: result.impact_hypothesis ?? "" })))
         }
         setOpen((current) => current === name ? null : name)
     }
@@ -243,6 +253,25 @@ export function InlineWorkItemFields(props: Props) {
         })
     }
     function toggleId(values: string[], id: string, setter: (values: string[]) => void) { setter(values.includes(id) ? values.filter((value) => value !== id) : [...values, id]) }
+    function toggleKeyResult(id: string) {
+        setKeyResultEstimates((current) => current.some((link) => link.keyResultId === id)
+            ? current.filter((link) => link.keyResultId !== id)
+            : [...current, { keyResultId: id, expectedMovement: "", impactHypothesis: "" }])
+    }
+    function updateKeyResultEstimate(id: string, change: Partial<Omit<KeyResultEstimate, "keyResultId">>) {
+        setKeyResultEstimates((current) => current.map((link) => link.keyResultId === id ? { ...link, ...change } : link))
+    }
+    function saveLinks() {
+        if (keyResultEstimates.some((link) => !Number.isFinite(Number(link.expectedMovement)) || Number(link.expectedMovement) <= 0)) {
+            setError("Every linked Key Result needs a positive expected movement")
+            return
+        }
+        if (keyResultEstimates.some((link) => !link.impactHypothesis.trim())) {
+            setError("Every linked Key Result needs an impact hypothesis")
+            return
+        }
+        save(() => updateWorkItemLinks(props.workspaceSlug, props.workItemId, relationshipIds, keyResultEstimates.map((link) => ({ keyResultId: link.keyResultId, expectedMovement: Number(link.expectedMovement), impactHypothesis: link.impactHypothesis.trim() }))))
+    }
     const filteredMembers = useMemo(() => props.members.filter((person) => person.username.toLowerCase().includes(query.toLowerCase())), [props.members, query])
     const filteredWork = useMemo(() => props.workOptions.filter((item) => item.title.toLowerCase().includes(query.toLowerCase())), [props.workOptions, query])
     const filteredRelationships = useMemo(() => props.relationshipOptions.filter((relationship) => relationship.label.toLowerCase().includes(query.toLowerCase())), [props.relationshipOptions, query])
@@ -285,8 +314,43 @@ export function InlineWorkItemFields(props: Props) {
                     <div className="contents">
                         <Field label="Parent" icon="parent" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("parent")} className="block max-w-full rounded py-0.5 text-left hover:text-white">{props.parent ? <span className="block truncate">{props.parent.title}</span> : "None"}</button>{open === "parent" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-56 overflow-y-auto p-1"><button type="button" onClick={() => setParentId("")} className="w-full rounded-lg px-1.5 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900">No parent</button>{filteredWork.map((item) => <button type="button" key={item.id} onClick={() => setParentId(item.id)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{parentId === item.id ? "✓" : ""}</span></button>)}</div><label className="flex items-center gap-2 border-t border-neutral-800 px-2.5 py-2 text-xs text-neutral-300"><input type="checkbox" checked={waitForParent} disabled={!parentId} onChange={(event) => setWaitForParent(event.target.checked)} /> Wait for parent</label><PopupFooter pending={pending} onClear={parentId ? () => { setParentId(""); setWaitForParent(false) } : undefined} onSave={() => save(() => updateWorkItemParent(props.workspaceSlug, props.workItemId, parentId || null, Boolean(parentId && waitForParent)))} /></Popup> : null}</div></Field>
                         <Field label="Dependencies" icon="dependency" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("dependencies")} className="max-w-full rounded py-0.5 text-left hover:text-white">{props.dependencies.length ? props.dependencies.map((item) => item.title).join(", ") : "None"}</button>{open === "dependencies" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-64 overflow-y-auto p-1">{filteredWork.map((item) => <button type="button" key={item.id} disabled={item.id === parentId} onClick={() => toggleId(dependencyIds, item.id, setDependencyIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900 disabled:opacity-40"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{dependencyIds.includes(item.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={dependencyIds.length ? () => setDependencyIds([]) : undefined} onSave={() => save(() => updateWorkItemDependencies(props.workspaceSlug, props.workItemId, dependencyIds))} /></Popup> : null}</div></Field>
-                        <Field label="Links" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-flex max-w-full flex-wrap gap-1.5"><button data-work-item-popup-trigger type="button" aria-disabled={props.linksLocked} onClick={() => { if (!props.linksLocked) toggle("links") }} className={`flex max-w-full flex-wrap gap-1.5 rounded p-0 ${props.linksLocked ? "cursor-not-allowed" : "hover:opacity-90"}`}>{props.relationships.map((relationship) => <RoundPill key={`relationship-${relationship.id}`} tone="sky">{relationship.label}</RoundPill>)}{props.keyResults.map((result) => <RoundPill key={`result-${result.id}`} tone="sky">{result.code}</RoundPill>)}{!props.relationships.length && !props.keyResults.length ? <span className="text-neutral-600">None</span> : null}</button>{open === "links" ? <Popup className="w-96"><Search value={query} onChange={setQuery} placeholder="Search relationships or Key Results…" /><div className="max-h-72 overflow-y-auto p-1">{!props.relationshipsLocked ? <><p className="px-1.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Relationships</p>{filteredRelationships.length ? filteredRelationships.map((relationship) => <button type="button" key={relationship.id} onClick={() => toggleId(relationshipIds, relationship.id, setRelationshipIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{relationship.label}</span><span>{relationshipIds.includes(relationship.id) ? "✓" : ""}</span></button>) : <p className="px-1.5 py-2 text-xs text-neutral-600">No relationships found.</p>}</> : null}<p className="px-1.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Committed Key Results</p>{filteredKeyResults.length ? filteredKeyResults.map((result) => <button type="button" key={result.id} onClick={() => toggleId(keyResultIds, result.id, setKeyResultIds)} className="flex w-full items-start gap-3 rounded-lg px-1.5 py-2 text-left hover:bg-neutral-900"><RoundPill tone="sky">{result.code}</RoundPill><span className="min-w-0 flex-1"><span className="block truncate text-sm text-white">{result.name}</span><span className="block truncate text-xs text-neutral-600">{result.objective}</span></span><span className="text-sm">{keyResultIds.includes(result.id) ? "✓" : ""}</span></button>) : <p className="px-1.5 py-2 text-xs text-neutral-600">No committed Key Results found.</p>}</div><PopupFooter pending={pending} onClear={relationshipIds.length || keyResultIds.length ? () => { setRelationshipIds([]); setKeyResultIds([]) } : undefined} onSave={() => save(() => updateWorkItemLinks(props.workspaceSlug, props.workItemId, relationshipIds, keyResultIds))} /></Popup> : null}</div></Field>
-                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPriorityLabel(props.priority)}</button>{open === "priority" ? <Popup className="w-64"><div className="p-1">{workItemPriorityOptions.map((option) => <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, option.value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priority === option.value || option.value === 4 && props.priority === 5 ? "✓" : ""}</span></button>)}</div></Popup> : null}</div></Field>
+                        <Field label="Links" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8">
+                            <div className="relative inline-flex max-w-full flex-wrap gap-1.5">
+                                <button data-work-item-popup-trigger type="button" aria-disabled={props.linksLocked} onClick={() => { if (!props.linksLocked) toggle("links") }} className={`flex max-w-full flex-wrap gap-1.5 rounded p-0 ${props.linksLocked ? "cursor-not-allowed" : "hover:opacity-90"}`}>
+                                    {props.relationships.map((relationship) => <RoundPill key={`relationship-${relationship.id}`} tone="sky">{relationship.label}</RoundPill>)}
+                                    {props.keyResults.map((result) => <RoundPill key={`result-${result.id}`} tone="sky">{result.code}</RoundPill>)}
+                                    {!props.relationships.length && !props.keyResults.length ? <span className="text-neutral-600">None</span> : null}
+                                </button>
+                                {open === "links" ? <Popup className="w-[30rem] max-w-[calc(100vw-2rem)]">
+                                    <Search value={query} onChange={setQuery} placeholder="Search relationships or Key Results…" />
+                                    <div className="max-h-[28rem] overflow-y-auto p-1">
+                                        {!props.relationshipsLocked ? <>
+                                            <p className="px-1.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Relationships</p>
+                                            {filteredRelationships.length ? filteredRelationships.map((relationship) => <button type="button" key={relationship.id} onClick={() => toggleId(relationshipIds, relationship.id, setRelationshipIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{relationship.label}</span><span>{relationshipIds.includes(relationship.id) ? "✓" : ""}</span></button>) : <p className="px-1.5 py-2 text-xs text-neutral-600">No relationships found.</p>}
+                                        </> : null}
+                                        <p className="px-1.5 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Committed Key Results</p>
+                                        {filteredKeyResults.length ? filteredKeyResults.map((result) => {
+                                            const estimate = keyResultEstimates.find((link) => link.keyResultId === result.id)
+                                            const unitLabel = result.unit === "percentage" ? "percentage points" : result.unit === "currency" ? (result.currency_code ?? "USD").toUpperCase() : result.unit === "duration" ? "hours" : "units"
+                                            return <div key={result.id} className={`rounded-lg ${estimate ? "border border-neutral-800 bg-neutral-950" : ""}`}>
+                                                <button type="button" onClick={() => toggleKeyResult(result.id)} className="flex w-full items-start gap-3 rounded-lg px-1.5 py-2 text-left hover:bg-neutral-900">
+                                                    <RoundPill tone="sky">{result.code}</RoundPill>
+                                                    <span className="min-w-0 flex-1"><span className="block truncate text-sm text-white">{result.name}</span><span className="block truncate text-xs text-neutral-600">{result.objective}</span></span>
+                                                    <span className="text-sm">{estimate ? "✓" : ""}</span>
+                                                </button>
+                                                {estimate ? <div className="grid gap-2 border-t border-neutral-800 px-2.5 py-2.5">
+                                                    <label className="text-xs text-neutral-400">Expected movement <span className="text-neutral-600">({unitLabel})</span><input type="number" min="0.000001" step="any" required value={estimate.expectedMovement} onChange={(event) => updateKeyResultEstimate(result.id, { expectedMovement: event.target.value })} className="mt-1 h-9 w-full rounded-md border border-neutral-700 bg-black px-2.5 text-sm text-white outline-none focus:border-neutral-500" /></label>
+                                                    <label className="text-xs text-neutral-400">Impact hypothesis<textarea rows={2} required value={estimate.impactHypothesis} onChange={(event) => updateKeyResultEstimate(result.id, { impactHypothesis: event.target.value })} placeholder="Why should this work move the KR?" className="mt-1 w-full rounded-md border border-neutral-700 bg-black px-2.5 py-2 text-sm text-white outline-none focus:border-neutral-500" /></label>
+                                                </div> : null}
+                                            </div>
+                                        }) : <p className="px-1.5 py-2 text-xs text-neutral-600">No committed Key Results found.</p>}
+                                    </div>
+                                    {error ? <p className="border-t border-red-500/20 px-2.5 py-2 text-xs text-red-300">{error}</p> : null}
+                                    <PopupFooter pending={pending} onClear={relationshipIds.length || keyResultEstimates.length ? () => { setRelationshipIds([]); setKeyResultEstimates([]) } : undefined} onSave={saveLinks} />
+                                </Popup> : null}
+                            </div>
+                        </Field>
+                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPriorityLabel(props.priority)}</button>{open === "priority" ? <Popup className="w-72"><div className="p-1">{workItemPriorityOptions.map((option) => <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, option.value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priority === option.value || option.value === 4 && props.priority === 5 ? "✓" : ""}</span></button>)}</div><p className="border-t border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-600">This sets the latest acceptable timing. The Admin queue calculates the execution order around it.</p></Popup> : null}</div></Field>
                     </div>
                     <Field label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
                         <div>

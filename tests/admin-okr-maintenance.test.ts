@@ -231,16 +231,25 @@ test("the OKRs tab is a metric table with popup-only Objective and Key Result de
 })
 
 test("work-item Links combine relationships and committed Key Results", async () => {
-    const [migration, fields, actions, page] = await Promise.all([
+    const [migration, priorityMigration, fields, actions, page] = await Promise.all([
         readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
+        readFile("supabase/migrations/20260809120000_admin_work_priority_queue.sql", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/InlineWorkItemFields.tsx", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/actions.ts", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/page.tsx", "utf8"),
     ])
     assert.match(migration, /OKR work links must stay inside one workspace/)
     assert.doesNotMatch(migration, /area = 'admin'[\s\S]*visibility = 'admins_only'/)
+    assert.match(priorityMigration, /expected_movement numeric/)
+    assert.match(priorityMigration, /impact_hypothesis text/)
+    assert.match(priorityMigration, /workspace_okr_work_items_expected_movement_check[\s\S]*not valid/)
+    assert.match(priorityMigration, /workspace_okr_work_items_impact_hypothesis_check[\s\S]*not valid/)
+    assert.match(priorityMigration, /new\.expected_movement is null or new\.expected_movement <= 0/)
+    assert.match(priorityMigration, /never updates actual measurements/)
     assert.match(fields, /Field label="Links"/)
     assert.match(fields, /Committed Key Results/)
+    assert.match(fields, /Expected movement/)
+    assert.match(fields, /Impact hypothesis/)
     assert.match(fields, /<RoundPill tone="sky">\{result\.code\}<\/RoundPill>/)
     assert.match(actions, /export async function updateWorkItemLinks/)
     assert.match(actions, /Work can only be linked to committed Key Results/)
@@ -289,8 +298,9 @@ test("maintenance errors use stable catalogue codes with specific and broad fall
 })
 
 test("Admin Work and Maintenance keep compact list rows while OKRs use the unified workspace", async () => {
-    const [adminPage, navigation, maintenancePage, detail, actions] = await Promise.all([
+    const [adminPage, workQueue, navigation, maintenancePage, detail, actions] = await Promise.all([
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+        readFile("components/admin/AdminWorkQueue.tsx", "utf8"),
         readFile("components/admin/AdminPanelNav.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/maintenance/page.tsx", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/page.tsx", "utf8"),
@@ -300,7 +310,11 @@ test("Admin Work and Maintenance keep compact list rows while OKRs use the unifi
     assert.doesNotMatch(navigation, /Overview/)
     assert.match(adminPage, /listAdminWorkItems/)
     assert.match(adminPage, /OkrWorkspace/)
-    assert.match(adminPage, /overflow-hidden rounded-2xl border/)
+    assert.match(adminPage, /okrAttention/)
+    assert.match(workQueue, /Recommended queue/)
+    assert.match(workQueue, /overflow-hidden rounded-2xl border/)
+    assert.match(workQueue, /impact\/hr/)
+    assert.match(workQueue, /completing work never changes a KR measurement automatically/)
     assert.doesNotMatch(adminPage, /md:grid-cols-2 xl:grid-cols-3/)
     assert.doesNotMatch(maintenancePage, /diagnosticSummary|failure_fingerprint|line-clamp-2/)
     assert.match(maintenancePage, /occurrence/)

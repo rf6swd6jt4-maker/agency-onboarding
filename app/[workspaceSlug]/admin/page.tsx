@@ -1,15 +1,13 @@
-import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
+import { AdminWorkQueue } from "@/components/admin/AdminWorkQueue"
 import { OkrWorkspace } from "@/components/admin/OkrWorkspace"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
-import { SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listWorkspaceOkrs } from "@/lib/admin/okrs"
+import { okrAttention } from "@/lib/admin/work-priority"
 import { listAdminWorkItems } from "@/lib/admin/work-items"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
-import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
 export const dynamic = "force-dynamic"
 
@@ -29,30 +27,30 @@ async function adminPeople(workspaceId: string) {
     }
 }
 
-function statusTone(status: string) {
-    if (status === "active" || status === "done") return "emerald" as const
-    if (status === "doing" || status === "waiting") return "yellow" as const
-    if (status === "blocked" || status === "cancelled" || status === "canceled") return "red" as const
-    return "neutral" as const
-}
-
-function workKindLabel(kind: string) {
-    if (kind === "maintenance") return "Maintenance"
-    if (kind === "okr_action") return "OKR action"
-    return "Admin work"
-}
-
 export default async function AdminPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
     const { workspace, user } = await requireWorkspace(workspaceSlug, "admin")
     const view = query.view === "okrs" ? "okrs" : "work"
-    const [allOkrs, workItems, people, { data: linkableWorkItems }] = await Promise.all([
+    const now = new Date()
+    const [allOkrs, people] = await Promise.all([
         listWorkspaceOkrs(workspace.id),
-        listAdminWorkItems(workspace.id),
         adminPeople(workspace.id),
+    ])
+    const [workItems, { data: linkableWorkItems }] = await Promise.all([
+        listAdminWorkItems(workspace.id, allOkrs, now),
         view === "okrs" ? supabaseAdmin.from("work_items").select("id, title, status, priority, due_date").eq("workspace_id", workspace.id).order("priority").order("updated_at", { ascending: false }).limit(250) : Promise.resolve({ data: [] }),
     ])
-    const okrs = allOkrs.filter((okr) => okr.objective_type !== "aspirational").sort((left, right) => {
+    const okrs = allOkrs.filter((okr) => okr.objective_type !== "aspirational").map((okr) => ({
+        ...okr,
+        key_results: okr.status === "active" ? [...okr.key_results].sort((left, right) => {
+            const leftAttention = okrAttention({ progress: left.progress, periodStart: okr.period_start, periodEnd: okr.period_end, now })
+            const rightAttention = okrAttention({ progress: right.progress, periodStart: okr.period_start, periodEnd: okr.period_end, now })
+            if (!Number.isFinite(leftAttention) && !Number.isFinite(rightAttention)) return left.sort_order - right.sort_order
+            if (!Number.isFinite(leftAttention)) return -1
+            if (!Number.isFinite(rightAttention)) return 1
+            return rightAttention - leftAttention || left.sort_order - right.sort_order
+        }) : okr.key_results,
+    })).sort((left, right) => {
         const leftClosed = left.status === "completed" || left.status === "cancelled" ? 1 : 0
         const rightClosed = right.status === "completed" || right.status === "cancelled" ? 1 : 0
         return leftClosed - rightClosed || left.period_end.localeCompare(right.period_end)
@@ -70,27 +68,9 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                 <AdminPanelNav workspaceSlug={workspace.slug} active={view} />
 
                 {view === "work" ? (
-                    <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-                        {workItems.length ? workItems.map((item) => {
-                            const assignees = item.assignee_ids.map((id) => people.names.get(id) ?? "Admin")
-                            return <Link key={item.id} href={`/${workspace.slug}/work-items/${item.id}`} className="block border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
-                                <div className="flex min-w-0 items-center gap-2">
-                                    <p className="truncate font-medium text-neutral-100">{item.title}</p>
-                                    <SquarePill tone={statusTone(item.status)} className="shrink-0 capitalize">{item.status.replace(/_/g, " ")}</SquarePill>
-                                    <SquarePill className="ml-auto shrink-0">Admin</SquarePill>
-                                </div>
-                                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
-                                    <span>{workKindLabel(item.kind)}</span>
-                                    <span>{workItemPriorityLabel(item.priority)}</span>
-                                    <span>{assignees.length ? assignees.join(", ") : "Unassigned"}</span>
-                                    <span className="font-mono">{shortId(item.id)}</span>
-                                    <span className="ml-auto">{formatRelativeTime(item.updated_at)}</span>
-                                </div>
-                            </Link>
-                        }) : <div className="p-6"><p className="text-lg font-semibold">No Admin work yet.</p><p className="mt-2 text-sm text-neutral-400">OKR actions and maintenance work items will appear here.</p></div>}
-                    </section>
+                    <AdminWorkQueue items={workItems} workspaceSlug={workspace.slug} names={people.names} />
                 ) : (
-                    <OkrWorkspace workspaceSlug={workspace.slug} currentUserId={user.id} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} today={new Date().toISOString().slice(0, 10)} />
+                    <OkrWorkspace workspaceSlug={workspace.slug} currentUserId={user.id} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} today={now.toISOString().slice(0, 10)} />
                 )}
             </div>
         </main>

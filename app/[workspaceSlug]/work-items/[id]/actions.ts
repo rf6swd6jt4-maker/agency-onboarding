@@ -17,6 +17,7 @@ async function requireWorkItem(slug: string, workItemId: string) {
 function refreshWorkItem(slug: string, workItemId: string) {
     revalidatePath(workItemHref(slug, workItemId))
     revalidatePath(`/${slug}/work`)
+    revalidatePath(`/${slug}/admin`)
 }
 
 async function refreshScheduleSurfaces(slug: string, workspaceId: string, workItemId: string) {
@@ -134,11 +135,18 @@ export async function updateWorkItemDependencies(slug: string, workItemId: strin
     refreshWorkItem(slug, workItemId)
 }
 
-export async function updateWorkItemLinks(slug: string, workItemId: string, relationshipIds: string[], keyResultIds: string[]) {
+export async function updateWorkItemLinks(slug: string, workItemId: string, relationshipIds: string[], keyResultLinks: Array<{ keyResultId: string; expectedMovement: number; impactHypothesis: string }>) {
     const { workspace, user, item } = await requireWorkItem(slug, workItemId)
     if (item.native_kind === "onboarding_step") throw new Error("Onboarding work-item links are managed by onboarding")
     const uniqueIds = [...new Set(relationshipIds)]
-    const uniqueKeyResultIds = [...new Set(keyResultIds)]
+    const normalizedKeyResultLinks = [...new Map(keyResultLinks.map((link) => [link.keyResultId, {
+        keyResultId: link.keyResultId,
+        expectedMovement: Number(link.expectedMovement),
+        impactHypothesis: String(link.impactHypothesis ?? "").trim(),
+    }])).values()]
+    const uniqueKeyResultIds = normalizedKeyResultLinks.map((link) => link.keyResultId)
+    if (normalizedKeyResultLinks.some((link) => !Number.isFinite(link.expectedMovement) || link.expectedMovement <= 0)) throw new Error("Every linked Key Result needs a positive expected movement")
+    if (normalizedKeyResultLinks.some((link) => !link.impactHypothesis)) throw new Error("Every linked Key Result needs an impact hypothesis")
     if ((item.area === "admin" || item.visibility === "admins_only") && uniqueIds.length) throw new Error("Private Admin work items cannot be linked to relationships")
     const [{ data: relationships }, { data: existingOkrLinks }] = await Promise.all([
         supabaseAdmin.from("relationships").select("id").eq("workspace_id", workspace.id),
@@ -160,11 +168,10 @@ export async function updateWorkItemLinks(slug: string, workItemId: string, rela
         if (error) throw new Error(error.message)
     }
     const existingKeyResultIds = new Set((existingOkrLinks ?? []).map((link) => link.key_result_id))
-    const addedKeyResultIds = uniqueKeyResultIds.filter((id) => !existingKeyResultIds.has(id))
     const removedKeyResultIds = [...existingKeyResultIds].filter((id) => !uniqueKeyResultIds.includes(id))
-    if (addedKeyResultIds.length) {
-        const { error: insertError } = await supabaseAdmin.from("workspace_okr_work_items").insert(addedKeyResultIds.map((keyResultId) => ({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: workItemId, linked_by: user.id })))
-        if (insertError) throw new Error(insertError.message)
+    if (normalizedKeyResultLinks.length) {
+        const { error: upsertError } = await supabaseAdmin.from("workspace_okr_work_items").upsert(normalizedKeyResultLinks.map((link) => ({ workspace_id: workspace.id, key_result_id: link.keyResultId, work_item_id: workItemId, expected_movement: link.expectedMovement, impact_hypothesis: link.impactHypothesis, linked_by: user.id })), { onConflict: "key_result_id,work_item_id" })
+        if (upsertError) throw new Error(upsertError.message)
     }
     if (removedKeyResultIds.length) {
         const { error: deleteError } = await supabaseAdmin.from("workspace_okr_work_items").delete().eq("workspace_id", workspace.id).eq("work_item_id", workItemId).in("key_result_id", removedKeyResultIds)

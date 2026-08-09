@@ -26,6 +26,14 @@ function reportingCadence(formData: FormData): OkrReportingCadence {
     return cadence
 }
 
+function okrWorkEstimate(formData: FormData) {
+    const expectedMovement = numericValue(formData, "expected_movement")
+    const impactHypothesis = value(formData, "impact_hypothesis")
+    if (expectedMovement <= 0) throw new Error("Expected movement must be greater than zero")
+    if (!impactHypothesis) throw new Error("Explain why this work should move the Key Result")
+    return { expectedMovement, impactHypothesis }
+}
+
 function adminPath(slug: string, suffix = "") {
     return `/${slug}/admin${suffix}`
 }
@@ -270,9 +278,10 @@ export async function createOkrAction(slug: string, okrId: string, keyResultId: 
     if (!okr || !keyResult || !value(formData, "title")) throw new Error("Add a valid OKR action")
     const title = value(formData, "title")
     const description = value(formData, "description")
-    const { data: item, error } = await supabaseAdmin.from("work_items").insert({ workspace_id: workspace.id, title, description: `Admin work: ${description || title}`, lifecycle_phase: null, status: "todo", priority: 3, is_key_task: true, area: "admin", kind: "okr_action", visibility: "admins_only", native_kind: "okr_action", created_by: user.id, metadata: { okr_id: okrId, key_result_id: keyResultId } }).select("id").single()
+    const { expectedMovement, impactHypothesis } = okrWorkEstimate(formData)
+    const { data: item, error } = await supabaseAdmin.from("work_items").insert({ workspace_id: workspace.id, title, description: `Admin work: ${description || title}`, lifecycle_phase: null, status: "todo", priority: 4, is_key_task: true, area: "admin", kind: "okr_action", visibility: "admins_only", native_kind: "okr_action", created_by: user.id, metadata: { okr_id: okrId, key_result_id: keyResultId } }).select("id").single()
     if (error || !item) throw new Error(error?.message ?? "Could not create action")
-    const { error: linkError } = await supabaseAdmin.from("workspace_okr_work_items").insert({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: item.id, linked_by: user.id })
+    const { error: linkError } = await supabaseAdmin.from("workspace_okr_work_items").insert({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: item.id, expected_movement: expectedMovement, impact_hypothesis: impactHypothesis, linked_by: user.id })
     if (linkError) {
         await supabaseAdmin.from("work_items").delete().eq("workspace_id", workspace.id).eq("id", item.id)
         throw new Error(linkError.message)
@@ -289,12 +298,13 @@ export async function linkOkrAction(slug: string, okrId: string, keyResultId: st
     const { workspace, user } = await requireWorkspace(slug, "admin")
     await requireCommittedOkr(workspace.id, okrId)
     const workItemId = value(formData, "work_item_id")
+    const { expectedMovement, impactHypothesis } = okrWorkEstimate(formData)
     const [{ data: keyResult }, { data: item }] = await Promise.all([
         supabaseAdmin.from("workspace_okr_key_results").select("id").eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).maybeSingle(),
         supabaseAdmin.from("work_items").select("id").eq("workspace_id", workspace.id).eq("id", workItemId).maybeSingle(),
     ])
     if (!keyResult || !item) throw new Error("Choose a work item from this workspace")
-    const { error } = await supabaseAdmin.from("workspace_okr_work_items").upsert({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: workItemId, linked_by: user.id })
+    const { error } = await supabaseAdmin.from("workspace_okr_work_items").upsert({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: workItemId, expected_movement: expectedMovement, impact_hypothesis: impactHypothesis, linked_by: user.id })
     if (error) throw new Error(error.message)
     revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }
