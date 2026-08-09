@@ -1,14 +1,18 @@
-import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { ListActionMenu } from "@/components/list/ListActionMenu"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
+import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { QuickStats } from "@/components/panel/QuickStats"
-import { SquarePill } from "@/components/ui"
+import { Assignee, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listMaintenanceWorkItems, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel, type MaintenanceCategory } from "@/lib/admin/maintenance"
+import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { formatRelativeTime } from "@/lib/ui/relative-time"
+import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
 import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
@@ -28,8 +32,11 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
     ])
     const memberships = membershipResult.data ?? []
     const ids = memberships.map((membership) => membership.user_id)
-    const { data: profiles } = ids.length ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", ids) : { data: [] }
-    const names = new Map((profiles ?? []).map((profile) => [profile.user_id, profile.username]))
+    const { data: profiles } = ids.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", ids) : { data: [] }
+    const people = new Map((profiles ?? []).map((profile) => [profile.user_id, {
+        name: profile.username,
+        avatarSrc: profile.avatar_path ? profileAvatarUrl(profile.username, profile.avatar_path) : null,
+    }]))
     const selectedCategory = MAINTENANCE_CATEGORIES.includes(query.category as MaintenanceCategory) ? query.category as MaintenanceCategory : null
     const selectedState = query.state === "resolved" ? "resolved" : "open"
     const openItems = items.filter((item) => !["done", "canceled"].includes(item.status))
@@ -69,27 +76,47 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
                 {MAINTENANCE_CATEGORIES.map((category) => <FilterRailLink key={category} href={filterHref(category)} selected={selectedCategory === category}>{maintenanceCategoryLabel(category)} <FilterRailCount>{stateItems.filter((item) => item.maintenance_category === category).length}</FilterRailCount></FilterRailLink>)}
             </FilterRail>
 
-            <section className="mt-5" aria-label="Maintenance queue">
-                <div className="overflow-hidden rounded-2xl border border-neutral-800 bg-black">{visibleItems.length ? visibleItems.map((item) => {
-                    const assigneeNames = item.assignee_ids.map((id) => names.get(id) ?? "Admin")
-                    return <div key={item.id} className="border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
-                        <div className="flex min-w-0 items-center gap-2">
-                            <Link href={`/${workspace.slug}/work-items/${item.id}`} className="truncate font-medium text-neutral-100 hover:underline">{item.title}</Link>
-                            <SquarePill tone={item.severity === "critical" ? "red" : "yellow"} className="shrink-0 capitalize">{item.severity}</SquarePill>
-                            <SquarePill className="ml-auto shrink-0">Admin</SquarePill>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
-                            <span>{maintenanceCategoryLabel(item.maintenance_category)}</span>
-                            <span>{workItemPriorityLabel(item.priority)}</span>
-                            <span>{item.occurrence_count} occurrence{item.occurrence_count === 1 ? "" : "s"}</span>
-                            <span>{assigneeNames.join(", ") || "Owner fallback pending"}</span>
-                            <span>First {formatRelativeTime(item.first_occurred_at)}</span>
-                            <span className="ml-auto">Last {formatRelativeTime(item.last_occurred_at)}</span>
-                            {item.native_href ? <Link href={item.native_href} className="text-neutral-400 underline underline-offset-4">Source</Link> : null}
-                        </div>
-                    </div>
-                }) : <p className="px-4 py-8 text-sm text-neutral-500">No {selectedState} maintenance items match this filter.</p>}</div>
-            </section>
+            <List ariaLabel="Maintenance queue">
+                {visibleItems.length ? visibleItems.map((item) => {
+                    const href = `/${workspace.slug}/work-items/${item.id}`
+                    const status = workItemStatusPresentation(item.status)
+                    const assignees = item.assignee_ids.map((id) => ({ id, ...(people.get(id) ?? { name: "Admin", avatarSrc: null }) }))
+                    const actions = [
+                        { label: "Open work item", href },
+                        item.native_href ? { label: "Open source", href: item.native_href } : null,
+                        { label: "Copy item ID", copyText: item.id },
+                    ]
+                    return <ListItem key={item.id} className={item.severity === "critical" ? "bg-red-950/[0.08]" : ""}>
+                        <MobileListActionSurface actions={actions} label={`Open actions for ${item.title}`}>
+                            <ListPrimaryRow>
+                                <ListTitle href={href} className="flex-1">{item.title}</ListTitle>
+                                <SquarePill tone={item.severity === "critical" ? "red" : "yellow"} className="shrink-0 capitalize">{item.severity}</SquarePill>
+                                <span className="hidden shrink-0 sm:inline-flex"><SquarePill>Admin</SquarePill></span>
+                                <Status label={status.label} tone={status.tone} className="ml-auto shrink-0" />
+                            </ListPrimaryRow>
+                            <ListSecondaryRow>
+                                <span className="shrink-0 text-neutral-400">{maintenanceCategoryLabel(item.maintenance_category)}</span>
+                                <span className="hidden shrink-0 text-neutral-500 md:inline">{workItemPriorityLabel(item.priority)}</span>
+                                <span className="hidden shrink-0 text-neutral-500 sm:inline">{item.occurrence_count} occurrence{item.occurrence_count === 1 ? "" : "s"}</span>
+                                <span className="hidden shrink-0 text-neutral-500 xl:inline">First {formatRelativeTime(item.first_occurred_at)}</span>
+                                {!assignees.length ? <span className="hidden shrink-0 text-neutral-600 lg:inline">Unassigned</span> : null}
+                                <ListTrailing>
+                                    <span className="font-mono text-neutral-500">{shortId(item.id)}</span>
+                                    <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(item.last_occurred_at)}</span>
+                                    {assignees[0] ? <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Assigned to ${assignees.map((assignee) => assignee.name).join(", ")}`}>
+                                        <Assignee name={assignees[0].name} avatarSrc={assignees[0].avatarSrc} compact compactSize="md" />
+                                        {assignees.length > 1 ? <span className="text-xs text-neutral-500">+{assignees.length - 1}</span> : null}
+                                    </span> : null}
+                                    <ListActionMenu actions={actions} className="hidden sm:block" />
+                                </ListTrailing>
+                            </ListSecondaryRow>
+                        </MobileListActionSurface>
+                    </ListItem>
+                }) : <div className="p-6">
+                    <p className="text-lg font-semibold">No {selectedState} maintenance items.</p>
+                    <p className="mt-2 text-sm text-neutral-400">Choose another state or category to broaden this queue.</p>
+                </div>}
+            </List>
         </div>
     </main>
 }

@@ -10,6 +10,8 @@ const canonicalListPages = [
     "app/[workspaceSlug]/work/page.tsx",
     "app/[workspaceSlug]/work-items/page.tsx",
     "app/[workspaceSlug]/communications/page.tsx",
+    "app/[workspaceSlug]/admin/maintenance/page.tsx",
+    "app/[workspaceSlug]/admin/activity/page.tsx",
 ]
 
 test("canonical platform lists use the shared header and two-row list primitives", async () => {
@@ -23,6 +25,16 @@ test("canonical platform lists use the shared header and two-row list primitives
         assert.match(page.source, /<ListSecondaryRow>/, `${page.path} must use ListSecondaryRow`)
         assert.match(page.source, /<MobileListActionSurface/, `${page.path} must use the mobile whole-item action surface`)
     }
+})
+
+test("the Admin work queue uses the same canonical row anatomy", async () => {
+    const source = await readFile("components/admin/AdminWorkQueue.tsx", "utf8")
+    for (const primitive of ["List", "ListItem", "ListPrimaryRow", "ListSecondaryRow", "ListTitle", "ListTrailing", "MobileListActionSurface"]) {
+        assert.match(source, new RegExp(`<${primitive}`), `AdminWorkQueue must use ${primitive}`)
+    }
+    assert.match(source, /<Assignee/)
+    assert.doesNotMatch(source, /rounded-full border bg-neutral-900/)
+    assert.doesNotMatch(source, /border-b border-neutral-900 px-3 py-3/)
 })
 
 test("the Assets sibling keeps the shared Library shell without becoming a canonical list", async () => {

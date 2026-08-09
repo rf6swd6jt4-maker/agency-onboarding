@@ -280,6 +280,9 @@ The two divider colours are deliberately different: the darker `border-neutral-9
 - Fulfilment: work-item title and operational status; attached relationship and concise work context; work-item ID, relevant time, creator, actions.
 - Work Item: task title, Key task label, lifecycle stage and operational status; priority or concise description; work-item ID, relevant time, creator, actions. `components/list/work-item-presentation.ts` is the shared label/tone map for work-item statuses; list and detail views must use it together.
 - Communication: person and business, channel label and latest-message status; one-line message preview and direction; relationship ID, latest-message time, actions.
+- Admin Work Queue: work-item title and Admin work kind; queue priority status; concise queue rationale, effort, forecast and priority source; work-item ID, latest update, execution-owner assignee, actions.
+- Maintenance: coded failure title, severity and Admin labels, work-item status; category, priority, occurrence count and first occurrence; work-item ID, latest occurrence, assignee, source and work-item actions.
+- Activity: recorded event summary and category, truthful event-level status; event key, compact metadata and attached entity; event ID, occurrence time, actor or Betelgeze automation avatar, source and copy actions.
 
 When a new list cannot fit this anatomy, first determine whether it is actually a list. Do not extend the standard merely to make galleries, timelines, settings rows, evidence disclosures, or nested planning structures resemble one.
 

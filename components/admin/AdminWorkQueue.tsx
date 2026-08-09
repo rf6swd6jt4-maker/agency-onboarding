@@ -1,13 +1,15 @@
 "use client"
 
-import Link from "next/link"
 import { useMemo, useState } from "react"
-import { Status, type StatusTone } from "@/components/ui"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { ListActionMenu } from "@/components/list/ListActionMenu"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { FilterRail, FilterRailButton, FilterRailCount } from "@/components/panel/FilterRail"
 import { QuickStats } from "@/components/panel/QuickStats"
+import { Assignee, SquarePill, Status, type StatusTone } from "@/components/ui"
 import type { AdminWorkItem } from "@/lib/admin/work-items"
 import { formatOkrMetricValue } from "@/lib/admin/okr-metrics"
-import { shortId } from "@/lib/ui/relative-time"
+import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
 function queueTone(item: AdminWorkItem): StatusTone {
@@ -76,14 +78,11 @@ function queueForecast(item: AdminWorkItem) {
     return `Finish ${finish}`
 }
 
-function initials(name: string) {
-    return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "A"
-}
-
-function QueueRow({ item, workspaceSlug, names }: {
+function QueueRow({ item, workspaceSlug, names, avatarUrls }: {
     item: AdminWorkItem
     workspaceSlug: string
     names: Record<string, string>
+    avatarUrls: Record<string, string | null>
 }) {
     const ownerName = item.execution_owner_id ? names[item.execution_owner_id] ?? "Admin" : null
     const collaborators = item.assignee_ids.filter((id) => id !== item.execution_owner_id).map((id) => names[id] ?? "Admin")
@@ -93,31 +92,41 @@ function QueueRow({ item, workspaceSlug, names }: {
     const effort = item.predicted_duration_hours === item.conservative_duration_hours
         ? `${formatHours(item.predicted_duration_hours)} expected`
         : `${formatHours(item.predicted_duration_hours)} expected · ${formatHours(item.conservative_duration_hours)} reserved`
+    const href = `/${workspaceSlug}/work-items/${item.id}`
+    const actions = [{ label: "Open work item", href }]
+    const firstAssigneeId = item.execution_owner_id ?? item.assignee_ids[0] ?? null
+    const firstAssigneeName = firstAssigneeId ? names[firstAssigneeId] ?? "Admin" : null
 
     return (
-        <article className="border-b border-neutral-900 px-3 py-3 last:border-0 hover:bg-neutral-900/50 sm:px-4">
-            <div className="min-w-0">
-                <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_11.5rem_10rem_5.25rem] sm:items-center">
-                    <Link href={`/${workspaceSlug}/work-items/${item.id}`} className="min-w-0 truncate font-medium text-neutral-100 hover:text-white hover:underline hover:underline-offset-4">{item.title}</Link>
-                    <Status label={priority.label} tone={queueTone(item)} className="text-xs sm:text-sm" />
-                    <span className="text-xs text-neutral-400 sm:text-right">{effort}</span>
-                    <div className="flex -space-x-1 sm:justify-end" aria-label={ownerName ? `Owned by ${ownerName}${collaborators.length ? ` with ${collaborators.join(", ")}` : ""}` : "Unassigned"}>
-                        {assignees.slice(0, 2).map((name, index) => <span key={`${name}-${index}`} className={`inline-flex h-7 w-7 items-center justify-center rounded-full border bg-neutral-900 text-[10px] font-semibold text-neutral-300 ${index === 0 && ownerName ? "border-white" : "border-neutral-700"}`}>{initials(name)}</span>)}
-                        {!assignees.length ? <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-neutral-700 text-xs text-neutral-600">—</span> : null}
-                    </div>
-                </div>
-                <div className="mt-1.5 grid min-w-0 gap-x-2 gap-y-1 text-xs leading-5 text-neutral-500 sm:grid-cols-[minmax(0,1fr)_11.5rem_10rem_5.25rem] sm:items-start">
-                    <p className="min-w-0 line-clamp-2 text-neutral-400">{queueExplanation(item)}</p>
-                    <span className={item.priority_override === null ? "text-neutral-500" : "text-amber-300"}>{priority.source}</span>
-                    <span className={`sm:text-right ${item.projected_lateness_hours > 0 ? "text-red-300" : ""}`}>{forecast ?? workKindLabel(item.kind)}</span>
-                    <span className="font-mono sm:text-right">{shortId(item.id)}</span>
-                </div>
-            </div>
-        </article>
+        <ListItem>
+            <MobileListActionSurface actions={actions} label={`Open actions for ${item.title}`}>
+                <ListPrimaryRow>
+                    <ListTitle href={href} className="flex-1">{item.title}</ListTitle>
+                    <span className="hidden shrink-0 sm:inline-flex"><SquarePill>{workKindLabel(item.kind)}</SquarePill></span>
+                    <Status label={priority.label} tone={queueTone(item)} className="ml-auto shrink-0" />
+                </ListPrimaryRow>
+                <ListSecondaryRow>
+                    <span className="hidden min-w-0 flex-1 truncate text-neutral-400 lg:inline">{queueExplanation(item)}</span>
+                    <span className="hidden shrink-0 text-neutral-500 md:inline">{effort}</span>
+                    <span className={`hidden shrink-0 xl:inline ${item.priority_override === null ? "text-neutral-500" : "text-amber-300"}`}>{priority.source}</span>
+                    {forecast ? <span className={`hidden shrink-0 text-neutral-500 sm:inline ${item.projected_lateness_hours > 0 ? "text-red-300" : ""}`}>{forecast}</span> : null}
+                    {!firstAssigneeName ? <span className="hidden shrink-0 text-neutral-600 md:inline">Unassigned</span> : null}
+                    <ListTrailing>
+                        <span className="font-mono text-neutral-500">{shortId(item.id)}</span>
+                        <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(item.updated_at)}</span>
+                        {firstAssigneeName ? <span className="inline-flex shrink-0 items-center gap-1" aria-label={ownerName ? `Owned by ${ownerName}${collaborators.length ? ` with ${collaborators.join(", ")}` : ""}` : `Assigned to ${assignees.join(", ")}`}>
+                            <Assignee name={firstAssigneeName} avatarSrc={firstAssigneeId ? avatarUrls[firstAssigneeId] : null} compact compactSize="md" />
+                            {assignees.length > 1 ? <span className="text-xs text-neutral-500">+{assignees.length - 1}</span> : null}
+                        </span> : null}
+                        <ListActionMenu actions={actions} className="hidden sm:block" />
+                    </ListTrailing>
+                </ListSecondaryRow>
+            </MobileListActionSurface>
+        </ListItem>
     )
 }
 
-export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: { items: AdminWorkItem[]; workspaceSlug: string; currentUserId: string; names: Record<string, string> }) {
+export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names, avatarUrls }: { items: AdminWorkItem[]; workspaceSlug: string; currentUserId: string; names: Record<string, string>; avatarUrls: Record<string, string | null> }) {
     const [view, setView] = useState<"business" | "mine">("business")
     const openItems = useMemo(() => items.filter((item) => item.status !== "done" && item.status !== "canceled"), [items])
     const visibleItems = useMemo(() => view === "mine" ? openItems.filter((item) => item.execution_owner_id === currentUserId) : openItems, [currentUserId, openItems, view])
@@ -139,15 +148,15 @@ export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: {
             <FilterRailButton selected={view === "business"} onClick={() => setView("business")}>Business <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailButton>
             <FilterRailButton selected={view === "mine"} onClick={() => setView("mine")}>My work <FilterRailCount>{myOpenItems.length}</FilterRailCount></FilterRailButton>
         </FilterRail>
-        <section className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-black" aria-label="Work queue">
-            {ranked.length ? ranked.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} />) : <p className="px-4 py-5 text-sm text-neutral-400">There is no actionable Admin work right now.</p>}
+        <List ariaLabel="Work queue">
+            {ranked.length ? ranked.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} avatarUrls={avatarUrls} />) : <p className="px-4 py-5 text-sm text-neutral-400">There is no actionable Admin work right now.</p>}
             {deferred.length ? (
                 <div className="border-t border-neutral-800">
                     <div className="bg-neutral-950/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">Blocked, waiting, or scheduled later</div>
-                    {deferred.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} />)}
+                    {deferred.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} avatarUrls={avatarUrls} />)}
                 </div>
             ) : null}
             {!items.length ? <p className="px-4 py-5 text-sm text-neutral-400">Committed OKR actions and maintenance work will appear here.</p> : null}
-        </section>
+        </List>
     </>
 }

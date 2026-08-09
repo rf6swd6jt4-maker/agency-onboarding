@@ -10,6 +10,6 @@ const workItemStatuses: Record<RelationshipWorkItemStatus, { label: string; tone
     canceled: { label: "Canceled", tone: "grey" },
 }
 
-export function workItemStatusPresentation(status: RelationshipWorkItemStatus) {
-    return workItemStatuses[status]
+export function workItemStatusPresentation(status: RelationshipWorkItemStatus | string) {
+    return workItemStatuses[status as RelationshipWorkItemStatus] ?? { label: status.replace(/_/g, " ").replace(/^./, (character) => character.toUpperCase()), tone: "grey" as const }
 }

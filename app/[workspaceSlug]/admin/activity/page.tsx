@@ -1,12 +1,16 @@
-import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { ListActionMenu } from "@/components/list/ListActionMenu"
+import { ListCreatorAvatar } from "@/components/list/ListCreatorAvatar"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
-import { TrendChart } from "@/components/ui"
+import { Assignee, SquarePill, Status, TrendChart, type StatusTone } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ADMIN_ACTIVITY_CATEGORIES, adminActivityCategoryLabel, listAdminActivity, listAdminActivitySince, type AdminActivityCategory, type AdminActivityLevel } from "@/lib/admin/activity"
 import { buildAdminActivityMetrics, type AdminActivityMetric } from "@/lib/admin/activity-metrics"
+import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -20,6 +24,12 @@ type PageProps = {
 
 function metadataSummary(metadata: Record<string, unknown>) {
     return Object.entries(metadata).filter(([, value]) => value !== null && value !== undefined && typeof value !== "object").slice(0, 4).map(([key, value]) => `${key.replace(/_/g, " ")}: ${String(value)}`).join(" · ")
+}
+
+function activityStatus(level: AdminActivityLevel): { label: string; tone: StatusTone } {
+    if (level === "error") return { label: "Error", tone: "red" }
+    if (level === "warning") return { label: "Warning", tone: "yellow" }
+    return { label: "Info", tone: "grey" }
 }
 
 function metricValue(metric: AdminActivityMetric, value: number) {
@@ -58,8 +68,11 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
     const [events, metricEvents] = await Promise.all([listAdminActivity(workspace.id, 500), listAdminActivitySince(workspace.id, metricSince)])
     const metrics = buildAdminActivityMetrics(metricEvents, now)
     const actorIds = [...new Set(events.map((event) => event.actor_user_id).filter((id): id is string => Boolean(id)))]
-    const { data: profiles } = actorIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", actorIds) : { data: [] }
-    const actorNames = new Map((profiles ?? []).map((profile) => [profile.user_id, profile.username]))
+    const { data: profiles } = actorIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", actorIds) : { data: [] }
+    const actors = new Map((profiles ?? []).map((profile) => [profile.user_id, {
+        name: profile.username,
+        avatarSrc: profile.avatar_path ? profileAvatarUrl(profile.username, profile.avatar_path) : null,
+    }]))
     const category = ADMIN_ACTIVITY_CATEGORIES.includes(query.category as AdminActivityCategory) ? query.category as AdminActivityCategory : null
     const level = ["info", "warning", "error"].includes(query.level ?? "") ? query.level as AdminActivityLevel : null
     const visibleEvents = events.filter((event) => (!category || event.category === category) && (!level || event.level === level))
@@ -94,12 +107,41 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
                 {ADMIN_ACTIVITY_CATEGORIES.map((item) => <FilterRailLink key={item} href={filterHref(item)} selected={category === item}>{adminActivityCategoryLabel(item)} <FilterRailCount>{eventsAtLevel.filter((event) => event.category === item).length}</FilterRailCount></FilterRailLink>)}
             </FilterRail>
 
-            <section className="mt-5" aria-label="Activity log">
-                <div className="overflow-hidden rounded-2xl border border-neutral-800 bg-black">{visibleEvents.length ? visibleEvents.map((event) => {
+            <List ariaLabel="Activity log">
+                {visibleEvents.length ? visibleEvents.map((event) => {
                     const details = metadataSummary(event.metadata)
-                    return <article key={event.id} className="grid gap-3 border-b border-neutral-900 px-4 py-4 last:border-0 lg:grid-cols-[130px_minmax(0,1fr)_170px]"><div><span className={`rounded-full px-2 py-1 text-[11px] uppercase tracking-wide ${event.level === "error" ? "bg-red-400/10 text-red-300" : event.level === "warning" ? "bg-yellow-300/10 text-yellow-200" : "bg-sky-400/10 text-sky-200"}`}>{event.level}</span><p className="mt-2 text-xs text-neutral-600">{adminActivityCategoryLabel(event.category)}</p></div><div className="min-w-0"><p className="text-sm font-medium text-neutral-100">{event.summary}</p><p className="mt-1 font-mono text-xs text-neutral-700">{event.event_key}{event.entity_id ? ` · ${event.entity_type ?? "record"} ${shortId(event.entity_id)}` : ""}</p>{details ? <p className="mt-2 line-clamp-2 text-xs leading-5 text-neutral-500">{details}</p> : null}{event.source_href ? <Link href={event.source_href} className="mt-2 inline-block text-xs text-neutral-400 underline underline-offset-4">Open source</Link> : null}</div><div className="text-xs text-neutral-600 lg:text-right"><p>{formatRelativeTime(event.occurred_at)}</p><p className="mt-1">{event.actor_user_id ? actorNames.get(event.actor_user_id) ?? "Workspace user" : "Automation"}</p></div></article>
-                }) : <p className="px-4 py-10 text-sm text-neutral-500">No activity matches these filters yet.</p>}</div>
-            </section>
+                    const status = activityStatus(event.level)
+                    const actor = event.actor_user_id ? actors.get(event.actor_user_id) ?? { name: "Workspace user", avatarSrc: null } : null
+                    const sourceIsExternal = Boolean(event.source_href?.startsWith("http://") || event.source_href?.startsWith("https://"))
+                    const actions = [
+                        event.source_href ? { label: "Open source", href: event.source_href, external: sourceIsExternal } : null,
+                        { label: "Copy event ID", copyText: event.id },
+                    ]
+                    return <ListItem key={event.id} className={event.level === "error" ? "bg-red-950/[0.08]" : ""}>
+                        <MobileListActionSurface actions={actions} label={`Open actions for ${event.summary}`}>
+                            <ListPrimaryRow>
+                                <ListTitle href={event.source_href} external={sourceIsExternal} className="flex-1">{event.summary}</ListTitle>
+                                <span className="hidden shrink-0 sm:inline-flex"><SquarePill>{adminActivityCategoryLabel(event.category)}</SquarePill></span>
+                                <Status label={status.label} tone={status.tone} className="ml-auto shrink-0" />
+                            </ListPrimaryRow>
+                            <ListSecondaryRow>
+                                <span className="min-w-0 flex-1 truncate font-mono text-xs text-neutral-500">{event.event_key}</span>
+                                {details ? <span className="hidden min-w-0 max-w-sm truncate text-neutral-500 xl:inline">{details}</span> : null}
+                                {event.entity_id ? <span className="hidden shrink-0 text-neutral-500 md:inline">{event.entity_type ?? "Record"} {shortId(event.entity_id)}</span> : null}
+                                <ListTrailing>
+                                    <span className="font-mono text-neutral-500">{shortId(event.id)}</span>
+                                    <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(event.occurred_at)}</span>
+                                    {actor ? <Assignee name={actor.name} avatarSrc={actor.avatarSrc} compact compactSize="md" /> : <span title="Betelgeze automation"><ListCreatorAvatar src={null} username={null} className="h-6 w-6" /></span>}
+                                    <ListActionMenu actions={actions} className="hidden sm:block" />
+                                </ListTrailing>
+                            </ListSecondaryRow>
+                        </MobileListActionSurface>
+                    </ListItem>
+                }) : <div className="p-6">
+                    <p className="text-lg font-semibold">No activity matches these filters.</p>
+                    <p className="mt-2 text-sm text-neutral-400">Choose another level or category to broaden the event stream.</p>
+                </div>}
+            </List>
         </div>
     </main>
 }
