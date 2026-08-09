@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState, useTransition } from "react"
 import { completeAdminWorkItem, undoAdminWorkItemCompletion, type WorkItemCompletionUndo } from "@/app/[workspaceSlug]/work-items/[id]/actions"
 import { Status, type StatusTone } from "@/components/ui"
+import { FilterRail, FilterRailButton, FilterRailCount } from "@/components/panel/FilterRail"
+import { QuickStats } from "@/components/panel/QuickStats"
 import type { AdminWorkItem } from "@/lib/admin/work-items"
 import { formatOkrMetricValue } from "@/lib/admin/okr-metrics"
 import { shortId } from "@/lib/ui/relative-time"
@@ -165,6 +167,7 @@ export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: {
 
     const openItems = useMemo(() => items.filter((item) => !hiddenIds.has(item.id) && item.status !== "done" && item.status !== "canceled"), [hiddenIds, items])
     const visibleItems = useMemo(() => view === "mine" ? openItems.filter((item) => item.execution_owner_id === currentUserId) : openItems, [currentUserId, openItems, view])
+    const myOpenItems = useMemo(() => openItems.filter((item) => item.execution_owner_id === currentUserId), [currentUserId, openItems])
     const ranked = visibleItems.filter((item) => item.queue_position !== null)
     const deferred = visibleItems.filter((item) => item.queue_position === null)
     const reservedHours = ranked.reduce((total, item) => total + item.conservative_duration_hours, 0)
@@ -216,18 +219,21 @@ export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: {
         })
     }
 
-    return (
-        <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-            <header className="border-b border-neutral-800 px-4 py-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <h2 className="font-semibold text-neutral-100">Work queue</h2>
-                    <div className="flex items-center gap-3"><div className="flex rounded-lg border border-neutral-800 p-0.5 text-xs"><button type="button" onClick={() => setView("business")} className={`rounded-md px-2.5 py-1 ${view === "business" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Business</button><button type="button" onClick={() => setView("mine")} className={`rounded-md px-2.5 py-1 ${view === "mine" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>My work</button></div><p className="text-xs text-neutral-500">{ranked.length} actionable · {formatHours(reservedHours)} reserved{lateItems.length ? ` · ${lateItems.length} projected late` : ""}</p></div>
-                </div>
-                {view === "business" && ownerSummaries.length ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">{ownerSummaries.map((owner) => <span key={owner.ownerId}>{owner.name}: {owner.count} item{owner.count === 1 ? "" : "s"} · {formatHours(owner.hours)}{owner.lateness > 0 ? <span className="text-red-300"> · {formatHours(owner.lateness)} late</span> : ""}</span>)}</div> : null}
-                {lateItems.length ? <p className="mt-2 text-sm text-red-300">The current plan exceeds available capacity by up to {formatHours(furthestLateness)}. The affected finish forecasts are marked below.</p> : null}
-                {!hasOkrMovement && visibleItems.length ? <p className="mt-2 text-sm text-neutral-500">No committed KR movement is active in this queue, so ordering is based on timing, dependencies, operational severity, and capacity.</p> : null}
-            </header>
-
+    return <>
+        <QuickStats ariaLabel="Work queue statistics" items={[
+            { label: "Actionable", value: ranked.length },
+            { label: "Reserved", value: formatHours(reservedHours) },
+            { label: "Deferred", value: deferred.length, hideOnMobile: true },
+            { label: "Projected late", value: lateItems.length },
+        ]} />
+        <FilterRail ariaLabel="Filter work queue">
+            <FilterRailButton selected={view === "business"} onClick={() => setView("business")}>Business <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailButton>
+            <FilterRailButton selected={view === "mine"} onClick={() => setView("mine")}>My work <FilterRailCount>{myOpenItems.length}</FilterRailCount></FilterRailButton>
+        </FilterRail>
+        {view === "business" && ownerSummaries.length ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">{ownerSummaries.map((owner) => <span key={owner.ownerId}>{owner.name}: {owner.count} item{owner.count === 1 ? "" : "s"} · {formatHours(owner.hours)}{owner.lateness > 0 ? <span className="text-red-300"> · {formatHours(owner.lateness)} late</span> : ""}</span>)}</div> : null}
+        {lateItems.length ? <p className="mt-3 text-sm text-red-300">The current plan exceeds available capacity by up to {formatHours(furthestLateness)}. The affected finish forecasts are marked below.</p> : null}
+        {!hasOkrMovement && visibleItems.length ? <p className="mt-3 text-sm text-neutral-500">No committed KR movement is active, so ordering uses timing, dependencies, operational severity, and capacity.</p> : null}
+        <section className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-black" aria-label="Work queue">
             {ranked.length ? ranked.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} pending={pending && pendingId === item.id} onComplete={complete} />) : <p className="px-4 py-5 text-sm text-neutral-400">There is no actionable Admin work right now.</p>}
             {deferred.length ? (
                 <div className="border-t border-neutral-800">
@@ -238,5 +244,5 @@ export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: {
             {!items.length ? <p className="px-4 py-5 text-sm text-neutral-400">Committed OKR actions and maintenance work will appear here.</p> : null}
             {notice ? <QueueNotice notice={notice} pending={pending} onUndo={undoCompletion} /> : null}
         </section>
-    )
+    </>
 }

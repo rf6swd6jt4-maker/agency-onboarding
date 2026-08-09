@@ -1,6 +1,9 @@
 import Link from "next/link"
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
+import { QuickStats } from "@/components/panel/QuickStats"
 import { SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listMaintenanceWorkItems, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel, type MaintenanceCategory } from "@/lib/admin/maintenance"
@@ -29,8 +32,12 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
     const names = new Map((profiles ?? []).map((profile) => [profile.user_id, profile.username]))
     const selectedCategory = MAINTENANCE_CATEGORIES.includes(query.category as MaintenanceCategory) ? query.category as MaintenanceCategory : null
     const selectedState = query.state === "resolved" ? "resolved" : "open"
-    const categoryItems = selectedCategory ? items.filter((item) => item.maintenance_category === selectedCategory) : items
-    const visibleItems = categoryItems.filter((item) => selectedState === "resolved" ? ["done", "canceled"].includes(item.status) : !["done", "canceled"].includes(item.status))
+    const openItems = items.filter((item) => !["done", "canceled"].includes(item.status))
+    const resolvedItems = items.filter((item) => ["done", "canceled"].includes(item.status))
+    const stateItems = selectedState === "resolved" ? resolvedItems : openItems
+    const visibleItems = selectedCategory ? stateItems.filter((item) => item.maintenance_category === selectedCategory) : stateItems
+    const criticalItems = openItems.filter((item) => item.severity === "critical")
+    const occurrences = items.reduce((total, item) => total + item.occurrence_count, 0)
     const filterHref = (category: MaintenanceCategory | null, state = selectedState) => {
         const params = new URLSearchParams({ state })
         if (category) params.set("category", category)
@@ -41,13 +48,29 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
         <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
         <div className="mx-auto max-w-7xl pt-5">
             <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-            <header><h1 className="text-2xl font-semibold">Platform Maintenance</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">Terminal, actionable automation failures deduplicated into accountable Work Items.</p></header>
-            <AdminPanelNav workspaceSlug={workspace.slug} active="maintenance" />
+            <PanelTabHeader
+                title="Maintenance Queue"
+                description="Actionable automation failures deduplicated into accountable Work Items. Repeated fingerprints update the open item; recurrence after resolution creates a new one."
+                tabs={<AdminPanelNav workspaceSlug={workspace.slug} active="maintenance" />}
+            />
 
-            <section className="mt-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><h2 className="text-xl font-semibold">Maintenance queue</h2><p className="mt-1 text-sm text-neutral-500">Repeated fingerprints update one open item; recurrence after resolution creates a new item.</p></div><div className="flex rounded-lg border border-neutral-800 p-1 text-sm"><Link href={filterHref(selectedCategory, "open")} className={`rounded px-3 py-1.5 ${selectedState === "open" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Open</Link><Link href={filterHref(selectedCategory, "resolved")} className={`rounded px-3 py-1.5 ${selectedState === "resolved" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Resolved</Link></div></div>
-                <div className="mt-4 flex gap-2 overflow-x-auto pb-1 text-xs"><Link href={filterHref(null)} className={`shrink-0 rounded-full border px-3 py-1.5 ${!selectedCategory ? "border-neutral-500 text-white" : "border-neutral-800 text-neutral-500"}`}>All categories</Link>{MAINTENANCE_CATEGORIES.map((category) => <Link key={category} href={filterHref(category)} className={`shrink-0 rounded-full border px-3 py-1.5 ${selectedCategory === category ? "border-neutral-500 text-white" : "border-neutral-800 text-neutral-500"}`}>{maintenanceCategoryLabel(category)}</Link>)}</div>
-                <div className="mt-4 overflow-hidden rounded-2xl border border-neutral-800 bg-black">{visibleItems.length ? visibleItems.map((item) => {
+            <QuickStats ariaLabel="Maintenance statistics" items={[
+                { label: "Open", value: openItems.length },
+                { label: "Resolved", value: resolvedItems.length },
+                { label: "Occurrences", value: occurrences, hideOnMobile: true },
+                { label: "Critical", value: criticalItems.length },
+            ]} />
+            <FilterRail ariaLabel="Filter maintenance by state">
+                <FilterRailLink href={filterHref(selectedCategory, "open")} selected={selectedState === "open"}>Open <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailLink>
+                <FilterRailLink href={filterHref(selectedCategory, "resolved")} selected={selectedState === "resolved"}>Resolved <FilterRailCount>{resolvedItems.length}</FilterRailCount></FilterRailLink>
+            </FilterRail>
+            <FilterRail ariaLabel="Filter maintenance by category" spacing="tight">
+                <FilterRailLink href={filterHref(null)} selected={!selectedCategory}>All categories <FilterRailCount>{stateItems.length}</FilterRailCount></FilterRailLink>
+                {MAINTENANCE_CATEGORIES.map((category) => <FilterRailLink key={category} href={filterHref(category)} selected={selectedCategory === category}>{maintenanceCategoryLabel(category)} <FilterRailCount>{stateItems.filter((item) => item.maintenance_category === category).length}</FilterRailCount></FilterRailLink>)}
+            </FilterRail>
+
+            <section className="mt-5" aria-label="Maintenance queue">
+                <div className="overflow-hidden rounded-2xl border border-neutral-800 bg-black">{visibleItems.length ? visibleItems.map((item) => {
                     const assigneeNames = item.assignee_ids.map((id) => names.get(id) ?? "Admin")
                     return <div key={item.id} className="border-b border-neutral-900 px-4 py-3 last:border-0 hover:bg-neutral-900/60">
                         <div className="flex min-w-0 items-center gap-2">

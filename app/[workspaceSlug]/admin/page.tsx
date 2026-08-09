@@ -2,6 +2,7 @@ import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { AdminWorkQueue } from "@/components/admin/AdminWorkQueue"
 import { OkrWorkspace } from "@/components/admin/OkrWorkspace"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listWorkspaceOkrs } from "@/lib/admin/okrs"
 import { okrAttention } from "@/lib/admin/work-priority"
@@ -61,11 +62,11 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
                 <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-                <header>
-                    <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">Private objectives, operational work, platform maintenance, and activity for workspace administrators.</p>
-                </header>
-                <AdminPanelNav workspaceSlug={workspace.slug} active={view} />
+                <PanelTabHeader
+                    title={view === "work" ? "Work Queue" : "OKRs"}
+                    description={view === "work" ? "Ranked Admin work ordered by timing, dependencies, expected impact, ownership, and available capacity." : "Objectives and measurable Key Results for private workspace administration."}
+                    tabs={<AdminPanelNav workspaceSlug={workspace.slug} active={view} />}
+                />
 
                 {view === "work" ? (
                     <AdminWorkQueue items={workItems} workspaceSlug={workspace.slug} currentUserId={user.id} names={Object.fromEntries(people.names)} />

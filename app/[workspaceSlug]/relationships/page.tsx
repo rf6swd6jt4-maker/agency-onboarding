@@ -5,6 +5,8 @@ import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { MobileAssignedServices } from "@/components/list/MobileAssignedServices"
+import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { RelationshipStage, RoundPill, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { SERVICES } from "@/lib/onboarding/services"
@@ -106,44 +108,27 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
                 <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-                <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                    <div>
-                        <h1 className="text-2xl font-semibold tracking-tight">
-                            Relationships
-                        </h1>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                            The canonical CRM surface for leads, sales, onboarding, fulfilment, assets, and future project work.
-                        </p>
-                    </div>
-                    <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
-                        <Link href={workspaceHref(workspace.slug, "relationships?create=relationship")} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-center text-sm font-medium leading-none text-black sm:min-h-10 sm:px-3">
-                            Start new relationship
-                        </Link>
-                    </div>
-                </header>
+                <PanelTabHeader
+                    title="Relationships"
+                    description="People and businesses moving through lead, sales, onboarding, fulfilment, and retention."
+                    actions={<Link href={workspaceHref(workspace.slug, "relationships?create=relationship")} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-center text-sm font-medium leading-none text-black sm:min-h-10 sm:px-3">Start new relationship</Link>}
+                />
 
-                <section className="mt-5 border-y border-neutral-800/80 py-1">
-                    <nav aria-label="Filter relationships by lifecycle stage" className="flex gap-1 overflow-x-auto overscroll-x-contain px-1 pb-1">
-                        <Link
-                            href={workspaceHref(workspace.slug, "relationships")}
-                            aria-current={!selectedPhase ? "page" : undefined}
-                            className={`shrink-0 border-b px-2 py-2 text-sm transition-colors ${!selectedPhase ? "border-white text-white" : "border-transparent text-neutral-500 hover:border-neutral-700 hover:text-neutral-200"}`}
-                        >
-                            All <span className="ml-1 tabular-nums text-neutral-500">{activeRelationships.length}</span>
-                        </Link>
+                <FilterRail ariaLabel="Filter relationships by lifecycle stage">
+                        <FilterRailLink href={workspaceHref(workspace.slug, "relationships")} selected={!selectedPhase}>
+                            All <FilterRailCount>{activeRelationships.length}</FilterRailCount>
+                        </FilterRailLink>
                         {RELATIONSHIP_PHASES.map((phase) => {
                             const selected = selectedPhase === phase.key
-                            return <Link
+                            return <FilterRailLink
                                 key={phase.key}
                                 href={workspaceHref(workspace.slug, `relationships?phase=${phase.key}`)}
-                                aria-current={selected ? "page" : undefined}
-                                className={`shrink-0 border-b px-2 py-2 text-sm transition-colors ${selected ? "border-white text-white" : "border-transparent text-neutral-500 hover:border-neutral-700 hover:text-neutral-200"}`}
+                                selected={selected}
                             >
-                                {phase.label} <span className="ml-1 tabular-nums text-neutral-500">{phaseCounts.get(phase.key) ?? 0}</span>
-                            </Link>
+                                {phase.label} <FilterRailCount>{phaseCounts.get(phase.key) ?? 0}</FilterRailCount>
+                            </FilterRailLink>
                         })}
-                    </nav>
-                </section>
+                </FilterRail>
 
                 <List ariaLabel="Relationships">
                     {visibleRelationships.length ? (

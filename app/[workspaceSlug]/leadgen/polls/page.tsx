@@ -7,6 +7,8 @@ import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
+import { QuickStats } from "@/components/panel/QuickStats"
 import { SquarePill } from "@/components/ui/SquarePill"
 import { Status } from "@/components/ui/Status"
 import type { StatusTone } from "@/components/ui/status-styles"
@@ -151,27 +153,19 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
         <div className="mx-auto max-w-7xl">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="leadgen" />
             <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                <div>
-                    <h1 className="text-2xl font-semibold tracking-tight">Polls</h1>
-                    <p className="mt-2 text-sm text-neutral-400">Track source polling, queue state, run durations, and pipeline counts. Signed in as {workspaceRoleLabel(role)}.</p>
-                </div>
-                <NewPollButton href={`/${workspace.slug}/leadgen/new`} />
-            </div>
+            <PanelTabHeader
+                title="Polls"
+                description={`Poll runs, queue state, durations, and pipeline results. Signed in as ${workspaceRoleLabel(role)}.`}
+                actions={<NewPollButton href={`/${workspace.slug}/leadgen/new`} />}
+                tabs={<LeadgenTabs workspaceSlug={workspace.slug} active="polls" />}
+            />
 
-            <LeadgenTabs workspaceSlug={workspace.slug} active="polls" />
-
-            <div className="mt-5 grid grid-cols-3 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 sm:grid-cols-4 sm:gap-3 sm:overflow-visible sm:rounded-none sm:border-0 sm:bg-transparent">
-                {[
-                    ["Running", livePolls.length, ""],
-                    ["History", polls.length, ""],
-                    ["Source checks", latestInvestigationStats?.checks ?? 0, "hidden sm:block"],
-                    ["Raw returned", latestTaskStats?.rawReturned ?? 0, ""],
-                ].map(([label, value, className]) => <div key={label} className={`${className} border-r border-neutral-800 px-2 py-2 text-center last:border-r-0 sm:rounded-lg sm:border sm:border-neutral-800 sm:bg-neutral-900 sm:px-3 sm:text-left`}>
-                    <p className="text-[10px] leading-tight text-neutral-500 sm:text-xs">{label}</p>
-                    <p className="mt-1 text-lg font-semibold">{value}</p>
-                </div>)}
-            </div>
+            <QuickStats ariaLabel="Poll statistics" items={[
+                { label: "Running", value: livePolls.length },
+                { label: "History", value: polls.length },
+                { label: "Source checks", value: latestInvestigationStats?.checks ?? 0, hideOnMobile: true },
+                { label: "Raw returned", value: latestTaskStats?.rawReturned ?? 0 },
+            ]} />
 
             <List ariaLabel="Lead generation polls">
                 {polls.length ? polls.map((poll) => {

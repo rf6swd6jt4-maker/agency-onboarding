@@ -6,6 +6,8 @@ import { ListAutoRefresh } from "@/components/list/ListAutoRefresh"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
+import { QuickStats } from "@/components/panel/QuickStats"
 import { Status } from "@/components/ui/Status"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -70,30 +72,22 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
         <div className="mx-auto max-w-7xl">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="leadgen" />
             <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                <div>
-                    <h1 className="text-2xl font-semibold tracking-tight">Lead Gen <span className="font-mono text-lg text-neutral-500">{LEADGEN_POLLING_SYSTEM_VERSION_LABEL}</span></h1>
-                    <p className="mt-2 text-sm text-neutral-400">Review qualified owner-phone leads from the latest poll. Research candidates and rejected evidence stay on the poll detail page. Signed in as {workspaceRoleLabel(role)}.</p>
-                </div>
-                <NewPollButton href={`/${workspace.slug}/leadgen/new`} />
-            </div>
-
-            <LeadgenTabs workspaceSlug={workspace.slug} active="leads" />
+            <PanelTabHeader
+                title="Leads"
+                description={`Qualified owner-phone leads from the latest poll. Research candidates and rejected evidence remain on the poll detail page. Signed in as ${workspaceRoleLabel(role)}.`}
+                actions={<><span className="font-mono text-sm text-neutral-500">{LEADGEN_POLLING_SYSTEM_VERSION_LABEL}</span><NewPollButton href={`/${workspace.slug}/leadgen/new`} /></>}
+                tabs={<LeadgenTabs workspaceSlug={workspace.slug} active="leads" />}
+            />
 
             {relationshipError && <div className="mt-5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
                 {relationshipError === "not-ready" ? "This lead needs a person and contact path before it can become a Relationship." : "Relationships are not ready in the database yet. Apply the latest Supabase migration, then try again."}
             </div>}
 
-            <div className="mt-5 grid grid-cols-3 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 sm:gap-3 sm:overflow-visible sm:rounded-none sm:border-0 sm:bg-transparent sm:grid-cols-3">
-                {[
-                    ["Qualified leads", companies.length],
-                    ["Owner phones", callable],
-                    ["Source links", withProfiles],
-                ].map(([label, value]) => <div key={label} className="border-r border-neutral-800 px-2 py-2 text-center last:border-r-0 sm:rounded-lg sm:border sm:border-neutral-800 sm:bg-neutral-900 sm:px-3 sm:text-left">
-                    <p className="text-[10px] leading-tight text-neutral-500 sm:text-xs">{label}</p>
-                    <p className="mt-1 text-lg font-semibold">{value}</p>
-                </div>)}
-            </div>
+            <QuickStats ariaLabel="Lead statistics" items={[
+                { label: "Qualified leads", value: companies.length },
+                { label: "Owner phones", value: callable },
+                { label: "Source links", value: withProfiles },
+            ]} />
 
             <List ariaLabel="Qualified leads">
                 {companies.length ? companies.map((company) => {

@@ -106,6 +106,76 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 - When the design changes, update `components/ui`, this document, and existing uses together.
 - A local exception must include a code comment explaining why the shared primitive cannot represent it.
 
+## PanelTabHeader
+
+`PanelTabHeader` is the canonical heading block for a workspace panel tab. It names the active tab and its primary content, not the wider panel that contains it.
+
+```tsx
+<PanelTabHeader
+    title="Leads"
+    description="Qualified owner-phone leads from the latest poll."
+    actions={<NewPollButton />}
+    tabs={<PanelTabs items={leadGenTabs} active="leads" ariaLabel="Lead Gen panel" />}
+/>
+```
+
+- A panel home route uses the home tab or list name: `Work Queue`, never `Admin`; `Leads`, never `Lead Gen`.
+- The description directly explains the active tab's content, ordering, or purpose. It must not summarize every capability in the parent panel.
+- Optional primary actions align right on desktop and remain reachable without displacing the title on mobile.
+- `PanelTabs` sit immediately beneath the title block and remain horizontally scrollable on mobile.
+- A tab containing a list has exactly one page heading. Do not repeat the list name or add another explanatory list header between the panel tabs and the list.
+- If a tab changes its principal content through a tab query such as Admin Work/OKRs, the heading and description change with the selected tab.
+
+The standard vertical order is:
+
+1. `PanelTabHeader`, including `PanelTabs` when the panel has tabs.
+2. `QuickStats` or another approved analytical summary.
+3. One or more `FilterRail` rows.
+4. Contextual warnings or operational notes when genuinely needed.
+5. The list itself.
+
+Do not place filters above quick statistics when both are present.
+
+## QuickStats
+
+`QuickStats` is the canonical compact summary strip above a list. The Polls tab is the visual reference. It communicates a small set of immediately useful counts or short measurements; it is not a filter and its boxes are not individually clickable.
+
+```tsx
+<QuickStats items={[
+    { label: "Running", value: runningCount },
+    { label: "History", value: pollCount },
+    { label: "Source checks", value: checkCount, hideOnMobile: true },
+    { label: "Raw returned", value: rawCount },
+]} />
+```
+
+- Use three visible statistics on mobile. A fourth lower-priority statistic may set `hideOnMobile` and return from `sm` upward.
+- Mobile renders one consolidated, bordered strip with internal dividers. Desktop separates the same statistics into evenly sized bordered boxes.
+- Labels are short neutral text; values are prominent, tabular, and limited to one line.
+- Prefer current list facts such as actionable count, reserved time, open failures, or poll results. Do not fill the strip with decorative totals.
+- `QuickStats` summarizes the currently meaningful list scope. Filtering may update the values when that makes the summary more truthful.
+- Use `StatusStat` for small inline status counts inside a settings or status context; use `QuickStats` for the top-of-list summary strip.
+
+## FilterRail
+
+`FilterRail` is the canonical list-filtering mechanic. Its appearance and behaviour come from the Relationships lifecycle rail.
+
+```tsx
+<FilterRail ariaLabel="Filter relationships by lifecycle stage">
+    <FilterRailLink href={allHref} selected={!phase}>All <FilterRailCount>{allCount}</FilterRailCount></FilterRailLink>
+    <FilterRailLink href={leadHref} selected={phase === "lead"}>Lead <FilterRailCount>{leadCount}</FilterRailCount></FilterRailLink>
+</FilterRail>
+```
+
+- Each rail represents one filtering dimension. Use a second rail with `spacing="tight"` when a list genuinely needs another dimension, such as Maintenance state plus category.
+- The selected option uses plain white text and a white underline. Unselected options remain neutral and acquire only a restrained hover underline.
+- Counts sit beside labels in subdued tabular text and should reflect the other currently selected filter dimensions.
+- Prefer `FilterRailLink` and URL-backed query parameters so filters survive refresh, back/forward navigation, sharing, and tab restoration.
+- Use `FilterRailButton` only for local interactive state that cannot reasonably be URL-backed, such as the live Work Queue's Business/My work view.
+- Rails never wrap. They scroll horizontally on mobile while preserving option order.
+- Do not recreate filter pills, segmented boxes, dropdowns, or page-local category chips when the available choices fit a rail.
+- When `QuickStats` and `FilterRail` are both present, every stats block comes first and the first rail follows beneath it.
+
 ## List
 
 `List` is the canonical presentation for a collection of comparable records that people need to scan, open, and act on. Leads, polls, and relationships are the reference implementations. A list is not a gallery, settings form, navigation rail, timeline, disclosure log, or nested planning structure such as OKRs.
