@@ -85,7 +85,10 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
         : { data: [] as Array<{ relationship_id: string; service_key: string }> }
     const servicesByRelationshipId = new Map<string, string[]>()
     for (const service of servicesResult.data ?? []) {
-        servicesByRelationshipId.set(service.relationship_id, [...(servicesByRelationshipId.get(service.relationship_id) ?? []), service.service_key])
+        const existingKeys = servicesByRelationshipId.get(service.relationship_id) ?? []
+        if (!existingKeys.includes(service.service_key)) {
+            servicesByRelationshipId.set(service.relationship_id, [...existingKeys, service.service_key])
+        }
     }
     const phaseCounts = new Map<RelationshipPhase, number>()
     for (const relationship of activeRelationships) {
@@ -186,7 +189,9 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                         {!smsPhone && !effectiveWhatsappPhone ? <span className="hidden min-w-0 truncate text-neutral-500 sm:inline">No phone</span> : null}
                                         <span className="hidden min-w-0 truncate text-neutral-400 md:inline">{relationship.primary_email ?? "No email saved"}</span>
                                         <span className="hidden min-w-0 truncate capitalize text-neutral-500 lg:inline">{location ?? "Location unset"}</span>
-                                        {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald" className="hidden xl:inline-flex">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                        <div className="hidden min-w-0 items-center gap-3 overflow-hidden xl:flex">
+                                            {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald" className="shrink-0">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                        </div>
                                         {serviceKeys.length === 0 ? <span className="hidden text-neutral-500 sm:inline">No assigned services</span> : null}
                                         <ListTrailing>
                                             <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
