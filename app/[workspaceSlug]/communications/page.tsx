@@ -1,25 +1,44 @@
 import Link from "next/link"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { ListActionMenu } from "@/components/list/ListActionMenu"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
+import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
+import { QuickStats } from "@/components/panel/QuickStats"
+import { SquarePill, Status, type StatusTone } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
-import {
-    listRelationshipsForWorkspace,
-    relationshipHubHref,
-} from "@/lib/relationships"
+import { listRelationshipsForWorkspace, relationshipHubHref, workspaceHref } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { formatRelativeTime } from "@/lib/ui/relative-time"
+import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
 
 export const dynamic = "force-dynamic"
 
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
+    searchParams: Promise<{ state?: string }>
 }
 
-export default async function CommunicationsPage({ params }: PageProps) {
-    const { workspaceSlug } = await params
+function communicationStatus(direction: string, status: string): { label: string; tone: StatusTone } {
+    const normalized = status.toLowerCase()
+    if (normalized.includes("failed") || normalized.includes("error")) return { label: "Delivery failed", tone: "red" }
+    if (direction === "inbound") return { label: "Needs reply", tone: "yellow" }
+    if (normalized.includes("queued") || normalized.includes("pending")) return { label: "Sending", tone: "yellow" }
+    if (normalized.includes("delivered") || normalized.includes("read")) return { label: "Delivered", tone: "green" }
+    return { label: "Sent", tone: "green" }
+}
+
+function providerLabel(provider: string) {
+    if (provider === "meta_whatsapp" || provider === "whatsapp") return "WhatsApp"
+    if (provider === "clickup") return "ClickUp"
+    return provider.replace(/_/g, " ")
+}
+
+export default async function CommunicationsPage({ params, searchParams }: PageProps) {
+    const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
     const { workspace, user } = await requireWorkspace(workspaceSlug)
-    const relationships = (await listRelationshipsForWorkspace(workspace.id))
-        .filter((relationship) => relationship.status !== "archived")
+    const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => relationship.status !== "archived")
     const clientIds = relationships.map((relationship) => relationship.client_id).filter((id): id is string => Boolean(id))
     const { data: messages } = clientIds.length
         ? await supabaseAdmin
@@ -35,59 +54,70 @@ export default async function CommunicationsPage({ params }: PageProps) {
     }
 
     const rows = relationships
-        .map((relationship) => ({
-            relationship,
-            latestMessage: relationship.client_id ? latestMessageByClient.get(relationship.client_id) ?? null : null,
-        }))
-        .filter((row) => row.latestMessage)
+        .flatMap((relationship) => {
+            const latestMessage = relationship.client_id ? latestMessageByClient.get(relationship.client_id) ?? null : null
+            return latestMessage ? [{ relationship, latestMessage }] : []
+        })
+        .sort((left, right) => right.latestMessage.created_at.localeCompare(left.latestMessage.created_at))
+    const needsReplyRows = rows.filter((row) => row.latestMessage.direction === "inbound")
+    const sentLastRows = rows.filter((row) => row.latestMessage.direction === "outbound")
+    const selectedState = query.state === "inbound" || query.state === "outbound" ? query.state : null
+    const visibleRows = selectedState === "inbound" ? needsReplyRows : selectedState === "outbound" ? sentLastRows : rows
+    const filterHref = (state: string | null) => workspaceHref(workspace.slug, `communications${state ? `?state=${state}` : ""}`)
 
     return (
         <main className="min-h-screen bg-neutral-950 px-4 pb-7 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
                 <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-                <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                    <div>
-                        <h1 className="text-2xl font-semibold tracking-tight">Communications</h1>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                            Placeholder home for relationship communication summaries. Chat-style detail pages will replace the old ClickUp chat channel workflow in a later focused push.
-                        </p>
-                    </div>
-                </header>
+                <PanelTabHeader
+                    title="Communications"
+                    description="Relationship conversations ordered by their latest recorded message."
+                />
 
-                <section className="mt-5 grid grid-cols-3 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900">
-                    {[
-                        ["Relationships", relationships.length],
-                        ["With messages", rows.length],
-                        ["Chat details", "Next"],
-                    ].map(([label, value]) => (
-                        <div key={label} className="border-r border-neutral-800 px-3 py-3 last:border-r-0">
-                            <p className="text-xs text-neutral-500">{label}</p>
-                            <p className="mt-1 text-xl font-semibold">{value}</p>
-                        </div>
-                    ))}
-                </section>
+                <QuickStats ariaLabel="Communication statistics" items={[
+                    { label: "Relationships", value: relationships.length },
+                    { label: "With messages", value: rows.length },
+                    { label: "Needs reply", value: needsReplyRows.length },
+                ]} />
 
-                <section className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-                    {rows.length ? rows.map(({ relationship, latestMessage }) => (
-                        <Link key={relationship.id} href={relationshipHubHref(workspace.slug, relationship.id)} className="grid gap-3 border-b border-neutral-900 px-4 py-4 last:border-0 hover:bg-neutral-900/60 lg:grid-cols-[minmax(220px,0.9fr)_minmax(280px,1.2fr)_130px_130px] lg:items-center">
-                            <div className="min-w-0">
-                                <p className="truncate font-medium text-neutral-100">{relationship.primary_person_name}</p>
-                                <p className="mt-1 truncate text-sm text-neutral-500">{relationship.business_name ?? relationship.primary_phone ?? relationship.primary_email ?? "No context saved"}</p>
-                            </div>
-                            <p className="line-clamp-2 text-sm text-neutral-300">{latestMessage?.body ?? "No message body saved"}</p>
-                            <p className="text-sm capitalize text-neutral-500">{latestMessage?.direction ?? "message"}</p>
-                            <p className="text-sm text-neutral-500 lg:text-right">{latestMessage ? formatRelativeTime(latestMessage.created_at) : "No messages"}</p>
-                        </Link>
-                    )) : (
-                        <div className="p-6">
-                            <p className="text-lg font-semibold">No relationship communications yet.</p>
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">
-                                This panel will list relationships by recent communication activity, then open chat-style detail pages for each relationship.
-                            </p>
-                        </div>
-                    )}
-                </section>
+                <FilterRail ariaLabel="Filter communications by latest direction">
+                    <FilterRailLink href={filterHref(null)} selected={!selectedState}>All <FilterRailCount>{rows.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("inbound")} selected={selectedState === "inbound"}>Needs reply <FilterRailCount>{needsReplyRows.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("outbound")} selected={selectedState === "outbound"}>Sent last <FilterRailCount>{sentLastRows.length}</FilterRailCount></FilterRailLink>
+                </FilterRail>
+
+                <List ariaLabel="Relationship communications">
+                    {visibleRows.length ? visibleRows.map(({ relationship, latestMessage }) => {
+                        const href = relationshipHubHref(workspace.slug, relationship.id)
+                        const title = relationship.business_name
+                            ? `${relationship.primary_person_name} – ${relationship.business_name}`
+                            : relationship.primary_person_name
+                        const status = communicationStatus(latestMessage.direction, latestMessage.status)
+                        const actions = [{ label: "Open relationship", href }]
+                        return <ListItem key={relationship.id}>
+                            <MobileListActionSurface actions={actions} label={`Open actions for ${title}`}>
+                                <ListPrimaryRow>
+                                    <ListTitle href={href} className="flex-1">{title}</ListTitle>
+                                    <span className="hidden shrink-0 sm:inline-flex"><SquarePill className="capitalize">{providerLabel(latestMessage.provider)}</SquarePill></span>
+                                    <Status label={status.label} tone={status.tone} className="ml-auto shrink-0" />
+                                </ListPrimaryRow>
+                                <ListSecondaryRow>
+                                    <span className="min-w-0 flex-1 truncate text-neutral-300">{latestMessage.body || "No message body saved"}</span>
+                                    <span className="hidden shrink-0 capitalize text-neutral-500 md:inline">{latestMessage.direction}</span>
+                                    <ListTrailing>
+                                        <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
+                                        <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(latestMessage.created_at)}</span>
+                                        <ListActionMenu actions={actions} className="hidden sm:block" />
+                                    </ListTrailing>
+                                </ListSecondaryRow>
+                            </MobileListActionSurface>
+                        </ListItem>
+                    }) : <div className="p-6">
+                        <p className="text-lg font-semibold">{selectedState ? `No conversations were ${selectedState === "inbound" ? "received" : "sent"} last.` : "No relationship communications yet."}</p>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">{selectedState ? <>Choose another state or <Link href={filterHref(null)} className="text-neutral-200 underline decoration-neutral-600 underline-offset-4 hover:text-white">show all conversations</Link>.</> : "Recorded relationship messages will appear here in latest-activity order."}</p>
+                    </div>}
+                </List>
             </div>
         </main>
     )

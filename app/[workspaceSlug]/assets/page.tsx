@@ -3,6 +3,8 @@
 import Link from "next/link"
 import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { LibraryTabs } from "@/components/library/LibraryTabs"
+import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
+import { QuickStats } from "@/components/panel/QuickStats"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { assetHref, listWorkspaceAssets, workspaceHref, type RelationshipAsset } from "@/lib/relationships"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
@@ -42,33 +44,19 @@ export default async function AssetsPage({ params }: PageProps) {
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
             <div className="mx-auto max-w-7xl pt-5">
                 <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-                <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                    <div>
-                        <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-                        <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                            Browse workspace work items and assets from one place.
-                        </p>
-                    </div>
-                    <Link href={workspaceHref(workspace.slug, "assets?create=asset")} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-center text-sm font-medium leading-none text-black sm:min-h-10 sm:px-3">
-                        New asset
-                    </Link>
-                </header>
+                <PanelTabHeader
+                    title="Assets"
+                    description="Workspace files and media available for relationship and work-item use."
+                    actions={<Link href={workspaceHref(workspace.slug, "assets?create=asset")} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-center text-sm font-medium leading-none text-black sm:min-h-10 sm:px-3">New asset</Link>}
+                    tabs={<LibraryTabs workspaceSlug={workspace.slug} active="assets" />}
+                />
 
-                <LibraryTabs workspaceSlug={workspace.slug} active="assets" />
-
-                <section className="mt-5 grid grid-cols-2 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 sm:grid-cols-4">
-                    {[
-                        ["Total", assets.length],
-                        ["Images", imageAssets.length],
-                        ["Documents", documentCount],
-                        ["Uploads", uploadCount],
-                    ].map(([label, value]) => (
-                        <div key={label} className="border-r border-neutral-800 px-3 py-3 last:border-r-0">
-                            <p className="text-xs text-neutral-500">{label}</p>
-                            <p className="mt-1 text-xl font-semibold">{value}</p>
-                        </div>
-                    ))}
-                </section>
+                <QuickStats ariaLabel="Asset statistics" items={[
+                    { label: "Total", value: assets.length, hideOnMobile: true },
+                    { label: "Images", value: imageAssets.length },
+                    { label: "Documents", value: documentCount },
+                    { label: "Uploads", value: uploadCount },
+                ]} />
 
                 <section className="mt-5">
                     {previewEntries.length ? (

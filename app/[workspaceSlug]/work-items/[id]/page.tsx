@@ -2,6 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
+import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
 import { SquarePill } from "@/components/ui"
 import {
     getWorkItem,
@@ -24,22 +25,12 @@ type PageProps = {
     params: Promise<{ workspaceSlug: string; id: string }>
 }
 
-function statusLabel(status: string) {
-    return status.replace(/_/g, " ")
-}
-
-function statusTone(status: string): "grey" | "yellow" | "green" | "red" {
-    if (status === "done") return "green"
-    if (status === "blocked" || status === "canceled") return "red"
-    if (status === "doing" || status === "waiting") return "yellow"
-    return "grey"
-}
-
 export default async function WorkItemDetailPage({ params }: PageProps) {
     const { workspaceSlug, id } = await params
     const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const item = await getWorkItem(workspace.id, id)
     if (!item) notFound()
+    const status = workItemStatusPresentation(item.status)
     if (item.visibility === "admins_only" && role === "staff") notFound()
     const isAdminItem = item.area === "admin"
     const canSeeOkrs = role !== "staff"
@@ -76,7 +67,7 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                         </header>
 
                 <InlineWorkItemFields
-                    workspaceSlug={workspace.slug} workItemId={item.id} status={item.status} statusLabel={statusLabel(item.status)} statusTone={statusTone(item.status)}
+                    workspaceSlug={workspace.slug} workItemId={item.id} status={item.status} statusLabel={status.label} statusTone={status.tone}
                     plannedStartDate={item.planned_start_date} plannedStartTime={item.planned_start_time ?? null} dueDate={item.due_date} dueTime={item.due_time ?? null} actualStartAt={item.actual_start_at} actualStartHasTime={Boolean(item.actual_start_has_time)} actualCompletedAt={item.actual_completed_at} actualCompletedHasTime={Boolean(item.actual_completed_has_time)} description={item.description}
                     assignees={planning.assignees.map(personProps)} executionOwnerId={item.execution_owner_id ?? null} creator={planning.creator ? personProps(planning.creator) : null} members={planning.members.map(personProps)}
                     parent={planning.parent ? { id: planning.parent.id, title: planning.parent.title, status: planning.parent.status } : null} parentId={item.parent_work_item_id ?? null} waitsForParent={waitsForParent}
@@ -120,7 +111,7 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                         workspaceSlug={workspace.slug}
                         relationship={contextRelationship}
                         metrics={[
-                            { label: "Status", value: statusLabel(item.status) },
+                            { label: "Status", value: status.label },
                             { label: "Assets", value: assets.length },
                         ]}
                     />

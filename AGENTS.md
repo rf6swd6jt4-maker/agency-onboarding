@@ -6,4 +6,4 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Shared UI vocabulary
 
-Before adding pills, badges, tags, assignee treatments, labels, or statuses, read `docs/ui-standards.md` and use the primitives exported by `components/ui`. Do not invent page-local variants when a shared primitive covers the meaning. If the design language changes, update the primitive and the standards document so the change propagates consistently.
+Before adding pills, badges, tags, assignee treatments, labels, statuses, panel-tab headers, quick statistics, filters, or lists, read `docs/ui-standards.md`. Use the primitives exported by `components/ui`, `components/panel`, and `components/list`; do not invent page-local variants when a shared primitive covers the meaning. A collection of comparable records must be checked against the documented `List` definition before it receives a custom repeated-row layout. If the design language changes, update the primitive, existing uses, and the standards document together so the change propagates consistently.

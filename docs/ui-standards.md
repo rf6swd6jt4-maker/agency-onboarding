@@ -276,8 +276,14 @@ The two divider colours are deliberately different: the darker `border-neutral-9
 - Lead: owner and company; callability status; phone, source, industry, location, score; ID, created time, Betelgeze creator, actions.
 - Poll: source summary; manual/automated label; poll status and duration; pipeline counts; ID, created time, creator, actions.
 - Relationship: person and business; Test and lifecycle labels; work status; role, contact routes, location and assigned services; ID, updated time, creator, actions.
+- Onboarding: person and business; Test/Stuck labels and onboarding status; step/submission/file counts and assigned services/modules; relationship ID, latest activity, creator, actions.
+- Fulfilment: work-item title and operational status; attached relationship and concise work context; work-item ID, relevant time, creator, actions.
+- Work Item: task title, Key task label, lifecycle stage and operational status; priority or concise description; work-item ID, relevant time, creator, actions. `components/list/work-item-presentation.ts` is the shared label/tone map for work-item statuses; list and detail views must use it together.
+- Communication: person and business, channel label and latest-message status; one-line message preview and direction; relationship ID, latest-message time, actions.
 
 When a new list cannot fit this anatomy, first determine whether it is actually a list. Do not extend the standard merely to make galleries, timelines, settings rows, evidence disclosures, or nested planning structures resemble one.
+
+The Assets gallery remains a gallery even though it shares the Library panel header, tabs, and `QuickStats` with Work Items. OKRs remain a nested planning workspace. Settings/source rows and onboarding-builder records remain configuration or authoring controls. None should be forced into `List` merely because they contain repeated records.
 
 ## TrendChart
 
