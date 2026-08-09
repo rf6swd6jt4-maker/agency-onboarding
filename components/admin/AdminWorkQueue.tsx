@@ -173,20 +173,6 @@ export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: {
     const reservedHours = ranked.reduce((total, item) => total + item.conservative_duration_hours, 0)
     const lateItems = ranked.filter((item) => item.projected_lateness_hours > 0)
     const furthestLateness = Math.max(0, ...lateItems.map((item) => item.projected_lateness_hours))
-    const hasOkrMovement = visibleItems.some((item) => item.contributions.length > 0)
-    const ownerSummaries = (() => {
-        const summaries = new Map<string, { count: number; hours: number; lateness: number }>()
-        for (const item of ranked) {
-            if (!item.execution_owner_id) continue
-            const current = summaries.get(item.execution_owner_id) ?? { count: 0, hours: 0, lateness: 0 }
-            summaries.set(item.execution_owner_id, {
-                count: current.count + 1,
-                hours: current.hours + item.conservative_duration_hours,
-                lateness: Math.max(current.lateness, item.projected_lateness_hours),
-            })
-        }
-        return [...summaries.entries()].map(([ownerId, summary]) => ({ ownerId, name: names[ownerId] ?? "Admin", ...summary }))
-    })()
 
     function complete(item: AdminWorkItem) {
         setPendingId(item.id)
@@ -224,15 +210,12 @@ export function AdminWorkQueue({ items, workspaceSlug, currentUserId, names }: {
             { label: "Actionable", value: ranked.length },
             { label: "Reserved", value: formatHours(reservedHours) },
             { label: "Deferred", value: deferred.length, hideOnMobile: true },
-            { label: "Projected late", value: lateItems.length },
+            { label: "Capacity", value: furthestLateness > 0 ? `${formatHours(furthestLateness)} late` : "On plan" },
         ]} />
         <FilterRail ariaLabel="Filter work queue">
             <FilterRailButton selected={view === "business"} onClick={() => setView("business")}>Business <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailButton>
             <FilterRailButton selected={view === "mine"} onClick={() => setView("mine")}>My work <FilterRailCount>{myOpenItems.length}</FilterRailCount></FilterRailButton>
         </FilterRail>
-        {view === "business" && ownerSummaries.length ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-500">{ownerSummaries.map((owner) => <span key={owner.ownerId}>{owner.name}: {owner.count} item{owner.count === 1 ? "" : "s"} · {formatHours(owner.hours)}{owner.lateness > 0 ? <span className="text-red-300"> · {formatHours(owner.lateness)} late</span> : ""}</span>)}</div> : null}
-        {lateItems.length ? <p className="mt-3 text-sm text-red-300">The current plan exceeds available capacity by up to {formatHours(furthestLateness)}. The affected finish forecasts are marked below.</p> : null}
-        {!hasOkrMovement && visibleItems.length ? <p className="mt-3 text-sm text-neutral-500">No committed KR movement is active, so ordering uses timing, dependencies, operational severity, and capacity.</p> : null}
         <section className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-black" aria-label="Work queue">
             {ranked.length ? ranked.map((item) => <QueueRow key={item.id} item={item} workspaceSlug={workspaceSlug} names={names} pending={pending && pendingId === item.id} onComplete={complete} />) : <p className="px-4 py-5 text-sm text-neutral-400">There is no actionable Admin work right now.</p>}
             {deferred.length ? (

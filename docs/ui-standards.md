@@ -120,9 +120,10 @@ Do not use this shape for statuses, tests, warnings, services, modules, or arbit
 ```
 
 - A panel home route uses the home tab or list name: `Work Queue`, never `Admin`; `Leads`, never `Lead Gen`.
-- The description directly explains the active tab's content, ordering, or purpose. It must not summarize every capability in the parent panel.
+- The description directly explains the active tab's content, ordering, or purpose. It must not summarize every capability in the parent panel. Begin with stable copy that identifies the list; a following sentence may adapt to the current list contents.
 - When the panel contains multiple tabs, `PanelTabs` occupy a dedicated row immediately beneath the description and above `QuickStats`, filters, or tab content. They remain horizontally scrollable on mobile.
-- Optional primary actions occupy the header's right-hand action slot on desktop. The bottom edge of the primary action aligns with the bottom line of the description, which is a stable two-line-minimum slot across sibling tabs. This prevents actions and tabs jumping vertically when descriptions differ by one line.
+- The title-to-description gap is always fixed. On desktop the description occupies a stable two-line-minimum slot with its copy aligned to the top; sibling tabs therefore keep actions and tabs at the same vertical position without creating extra space between a one-line description and its title.
+- Optional primary actions occupy the header's right-hand action slot on desktop and anchor to the bottom of that stable description slot. This prevents actions and tabs jumping vertically when descriptions differ by one line.
 - Put one principal action in this slot, such as `New Poll` or `Start new relationship`. Supplementary metadata may sit immediately before it, but the primary action remains the final, rightmost control.
 - On mobile the action slot follows the description and uses the full available width without displacing the title or tab row.
 - Do not place tab navigation beside the title, inside the action slot, below statistics, or in page-local wrappers with different spacing.
@@ -134,10 +135,11 @@ The standard vertical order is:
 1. `PanelTabHeader`: title and description/action row, then `PanelTabs` when the panel has tabs.
 2. `QuickStats` or another approved analytical summary.
 3. One or more `FilterRail` rows.
-4. Contextual warnings or operational notes when genuinely needed.
-5. The list itself.
+4. The list itself.
 
 Do not place filters above quick statistics when both are present.
+
+A list tab must not insert a page-specific summary, capacity note, explanatory paragraph, owner roll-up, or other bespoke information block between these standard elements. Put stable explanatory copy in the tab description, append genuinely useful dynamic context to that description, express a compact measurement through `QuickStats`, or omit it. Transactional errors and actionable warnings use the platform's approved notice treatment and are not list summaries.
 
 ## QuickStats
 
@@ -156,6 +158,7 @@ Do not place filters above quick statistics when both are present.
 - Mobile renders one consolidated, bordered strip with internal dividers. Desktop separates the same statistics into evenly sized bordered boxes.
 - Labels are short neutral text; values are prominent, tabular, and limited to one line.
 - Prefer current list facts such as actionable count, reserved time, open failures, or poll results. Do not fill the strip with decorative totals.
+- Capacity and forecast information belongs here when it can be expressed compactly, for example `Capacity — 10h late`; do not repeat it in a prose block beneath the filters.
 - `QuickStats` summarizes the currently meaningful list scope. Filtering may update the values when that makes the summary more truthful.
 - Use `StatusStat` for small inline status counts inside a settings or status context; use `QuickStats` for the top-of-list summary strip.
 
