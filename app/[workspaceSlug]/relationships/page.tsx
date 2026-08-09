@@ -4,10 +4,11 @@ import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
+import { MobileAssignedServices } from "@/components/list/MobileAssignedServices"
 import { RelationshipStage, RoundPill, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { SERVICES } from "@/lib/onboarding/services"
-import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
+import { profileAvatarUrl } from "@/lib/profile-avatar"
 import {
     RELATIONSHIP_PHASES,
     countOpenWorkItemsByRelationship,
@@ -74,7 +75,6 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", creatorIds)
         : { data: [] as Array<{ user_id: string; username: string; avatar_path: string | null }> }
     const creatorById = new Map((creatorsResult.data ?? []).map((creator) => [creator.user_id, creator]))
-    const creatorAvatarUrls = await createUploadSignedUrls((creatorsResult.data ?? []).map((creator) => creator.avatar_path).filter((path): path is string => Boolean(path)))
     const relationshipIds = activeRelationships.filter((relationship) => !relationship.fallback).map((relationship) => relationship.id)
     const servicesResult = relationshipIds.length
         ? await supabaseAdmin
@@ -160,6 +160,8 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                 : relationship.primary_person_name
                             const isTest = Boolean(relationship.source_metadata.is_test) || Boolean(relationship.client_id && testClientIds.has(relationship.client_id))
                             const serviceKeys = servicesByRelationshipId.get(relationship.id) ?? []
+                            const serviceLabels = serviceKeys.map((serviceKey) => SERVICES[serviceKey]?.title ?? serviceKey)
+                            const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
                             const workStatus = relationshipWorkStatus(openWorkCount)
                             const relationshipActions = [
                                 { label: "Open relationship", href: relationshipHref },
@@ -177,6 +179,7 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                         <span className="ml-auto shrink-0">{workStatus}</span>
                                     </ListPrimaryRow>
                                     <ListSecondaryRow>
+                                        <MobileAssignedServices labels={serviceLabels} />
                                         {relationship.primary_contact_role ? <span className="hidden shrink-0 text-neutral-400 lg:inline">{relationship.primary_contact_role}</span> : null}
                                         {smsPhone ? <span className="hidden min-w-0 truncate text-neutral-200 sm:inline">SMS: {smsPhone}</span> : null}
                                         {effectiveWhatsappPhone ? <span className="hidden min-w-0 truncate text-neutral-400 sm:inline">WA: {effectiveWhatsappPhone}</span> : null}
@@ -184,10 +187,11 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                         <span className="hidden min-w-0 truncate text-neutral-400 md:inline">{relationship.primary_email ?? "No email saved"}</span>
                                         <span className="hidden min-w-0 truncate capitalize text-neutral-500 lg:inline">{location ?? "Location unset"}</span>
                                         {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald" className="hidden xl:inline-flex">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                        {serviceKeys.length === 0 ? <span className="hidden text-neutral-500 sm:inline">No assigned services</span> : null}
                                         <ListTrailing>
                                             <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
                                             <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(relationship.updated_at)}</span>
-                                            <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Added by" date={new Date(relationship.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
+                                            <ListCreatorBadge src={creatorAvatarSrc} username={creator?.username ?? null} label="Added by" date={new Date(relationship.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
                                             <ListActionMenu actions={relationshipActions} className="hidden sm:block" />
                                         </ListTrailing>
                                     </ListSecondaryRow>

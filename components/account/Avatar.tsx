@@ -13,6 +13,9 @@ export function Avatar({
             <img
                 src={src}
                 alt={`${name} profile picture`}
+                width={96}
+                height={96}
+                decoding="async"
                 className={`${className} rounded-full object-cover`}
             />
         )

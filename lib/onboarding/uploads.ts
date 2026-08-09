@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto"
+import sharp from "sharp"
 import {
     DeleteObjectsCommand,
     GetObjectCommand,
@@ -250,7 +251,19 @@ export async function storeWorkspaceImage(
 }
 
 export async function storeProfileAvatar(userId: string, file: { name: string; size: number; type: string; bytes: Uint8Array }) {
-    return storeWorkspaceImage(`profiles/${userId}`, file)
+    const image = await sharp(file.bytes)
+        .rotate()
+        .resize(400, 400, { fit: "cover", position: "centre", withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toBuffer()
+    const fileName = `${file.name.replace(/\.[^.]+$/, "") || "avatar"}.webp`
+
+    return storeWorkspaceImage(`profiles/${userId}`, {
+        name: fileName,
+        size: image.byteLength,
+        type: "image/webp",
+        bytes: new Uint8Array(image),
+    })
 }
 
 export async function createUploadSignedUrl(

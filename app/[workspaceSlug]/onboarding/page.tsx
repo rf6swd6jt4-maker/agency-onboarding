@@ -12,7 +12,7 @@ import { getOnboardingStepsForModules } from "@/lib/onboarding/canonical-helpers
 import { getProgressPercentage } from "@/lib/onboarding/progress"
 import { SERVICES } from "@/lib/onboarding/services"
 import { isOnboardingStuck } from "@/lib/onboarding/stuck"
-import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
+import { profileAvatarUrl } from "@/lib/profile-avatar"
 import {
     onboardingDetailHref,
     listRelationshipsForWorkspace,
@@ -153,7 +153,6 @@ export default async function RelationshipOnboardingPage({ params }: PageProps) 
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", creatorIds)
         : { data: [] as Array<{ user_id: string; username: string; avatar_path: string | null }> }
     const creatorById = new Map((creators ?? []).map((creator) => [creator.user_id, creator]))
-    const creatorAvatarUrls = await createUploadSignedUrls((creators ?? []).map((creator) => creator.avatar_path).filter((path): path is string => Boolean(path)))
 
     return (
         <main className="min-h-screen bg-neutral-950 px-4 pb-7 text-white sm:px-6">
@@ -189,6 +188,7 @@ export default async function RelationshipOnboardingPage({ params }: PageProps) 
                             ? `${relationship.primary_person_name} – ${relationship.business_name}`
                             : relationship.primary_person_name
                         const creator = session.created_by ? creatorById.get(session.created_by) : null
+                        const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
                         const serviceKeys = serviceKeysByRelationship.get(relationship.id) ?? []
                         const moduleKeys = moduleKeysByRelationship.get(relationship.id) ?? []
                         const actions = [
@@ -222,7 +222,7 @@ export default async function RelationshipOnboardingPage({ params }: PageProps) 
                                     <div className="flex shrink-0 items-center gap-3">
                                         <p className="font-mono text-xs text-neutral-600">{shortId(relationship.id)}</p>
                                         <p className="whitespace-nowrap text-sm text-neutral-500">{formatRelativeTime(latestActivity)}</p>
-                                        <ListCreatorAvatar src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} className="h-7 w-7 shrink-0" />
+                                        <ListCreatorAvatar src={creatorAvatarSrc} username={creator?.username ?? null} className="h-7 w-7 shrink-0" />
                                     </div>
                                 </div>
                             </MobileCardActionSurface>
@@ -244,7 +244,7 @@ export default async function RelationshipOnboardingPage({ params }: PageProps) 
                                 <div className="flex items-center justify-end gap-3">
                                     <p className="font-mono text-xs text-neutral-600">{shortId(relationship.id)}</p>
                                     <p className="whitespace-nowrap text-sm text-neutral-500">{formatRelativeTime(latestActivity)}</p>
-                                    <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Created by" date={new Date(session.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
+                                    <ListCreatorBadge src={creatorAvatarSrc} username={creator?.username ?? null} label="Created by" date={new Date(session.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
                                 </div>
                                 <ListActionMenu actions={actions} />
                             </div>

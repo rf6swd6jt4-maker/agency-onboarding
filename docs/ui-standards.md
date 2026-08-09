@@ -175,6 +175,7 @@ The meaning of the time may vary—created, updated, or latest activity—but it
 - On the secondary row, preserve the most important domain value on mobile and progressively reveal lower-priority values at `sm`, `md`, `lg`, and `xl`. Do not attempt to retain every desktop field by wrapping it.
 - Mobile priority is: the short ID, one useful non-sensitive core measurement where appropriate, then the relative time and creator. The short ID is always visible. Secondary descriptive metadata, locations, and assigned-item pills appear only when the available breakpoint can accommodate them on the same line.
 - Relationship phone numbers, WhatsApp numbers, and email addresses are never shown in the mobile list. They return at their documented wider breakpoints and remain available as copy actions in the mobile action popup.
+- Assigned services use `MobileAssignedServices` below `sm`: show the first service as an emerald `RoundPill`, followed by a plain `+N` count when more services are assigned. Never render a second service pill on the mobile row. When none are assigned, show `No assigned services` in neutral supporting text rather than leaving an unexplained gap.
 - Truncation is for flexible text values such as names, phone numbers, email addresses, and locations. Fixed semantic controls—`Status`, `RelationshipStage`, pills, creator, and actions—must remain intact rather than compressing or splitting.
 - When several values share a band, order them by importance so overflow removes the least important information first. Do not use horizontal scrolling to expose ordinary list metadata.
 - The outer list remains one consolidated collection on mobile and desktop; do not switch between separate cards and a table at an arbitrary breakpoint.
@@ -188,6 +189,7 @@ The two divider colours are deliberately different: the darker `border-neutral-9
 - On mobile, `MobileListActionSurface` makes the entire item one accessible action target. Tapping anywhere opens the item's action popup; it does not navigate immediately. The canonical `Open …` action is first, followed by secondary and destructive actions.
 - The three-dot `ListActionMenu` is hidden on mobile. From `sm` upward, the action surface disappears, the linked title is the default navigation affordance, and the three-dot menu is restored as the final element.
 - Destructive operations remain inside the action popup and keep their confirmation behaviour at every breakpoint.
+- Creator avatars in lists use the stable, versioned `/api/profile-avatars/[username]` rendition rather than direct signed upload URLs. This keeps the displayed file small and cacheable across tab openings; do not restore per-render signed URLs in list implementations.
 - A genuine failed or critical record may add a very faint semantic wash to `ListItem`, but this must not replace its `Status` or alter the standard geometry.
 
 ### Reference mappings

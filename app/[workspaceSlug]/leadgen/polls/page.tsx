@@ -12,7 +12,7 @@ import { Status } from "@/components/ui/Status"
 import type { StatusTone } from "@/components/ui/status-styles"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { sourceLabel } from "@/lib/leadgen/sources"
-import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
+import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { compactText, formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
@@ -111,7 +111,6 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", creatorIds)
         : { data: [] as Array<{ user_id: string; username: string; avatar_path: string | null }> }
     const creatorById = new Map((creators ?? []).map((creator) => [creator.user_id, creator]))
-    const creatorAvatarUrls = await createUploadSignedUrls((creators ?? []).map((creator) => creator.avatar_path).filter((path): path is string => Boolean(path)))
 
     const tasksResult = polls.length ? await supabaseAdmin
         .from("leadgen_poll_tasks")
@@ -187,6 +186,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                     const hasConsoleEntry = poll.status === "failed" || failedTasks.length > 0
                         || failedInvestigations.length > 0
                     const creator = poll.requested_by ? creatorById.get(poll.requested_by) : null
+                    const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
                     const duration = <span className="font-mono text-sm text-neutral-500"><PollDuration startedAt={poll.started_at} createdAt={poll.created_at} completedAt={poll.completed_at} live={live} /></span>
                     const pollHref = `/${workspace.slug}/leadgen/poll/${poll.id}`
                     const pollActions = [
@@ -215,7 +215,7 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                             <ListTrailing>
                                 <span className="font-mono text-neutral-500">{shortId(poll.id)}</span>
                                 <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(poll.created_at)}</span>
-                                <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Created by" date={new Date(poll.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
+                                <ListCreatorBadge src={creatorAvatarSrc} username={creator?.username ?? null} label="Created by" date={new Date(poll.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
                                 <ListActionMenu actions={pollActions} className="hidden sm:block" />
                             </ListTrailing>
                         </ListSecondaryRow>
