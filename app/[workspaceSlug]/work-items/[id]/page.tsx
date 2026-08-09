@@ -85,7 +85,7 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                     workOptions={planning.availableWorkItems.map((candidate) => ({ id: candidate.id, title: candidate.title, status: candidate.status }))}
                     relationships={relationships.map((link) => ({ id: link.relationship_id, label: link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship" }))}
                     relationshipOptions={relationshipOptions.map((relationship) => ({ id: relationship.id, label: relationship.business_name ?? relationship.primary_person_name }))}
-                    relationshipsLocked={isAdminItem || item.native_kind === "onboarding_step"} priority={item.priority}
+                    relationshipsLocked={isAdminItem || item.native_kind === "onboarding_step"} priorityOverride={item.priority_override ?? null}
                     keyResults={keyResultLinks.map((result) => ({ ...result, code: `KR-${shortId(result.id)}` }))}
                     keyResultOptions={keyResultOptions.map((result) => ({ ...result, code: `KR-${shortId(result.id)}` }))}
                     linksLocked={item.native_kind === "onboarding_step"}

@@ -8,7 +8,7 @@ import { workItemHref } from "@/lib/relationships"
 async function requireWorkItem(slug: string, workItemId: string) {
     const context = await requireWorkspace(slug, "admin")
     const { data: item } = await supabaseAdmin.from("work_items")
-        .select("id, status, native_kind, parent_work_item_id, area, visibility")
+        .select("id, status, native_kind, parent_work_item_id, area, visibility, actual_completed_at, actual_completed_has_time, updated_at")
         .eq("workspace_id", context.workspace.id).eq("id", workItemId).maybeSingle()
     if (!item) throw new Error("Work item not found")
     return { ...context, item }
@@ -186,10 +186,62 @@ export async function updateWorkItemLinks(slug: string, workItemId: string, rela
     refreshWorkItem(slug, workItemId)
 }
 
-export async function updateWorkItemPriority(slug: string, workItemId: string, priority: number) {
+export async function updateWorkItemPriority(slug: string, workItemId: string, priorityOverride: number | null) {
     const { workspace } = await requireWorkItem(slug, workItemId)
-    if (!Number.isInteger(priority) || priority < 1 || priority > 4) throw new Error("Invalid priority")
-    const { error } = await supabaseAdmin.from("work_items").update({ priority }).eq("workspace_id", workspace.id).eq("id", workItemId)
+    if (priorityOverride !== null && (!Number.isInteger(priorityOverride) || priorityOverride < 1 || priorityOverride > 4)) throw new Error("Invalid priority")
+    const { error } = await supabaseAdmin.from("work_items").update({ priority_override: priorityOverride }).eq("workspace_id", workspace.id).eq("id", workItemId)
     if (error) throw new Error(error.message)
     refreshWorkItem(slug, workItemId)
+}
+
+export type WorkItemCompletionUndo = {
+    workItemId: string
+    previousStatus: "todo" | "doing" | "waiting" | "blocked"
+    previousActualCompletedAt: string | null
+    previousActualCompletedHasTime: boolean
+    completionVersion: string
+}
+
+export async function completeAdminWorkItem(slug: string, workItemId: string): Promise<WorkItemCompletionUndo> {
+    const { workspace, item } = await requireWorkItem(slug, workItemId)
+    if (item.area !== "admin" || item.visibility !== "admins_only") throw new Error("Only private Admin work can be completed from this queue")
+    if (!["todo", "doing", "waiting", "blocked"].includes(item.status)) throw new Error("This work item is no longer actionable")
+    const completedAt = new Date().toISOString()
+    const { data: completed, error } = await supabaseAdmin.from("work_items")
+        .update({ status: "done", actual_completed_at: completedAt, actual_completed_has_time: true })
+        .eq("workspace_id", workspace.id)
+        .eq("id", workItemId)
+        .eq("updated_at", item.updated_at)
+        .select("updated_at")
+        .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!completed) throw new Error("This work item changed before it could be completed. Refresh and try again.")
+    await refreshScheduleSurfaces(slug, workspace.id, workItemId)
+    return {
+        workItemId,
+        previousStatus: item.status as WorkItemCompletionUndo["previousStatus"],
+        previousActualCompletedAt: item.actual_completed_at,
+        previousActualCompletedHasTime: Boolean(item.actual_completed_has_time),
+        completionVersion: completed.updated_at,
+    }
+}
+
+export async function undoAdminWorkItemCompletion(slug: string, undo: WorkItemCompletionUndo) {
+    if (!undo || !undo.workItemId || !["todo", "doing", "waiting", "blocked"].includes(undo.previousStatus)) throw new Error("This completion cannot be undone")
+    const { workspace, item } = await requireWorkItem(slug, undo.workItemId)
+    if (item.area !== "admin" || item.visibility !== "admins_only" || item.status !== "done") throw new Error("This work item is no longer in the completed state")
+    const { data: restored, error } = await supabaseAdmin.from("work_items")
+        .update({
+            status: undo.previousStatus,
+            actual_completed_at: undo.previousActualCompletedAt,
+            actual_completed_has_time: undo.previousActualCompletedHasTime,
+        })
+        .eq("workspace_id", workspace.id)
+        .eq("id", undo.workItemId)
+        .eq("updated_at", undo.completionVersion)
+        .select("id")
+        .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!restored) throw new Error("This work item changed after completion, so Undo cannot safely overwrite it")
+    await refreshScheduleSurfaces(slug, workspace.id, undo.workItemId)
 }

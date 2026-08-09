@@ -7,6 +7,7 @@ export type AdminQueueWorkInput = {
     title: string
     status: AdminQueueWorkStatus
     priority: number
+    priority_override: number | null
     kind: AdminQueueWorkKind
     severity: string | null
     planned_start_date: string | null
@@ -77,10 +78,17 @@ export type AdminQueueResult = {
     direct_impact_rate: number
     queue_impact_rate: number
     latest_safe_start: string | null
+    projected_start: string | null
+    projected_finish: string | null
+    projected_lateness_hours: number
     enables_work_item_id: string | null
     enables_work_item_title: string | null
     blocked_by_ids: string[]
     contributions: AdminQueueContribution[]
+}
+
+function schedulingPriority(item: AdminQueueWorkInput) {
+    return item.priority_override ?? item.priority
 }
 
 const WORKDAY_START_UTC = 9
@@ -259,10 +267,11 @@ export function okrAttention({ progress, periodStart, periodEnd, now }: { progre
 
 function priorityHorizon(item: AdminQueueWorkInput, calendarNow: Date, schedulingNow: Date, conservativeDuration: number) {
     const horizons: Date[] = []
-    const forcedNow = item.priority === 1 || item.kind === "maintenance" && item.severity === "critical"
+    const priority = schedulingPriority(item)
+    const forcedNow = priority === 1 || item.kind === "maintenance" && item.severity === "critical"
     if (forcedNow) horizons.push(addWorkingHours(schedulingNow, conservativeDuration))
-    if (item.priority === 2) horizons.push(workdayEnd(nextWorkday(calendarNow)))
-    if (item.priority === 3) {
+    if (priority === 2) horizons.push(workdayEnd(nextWorkday(calendarNow)))
+    if (priority === 3) {
         let endOfWeek = utcDayStart(calendarNow)
         const daysUntilFriday = (5 - endOfWeek.getUTCDay() + 7) % 7
         endOfWeek = addUtcDays(endOfWeek, daysUntilFriday)
@@ -433,6 +442,9 @@ export function buildAdminWorkQueue({
             direct_impact_rate: directRate.get(item.id) ?? 0,
             queue_impact_rate: Math.max(directRate.get(item.id) ?? 0, inheritedResult.rate),
             latest_safe_start: latestSafeStart.get(item.id)?.toISOString() ?? null,
+            projected_start: null,
+            projected_finish: null,
+            projected_lateness_hours: 0,
             enables_work_item_id: inheritedResult.targetId,
             enables_work_item_title: inheritedResult.targetId ? itemById.get(inheritedResult.targetId)?.title ?? null : null,
             blocked_by_ids: (prerequisitesByItem.get(item.id) ?? []).filter((id) => !completedIds.has(id)),
@@ -491,7 +503,7 @@ export function buildAdminWorkQueue({
 
         let selected: AdminQueueWorkInput | undefined = forced[0]
         let reason: AdminQueueResult["queue_reason"] = "forced"
-        let label = selected?.kind === "maintenance" && selected.severity === "critical" ? "Critical maintenance" : "Must do now"
+        let label = selected?.kind === "maintenance" && selected.severity === "critical" ? "Critical maintenance" : "Deadline at risk"
 
         if (!selected) {
             const upcomingStarts = ready.flatMap((item) => latestSafeStart.get(item.id) ? [latestSafeStart.get(item.id)!] : [])
@@ -502,7 +514,7 @@ export function buildAdminWorkQueue({
             selected = continuations[0]
             if (selected) {
                 reason = "continuation"
-                label = "Continue in progress"
+                label = "Continue"
             }
 
             const impactCandidates = ready.filter((item) => projectedEffectiveRate(item.id).rate > 0 && (durations.get(item.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS) <= safeHours)
@@ -517,14 +529,14 @@ export function buildAdminWorkQueue({
                     label = `Unlocks ${itemById.get(projected.inherited.targetId)?.title ?? "higher-impact work"}`
                 } else {
                     reason = "impact"
-                    label = "Highest impact over time"
+                    label = "Highest impact"
                 }
             }
             if (!selected) {
                 const obligations = ready.filter((item) => latestSafeStart.get(item.id)).sort((left, right) => compareFiniteDates(latestSafeStart.get(left.id) ?? null, latestSafeStart.get(right.id) ?? null))
-                selected = obligations[0] ?? ready.sort((left, right) => left.priority - right.priority || left.created_at.localeCompare(right.created_at))[0]
+                selected = obligations[0] ?? ready.sort((left, right) => schedulingPriority(left) - schedulingPriority(right) || left.created_at.localeCompare(right.created_at))[0]
                 reason = obligations[0] ? "obligation" : "backlog"
-                label = obligations[0] ? "Next obligation" : "Backlog"
+                label = obligations[0] ? "Do next" : "Backlog"
             }
         }
 
@@ -533,13 +545,19 @@ export function buildAdminWorkQueue({
         result.queue_position = position
         result.queue_reason = reason
         result.queue_label = label
+        const projectedFinish = addWorkingHours(cursor, durations.get(selected.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS)
+        const safeStart = latestSafeStart.get(selected.id)
+        const horizon = safeStart ? addWorkingHours(safeStart, durations.get(selected.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS) : null
+        result.projected_start = cursor.toISOString()
+        result.projected_finish = projectedFinish.toISOString()
+        result.projected_lateness_hours = horizon && projectedFinish > horizon ? workingHoursBetween(horizon, projectedFinish) : 0
         remaining.delete(selected.id)
         simulatedComplete.add(selected.id)
         for (const contribution of contributionModelsByItem.get(selected.id) ?? []) {
             const gap = projectedGapByKeyResult.get(contribution.keyResultId) ?? 0
             projectedGapByKeyResult.set(contribution.keyResultId, Math.max(0, gap - contribution.expectedMovement))
         }
-        cursor = addWorkingHours(cursor, durations.get(selected.id)?.conservative ?? DEFAULT_CONSERVATIVE_DURATION_HOURS)
+        cursor = projectedFinish
         position += 1
         safety += 1
     }

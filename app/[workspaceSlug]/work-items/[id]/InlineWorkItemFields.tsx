@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Assignee, RoundPill, Status } from "@/components/ui"
 import { Avatar } from "@/components/account/Avatar"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
-import { workItemPriorityLabel, workItemPriorityOptions } from "@/lib/work-item-priority"
+import { workItemPrioritySelectionLabel, workItemPrioritySelectionOptions } from "@/lib/work-item-priority"
 import {
     updateWorkItemAssignees,
     updateWorkItemDependencies,
@@ -63,7 +63,7 @@ type Props = {
     keyResults: KeyResultOption[]
     keyResultOptions: KeyResultOption[]
     linksLocked: boolean
-    priority: number
+    priorityOverride: number | null
 }
 
 function displayDate(value: string | null, time: string | null = null) {
@@ -350,7 +350,7 @@ export function InlineWorkItemFields(props: Props) {
                                 </Popup> : null}
                             </div>
                         </Field>
-                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPriorityLabel(props.priority)}</button>{open === "priority" ? <Popup className="w-72"><div className="p-1">{workItemPriorityOptions.map((option) => <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, option.value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priority === option.value || option.value === 4 && props.priority === 5 ? "✓" : ""}</span></button>)}</div><p className="border-t border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-600">This sets the latest acceptable timing. The Admin queue calculates the execution order around it.</p></Popup> : null}</div></Field>
+                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPrioritySelectionLabel(props.priorityOverride)}</button>{open === "priority" ? <Popup className="w-72"><div className="p-1">{workItemPrioritySelectionOptions.map((option) => { const value = option.value === "system" ? null : Number(option.value); return <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priorityOverride === value ? "✓" : ""}</span></button> })}</div><p className="border-t border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-600">System generated lets the queue decide from deadlines, dependencies, duration, and expected KR movement. Choose another option only to override that result.</p></Popup> : null}</div></Field>
                     </div>
                     <Field label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
                         <div>

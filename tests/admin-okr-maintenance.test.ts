@@ -4,7 +4,7 @@ import test from "node:test"
 import { maintenanceBugTitle, resolveMaintenanceError } from "../lib/admin/error-catalogue.ts"
 import { okrAttainment, okrGap, okrKeyResultProgress, okrTargetMet, okrTrendScale } from "../lib/admin/okr-metrics.ts"
 import { okrDisplayStatus, okrDisplayTitle } from "../lib/admin/okr-title.ts"
-import { workItemPriorityLabel, workItemPriorityOptions } from "../lib/work-item-priority.ts"
+import { workItemPriorityLabel, workItemPriorityOptions, workItemPrioritySelectionOptions } from "../lib/work-item-priority.ts"
 
 test("OKR progress moves from baseline to target and clamps to 0-100", () => {
     assert.equal(okrKeyResultProgress({ baseline: 100, target: 300, current: 100 }), 0)
@@ -259,8 +259,21 @@ test("work-item Links combine relationships and committed Key Results", async ()
 
 test("manual work priorities use time-horizon language", () => {
     assert.deepEqual(workItemPriorityOptions.map((option) => option.label), ["Must do now", "Can be done tomorrow", "Can be done this week", "Backlog"])
+    assert.equal(workItemPrioritySelectionOptions[0].label, "System generated")
     assert.equal(workItemPriorityLabel(1), "Must do now")
     assert.equal(workItemPriorityLabel(5), "Backlog")
+})
+
+test("manual priority overrides are nullable and independent from the system seed", async () => {
+    const [migration, actions, fields] = await Promise.all([
+        readFile("supabase/migrations/20260809140000_work_item_priority_overrides.sql", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/actions.ts", "utf8"),
+        readFile("app/[workspaceSlug]/work-items/[id]/InlineWorkItemFields.tsx", "utf8"),
+    ])
+    assert.match(migration, /add column if not exists priority_override integer/)
+    assert.match(migration, /priority_override is null or priority_override between 1 and 4/)
+    assert.match(actions, /update\(\{ priority_override: priorityOverride \}\)/)
+    assert.match(fields, /System generated lets the queue decide/)
 })
 
 test("the one-time OKR reset is exact, idempotent, and fails closed around repurposed work", async () => {
@@ -335,10 +348,12 @@ test("Admin Work and Maintenance keep compact list rows while OKRs use the unifi
     assert.match(adminPage, /listAdminWorkItems/)
     assert.match(adminPage, /OkrWorkspace/)
     assert.match(adminPage, /okrAttention/)
-    assert.match(workQueue, /Recommended queue/)
+    assert.match(workQueue, /Work queue/)
     assert.match(workQueue, /overflow-hidden rounded-2xl border/)
-    assert.match(workQueue, /impact\/hr/)
-    assert.match(workQueue, /completing work never changes a KR measurement automatically/)
+    assert.match(workQueue, /System priority/)
+    assert.match(workQueue, /Manual override/)
+    assert.match(workQueue, /Work item completed/)
+    assert.doesNotMatch(workQueue, /Completed and canceled/)
     assert.doesNotMatch(adminPage, /md:grid-cols-2 xl:grid-cols-3/)
     assert.doesNotMatch(maintenancePage, /diagnosticSummary|failure_fingerprint|line-clamp-2/)
     assert.match(maintenancePage, /occurrence/)

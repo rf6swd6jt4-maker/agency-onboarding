@@ -68,7 +68,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
                 <AdminPanelNav workspaceSlug={workspace.slug} active={view} />
 
                 {view === "work" ? (
-                    <AdminWorkQueue items={workItems} workspaceSlug={workspace.slug} names={people.names} />
+                    <AdminWorkQueue items={workItems} workspaceSlug={workspace.slug} names={Object.fromEntries(people.names)} />
                 ) : (
                     <OkrWorkspace workspaceSlug={workspace.slug} currentUserId={user.id} okrs={okrs} ownerOptions={people.ownerOptions} workItems={linkableWorkItems ?? []} people={Object.fromEntries(people.names)} today={now.toISOString().slice(0, 10)} />
                 )}

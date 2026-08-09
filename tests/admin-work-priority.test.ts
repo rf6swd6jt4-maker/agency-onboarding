@@ -10,6 +10,7 @@ function work(id: string, overrides: Partial<AdminQueueWorkInput> = {}): AdminQu
         title: id,
         status: "todo",
         priority: 4,
+        priority_override: null,
         kind: "okr_action",
         severity: null,
         planned_start_date: null,
@@ -113,6 +114,34 @@ test("Must do now is forced, while tomorrow is a safe-start constraint rather th
     const tomorrow = queue({ items: [work("tomorrow", { priority: 2 }), work("impact")], okrs: [objective], links: [highImpactLink] })
     assert.equal(tomorrow[0].work_item_id, "impact")
     assert.equal(tomorrow[0].queue_reason, "impact")
+})
+
+test("a manual priority override replaces the system timing seed", () => {
+    const objective = okr("growth", "growth-kr")
+    const highImpactLink = { work_item_id: "impact", key_result_id: "growth-kr", expected_movement: 80, impact_hypothesis: "Move most of the gap" }
+    const systemGenerated = queue({ items: [work("system", { priority: 4 }), work("impact")], okrs: [objective], links: [highImpactLink] })
+    assert.equal(systemGenerated[0].work_item_id, "impact")
+
+    const overridden = queue({ items: [work("override", { priority: 4, priority_override: 1 }), work("impact")], okrs: [objective], links: [highImpactLink] })
+    assert.equal(overridden[0].work_item_id, "override")
+    assert.equal(overridden[0].queue_label, "Deadline at risk")
+})
+
+test("queue results expose conservative finish forecasts and working-hour lateness", () => {
+    const results = queue({
+        items: [
+            work("first", { priority: 2, created_at: "2026-08-01T09:00:00.000Z" }),
+            work("second", { priority: 2, created_at: "2026-08-02T09:00:00.000Z" }),
+            work("third", { priority: 2, created_at: "2026-08-03T09:00:00.000Z" }),
+        ],
+    })
+    assert.equal(results[0].projected_start, NOW)
+    assert.equal(results[0].projected_finish, "2026-08-10T15:00:00.000Z")
+    assert.equal(results[0].projected_lateness_hours, 0)
+    assert.equal(results[1].projected_finish, "2026-08-11T13:00:00.000Z")
+    assert.equal(results[1].projected_lateness_hours, 0)
+    assert.equal(results[2].projected_finish, "2026-08-12T11:00:00.000Z")
+    assert.equal(results[2].projected_lateness_hours, 2)
 })
 
 test("tomorrow still means the next workday when the queue is viewed after today's workday", () => {
