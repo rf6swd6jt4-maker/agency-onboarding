@@ -133,9 +133,9 @@ Use the primitives in `components/list/List.tsx`:
 ```
 
 - `List` owns the consolidated black surface, `rounded-2xl` outer corners, neutral border, clipping, and list semantics.
-- `ListItem` owns the divider between records and the restrained hover highlight. Do not wrap every item in its own floating card.
-- `ListPrimaryRow` is the identity and state band. It has the subtly tinted surface and internal divider.
-- `ListSecondaryRow` is the supporting-information band. It can wrap when space is constrained.
+- `ListItem` owns the divider between records and the restrained hover highlight. Its divider uses `border-neutral-800`, exactly matching the outer list border. Do not wrap every item in its own floating card.
+- `ListPrimaryRow` is the identity and state band. It has the subtly tinted surface and an internal `border-neutral-900` divider.
+- `ListSecondaryRow` is the supporting-information band. It is always one line and never wraps.
 - `ListTitle` is the primary identity, always placed first and given the flexible width. Link it whenever the record has a canonical destination. It truncates rather than displacing state or actions.
 - `ListTrailing` is the stable audit/action cluster at the end of the supporting row.
 
@@ -168,10 +168,15 @@ The meaning of the time may vary—created, updated, or latest activity—but it
 ### Responsive behaviour
 
 - Preserve the same two semantic rows at every breakpoint.
-- Both rows may wrap, but their information order must remain unchanged.
-- The title receives flexible space and truncates first.
-- Statuses, labels, the trailing cluster, and actions remain legible and must not be squeezed into overlapping columns.
+- Each semantic row is exactly one visual line high. Neither text nor a UI element may wrap beneath another item inside that row; a two-line primary or secondary band is not permitted.
+- The title receives flexible space and truncates first. Primary labels, stages, and statuses are single-line, non-wrapping elements.
+- On the secondary row, preserve the most important domain value on mobile and progressively reveal lower-priority values at `sm`, `md`, `lg`, and `xl`. Do not attempt to retain every desktop field by wrapping it.
+- Mobile priority is: one useful contact or core measurement, then the relative time, creator, and actions. The short ID is hidden below `sm`; secondary contact routes, descriptive metadata, locations, and assigned-item pills appear only when the available breakpoint can accommodate them on the same line.
+- Truncation is for flexible text values such as names, phone numbers, email addresses, and locations. Fixed semantic controls—`Status`, `RelationshipStage`, pills, creator, and actions—must remain intact rather than compressing or splitting.
+- When several values share a band, order them by importance so overflow removes the least important information first. Do not use horizontal scrolling to expose ordinary list metadata.
 - The outer list remains one consolidated collection on mobile and desktop; do not switch between separate cards and a table at an arbitrary breakpoint.
+
+The two divider colours are deliberately different: the darker `border-neutral-900` separates the primary and secondary bands within one record, while the stronger `border-neutral-800` separates records and matches the list perimeter. This alternating rhythm must remain visible on mobile and desktop.
 
 ### Interaction and exceptional state
 

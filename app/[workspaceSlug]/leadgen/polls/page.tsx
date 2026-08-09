@@ -198,20 +198,20 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                     return <ListItem key={poll.id} className={poll.status === "failed" ? "bg-red-950/[0.08]" : ""}>
                         <ListPrimaryRow>
                             <ListTitle href={pollHref} className="flex-1">{sourceNames(poll.source_snapshot, poll.source_count)} poll</ListTitle>
-                            <SquarePill>{poll.trigger === "manual" ? "Manual" : "Automated"}</SquarePill>
+                            <SquarePill className="shrink-0">{poll.trigger === "manual" ? "Manual" : "Automated"}</SquarePill>
                             <span className="ml-auto flex shrink-0 items-center gap-3">
                                 <Status label={meta.label} tone={meta.tone} />
                                 {duration}
                             </span>
                         </ListPrimaryRow>
                         <ListSecondaryRow>
-                            <span className="text-neutral-500"><span className="text-neutral-200">{taskStats.completedQueries}</span>/<span className="text-neutral-200">{taskStats.sourceQueries}</span> seed</span>
-                            <span className="text-neutral-500"><span className="text-neutral-200">{taskStats.rawReturned}</span> raw</span>
-                            <span className="text-neutral-500"><span className="text-neutral-200">{claimStats.matched}</span>/<span className="text-neutral-200">{claimStats.checks}</span> checks</span>
-                            <span className="text-neutral-500"><span className="text-neutral-200">{claimStats.ownerClaims}</span> owner claims</span>
-                            <span className="text-neutral-500"><span className="text-neutral-200">{poll.qualified_count}</span> qualified</span>
+                            <span className="shrink-0 text-neutral-500"><span className="text-neutral-200">{taskStats.completedQueries}</span>/<span className="text-neutral-200">{taskStats.sourceQueries}</span> seed</span>
+                            <span className="hidden shrink-0 text-neutral-500 sm:inline"><span className="text-neutral-200">{taskStats.rawReturned}</span> raw</span>
+                            <span className="hidden shrink-0 text-neutral-500 md:inline"><span className="text-neutral-200">{claimStats.matched}</span>/<span className="text-neutral-200">{claimStats.checks}</span> checks</span>
+                            <span className="hidden shrink-0 text-neutral-500 lg:inline"><span className="text-neutral-200">{claimStats.ownerClaims}</span> owner claims</span>
+                            <span className="shrink-0 text-neutral-500"><span className="text-neutral-200">{poll.qualified_count}</span> qualified</span>
                             <ListTrailing>
-                                <span className="font-mono text-neutral-500">{shortId(poll.id)}</span>
+                                <span className="hidden font-mono text-neutral-500 sm:inline">{shortId(poll.id)}</span>
                                 <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(poll.created_at)}</span>
                                 <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Created by" date={new Date(poll.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
                                 <ListActionMenu actions={pollActions} />

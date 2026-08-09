@@ -118,13 +118,13 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                             <Status label={bestPhone ? "Callable" : "No phone"} tone={bestPhone ? "green" : "grey"} className="ml-auto shrink-0" />
                         </ListPrimaryRow>
                         <ListSecondaryRow>
-                            <span className="truncate text-neutral-200">{bestPhone || "No phone"}</span>
-                            <span className="truncate capitalize text-neutral-400">{company.source_key}</span>
-                            <span className="truncate text-neutral-400">{industry}</span>
-                            <span className="truncate text-neutral-500">{location}</span>
-                            <span className="font-mono text-neutral-500">{company.lead_score ?? 0} pts</span>
+                            <span className="min-w-0 truncate text-neutral-200">{bestPhone || "No phone"}</span>
+                            <span className="hidden min-w-0 truncate capitalize text-neutral-400 sm:inline">{company.source_key}</span>
+                            <span className="hidden min-w-0 truncate text-neutral-400 md:inline">{industry}</span>
+                            <span className="hidden min-w-0 truncate text-neutral-500 lg:inline">{location}</span>
+                            <span className="hidden shrink-0 font-mono text-neutral-500 sm:inline">{company.lead_score ?? 0} pts</span>
                             <ListTrailing>
-                                <span className="font-mono text-neutral-500">{shortId(company.id)}</span>
+                                <span className="hidden font-mono text-neutral-500 sm:inline">{shortId(company.id)}</span>
                                 <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(company.created_at)}</span>
                                 <ListCreatorBadge username={null} label="Added by" date={new Date(company.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
                                 <ListActionMenu actions={leadActions} />

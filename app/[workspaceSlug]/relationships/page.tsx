@@ -170,20 +170,20 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                 <ListItem key={relationship.id}>
                                     <ListPrimaryRow>
                                         <ListTitle href={relationshipHref} className="flex-1">{relationshipTitle}</ListTitle>
-                                        {isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}
-                                        <RelationshipStage phase={relationship.lifecycle_phase} />
+                                        {isTest ? <SquarePill tone="yellow" className="shrink-0">Test</SquarePill> : null}
+                                        <RelationshipStage phase={relationship.lifecycle_phase} className="shrink-0" />
                                         <span className="ml-auto shrink-0">{workStatus}</span>
                                     </ListPrimaryRow>
                                     <ListSecondaryRow>
-                                        {relationship.primary_contact_role ? <span className="shrink-0 text-neutral-400">{relationship.primary_contact_role}</span> : null}
-                                        {smsPhone ? <span className="truncate text-neutral-200">SMS: {smsPhone}</span> : null}
-                                        {effectiveWhatsappPhone ? <span className="truncate text-neutral-400">WA: {effectiveWhatsappPhone}</span> : null}
-                                        {!smsPhone && !effectiveWhatsappPhone ? <span className="text-neutral-500">No phone</span> : null}
-                                        <span className="truncate text-neutral-400">{relationship.primary_email ?? "No email saved"}</span>
-                                        <span className="truncate capitalize text-neutral-500">{location ?? "Location unset"}</span>
-                                        {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                        {relationship.primary_contact_role ? <span className="hidden shrink-0 text-neutral-400 lg:inline">{relationship.primary_contact_role}</span> : null}
+                                        {smsPhone ? <span className="min-w-0 truncate text-neutral-200">SMS: {smsPhone}</span> : null}
+                                        {effectiveWhatsappPhone ? <span className={`min-w-0 truncate text-neutral-400 ${smsPhone ? "hidden sm:inline" : ""}`}>WA: {effectiveWhatsappPhone}</span> : null}
+                                        {!smsPhone && !effectiveWhatsappPhone ? <span className="min-w-0 truncate text-neutral-500">No phone</span> : null}
+                                        <span className="hidden min-w-0 truncate text-neutral-400 md:inline">{relationship.primary_email ?? "No email saved"}</span>
+                                        <span className="hidden min-w-0 truncate capitalize text-neutral-500 lg:inline">{location ?? "Location unset"}</span>
+                                        {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald" className="hidden xl:inline-flex">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
                                         <ListTrailing>
-                                            <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
+                                            <span className="hidden font-mono text-neutral-500 sm:inline">{shortId(relationship.id)}</span>
                                             <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(relationship.updated_at)}</span>
                                             <ListCreatorBadge src={creator?.avatar_path ? creatorAvatarUrls.get(creator.avatar_path) : null} username={creator?.username ?? null} label="Added by" date={new Date(relationship.created_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "short" })} />
                                             <ListActionMenu actions={relationshipActions} />
