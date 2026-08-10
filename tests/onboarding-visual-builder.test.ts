@@ -117,6 +117,22 @@ test("the Builder outline nests fields, owns structure actions, and filters the 
     assert.doesNotMatch(builderUi, />Library<\/button>/)
 })
 
+test("the Builder outline separates collapse, visibility, item identity, and deletion", () => {
+    assert.match(builderUi, /function ChevronIcon/)
+    assert.match(builderUi, /collapsedGroups/)
+    assert.match(builderUi, /collapsedSteps/)
+    assert.match(builderUi, /function OutlineItemIcon/)
+    assert.match(builderUi, /bg-blue-500\/15 text-blue-300/)
+    assert.match(builderUi, /bg-teal-500\/15 text-teal-300/)
+    assert.match(builderUi, /bg-cyan-500\/15 text-cyan-300/)
+    assert.match(builderUi, /bg-violet-500\/15 text-violet-300/)
+    assert.match(builderUi, /bg-amber-500\/15 text-amber-300/)
+    assert.match(builderUi, /text-xs font-bold/)
+    assert.match(builderUi, /opacity-40 grayscale/)
+    assert.doesNotMatch(builderUi, /⠿/)
+    assert.doesNotMatch(builderUi, /ml-4 border-l border-neutral-800/)
+})
+
 test("collaborative drafts use private Realtime, Yjs merging, presence, author undo, and fail-closed offline editing", () => {
     assert.match(collaboration, /from "yjs"/)
     assert.match(collaboration, /new Y\.UndoManager/)

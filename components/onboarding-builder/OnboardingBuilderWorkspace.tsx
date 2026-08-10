@@ -107,9 +107,32 @@ type OutlineDropTarget = {
     fieldIndex?: number
 }
 
-function OutlineLeadingControl({ selected, deletable, draggable }: { selected: boolean; deletable: boolean; draggable: boolean }) {
-    if (selected && deletable) return <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center text-red-400"><TrashIcon /></span>
-    return <span aria-hidden="true" className={`inline-flex h-7 w-7 shrink-0 items-center justify-center text-base leading-none ${draggable ? "cursor-grab text-neutral-600 group-hover/row:text-neutral-400" : "text-neutral-800"}`}>{draggable ? "⠿" : "·"}</span>
+function ChevronIcon({ collapsed }: { collapsed: boolean }) {
+    return <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-3.5 w-3.5 fill-none stroke-current stroke-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
+}
+
+function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "form" | "video" | "button" | "field" }) {
+    const tone = {
+        bookend: "bg-indigo-500/15 text-indigo-300",
+        module: "bg-blue-500/15 text-blue-300",
+        step: "bg-teal-500/15 text-teal-300",
+        header: "bg-sky-500/15 text-sky-300",
+        form: "bg-cyan-500/15 text-cyan-300",
+        video: "bg-violet-500/15 text-violet-300",
+        button: "bg-amber-500/15 text-amber-300",
+        field: "bg-emerald-500/15 text-emerald-300",
+    }[kind]
+    const glyph = {
+        bookend: <path d="M5 3v14M5 4h9l-2 3 2 3H5" />,
+        module: <><rect x="3" y="4" width="14" height="4" rx="1" /><rect x="3" y="12" width="14" height="4" rx="1" /></>,
+        step: <><rect x="4" y="3" width="12" height="14" rx="2" /><path d="M7 7h6M7 10h6M7 13h4" /></>,
+        header: <path d="M5 5h10M10 5v10M7 15h6" />,
+        form: <><path d="M7 5h9M7 10h9M7 15h9" /><circle cx="4" cy="5" r=".6" /><circle cx="4" cy="10" r=".6" /><circle cx="4" cy="15" r=".6" /></>,
+        video: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="m8 8 5 2-5 2Z" /></>,
+        button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
+        field: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="M6 10h5" /></>,
+    }[kind]
+    return <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${tone}`}><svg viewBox="0 0 20 20" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current stroke-[1.6] [stroke-linecap:round] [stroke-linejoin:round]">{glyph}</svg></span>
 }
 
 function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectStep, onSelectBlock, onSelectField, onToggleModule, onDeleteSelection, onDrop }: {
@@ -124,6 +147,17 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
     onDeleteSelection: () => void
     onDrop: (event: DragEvent<HTMLElement>, target: OutlineDropTarget) => void
 }) {
+    const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+    const [collapsedSteps, setCollapsedSteps] = useState<Set<string>>(() => new Set())
+
+    function toggleCollapsed(setter: typeof setCollapsedGroups, key: string) {
+        setter((current) => {
+            const next = new Set(current)
+            if (next.has(key)) next.delete(key); else next.add(key)
+            return next
+        })
+    }
+
     function startDrag(event: DragEvent<HTMLElement>, payload: Record<string, unknown>) {
         event.stopPropagation()
         event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ ...payload, copy: event.shiftKey }))
@@ -137,42 +171,53 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
     return <div data-builder-outline-tree className="space-y-1">
         {groups.map((group) => {
             const moduleId = group.kind === "module" ? group.definition.id : null
-            const visible = moduleId ? visibleModuleIds.has(moduleId) : true
+            const shown = moduleId ? visibleModuleIds.has(moduleId) : true
+            const groupCollapsed = collapsedGroups.has(group.key)
             return <section key={group.key} className="overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20">
                 <div className="flex h-9 items-center gap-1 px-1.5">
-                    <span className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-neutral-300">{group.title}</span>
-                    {group.kind === "bookend" ? <RoundPill>Bookend</RoundPill> : group.definition.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}
-                    {moduleId ? <button type="button" aria-label={`${visible ? "Hide" : "Show"} ${group.title} in roadmap`} aria-pressed={visible} onClick={() => onToggleModule(moduleId)} className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition hover:bg-neutral-800 hover:text-white ${visible ? "text-neutral-400" : "text-neutral-700"}`}><EyeIcon hidden={!visible} /></button> : null}
+                    <button type="button" aria-label={`${groupCollapsed ? "Expand" : "Collapse"} ${group.title}`} aria-expanded={!groupCollapsed} onClick={() => toggleCollapsed(setCollapsedGroups, group.key)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronIcon collapsed={groupCollapsed} /></button>
+                    <span className={`transition ${shown ? "" : "opacity-40 grayscale"}`}><OutlineItemIcon kind={group.kind === "module" ? "module" : "bookend"} /></span>
+                    <span className={`min-w-0 flex-1 truncate px-1 text-xs font-bold transition ${shown ? "text-neutral-200" : "text-neutral-600"}`}>{group.title}</span>
+                    <span className={`shrink-0 transition ${shown ? "" : "opacity-40 grayscale"}`}>{group.kind === "bookend" ? <RoundPill>Bookend</RoundPill> : group.definition.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span>
+                    {moduleId ? <button type="button" aria-label={`${shown ? "Hide" : "Show"} ${group.title} in roadmap`} aria-pressed={shown} onClick={() => onToggleModule(moduleId)} className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition hover:bg-neutral-800 hover:text-white ${shown ? "text-neutral-400" : "text-neutral-600"}`}><EyeIcon hidden={!shown} /></button> : <span className="h-7 w-7 shrink-0" />}
                 </div>
-                {visible ? <div className="border-t border-neutral-900 px-1 py-1">
+                {!groupCollapsed ? <div className={`px-1 pb-1 transition ${shown ? "" : "opacity-40 grayscale"}`}>
                     {group.definition.steps.map((step, stepIndex) => {
                         const stepSelected = selection.groupKey === group.key && selection.stepId === step.id && !selection.blockId
-                        return <div key={step.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDrop(event, { groupKey: group.key, stepId: step.id, stepIndex })}>
-                            <div className={`group/row flex min-h-8 items-center rounded-md text-xs ${selectedRow(stepSelected)}`} draggable={editable} onDragStart={(event) => startDrag(event, { type: "step", groupKey: group.key, stepId: step.id })}>
-                                <button type="button" aria-label={stepSelected ? `Delete ${visualStepTitle(step)}` : `Drag ${visualStepTitle(step)}`} disabled={!editable} onClick={(event) => { if (!stepSelected) return; event.stopPropagation(); onDeleteSelection() }} className="shrink-0 disabled:opacity-40"><OutlineLeadingControl selected={stepSelected} deletable draggable={editable} /></button>
-                                <button type="button" onClick={() => onSelectStep(group.key, step.id)} className="min-w-0 flex-1 truncate py-2 pr-2 text-left"><span className="mr-1 text-neutral-600">{stepIndex + 1}.</span>{visualStepTitle(step)}</button>
+                        const stepKey = `${group.key}:${step.id}`
+                        const stepCollapsed = collapsedSteps.has(stepKey)
+                        return <div key={step.id} className="ml-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDrop(event, { groupKey: group.key, stepId: step.id, stepIndex })}>
+                            <div title={shown ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(stepSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "step", groupKey: group.key, stepId: step.id })}>
+                                <button type="button" aria-label={`${stepCollapsed ? "Expand" : "Collapse"} ${visualStepTitle(step)}`} aria-expanded={!stepCollapsed} onClick={(event) => { event.stopPropagation(); toggleCollapsed(setCollapsedSteps, stepKey) }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronIcon collapsed={stepCollapsed} /></button>
+                                <OutlineItemIcon kind="step" />
+                                <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectStep(group.key, step.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left"><span className="mr-1 text-neutral-600">{stepIndex + 1}.</span>{visualStepTitle(step)}</button>
+                                {stepSelected && shown ? <button type="button" aria-label={`Delete ${visualStepTitle(step)}`} disabled={!editable} onClick={(event) => { event.stopPropagation(); onDeleteSelection() }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-700 hover:text-white disabled:opacity-30"><TrashIcon /></button> : <span className="h-7 w-7 shrink-0" />}
                             </div>
-                            <div className="ml-4 border-l border-neutral-800 pl-1">
+                            {!stepCollapsed ? <div className="ml-5">
                                 {step.blocks.map((block, blockIndex) => {
                                     const blockSelected = selection.groupKey === group.key && selection.stepId === step.id && selection.blockId === block.id && !selection.fieldId
                                     const blockLabel = block.kind === "header" ? "Header" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.label || "Button"
                                     return <div key={block.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, blockIndex }) }}>
-                                        <div className={`group/row flex min-h-8 items-center rounded-md text-xs ${selectedRow(blockSelected)}`} draggable={editable && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id })}>
-                                            <button type="button" aria-label={blockSelected && block.kind !== "header" ? `Delete ${blockLabel}` : `Drag ${blockLabel}`} disabled={!editable || block.kind === "header"} onClick={(event) => { if (!blockSelected || block.kind === "header") return; event.stopPropagation(); onDeleteSelection() }} className="shrink-0 disabled:opacity-40"><OutlineLeadingControl selected={blockSelected} deletable={block.kind !== "header"} draggable={editable && block.kind !== "header"} /></button>
-                                            <button type="button" onClick={() => onSelectBlock(group.key, step.id, block.id)} className="min-w-0 flex-1 truncate py-2 pr-2 text-left capitalize">{blockLabel}</button>
+                                        <div title={shown && block.kind !== "header" ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(blockSelected)}`} draggable={editable && shown && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id })}>
+                                            <span className="h-7 w-7 shrink-0" />
+                                            <OutlineItemIcon kind={block.kind} />
+                                            <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectBlock(group.key, step.id, block.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left capitalize">{blockLabel}</button>
+                                            {blockSelected && shown && block.kind !== "header" ? <button type="button" aria-label={`Delete ${blockLabel}`} disabled={!editable} onClick={(event) => { event.stopPropagation(); onDeleteSelection() }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-700 hover:text-white disabled:opacity-30"><TrashIcon /></button> : <span className="h-7 w-7 shrink-0" />}
                                         </div>
-                                        {block.kind === "form" ? <div className="ml-4 border-l border-neutral-800 pl-1">
+                                        {block.kind === "form" ? <div className="ml-5">
                                             {block.fields.map((field, fieldIndex) => {
                                                 const fieldSelected = selection.groupKey === group.key && selection.stepId === step.id && selection.blockId === block.id && selection.fieldId === field.id
-                                                return <div key={field.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldIndex }) }} className={`group/row flex min-h-8 items-center rounded-md text-xs ${selectedRow(fieldSelected)}`} draggable={editable} onDragStart={(event) => startDrag(event, { type: "field", groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldId: field.id })}>
-                                                    <button type="button" aria-label={fieldSelected ? `Delete ${field.label || "field"}` : `Drag ${field.label || "field"}`} disabled={!editable} onClick={(event) => { if (!fieldSelected) return; event.stopPropagation(); onDeleteSelection() }} className="shrink-0 disabled:opacity-40"><OutlineLeadingControl selected={fieldSelected} deletable draggable={editable} /></button>
-                                                    <button type="button" onClick={() => onSelectField(group.key, step.id, block.id, field.id)} className="min-w-0 flex-1 truncate py-2 pr-2 text-left">{field.label || `Field ${fieldIndex + 1}`}</button>
+                                                return <div key={field.id} title={shown ? "Drag to reorder within this form; hold Shift while dragging to duplicate" : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldIndex }) }} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(fieldSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "field", groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldId: field.id })}>
+                                                    <span className="h-7 w-7 shrink-0" />
+                                                    <OutlineItemIcon kind="field" />
+                                                    <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectField(group.key, step.id, block.id, field.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left">{field.label || `Field ${fieldIndex + 1}`}</button>
+                                                    {fieldSelected && shown ? <button type="button" aria-label={`Delete ${field.label || "field"}`} disabled={!editable} onClick={(event) => { event.stopPropagation(); onDeleteSelection() }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-700 hover:text-white disabled:opacity-30"><TrashIcon /></button> : <span className="h-7 w-7 shrink-0" />}
                                                 </div>
                                             })}
                                         </div> : null}
                                     </div>
                                 })}
-                            </div>
+                            </div> : null}
                         </div>
                     })}
                 </div> : null}
