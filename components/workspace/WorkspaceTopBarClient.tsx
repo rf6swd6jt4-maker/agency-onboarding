@@ -1079,7 +1079,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (!href) return false
         event.preventDefault()
         setSearchOpen(false)
-        navigateActiveTab(href)
+        navigateWorkspaceDestination(href)
         return true
     }
 
@@ -1192,6 +1192,19 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         pendingNavigationRef.current.set(tabId, url)
         requestTabFrameNavigation(tabId, url)
+    }
+
+    function isStandaloneBuilderHref(href: string) {
+        const pathname = href.split(/[?#]/, 1)[0]
+        return pathname === `/${workspace.slug}/onboarding-builder`
+    }
+
+    function navigateWorkspaceDestination(href: string) {
+        if (isStandaloneBuilderHref(href)) {
+            window.open(href, "_blank", "noopener,noreferrer")
+            return
+        }
+        navigateActiveTab(href)
     }
 
     function handleFrameLoad(tabId: string, expectedUrl: string) {
@@ -1464,6 +1477,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         icon: workspacePanelIcon(panel.key),
         meta: panel.key === "leadgen" ? LEADGEN_POLLING_SYSTEM_VERSION_LABEL : null,
         disabled: !canAccessWorkspacePanel(panel, workspaceRole),
+        standalone: "standalone" in panel && panel.standalone === true,
     }))
     const canCreateOkr = canAccessPrivateWorkspacePanels(workspaceRole)
     const okrPeriodStart = new Date().toISOString().slice(0, 10)
@@ -1526,7 +1540,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                 {query.trim().length >= 2 && !searchLoading && searchResults.length === 0 && <p className="px-3 py-3 text-sm text-neutral-500">No core results found.</p>}
                                 {query.trim().length >= 2 && !searchLoading && searchResults.map((item) => (
                                     <div key={item.id} className="border-b border-neutral-900 last:border-0">
-                                        <Link href={item.href} data-global-loading="false" className="block px-3 py-2 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateActiveTab(item.href) }}>
+                                        <Link href={item.href} data-global-loading="false" target={isStandaloneBuilderHref(item.href) ? "_blank" : undefined} rel={isStandaloneBuilderHref(item.href) ? "noopener noreferrer" : undefined} className="block px-3 py-2 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateWorkspaceDestination(item.href) }}>
                                             <SearchResultContent item={item} />
                                         </Link>
                                         {item.hubHref && item.hubHref !== item.href && (
@@ -1557,7 +1571,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                     {query.trim().length >= 2 && !searchLoading && searchResults.length === 0 && <p className="px-3 py-3 text-sm text-neutral-500">No core results found.</p>}
                                     {query.trim().length >= 2 && !searchLoading && searchResults.map((item) => (
                                         <div key={item.id} className="border-b border-neutral-900 last:border-0">
-                                            <Link href={item.href} data-global-loading="false" className="block px-3 py-3 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateActiveTab(item.href) }}>
+                                            <Link href={item.href} data-global-loading="false" target={isStandaloneBuilderHref(item.href) ? "_blank" : undefined} rel={isStandaloneBuilderHref(item.href) ? "noopener noreferrer" : undefined} className="block px-3 py-3 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateWorkspaceDestination(item.href) }}>
                                                 <SearchResultContent item={item} mobile />
                                             </Link>
                                             {item.hubHref && item.hubHref !== item.href && (
@@ -1800,7 +1814,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                     )
 
                     return (
-                        <Link key={item.key} href={item.href} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateActiveTab(item.href); closeSidebarAfterNavigation() }} className={itemClassName}>
+                        <Link key={item.key} href={item.href} target={item.standalone ? "_blank" : undefined} rel={item.standalone ? "noopener noreferrer" : undefined} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateWorkspaceDestination(item.href); closeSidebarAfterNavigation() }} className={itemClassName}>
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-500">{item.meta}</span>}

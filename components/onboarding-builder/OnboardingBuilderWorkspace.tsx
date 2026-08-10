@@ -1,449 +1,483 @@
 "use client"
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react"
-import { useRouter } from "next/navigation"
-import {
-    archiveOnboardingModule,
-    createOnboardingModule,
-    deleteOnboardingModuleDraft,
-    duplicateOnboardingModule,
-    prepareBuilderVideoUpload,
-    publishOnboardingBookend,
-    publishOnboardingModule,
-    revokeOnboardingModulePreview,
-    restoreOnboardingModule,
-    rotateOnboardingModulePreview,
-    saveOnboardingBookendDraft,
-    saveOnboardingModuleDraft,
-} from "@/app/[workspaceSlug]/onboarding-builder/actions"
+import { useEffect, useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react"
+import { createOnboardingModule } from "@/app/[workspaceSlug]/onboarding-builder/actions"
+import { publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import { SortableAuthoringList } from "@/components/onboarding-builder/SortableAuthoringList"
-import { BuilderPreview } from "@/components/onboarding-builder/BuilderPreview"
-import { RoundPill, SquarePill } from "@/components/ui"
-import type {
-    ConfiguredOnboardingField,
-    ConfiguredOnboardingStep,
-    OnboardingBookendDefinition,
-    OnboardingBuilderData,
-    OnboardingModuleDefinition,
-    OnboardingModulePublishImpact,
-    OnboardingModuleSummary,
-} from "@/lib/onboarding/configuration-types"
-import { modulePublishDiff } from "@/lib/onboarding/publish-impact"
+import { VisualBuilderCanvas } from "@/components/onboarding-builder/VisualBuilderCanvas"
+import { useCollaborativeOnboardingDocument, type VisualBuilderDocument } from "@/components/onboarding-builder/useCollaborativeOnboardingDocument"
+import { RoundPill, SquarePill, Status } from "@/components/ui"
+import {
+    createButtonBlock,
+    createFormBlock,
+    createOnboardingField,
+    createOnboardingStepV2,
+    createVideoBlock,
+    type OnboardingBlock,
+    type OnboardingBookendDefinitionV2,
+    type OnboardingModuleDefinitionV2,
+    type OnboardingStepV2,
+} from "@/lib/onboarding/block-definition"
+import { visualStepTitle } from "@/lib/onboarding/block-validation"
+import type { OnboardingBuilderData, OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
+import { ONBOARDING_THEME_SLOTS } from "@/lib/onboarding/configuration-types"
+import { ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
+import { orderOnboardingServices, resolveOrderedModuleSources } from "@/lib/onboarding/session-composition-order"
 
-type Selection = { type: "module" } | { type: "step"; stepId: string } | { type: "field"; stepId: string; fieldId: string }
-type LibrarySelection = { type: "module"; id: string } | { type: "bookend"; kind: "welcome" | "completion" }
-type SaveState = "idle" | "saving" | "saved" | "error"
+type DefinitionGroup = {
+    key: string
+    kind: "module" | "bookend"
+    title: string
+    definition: OnboardingModuleDefinitionV2 | OnboardingBookendDefinitionV2
+}
 
-function newField(): ConfiguredOnboardingField {
+type Selection = { groupKey: string; stepId: string; blockId: string | null }
+type LeftTab = "outline" | "blocks" | "library"
+
+function definitionId(groupKey: string) {
+    return groupKey.startsWith("module:") ? groupKey.slice(7) : groupKey
+}
+
+function duplicateBlock(block: OnboardingBlock): OnboardingBlock {
     const id = crypto.randomUUID()
-    return { id, key: `field-${id.replaceAll("-", "").slice(-12)}`, label: "Short answer", type: "text", required: false, helpText: "", placeholder: "", accept: "any", multiple: false }
-}
-
-function newStep(kind: "form" | "video"): ConfiguredOnboardingStep {
-    const id = crypto.randomUUID()
-    return { id, key: `step-${id.replaceAll("-", "").slice(-12)}`, kind, title: kind === "form" ? "New form step" : "New video step", description: "", estimatedTime: kind === "form" ? "2–3 minutes" : "2 minutes", why: "", videoUrl: "", videoPath: null, fields: kind === "form" ? [newField()] : [] }
-}
-
-function actionError(outcome: { ok: boolean; error?: string }, fallback: string) {
-    return outcome.ok ? null : outcome.error ?? fallback
-}
-
-function useModuleAutosave(workspaceSlug: string, currentModule: OnboardingModuleDefinition | null, enabled: boolean) {
-    const [state, setState] = useState<SaveState>("idle")
-    const [error, setError] = useState<string | null>(null)
-    const baselines = useRef(new Map<string, string>())
-    const latest = useRef(currentModule)
-    const saving = useRef(false)
-    const timer = useRef<number | null>(null)
-
-    useEffect(() => {
-        latest.current = currentModule
-    }, [currentModule])
-
-    useEffect(() => {
-        if (!currentModule) return
-        const value = JSON.stringify(currentModule)
-        if (!baselines.current.has(currentModule.id)) {
-            baselines.current.set(currentModule.id, value)
-            return
-        }
-        if (!enabled || value === baselines.current.get(currentModule.id)) return
-        if (timer.current) window.clearTimeout(timer.current)
-        timer.current = window.setTimeout(() => {
-            async function persist(initial: OnboardingModuleDefinition) {
-                if (saving.current || !enabled) return
-                saving.current = true
-                let payload: OnboardingModuleDefinition | null = initial
-                while (payload) {
-                    const serialized: string = JSON.stringify(payload)
-                    if (serialized === baselines.current.get(payload.id)) break
-                    setState("saving")
-                    setError(null)
-                    const outcome = await saveOnboardingModuleDraft(workspaceSlug, payload.id, payload)
-                    if (!outcome.ok) {
-                        setState("error")
-                        setError(outcome.error)
-                        break
-                    }
-                    baselines.current.set(payload.id, serialized)
-                    setState("saved")
-                    const newest = latest.current
-                    payload = newest?.id === payload.id && JSON.stringify(newest) !== serialized ? newest : null
-                }
-                saving.current = false
-            }
-            void persist(currentModule)
-        }, 750)
-        return () => { if (timer.current) window.clearTimeout(timer.current) }
-    }, [currentModule, enabled, workspaceSlug])
-
-    return { state, error }
-}
-
-function Pane({ title, detail, children, className = "" }: { title: string; detail?: string; children: ReactNode; className?: string }) {
-    return <section className={`min-h-0 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900 ${className}`}><header className="border-b border-neutral-800 px-3 py-3"><h2 className="text-sm font-semibold text-white">{title}</h2>{detail ? <p className="mt-1 text-xs leading-5 text-neutral-600">{detail}</p> : null}</header>{children}</section>
-}
-
-function LibraryPane({ data, selection, select, create, pending }: { data: OnboardingBuilderData; selection: LibrarySelection; select: (selection: LibrarySelection) => void; create: () => void; pending: boolean }) {
-    return <Pane title="Modules and bookends" detail="Reusable workspace onboarding content." className="flex flex-col"><div className="min-h-0 flex-1 overflow-y-auto p-2"><p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">Required bookends</p>{([data.welcome, data.completion] as const).map((bookend) => <button key={bookend.kind} type="button" onClick={() => select({ type: "bookend", kind: bookend.kind })} className={`mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm ${selection.type === "bookend" && selection.kind === bookend.kind ? "bg-neutral-800 text-white" : "text-neutral-400 hover:bg-neutral-800/70 hover:text-white"}`}><span className="min-w-0 flex-1 truncate capitalize">{bookend.kind}</span><RoundPill>Locked</RoundPill></button>)}<div className="mt-3 flex items-center justify-between px-2"><p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-600">Modules</p><button type="button" disabled={pending || !data.schemaReady} onClick={create} className="text-xs text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>{data.modules.map((module) => <button key={module.id} type="button" onClick={() => select({ type: "module", id: module.id })} className={`mt-1 block w-full rounded-lg px-3 py-2 text-left ${selection.type === "module" && selection.id === module.id ? "bg-neutral-800" : "hover:bg-neutral-800/70"}`}><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm text-neutral-200">{module.name}</span>{module.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span><span className="mt-1 flex items-center gap-2 text-[11px] text-neutral-600"><span>v{module.version}</span><span>{module.stepCount} steps</span>{module.mandatory ? <span>Mandatory</span> : null}</span></button>)}</div></Pane>
-}
-
-function OutlinePane({ module, selection, setSelection, update }: { module: OnboardingModuleDefinition | null; selection: Selection; setSelection: (selection: Selection) => void; update: (module: OnboardingModuleDefinition) => void }) {
-    if (!module) return <Pane title="Outline" className="flex items-center justify-center p-5"><p className="text-sm text-neutral-600">Choose a module to edit its outline.</p></Pane>
-    return <Pane title="Step and field outline" detail="Drag steps and fields to set the client order." className="flex flex-col"><div className="min-h-0 flex-1 overflow-y-auto p-2"><button type="button" onClick={() => setSelection({ type: "module" })} className={`mb-2 block w-full rounded-lg px-3 py-2 text-left text-sm ${selection.type === "module" ? "bg-neutral-800 text-white" : "text-neutral-400 hover:bg-neutral-800/70"}`}>Module settings</button><SortableAuthoringList items={module.steps} onChange={(steps) => update({ ...module, steps })} ariaLabel="Module step order" renderItem={(step, index, handle) => <div className="rounded-xl border border-neutral-800 bg-black/45 p-1.5"><div className="flex items-center gap-1">{handle}<button type="button" onClick={() => setSelection({ type: "step", stepId: step.id })} className={`min-w-0 flex-1 rounded-lg px-2 py-2 text-left ${selection.type !== "module" && selection.stepId === step.id && selection.type === "step" ? "bg-neutral-800" : "hover:bg-neutral-900"}`}><span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm text-neutral-200">{index + 1}. {step.title}</span><RoundPill>{step.kind}</RoundPill></span></button></div>{step.kind === "form" ? <div className="ml-10 mt-1"><SortableAuthoringList items={step.fields} onChange={(fields) => update({ ...module, steps: module.steps.map((item) => item.id === step.id ? { ...item, fields } : item) })} ariaLabel={`${step.title} field order`} renderItem={(field, fieldIndex, fieldHandle) => <div className="flex items-center gap-1">{fieldHandle}<button type="button" onClick={() => setSelection({ type: "field", stepId: step.id, fieldId: field.id })} className={`min-w-0 flex-1 truncate rounded-lg px-2 py-1.5 text-left text-xs ${selection.type === "field" && selection.fieldId === field.id ? "bg-neutral-800 text-white" : "text-neutral-500 hover:bg-neutral-900 hover:text-neutral-200"}`}>{fieldIndex + 1}. {field.label}</button></div>} /></div> : null}</div>} /></div><div className="grid grid-cols-2 gap-2 border-t border-neutral-800 p-2"><button type="button" onClick={() => { const step = newStep("form"); update({ ...module, steps: [...module.steps, step] }); setSelection({ type: "step", stepId: step.id }) }} className="h-10 rounded-lg border border-neutral-700 text-xs text-neutral-300">Add form step</button><button type="button" onClick={() => { const step = newStep("video"); update({ ...module, steps: [...module.steps, step] }); setSelection({ type: "step", stepId: step.id }) }} className="h-10 rounded-lg border border-neutral-700 text-xs text-neutral-300">Add video step</button></div></Pane>
-}
-
-function FieldInspector({ field, update, remove }: { field: ConfiguredOnboardingField; update: (field: ConfiguredOnboardingField) => void; remove: () => void }) {
-    return <div className="space-y-4"><label className="block text-sm text-neutral-300">Field label<input value={field.label} onChange={(event) => update({ ...field, label: event.target.value })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Field type<select value={field.type} onChange={(event) => { const type = event.target.value as ConfiguredOnboardingField["type"]; update({ ...field, type, multiple: type === "file" ? field.type === "file" ? field.multiple : true : false, accept: type === "file" ? field.accept : "any" }) }} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="text">Short text</option><option value="email">Email</option><option value="tel">Phone</option><option value="url">URL</option><option value="textarea">Long text</option><option value="file">File</option></select></label><label className="block text-sm text-neutral-300">Help text <span className="text-neutral-600">(optional)</span><textarea value={field.helpText} onChange={(event) => update({ ...field, helpText: event.target.value })} rows={2} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>{field.type !== "file" ? <label className="block text-sm text-neutral-300">Placeholder <span className="text-neutral-600">(optional)</span><input value={field.placeholder} onChange={(event) => update({ ...field, placeholder: event.target.value })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label> : <details className="rounded-lg border border-neutral-800 bg-black/40 p-3"><summary className="cursor-pointer text-sm text-neutral-300">Advanced file controls</summary><label className="mt-3 block text-sm text-neutral-400">Accepted files<select value={field.accept} onChange={(event) => update({ ...field, accept: event.target.value as ConfiguredOnboardingField["accept"] })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="any">Any file</option><option value="image">Images</option><option value="video">Videos</option><option value="document">Documents</option></select></label><label className="mt-3 flex min-h-10 items-center gap-2 text-sm text-neutral-400"><input type="checkbox" checked={field.multiple} onChange={(event) => update({ ...field, multiple: event.target.checked })} className="h-4 w-4 accent-white" />Allow multiple files</label><p className="mt-2 text-xs text-neutral-600">Maximum 500 MB per file.</p></details>}<label className="flex min-h-10 items-center gap-2 rounded-lg border border-neutral-800 bg-black px-3 text-sm text-neutral-300"><input type="checkbox" checked={field.required} onChange={(event) => update({ ...field, required: event.target.checked })} className="h-4 w-4 accent-white" />Required field</label><button type="button" onClick={remove} className="text-sm text-red-300/80 hover:text-red-200">Delete field</button></div>
-}
-
-function StepInspector({ workspaceSlug, module, step, update, remove, addField }: { workspaceSlug: string; module: OnboardingModuleDefinition; step: ConfiguredOnboardingStep; update: (step: ConfiguredOnboardingStep) => void; remove: () => void; addField: () => void }) {
-    const [uploading, setUploading] = useState(false)
-    const [uploadError, setUploadError] = useState<string | null>(null)
-    async function upload(file: File) {
-        if (!module.revisionId) { setUploadError("Save the module draft before uploading video."); return }
-        setUploading(true); setUploadError(null)
-        try {
-            const prepared = await prepareBuilderVideoUpload(workspaceSlug, module.id, module.revisionId, { name: file.name, size: file.size, type: file.type })
-            const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file })
-            if (!response.ok) throw new Error(`Upload failed with status ${response.status}.`)
-            update({ ...step, videoPath: prepared.storedVideo.path, videoUrl: "", resolvedVideoUrl: prepared.previewUrl })
-        } catch (error) { setUploadError(error instanceof Error ? error.message : "Video upload failed.") }
-        finally { setUploading(false) }
+    if (block.kind !== "form") return { ...block, id }
+    return {
+        ...block,
+        id,
+        fields: block.fields.map((field) => {
+            const fieldId = crypto.randomUUID()
+            return { ...field, id: fieldId, key: `field-${fieldId.replaceAll("-", "").slice(-12)}` }
+        }),
     }
-    return <div className="space-y-4"><label className="block text-sm text-neutral-300">Step title<input value={step.title} onChange={(event) => update({ ...step, title: event.target.value })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Description<textarea value={step.description} onChange={(event) => update({ ...step, description: event.target.value })} rows={3} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label><label className="block text-sm text-neutral-300">Estimated time<input value={step.estimatedTime} onChange={(event) => update({ ...step, estimatedTime: event.target.value })} placeholder="2–3 minutes" className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Why we ask<textarea value={step.why} onChange={(event) => update({ ...step, why: event.target.value })} rows={3} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>{step.kind === "video" ? <div className="space-y-3 rounded-xl border border-neutral-800 bg-black/40 p-3"><label className="block text-sm text-neutral-300">Video URL<input value={step.videoUrl} onChange={(event) => update({ ...step, videoUrl: event.target.value, videoPath: event.target.value ? null : step.videoPath })} placeholder="https://www.loom.com/share/…" className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><div className="flex items-center gap-3"><span className="text-xs text-neutral-600">or</span><label className="cursor-pointer rounded-lg border border-neutral-700 px-3 py-2 text-xs text-neutral-300">{uploading ? "Uploading…" : "Upload video"}<input type="file" accept="video/*" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file) }} className="sr-only" /></label>{step.videoPath ? <span className="min-w-0 flex-1 truncate text-xs text-emerald-300">Uploaded video attached</span> : null}</div>{uploadError ? <p className="text-xs text-red-300">{uploadError}</p> : null}</div> : <button type="button" onClick={addField} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-300">Add field</button>}<button type="button" disabled={module.steps.length <= 1} onClick={remove} className="text-sm text-red-300/80 hover:text-red-200 disabled:opacity-30">Delete step</button></div>
 }
 
-function ModuleInspector({ module, summary, update, children }: { module: OnboardingModuleDefinition; summary?: OnboardingModuleSummary; update: (module: OnboardingModuleDefinition) => void; children?: ReactNode }) {
-    return <div className="space-y-4"><label className="block text-sm text-neutral-300">Module name<input value={module.name} onChange={(event) => update({ ...module, name: event.target.value })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Description <span className="text-neutral-600">(optional)</span><textarea value={module.description} onChange={(event) => update({ ...module, description: event.target.value })} rows={3} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label><label className="flex min-h-10 items-center gap-2 rounded-lg border border-neutral-800 bg-black px-3 text-sm text-neutral-300"><input type="checkbox" checked={module.isTest} onChange={(event) => update({ ...module, isTest: event.target.checked })} className="h-4 w-4 accent-white" />Mark this module as Test</label><dl className="grid grid-cols-2 gap-2 rounded-xl border border-neutral-800 bg-black/40 p-3 text-xs"><div><dt className="text-neutral-600">Internal code</dt><dd className="mt-1 truncate font-mono text-neutral-300">{module.code}</dd></div><div><dt className="text-neutral-600">Version</dt><dd className="mt-1 text-neutral-300">{module.version}</dd></div><div><dt className="text-neutral-600">Mandatory</dt><dd className="mt-1 text-neutral-300">{summary?.mandatory ? "Yes" : "No"}</dd></div><div><dt className="text-neutral-600">Used by</dt><dd className="mt-1 truncate text-neutral-300">{summary?.usedBy.map((service) => service.name).join(", ") || "No services"}</dd></div></dl>{children}</div>
+function duplicateStep(step: OnboardingStepV2) {
+    const id = crypto.randomUUID()
+    return {
+        ...step,
+        id,
+        key: `step-${id.replaceAll("-", "").slice(-12)}`,
+        blocks: step.blocks.map(duplicateBlock),
+    }
 }
 
-function PublishDialog({ module, impact, close, publish, pending, error }: { module: OnboardingModuleDefinition; impact: OnboardingModulePublishImpact; close: () => void; publish: (active: boolean, explanation: string) => void; pending: boolean; error: string | null }) {
-    const [active, setActive] = useState(false)
-    const [explanation, setExplanation] = useState("We updated this part of your onboarding so we can collect the right information. Please complete it again.")
-    const changeParts = [
-        impact.addedSteps ? `+${impact.addedSteps} step${impact.addedSteps === 1 ? "" : "s"}` : null,
-        impact.removedSteps ? `−${impact.removedSteps} step${impact.removedSteps === 1 ? "" : "s"}` : null,
-        impact.addedFields ? `+${impact.addedFields} field${impact.addedFields === 1 ? "" : "s"}` : null,
-        impact.removedFields ? `−${impact.removedFields} field${impact.removedFields === 1 ? "" : "s"}` : null,
-        impact.orderChanged ? "order changed" : null,
-    ].filter(Boolean)
-    return <div role="dialog" aria-modal="true" aria-labelledby="publish-module-title" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm"><div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl"><div className="flex items-start gap-4 border-b border-neutral-800 p-4"><div className="min-w-0 flex-1"><h2 id="publish-module-title" className="text-lg font-semibold">Publish {module.name}</h2><p className="mt-1 text-sm text-neutral-500">{impact.draftStepCount} steps · {impact.draftFieldCount} fields</p></div><button type="button" onClick={close} aria-label="Close publish dialog" className="text-xl text-neutral-500">×</button></div><div className="space-y-3 p-4"><div className="rounded-xl border border-neutral-800 bg-black/40 p-3 text-xs leading-5 text-neutral-400"><p className="font-medium text-neutral-200">Publication impact</p><p className="mt-1">Services: {impact.serviceNames.length ? `${impact.serviceNames.length} · ${impact.serviceNames.join(", ")}` : "No active services"}</p><p>Active sessions containing this module: {impact.activeSessionCount}</p><p className="mt-1">{impact.publishedVersion === null ? `First publication · ${impact.draftStepCount} steps and ${impact.draftFieldCount} fields` : `Published v${impact.publishedVersion} → draft · steps ${impact.publishedStepCount} → ${impact.draftStepCount} · fields ${impact.publishedFieldCount} → ${impact.draftFieldCount}`}</p><p>{changeParts.length ? changeParts.join(" · ") : "No structural step or field changes detected."}</p></div><label className={`block rounded-xl border p-3 ${!active ? "border-white bg-white/5" : "border-neutral-800"}`}><input type="radio" checked={!active} onChange={() => setActive(false)} className="mr-2 accent-white" /><span className="font-medium">Future sessions only</span><span className="mt-1 block pl-6 text-xs text-neutral-500">Existing sessions keep their current snapshot.</span></label><label className={`block rounded-xl border p-3 ${active ? "border-white bg-white/5" : "border-neutral-800"}`}><input type="radio" checked={active} onChange={() => setActive(true)} className="mr-2 accent-white" /><span className="font-medium">Future and all affected active sessions</span><span className="mt-1 block pl-6 text-xs leading-5 text-neutral-500">Resets {impact.activeSessionCount} active session{impact.activeSessionCount === 1 ? "" : "s"} atomically. Completed sessions and unrelated modules stay frozen.</span></label>{active ? <label className="block text-sm text-neutral-300">Client explanation<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label> : null}{error ? <p role="alert" className="text-sm text-red-300">{error}</p> : null}</div><div className="flex justify-end gap-2 border-t border-neutral-800 p-4"><button type="button" onClick={close} className="h-10 px-3 text-sm text-neutral-400">Cancel</button><button type="button" disabled={pending} onClick={() => publish(active, explanation)} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-40">{pending ? "Publishing…" : "Publish module"}</button></div></div></div>
+function IconButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
+    return <button type="button" aria-label={label} title={label} disabled={disabled} onClick={onClick} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-900 text-neutral-400 transition hover:border-neutral-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-30">{children}</button>
 }
 
-export function OnboardingBuilderWorkspace({
-    workspaceSlug,
-    workspaceName,
-    data,
-    initialBookend,
-}: {
-    workspaceSlug: string
-    workspaceName: string
-    data: OnboardingBuilderData
-    initialBookend?: "welcome" | "completion" | null
-}) {
-    const router = useRouter()
-    const initialModuleId = data.selectedModule?.id ?? data.moduleDefinitions[0]?.id ?? ""
-    const [librarySelection, setLibrarySelection] = useState<LibrarySelection>(
-        initialBookend ? { type: "bookend", kind: initialBookend } : { type: "module", id: initialModuleId },
-    )
-    const [definitions, setDefinitions] = useState(data.moduleDefinitions)
-    const [welcome, setWelcome] = useState(data.welcome)
-    const [completion, setCompletion] = useState(data.completion)
-    const [selection, setSelection] = useState<Selection>({ type: "module" })
-    const [mobilePane, setMobilePane] = useState<"library" | "outline" | "inspector">("library")
-    const [previewOpen, setPreviewOpen] = useState(false)
+function BuilderIcon({ name }: { name: "back" | "left" | "right" | "desktop" | "mobile" | "preview" | "undo" | "redo" | "publish" }) {
+    const paths: Record<typeof name, ReactNode> = {
+        back: <path d="m15 18-6-6 6-6" />,
+        left: <><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4" /><path d="m16 8-4 4 4 4" /></>,
+        right: <><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" /><path d="m8 8 4 4-4 4" /></>,
+        desktop: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
+        mobile: <><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></>,
+        preview: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
+        undo: <><path d="M9 7 4 12l5 5" /><path d="M20 17a8 8 0 0 0-13-5" /></>,
+        redo: <><path d="m15 7 5 5-5 5" /><path d="M4 17a8 8 0 0 1 13-5" /></>,
+        publish: <><path d="M12 3v12" /><path d="m7 8 5-5 5 5" /><path d="M5 21h14" /></>,
+    }
+    return <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
+}
+
+function composeGroups(document: VisualBuilderDocument, data: OnboardingBuilderData, selectedServiceIds: string[], focusedModuleId: string | null) {
+    const modules = new Map(document.modules.map((module) => [module.id, module]))
+    if (focusedModuleId) {
+        const focusedDefinition = modules.get(focusedModuleId)
+        return focusedDefinition ? [{ key: `module:${focusedDefinition.id}`, kind: "module" as const, title: focusedDefinition.name, definition: focusedDefinition }] : []
+    }
+    const selectedServices = orderOnboardingServices(data.services.filter((service) => selectedServiceIds.includes(service.id) && service.state === "active"))
+    const sources = resolveOrderedModuleSources({ services: selectedServices, modules: document.modules, mandatoryModuleIds: data.mandatory.draftModuleIds.length ? data.mandatory.draftModuleIds : data.mandatory.publishedModuleIds })
+    return [
+        { key: "bookend:welcome", kind: "bookend" as const, title: "Welcome", definition: document.welcome },
+        ...sources.flatMap((source) => {
+            const sourceDefinition = modules.get(source.moduleId)
+            return sourceDefinition ? [{ key: `module:${sourceDefinition.id}`, kind: "module" as const, title: sourceDefinition.name, definition: sourceDefinition }] : []
+        }),
+        { key: "bookend:completion", kind: "bookend" as const, title: "Completion", definition: document.completion },
+    ]
+}
+
+function documentDefinition(document: VisualBuilderDocument, groupKey: string) {
+    if (groupKey === "bookend:welcome") return document.welcome
+    if (groupKey === "bookend:completion") return document.completion
+    return document.modules.find((module) => module.id === groupKey.replace("module:", "")) ?? null
+}
+
+function replaceDocumentDefinition(document: VisualBuilderDocument, groupKey: string, definition: DefinitionGroup["definition"]) {
+    if (groupKey === "bookend:welcome") return { ...document, welcome: definition as OnboardingBookendDefinitionV2 }
+    if (groupKey === "bookend:completion") return { ...document, completion: definition as OnboardingBookendDefinitionV2 }
+    const moduleId = groupKey.replace("module:", "")
+    return { ...document, modules: document.modules.map((module) => module.id === moduleId ? definition as OnboardingModuleDefinitionV2 : module) }
+}
+
+function selectedStep(groups: DefinitionGroup[], selection: Selection) {
+    const group = groups.find((item) => item.key === selection.groupKey) ?? groups[0]
+    const step = group?.definition.steps.find((item) => item.id === selection.stepId) ?? group?.definition.steps[0]
+    return { group, step }
+}
+
+function railPreference(key: string, fallback: boolean) {
+    if (typeof window === "undefined") return fallback
+    return window.localStorage.getItem(key) !== "collapsed"
+}
+
+export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data, initialBookend }: { workspaceSlug: string; workspaceName: string; data: OnboardingBuilderData; initialBookend?: "welcome" | "completion" | null }) {
+    const initialDocument = useMemo<VisualBuilderDocument>(() => ({ modules: data.visualModules, welcome: data.visualWelcome, completion: data.visualCompletion, theme: data.theme, linkedChangeSets: [] }), [data])
+    const collaboration = useCollaborativeOnboardingDocument({ workspaceSlug, initial: initialDocument, collaboration: data.collaboration })
+    const activeServices = data.services.filter((service) => service.state === "active")
+    const servicePreferenceKey = `betelgeze:onboarding-builder:${workspaceSlug}:services`
+    const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(() => activeServices.slice(0, 1).map((service) => service.id))
+    const selectedModuleSummary = data.selectedModule ? data.modules.find((module) => module.id === data.selectedModule?.id) : null
+    const [focusedModuleId, setFocusedModuleId] = useState<string | null>(data.selectedModule && !selectedModuleSummary?.usedBy.length && !selectedModuleSummary?.mandatory ? data.selectedModule.id : null)
+    const groups = useMemo(() => composeGroups(collaboration.document, data, selectedServiceIds, focusedModuleId), [collaboration.document, data, focusedModuleId, selectedServiceIds])
+    const firstGroup = groups[0]
+    const initialGroupKey = initialBookend ? `bookend:${initialBookend}` : data.selectedModule ? `module:${data.selectedModule.id}` : firstGroup?.key ?? "bookend:welcome"
+    const initialGroup = groups.find((group) => group.key === initialGroupKey) ?? firstGroup
+    const [selection, setSelection] = useState<Selection>({ groupKey: initialGroup?.key ?? "", stepId: initialGroup?.definition.steps[0]?.id ?? "", blockId: null })
+    const [leftOpen, setLeftOpen] = useState(true)
+    const [rightOpen, setRightOpen] = useState(true)
+    const [leftTab, setLeftTab] = useState<LeftTab>("outline")
+    const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop")
+    const [preview, setPreview] = useState(false)
     const [publishOpen, setPublishOpen] = useState(false)
-    const [actionErrorState, setActionErrorState] = useState<string | null>(null)
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+    const [applyToActive, setApplyToActive] = useState(false)
+    const [explanation, setExplanation] = useState("We updated parts of your onboarding so we can collect the right information. Please review the affected sections again.")
+    const [notice, setNotice] = useState<string | null>(null)
+    const [error, setError] = useState<string | null>(null)
     const [pending, startTransition] = useTransition()
-    const bookendSaveTimer = useRef<number | null>(null)
 
-    const selectedModule = librarySelection.type === "module"
-        ? definitions.find((item) => item.id === librarySelection.id) ?? null
-        : null
-    const summary = selectedModule ? data.modules.find((item) => item.id === selectedModule.id) : undefined
-    const publishImpact = selectedModule ? {
-        ...data.publishImpactByModule[selectedModule.id],
-        ...modulePublishDiff(selectedModule, data.publishedModuleDefinitions[selectedModule.id] ?? undefined),
-    } : null
-    const bookend = librarySelection.type === "bookend"
-        ? librarySelection.kind === "welcome" ? welcome : completion
-        : null
-    const autosave = useModuleAutosave(
-        workspaceSlug,
-        selectedModule,
-        data.schemaReady && Boolean(selectedModule) && !selectedModule?.id.startsWith("legacy:"),
-    )
-    const selectedStep = selectedModule && selection.type !== "module"
-        ? selectedModule.steps.find((step) => step.id === selection.stepId) ?? null
-        : null
-    const selectedField = selectedStep && selection.type === "field"
-        ? selectedStep.fields.find((field) => field.id === selection.fieldId) ?? null
-        : null
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            try {
+                const stored = JSON.parse(window.localStorage.getItem(servicePreferenceKey) ?? "[]") as string[]
+                const valid = stored.filter((id) => activeServices.some((service) => service.id === id))
+                if (valid.length) setSelectedServiceIds(valid)
+                setLeftOpen(railPreference(`${servicePreferenceKey}:left`, true))
+                setRightOpen(railPreference(`${servicePreferenceKey}:right`, true))
+            } catch { /* invalid local preference uses defaults */ }
+        }, 0)
+        return () => window.clearTimeout(timer)
+    // Preferences intentionally hydrate once; live catalogue changes arrive on reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
-    function choose(next: LibrarySelection) {
-        setLibrarySelection(next)
-        setSelection({ type: "module" })
-        setMobilePane(next.type === "module" ? "outline" : "inspector")
-        setActionErrorState(null)
+    useEffect(() => {
+        if (!groups.length) return
+        if (!groups.some((group) => group.key === selection.groupKey)) {
+            const timer = window.setTimeout(() => setSelection({ groupKey: groups[0].key, stepId: groups[0].definition.steps[0]?.id ?? "", blockId: null }), 0)
+            return () => window.clearTimeout(timer)
+        }
+    }, [groups, selection.groupKey])
+
+    const updatePresence = collaboration.updatePresence
+    useEffect(() => {
+        updatePresence({ selection: selection.groupKey && selection.stepId ? `${selection.groupKey}:${selection.stepId}:${selection.blockId ?? "step"}` : null })
+    }, [selection.blockId, selection.groupKey, selection.stepId, updatePresence])
+
+    const resolved = selectedStep(groups, selection)
+    const currentGroup = resolved.group
+    const currentStep = resolved.step
+    const selectedBlock = currentStep?.blocks.find((block) => block.id === selection.blockId) ?? null
+    const moduleTitles = groups.filter((group) => group.kind === "module").map((group) => group.title)
+    const baselineModules = new Map(data.visualModules.map((module) => [module.id, JSON.stringify(module)]))
+    const dirtyModuleIds = collaboration.document.modules.filter((module) => JSON.stringify(module) !== baselineModules.get(module.id)).map((module) => module.id)
+    const welcomeDirty = JSON.stringify(collaboration.document.welcome) !== JSON.stringify(data.visualWelcome)
+    const completionDirty = JSON.stringify(collaboration.document.completion) !== JSON.stringify(data.visualCompletion)
+    const themeDirty = JSON.stringify(collaboration.document.theme) !== JSON.stringify(data.theme)
+
+    function rememberRail(side: "left" | "right", open: boolean) {
+        window.localStorage.setItem(`${servicePreferenceKey}:${side}`, open ? "open" : "collapsed")
+        if (side === "left") setLeftOpen(open); else setRightOpen(open)
     }
 
-    function replaceModule(next: OnboardingModuleDefinition) {
-        setDefinitions((items) => items.map((item) => item.id === next.id ? next : item))
-    }
-
-    function run(
-        action: () => Promise<{ ok: boolean; error?: string; data?: Record<string, unknown> }>,
-        after?: (result?: Record<string, unknown>) => void,
-    ) {
-        setActionErrorState(null)
-        startTransition(async () => {
-            const outcome = await action()
-            const error = actionError(outcome, "The Builder action could not be completed.")
-            if (error) {
-                setActionErrorState(error)
-                return
-            }
-            after?.(outcome.data)
-            router.refresh()
+    function updateDefinition(groupKey: string, update: (definition: DefinitionGroup["definition"]) => DefinitionGroup["definition"]) {
+        collaboration.updateDocument((document) => {
+            if (groupKey === "bookend:welcome") return { ...document, welcome: update(document.welcome) as OnboardingBookendDefinitionV2 }
+            if (groupKey === "bookend:completion") return { ...document, completion: update(document.completion) as OnboardingBookendDefinitionV2 }
+            const moduleId = groupKey.replace("module:", "")
+            return { ...document, modules: document.modules.map((module) => module.id === moduleId ? update(module) as OnboardingModuleDefinitionV2 : module) }
         })
     }
 
-    function saveBookend(next: OnboardingBookendDefinition) {
-        if (next.kind === "welcome") setWelcome(next)
-        else setCompletion(next)
-        if (bookendSaveTimer.current) window.clearTimeout(bookendSaveTimer.current)
-        bookendSaveTimer.current = window.setTimeout(async () => {
-            const outcome = await saveOnboardingBookendDraft(workspaceSlug, next.kind, next)
-            if (!outcome.ok) setActionErrorState(outcome.error)
-        }, 750)
+    function updateCurrentStep(step: OnboardingStepV2) {
+        if (!currentGroup) return
+        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: definition.steps.map((item) => item.id === step.id ? step : item) }))
     }
 
-    let inspector: ReactNode = <p className="text-sm text-neutral-600">Choose a module or bookend.</p>
-    if (bookend) {
-        inspector = (
-            <div className="space-y-4">
-                <label className="block text-sm text-neutral-300">
-                    Title
-                    <input value={bookend.title} onChange={(event) => saveBookend({ ...bookend, title: event.target.value })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" />
-                </label>
-                <label className="block text-sm text-neutral-300">
-                    Body
-                    <textarea value={bookend.body} onChange={(event) => saveBookend({ ...bookend, body: event.target.value })} rows={5} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" />
-                </label>
-                <label className="block text-sm text-neutral-300">
-                    Video URL <span className="text-neutral-600">(optional)</span>
-                    <input value={bookend.videoUrl} onChange={(event) => saveBookend({ ...bookend, videoUrl: event.target.value })} className="mt-2 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" />
-                </label>
-                <p className="text-xs leading-5 text-neutral-600">
-                    {bookend.kind === "welcome"
-                        ? "Welcome publishing affects future sessions only."
-                        : "Completion publishing updates future and active-incomplete sessions. Completed sessions remain frozen."}
-                </p>
-                <button type="button" disabled={pending || !data.schemaReady} onClick={() => run(() => publishOnboardingBookend(workspaceSlug, bookend.kind, bookend))} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">
-                    {pending ? "Publishing…" : `Publish ${bookend.kind}`}
-                </button>
-            </div>
-        )
-    } else if (selectedModule && selection.type === "module") {
-        inspector = (
-            <ModuleInspector module={selectedModule} summary={summary} update={replaceModule}>
-                <div className="flex flex-wrap gap-2">
-                    <button type="button" disabled={pending || !data.schemaReady} onClick={() => setPublishOpen(true)} className="h-10 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-30">Publish</button>
-                    <button type="button" disabled={pending || !data.schemaReady} onClick={() => run(
-                        () => duplicateOnboardingModule(workspaceSlug, selectedModule.id),
-                        (result) => {
-                            const id = String(result?.module_id ?? "")
-                            if (id) router.push(`/${workspaceSlug}/onboarding-builder?module=${id}`)
-                        },
-                    )} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-300">Duplicate</button>
-                    <button type="button" disabled={pending || !data.schemaReady} onClick={() => run(
-                        () => rotateOnboardingModulePreview(workspaceSlug, selectedModule.id, selectedModule),
-                        (result) => {
-                            const token = String(result?.token ?? "")
-                            if (token) setPreviewUrl(`${window.location.origin}/onboarding/preview/${token}`)
-                        },
-                    )} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-300">Create preview link</button>
-                </div>
-                {previewUrl ? (
-                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
-                        <p className="break-all">{previewUrl}</p>
-                        <div className="mt-2 flex items-center gap-3">
-                            <button type="button" onClick={() => void navigator.clipboard.writeText(previewUrl)} className="underline underline-offset-4">Copy 24-hour link</button>
-                            <button type="button" disabled={pending} onClick={() => run(
-                                () => revokeOnboardingModulePreview(workspaceSlug, selectedModule.id),
-                                () => setPreviewUrl(null),
-                            )} className="text-red-200 underline underline-offset-4 disabled:opacity-40">Revoke link</button>
-                        </div>
-                    </div>
-                ) : null}
-                <div className="border-t border-neutral-800 pt-3">
-                    {selectedModule.status === "archived" ? (
-                        <button type="button" disabled={pending} onClick={() => run(() => restoreOnboardingModule(workspaceSlug, selectedModule.id))} className="text-sm text-neutral-300">Restore module</button>
-                    ) : (
-                        <button type="button" disabled={pending || Boolean(summary?.mandatory) || Boolean(summary?.usedBy.length)} onClick={() => run(() => archiveOnboardingModule(workspaceSlug, selectedModule.id))} className="text-sm text-red-300/80 disabled:opacity-30">Archive module</button>
-                    )}
-                    {selectedModule.status === "draft" && data.publishImpactByModule[selectedModule.id]?.publishedVersion === null ? (
-                        <button type="button" disabled={pending} onClick={() => run(
-                            () => deleteOnboardingModuleDraft(workspaceSlug, selectedModule.id),
-                            () => router.push(`/${workspaceSlug}/onboarding-builder`),
-                        )} className="ml-3 text-sm text-red-300/80">Delete draft permanently</button>
-                    ) : null}
-                </div>
-            </ModuleInspector>
-        )
-    } else if (selectedModule && selectedStep && selection.type === "step") {
-        inspector = (
-            <StepInspector
-                workspaceSlug={workspaceSlug}
-                module={selectedModule}
-                step={selectedStep}
-                update={(step) => replaceModule({
-                    ...selectedModule,
-                    steps: selectedModule.steps.map((item) => item.id === step.id ? step : item),
-                })}
-                remove={() => {
-                    replaceModule({ ...selectedModule, steps: selectedModule.steps.filter((item) => item.id !== selectedStep.id) })
-                    setSelection({ type: "module" })
-                }}
-                addField={() => {
-                    const field = newField()
-                    replaceModule({
-                        ...selectedModule,
-                        steps: selectedModule.steps.map((step) => step.id === selectedStep.id ? { ...step, fields: [...step.fields, field] } : step),
-                    })
-                    setSelection({ type: "field", stepId: selectedStep.id, fieldId: field.id })
-                }}
-            />
-        )
-    } else if (selectedModule && selectedStep && selectedField) {
-        inspector = (
-            <FieldInspector
-                field={selectedField}
-                update={(field) => replaceModule({
-                    ...selectedModule,
-                    steps: selectedModule.steps.map((step) => step.id === selectedStep.id
-                        ? { ...step, fields: step.fields.map((item) => item.id === field.id ? field : item) }
-                        : step),
-                })}
-                remove={() => {
-                    replaceModule({
-                        ...selectedModule,
-                        steps: selectedModule.steps.map((step) => step.id === selectedStep.id
-                            ? { ...step, fields: step.fields.filter((item) => item.id !== selectedField.id) }
-                            : step),
-                    })
-                    setSelection({ type: "step", stepId: selectedStep.id })
-                }}
-            />
-        )
-    } else if (selectedModule) {
-        inspector = <p className="text-sm text-neutral-600">Choose an item from the outline.</p>
+    function updateCurrentRevisionId(revisionId: string) {
+        if (!currentGroup) return
+        updateDefinition(currentGroup.key, (definition) => ({ ...definition, revisionId }))
     }
 
-    const lastEditorName = selectedModule?.lastEditedBy ? data.editors[selectedModule.lastEditedBy] ?? "another workspace admin" : null
-    const inspectorDetail = selectedModule
-        ? `${autosave.state === "saving" ? "Saving…" : autosave.state === "saved" ? "Saved" : autosave.state === "error" ? "Save error" : "Draft autosaves"}${selectedModule.lastEditedAt ? ` · last edited${lastEditorName ? ` by ${lastEditorName}` : ""} ${new Date(selectedModule.lastEditedAt).toLocaleString()}` : ""}`
-        : bookend ? "Locked bookend draft" : "Choose content"
+    function linkDefinitions(document: VisualBuilderDocument, sourceGroupKey: string, targetGroupKey: string) {
+        if (sourceGroupKey === targetGroupKey) return document
+        const participants = [definitionId(sourceGroupKey), definitionId(targetGroupKey)].sort()
+        const existing = document.linkedChangeSets.find((changeSet) => participants.every((id) => changeSet.definitionIds.includes(id)))
+        if (existing) return document
+        return { ...document, linkedChangeSets: [...document.linkedChangeSets, { id: crypto.randomUUID(), definitionIds: participants, createdVersion: collaboration.serverVersion }] }
+    }
 
-    return (
-        <div>
-            <div className="mb-3 flex items-center justify-between gap-3 lg:hidden">
-                <div className="flex rounded-lg border border-neutral-800 bg-neutral-900 p-1">
-                    {(["library", "outline", "inspector"] as const).map((pane) => (
-                        <button key={pane} type="button" disabled={pane === "outline" && !selectedModule} onClick={() => setMobilePane(pane)} className={`rounded-md px-3 py-2 text-xs capitalize ${mobilePane === pane ? "bg-white text-black" : "text-neutral-400"}`}>{pane}</button>
-                    ))}
-                </div>
-                <button type="button" onClick={() => setPreviewOpen(true)} className="h-10 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-200">Preview</button>
+    function moveStep(sourceGroupKey: string, targetGroupKey: string, stepId: string, targetIndex: number, copy: boolean) {
+        const moved: { step: OnboardingStepV2 | null } = { step: null }
+        collaboration.updateDocument((document) => {
+            const source = documentDefinition(document, sourceGroupKey)
+            const target = documentDefinition(document, targetGroupKey)
+            const sourceStep = source?.steps.find((step) => step.id === stepId)
+            if (!source || !target || !sourceStep) return document
+            if (targetGroupKey.startsWith("bookend:") && sourceStep.blocks.some((block) => block.kind === "form")) {
+                setError("A step containing a Form cannot be moved into a bookend.")
+                return document
+            }
+            if (!copy && source.steps.length === 1) {
+                setError(sourceGroupKey.startsWith("bookend:") ? "Each bookend must retain at least one step." : "Each module must retain at least one step.")
+                return document
+            }
+            moved.step = copy ? duplicateStep(sourceStep) : sourceStep
+            if (sourceGroupKey === targetGroupKey) {
+                const steps = [...source.steps]
+                const sourceIndex = steps.findIndex((step) => step.id === stepId)
+                if (!copy) steps.splice(sourceIndex, 1)
+                const adjustedIndex = !copy && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+                steps.splice(Math.max(0, Math.min(adjustedIndex, steps.length)), 0, moved.step)
+                return replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps })
+            }
+            let next = copy ? document : replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps: source.steps.filter((step) => step.id !== stepId) })
+            const nextTarget = documentDefinition(next, targetGroupKey)
+            if (!nextTarget) return document
+            const targetSteps = [...nextTarget.steps]
+            targetSteps.splice(Math.max(0, Math.min(targetIndex, targetSteps.length)), 0, moved.step)
+            next = replaceDocumentDefinition(next, targetGroupKey, { ...nextTarget, steps: targetSteps })
+            return linkDefinitions(next, sourceGroupKey, targetGroupKey)
+        })
+        if (moved.step) setSelection({ groupKey: targetGroupKey, stepId: moved.step.id, blockId: null })
+    }
+
+    function moveBlock(sourceGroupKey: string, sourceStepId: string, blockId: string, targetGroupKey: string, targetStepId: string, copy: boolean) {
+        const moved: { block: OnboardingBlock | null } = { block: null }
+        collaboration.updateDocument((document) => {
+            const source = documentDefinition(document, sourceGroupKey)
+            const target = documentDefinition(document, targetGroupKey)
+            const sourceStep = source?.steps.find((step) => step.id === sourceStepId)
+            const targetStep = target?.steps.find((step) => step.id === targetStepId)
+            const sourceBlock = sourceStep?.blocks.find((block) => block.id === blockId)
+            if (!source || !target || !sourceStep || !targetStep || !sourceBlock || sourceBlock.kind === "header") return document
+            if (sourceBlock.kind === "form" && (targetGroupKey.startsWith("bookend:") || targetStep.blocks.some((block) => block.kind === "form" && block.id !== sourceBlock.id))) {
+                setError("That target step cannot accept another Form block.")
+                return document
+            }
+            moved.block = copy ? duplicateBlock(sourceBlock) : sourceBlock
+            const sourceSteps = source.steps.map((step) => step.id === sourceStepId && !copy ? { ...step, blocks: step.blocks.filter((block) => block.id !== blockId) } : step)
+            let next = replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps: sourceSteps })
+            const nextTarget = documentDefinition(next, targetGroupKey)
+            if (!nextTarget) return document
+            const targetSteps = nextTarget.steps.map((step) => step.id === targetStepId
+                ? { ...step, blocks: [step.blocks[0], moved.block!, ...step.blocks.slice(1).filter((block) => block.id !== moved.block!.id)] }
+                : step)
+            next = replaceDocumentDefinition(next, targetGroupKey, { ...nextTarget, steps: targetSteps })
+            return linkDefinitions(next, sourceGroupKey, targetGroupKey)
+        })
+        if (moved.block) setSelection({ groupKey: targetGroupKey, stepId: targetStepId, blockId: moved.block.id })
+    }
+
+    function acceptStructureDrop(event: DragEvent<HTMLElement>, targetGroupKey: string, targetStepId: string | null, targetIndex: number) {
+        const raw = event.dataTransfer.getData("application/x-betelgeze-builder-item")
+        if (!raw) return
+        event.preventDefault()
+        try {
+            const payload = JSON.parse(raw) as { type: "step" | "block" | "library"; groupKey?: string; stepId?: string; blockId?: string; kind?: "form" | "video" | "button"; copy?: boolean }
+            if (payload.type === "step" && payload.groupKey && payload.stepId) moveStep(payload.groupKey, targetGroupKey, payload.stepId, targetIndex, Boolean(payload.copy || event.shiftKey))
+            else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && targetStepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, targetGroupKey, targetStepId, Boolean(payload.copy || event.shiftKey))
+            else if (payload.type === "library" && payload.kind && targetStepId) {
+                const block = payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : createButtonBlock()
+                let inserted = false
+                collaboration.updateDocument((document) => {
+                    const target = documentDefinition(document, targetGroupKey)
+                    const targetStep = target?.steps.find((step) => step.id === targetStepId)
+                    if (!target || !targetStep) return document
+                    if (payload.kind === "form" && (targetGroupKey.startsWith("bookend:") || targetStep.blocks.some((candidate) => candidate.kind === "form"))) {
+                        setError("That target step cannot accept a Form block.")
+                        return document
+                    }
+                    inserted = true
+                    const steps = target.steps.map((step) => step.id === targetStepId ? { ...step, blocks: [step.blocks[0], block, ...step.blocks.slice(1)] } : step)
+                    return replaceDocumentDefinition(document, targetGroupKey, { ...target, steps })
+                })
+                if (inserted) setSelection({ groupKey: targetGroupKey, stepId: targetStepId, blockId: block.id })
+            }
+        } catch { setError("That Builder item could not be moved.") }
+    }
+
+    function chooseGroup(group: DefinitionGroup) {
+        setSelection({ groupKey: group.key, stepId: group.definition.steps[0]?.id ?? "", blockId: null })
+        collaboration.updatePresence({ selection: group.key })
+    }
+
+    function addStep() {
+        if (!currentGroup) return
+        const step = createOnboardingStepV2({ bookend: currentGroup.kind === "bookend", title: currentGroup.kind === "bookend" ? `New ${currentGroup.title.toLowerCase()} step` : "Untitled step", showComposedModuleSummary: currentGroup.key === "bookend:welcome" && currentGroup.definition.steps.length === 0 })
+        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: [...definition.steps, step] }))
+        setSelection({ groupKey: currentGroup.key, stepId: step.id, blockId: step.blocks[0].id })
+    }
+
+    function addBlock(kind: "form" | "video" | "button") {
+        if (!currentStep || !currentGroup) return
+        if (kind === "form" && (currentGroup.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form"))) return
+        const block = kind === "form" ? createFormBlock() : kind === "video" ? createVideoBlock() : createButtonBlock()
+        updateCurrentStep({ ...currentStep, blocks: [...currentStep.blocks, block] })
+        setSelection({ ...selection, blockId: block.id })
+    }
+
+    function updateBlock(block: OnboardingBlock) {
+        if (!currentStep) return
+        updateCurrentStep({ ...currentStep, blocks: currentStep.blocks.map((item) => item.id === block.id ? block : item) })
+    }
+
+    function removeBlock() {
+        if (!currentStep || !selectedBlock || selectedBlock.kind === "header") return
+        updateCurrentStep({ ...currentStep, blocks: currentStep.blocks.filter((block) => block.id !== selectedBlock.id) })
+        setSelection({ ...selection, blockId: null })
+    }
+
+    function removeCurrentStep() {
+        if (!currentGroup || !currentStep) return
+        if (currentGroup.definition.steps.length === 1) {
+            setError(currentGroup.kind === "bookend" ? "Each bookend must retain at least one step." : "Each module must retain at least one step.")
+            return
+        }
+        const remaining = currentGroup.definition.steps.filter((step) => step.id !== currentStep.id)
+        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: remaining }))
+        setSelection({ groupKey: currentGroup.key, stepId: remaining[0].id, blockId: null })
+    }
+
+    function addThemeSwatch() {
+        const id = crypto.randomUUID()
+        collaboration.updateDocument((document) => ({
+            ...document,
+            theme: { ...document.theme, swatches: [...document.theme.swatches, { id, name: "New colour", hex: "#64748B", hidden: false }] },
+        }))
+    }
+
+    function updateThemeSwatch(id: string, values: { name?: string; hex?: string; hidden?: boolean }) {
+        collaboration.updateDocument((document) => ({
+            ...document,
+            theme: { ...document.theme, swatches: document.theme.swatches.map((swatch) => swatch.id === id ? { ...swatch, ...values } : swatch) },
+        }))
+    }
+
+    function currentPublishScope() {
+        const visibleModuleIds = new Set(groups.filter((group) => group.kind === "module").map((group) => group.key.replace("module:", "")))
+        const included = new Set<string>(focusedModuleId ? [focusedModuleId] : [...visibleModuleIds, "bookend:welcome", "bookend:completion"])
+        let changed = true
+        while (changed) {
+            changed = false
+            for (const changeSet of collaboration.document.linkedChangeSets) {
+                if (changeSet.createdVersion !== undefined && changeSet.createdVersion <= data.collaboration.publishedVersion) continue
+                if (!changeSet.definitionIds.some((id) => included.has(id))) continue
+                for (const id of changeSet.definitionIds) if (!included.has(id)) { included.add(id); changed = true }
+            }
+        }
+        return {
+            modules: collaboration.document.modules.filter((module) => included.has(module.id) && dirtyModuleIds.includes(module.id)),
+            bookends: [included.has("bookend:welcome") && welcomeDirty ? collaboration.document.welcome : null, included.has("bookend:completion") && completionDirty ? collaboration.document.completion : null].filter(Boolean) as OnboardingBookendDefinitionV2[],
+            theme: !focusedModuleId && themeDirty ? collaboration.document.theme : null,
+        }
+    }
+
+    const publishScope = currentPublishScope()
+    const publishCount = publishScope.modules.length + publishScope.bookends.length + (publishScope.theme ? 1 : 0)
+
+    async function publishChanges() {
+        setError(null); setNotice(null)
+        const version = await collaboration.flush()
+        await collaboration.setReleaseLock(true)
+        try {
+            const outcome = await publishVisualOnboardingRelease(workspaceSlug, {
+                ...publishScope,
+                expectedDocumentVersion: version,
+                applyToActive,
+                explanation,
+            })
+            if (!outcome.ok) { setError(outcome.error); return }
+            setPublishOpen(false)
+            setNotice("Onboarding release published.")
+            window.setTimeout(() => window.location.reload(), 650)
+        } finally {
+            await collaboration.setReleaseLock(false)
+        }
+    }
+
+    async function createPreviewLink() {
+        const snapshot = { schemaVersion: 2, workspaceName, serviceIds: selectedServiceIds, modules: groups.filter((group) => group.kind === "module").map((group) => group.definition), welcome: collaboration.document.welcome, completion: collaboration.document.completion, theme: collaboration.document.theme, help: data.help }
+        const outcome = await rotateVisualOnboardingPreview(workspaceSlug, snapshot)
+        if (!outcome.ok) { setError(outcome.error); return }
+        const url = `${window.location.origin}/onboarding/preview/${outcome.data.token}`
+        await navigator.clipboard.writeText(url)
+        setNotice("Frozen 24-hour preview link copied.")
+    }
+
+    return <div onPointerMove={(event) => collaboration.updatePresence({ cursor: { x: event.clientX, y: event.clientY } })} onPointerLeave={() => collaboration.updatePresence({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-neutral-800 bg-black px-3 sm:px-4">
+            <a href={`/${workspaceSlug}/settings#onboarding`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white"><BuilderIcon name="back" /><span className="hidden sm:inline">Back to Betelgeze</span></a>
+            <span className="hidden h-5 w-px bg-neutral-800 sm:block" />
+            <div className="min-w-0"><p className="truncate text-sm font-medium">Onboarding Builder</p><p className="hidden text-[11px] text-neutral-600 sm:block">{workspaceName}</p></div>
+            <div className="ml-2 hidden min-w-0 flex-1 items-center gap-2 md:flex">
+                <label className="text-xs text-neutral-500">Session</label>
+                <div className="flex max-w-[28rem] flex-wrap gap-1">{activeServices.map((service) => <button key={service.id} type="button" onClick={() => { const next = selectedServiceIds.includes(service.id) ? selectedServiceIds.filter((id) => id !== service.id) : [...selectedServiceIds, service.id]; setSelectedServiceIds(next); window.localStorage.setItem(servicePreferenceKey, JSON.stringify(next)); setFocusedModuleId(null) }} className={`rounded-md border px-2 py-1 text-[11px] ${selectedServiceIds.includes(service.id) ? "border-neutral-500 bg-neutral-800 text-white" : "border-neutral-800 text-neutral-500 hover:text-neutral-300"}`}>{service.name}</button>)}</div>
             </div>
-            {!data.schemaReady ? (
-                <p className="mb-3 rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">Builder is showing legacy definitions read-only until the new onboarding schema is available.</p>
-            ) : null}
-            <div className="grid min-h-[42rem] gap-3 lg:h-[calc(100dvh-3rem)] lg:min-h-[42rem] lg:grid-cols-[17rem_20rem_minmax(0,1fr)]">
-                <div className={mobilePane === "library" ? "min-h-[34rem]" : "hidden lg:block"}>
-                    <LibraryPane
-                        data={data}
-                        selection={librarySelection}
-                        select={choose}
-                        pending={pending}
-                        create={() => run(
-                            () => createOnboardingModule(workspaceSlug),
-                            (result) => {
-                                const id = String(result?.module_id ?? "")
-                                if (id) router.push(`/${workspaceSlug}/onboarding-builder?module=${id}`)
-                            },
-                        )}
-                    />
-                </div>
-                <div className={mobilePane === "outline" ? "min-h-[34rem]" : "hidden lg:block"}>
-                    <OutlinePane module={selectedModule} selection={selection} setSelection={(next) => { setSelection(next); setMobilePane("inspector") }} update={replaceModule} />
-                </div>
-                <div className={mobilePane === "inspector" ? "min-h-[34rem]" : "hidden lg:block"}>
-                    <Pane title="Inspector and preview" detail={inspectorDetail} className="flex h-full flex-col">
-                        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                            <div className="grid min-h-0 gap-5 xl:grid-cols-[minmax(18rem,.72fr)_minmax(20rem,1.28fr)]">
-                                <div>
-                                    {inspector}
-                                    {autosave.error || actionErrorState ? <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{autosave.error ?? actionErrorState}</p> : null}
-                                </div>
-                                <div className="hidden min-h-[34rem] xl:block">
-                                    <BuilderPreview module={selectedModule} bookend={bookend} theme={data.theme} help={data.help} workspaceName={workspaceName} />
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex justify-end border-t border-neutral-800 p-2 xl:hidden">
-                            <button type="button" onClick={() => setPreviewOpen(true)} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-200">Open preview</button>
-                        </div>
-                    </Pane>
-                </div>
+            <div className="ml-auto flex items-center gap-1.5">
+                <div className="hidden items-center -space-x-1.5 sm:flex">{[...(data.collaboration.currentUser ? [{ ...data.collaboration.currentUser, color: "#FFFFFF" }] : []), ...collaboration.presence].slice(0, 5).map((person) => <span key={"userId" in person ? person.userId : person.id} title={person.name} className="flex h-7 w-7 items-center justify-center rounded-full border-2 bg-neutral-800 text-[10px] font-semibold" style={{ borderColor: person.color }}>{person.name.slice(0, 2).toUpperCase()}</span>)}</div>
+                <span className="hidden text-[11px] text-neutral-500 xl:inline"><Status label={collaboration.syncState === "synced" ? "Synced" : collaboration.syncState === "syncing" ? "Syncing" : collaboration.syncState === "publishing" ? "Publish in progress" : collaboration.syncState === "offline" ? "Offline — editing paused" : "Reconnecting"} tone={collaboration.syncState === "synced" ? "green" : collaboration.syncState === "offline" || collaboration.syncState === "error" ? "red" : "yellow"} /></span>
+                <IconButton label="Undo your last edit" onClick={collaboration.undo} disabled={!collaboration.undoState.canUndo || !collaboration.editable}><BuilderIcon name="undo" /></IconButton>
+                <IconButton label="Redo your last edit" onClick={collaboration.redo} disabled={!collaboration.undoState.canRedo || !collaboration.editable}><BuilderIcon name="redo" /></IconButton>
+                <div className="hidden rounded-lg border border-neutral-800 p-0.5 sm:flex"><button type="button" aria-label="Desktop preview" onClick={() => setViewport("desktop")} className={`h-8 w-8 rounded-md ${viewport === "desktop" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}><BuilderIcon name="desktop" /></button><button type="button" aria-label="Mobile preview" onClick={() => setViewport("mobile")} className={`h-8 w-8 rounded-md ${viewport === "mobile" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}><BuilderIcon name="mobile" /></button></div>
+                <button type="button" onClick={() => setPreview((value) => !value)} className="inline-flex h-9 items-center gap-2 rounded-lg border border-neutral-700 px-3 text-xs font-medium text-neutral-200"><BuilderIcon name="preview" />{preview ? "Edit" : "Preview"}</button>
+                <button type="button" disabled={!publishCount || !collaboration.editable} onClick={() => setPublishOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-3 text-xs font-semibold text-black disabled:opacity-30"><BuilderIcon name="publish" />Publish{publishCount ? ` ${publishCount}` : ""}</button>
             </div>
-            {previewOpen ? (
-                <div role="dialog" aria-modal="true" aria-label="Onboarding preview" className="fixed inset-0 z-[100] bg-neutral-950 p-2 sm:p-4">
-                    <div className="mx-auto flex h-full max-w-7xl flex-col">
-                        <div className="mb-2 flex items-center justify-between">
-                            <p className="text-sm font-medium">Client preview</p>
-                            <button type="button" onClick={() => setPreviewOpen(false)} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-200">Close preview</button>
-                        </div>
-                        <div className="min-h-0 flex-1">
-                            <BuilderPreview module={selectedModule} bookend={bookend} theme={data.theme} help={data.help} workspaceName={workspaceName} />
-                        </div>
-                    </div>
-                </div>
-            ) : null}
-            {publishOpen && selectedModule ? (
-                <PublishDialog
-                    module={selectedModule}
-                    impact={publishImpact!}
-                    pending={pending}
-                    error={actionErrorState}
-                    close={() => { setPublishOpen(false); setActionErrorState(null) }}
-                    publish={(active, explanation) => run(
-                        () => publishOnboardingModule(workspaceSlug, selectedModule.id, selectedModule, active, explanation),
-                        () => setPublishOpen(false),
-                    )}
-                />
-            ) : null}
+        </header>
+
+        {notice || error ? <div className={`shrink-0 border-b px-4 py-2 text-center text-xs ${error ? "border-red-900 bg-red-950 text-red-200" : "border-emerald-900 bg-emerald-950 text-emerald-200"}`}>{error ?? notice}</div> : null}
+        {!data.schemaReady ? <div className="border-b border-yellow-800 bg-yellow-950 px-4 py-2 text-center text-xs text-yellow-100">The visual Builder schema must be deployed before edits can be published.</div> : null}
+
+        <div className={`grid min-h-0 flex-1 ${preview ? "grid-cols-1" : `${leftOpen ? "md:grid-cols-[18rem_minmax(0,1fr)]" : "md:grid-cols-[3rem_minmax(0,1fr)]"} ${rightOpen ? "xl:grid-cols-[18rem_minmax(0,1fr)_18rem]" : "xl:grid-cols-[18rem_minmax(0,1fr)_3rem]"}`}`}>
+            {!preview ? <aside className={`min-h-0 border-r border-neutral-800 bg-neutral-950 ${leftOpen ? "hidden md:flex md:flex-col" : "hidden md:flex md:items-start md:justify-center md:pt-3"}`}>
+                {leftOpen ? <><div className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2"><button type="button" onClick={() => setLeftTab("outline")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "outline" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Outline</button><button type="button" onClick={() => setLeftTab("blocks")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "blocks" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Blocks</button><button type="button" onClick={() => setLeftTab("library")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "library" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Library</button><span className="ml-auto"><IconButton label="Collapse left rail" onClick={() => rememberRail("left", false)}><BuilderIcon name="left" /></IconButton></span></div><div className="min-h-0 flex-1 overflow-y-auto p-2">
+                    {leftTab === "outline" ? (
+                        <div className="space-y-2">{groups.map((group) => (
+                            <section key={group.key} onDragOver={(event) => event.preventDefault()} onDrop={(event) => acceptStructureDrop(event, group.key, group.definition.steps.at(-1)?.id ?? null, group.definition.steps.length)} className="rounded-xl border border-neutral-800 bg-black/40">
+                                <button type="button" onClick={() => chooseGroup(group)} className="flex w-full items-center gap-2 px-3 py-2 text-left"><span className="min-w-0 flex-1 truncate text-xs font-semibold text-neutral-300">{group.title}</span>{group.kind === "bookend" ? <RoundPill>Bookend</RoundPill> : null}</button>
+                                <div className="border-t border-neutral-900 p-1"><SortableAuthoringList items={group.definition.steps} disabled={!collaboration.editable} onChange={(steps) => updateDefinition(group.key, (definition) => ({ ...definition, steps }))} ariaLabel={`${group.title} steps`} renderItem={(step, index, handle) => (
+                                    <div draggable={collaboration.editable} onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "step", groupKey: group.key, stepId: step.id, copy: event.shiftKey })); event.dataTransfer.effectAllowed = event.shiftKey ? "copy" : "move" }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); acceptStructureDrop(event, group.key, step.id, index) }} className={`flex items-center rounded-lg ${selection.stepId === step.id ? "bg-neutral-800" : "hover:bg-neutral-900"}`}>{handle}<button type="button" onClick={() => setSelection({ groupKey: group.key, stepId: step.id, blockId: null })} className="min-w-0 flex-1 truncate py-2 pr-2 text-left text-xs text-neutral-300">{index + 1}. {visualStepTitle(step)}</button></div>
+                                )} /></div>
+                            </section>
+                        ))}</div>
+                    ) : leftTab === "blocks" ? <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks onto the canvas or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header</b><small className="text-neutral-600">Required at the top</small></span></button>{(["form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div> : <div><div className="flex items-center justify-between px-2 pb-2"><p className="text-xs text-neutral-500">All modules</p><button type="button" disabled={pending || !collaboration.editable} onClick={() => startTransition(async () => { const outcome = await createOnboardingModule(workspaceSlug); if (!outcome.ok) setError(outcome.error); else window.location.href = `/${workspaceSlug}/onboarding-builder?module=${outcome.data?.module_id}` })} className="text-xs text-neutral-300 underline underline-offset-4">New module</button></div>{collaboration.document.modules.map((module) => <button key={module.id} type="button" onClick={() => { setFocusedModuleId(module.id); const group = { key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module }; chooseGroup(group) }} className={`mb-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left ${focusedModuleId === module.id ? "bg-neutral-800" : "hover:bg-neutral-900"}`}><span className="min-w-0 flex-1 truncate text-sm text-neutral-300">{module.name}</span>{module.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</button>)}{focusedModuleId ? <button type="button" onClick={() => setFocusedModuleId(null)} className="mt-3 w-full rounded-lg border border-neutral-700 px-3 py-2 text-xs">Return to composed session</button> : null}</div>}
+                </div><div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div></> : <IconButton label="Expand left rail" onClick={() => rememberRail("left", true)}><BuilderIcon name="right" /></IconButton>}
+            </aside> : null}
+
+            <main onDragOver={(event) => event.preventDefault()} onDrop={(event) => currentGroup && currentStep && acceptStructureDrop(event, currentGroup.key, currentStep.id, currentGroup.definition.steps.indexOf(currentStep))} className="min-h-0 overflow-auto bg-neutral-900/50 p-3 sm:p-5">
+                {!preview && currentGroup && currentStep ? <div className="mx-auto mb-3 hidden max-w-[1180px] flex-wrap items-center justify-end gap-2 rounded-xl border border-neutral-800 bg-neutral-950/90 p-2 text-xs text-neutral-400 md:flex">
+                    <span className="mr-auto px-1">{selectedBlock && selectedBlock.kind !== "header" ? `Selected ${selectedBlock.kind} block` : `Step: ${visualStepTitle(currentStep)}`}</span>
+                    <label className="sr-only" htmlFor="builder-move-target">Move selection to</label>
+                    <select id="builder-move-target" defaultValue="" onChange={(event) => { const [targetGroupKey, targetStepId] = event.target.value.split("|"); if (!targetGroupKey || !targetStepId) return; if (selectedBlock && selectedBlock.kind !== "header") moveBlock(currentGroup.key, currentStep.id, selectedBlock.id, targetGroupKey, targetStepId, false); else moveStep(currentGroup.key, targetGroupKey, currentStep.id, documentDefinition(collaboration.document, targetGroupKey)?.steps.length ?? 0, false); event.currentTarget.value = "" }} className="h-8 max-w-56 rounded-lg border border-neutral-700 bg-black px-2 text-xs text-neutral-300">
+                        <option value="">Move to…</option>
+                        {groups.flatMap((group) => group.definition.steps.map((candidate) => <option key={`${group.key}:${candidate.id}`} value={`${group.key}|${candidate.id}`} disabled={(selectedBlock?.kind === "form" || (!selectedBlock && currentStep.blocks.some((block) => block.kind === "form"))) && group.kind === "bookend"}>{group.title} · {visualStepTitle(candidate)}</option>))}
+                    </select>
+                    <button type="button" onClick={() => selectedBlock && selectedBlock.kind !== "header" ? moveBlock(currentGroup.key, currentStep.id, selectedBlock.id, currentGroup.key, currentStep.id, true) : moveStep(currentGroup.key, currentGroup.key, currentStep.id, currentGroup.definition.steps.indexOf(currentStep) + 1, true)} className="h-8 rounded-lg border border-neutral-700 px-2 text-neutral-300">Duplicate</button>
+                    {!selectedBlock ? <button type="button" onClick={removeCurrentStep} className="h-8 rounded-lg border border-red-950 px-2 text-red-300">Delete step</button> : null}
+                </div> : null}
+                {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition as OnboardingModuleDefinitionV2 } : { kind: "bookend", definition: currentGroup.definition as OnboardingBookendDefinitionV2 }} step={currentStep} steps={currentGroup.definition.steps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={preview ? null : selection.blockId} selectBlock={(blockId) => !preview && setSelection({ ...selection, blockId })} selectStep={(stepId) => setSelection({ ...selection, stepId, blockId: null })} updateStep={preview ? () => undefined : updateCurrentStep} updateDraftRevisionId={updateCurrentRevisionId} viewport={viewport} readOnly={preview} collaboratorSelections={collaboration.presence} /> : <div className="flex h-full items-center justify-center text-sm text-neutral-500">Choose or create a module to start building.</div>}
+            </main>
+
+            {!preview ? <aside className={`min-h-0 border-l border-neutral-800 bg-neutral-950 ${rightOpen ? "hidden xl:flex xl:flex-col" : "hidden xl:flex xl:items-start xl:justify-center xl:pt-3"}`}>
+                {rightOpen ? <><div className="flex h-12 items-center border-b border-neutral-800 px-3"><div><p className="text-xs font-semibold">Style and advanced</p><p className="text-[10px] text-neutral-600">{selectedBlock ? selectedBlock.kind : "Global style"}</p></div><span className="ml-auto"><IconButton label="Collapse right rail" onClick={() => rememberRail("right", false)}><BuilderIcon name="right" /></IconButton></span></div><div className="min-h-0 flex-1 overflow-y-auto p-3">
+                    {selectedBlock ? <div className="space-y-4"><div className="grid grid-cols-2 gap-2"><label className="text-xs text-neutral-500">Width<select value={selectedBlock.layout.width} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, width: event.target.value as OnboardingBlock["layout"]["width"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="narrow">Narrow</option><option value="standard">Standard</option><option value="wide">Wide</option><option value="full">Full</option></select></label><label className="text-xs text-neutral-500">Alignment<select value={selectedBlock.layout.alignment} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, alignment: event.target.value as OnboardingBlock["layout"]["alignment"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="left">Left</option><option value="center">Centre</option></select></label></div><label className="block text-xs text-neutral-500">Spacing before<select value={selectedBlock.layout.spacingBefore} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, spacingBefore: event.target.value as OnboardingBlock["layout"]["spacingBefore"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="compact">Compact</option><option value="normal">Normal</option><option value="spacious">Spacious</option></select></label>{selectedBlock.kind === "header" && currentGroup?.key === "bookend:welcome" && currentGroup.definition.steps[0]?.id === currentStep?.id ? <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(selectedBlock.showComposedModuleSummary)} onChange={(event) => updateBlock({ ...selectedBlock, showComposedModuleSummary: event.target.checked })} />Show composed module list</label> : null}{selectedBlock.kind === "form" ? <><label className="block text-xs text-neutral-500">Why we ask<textarea value={selectedBlock.whyWeAsk} onChange={(event) => updateBlock({ ...selectedBlock, whyWeAsk: event.target.value })} rows={3} className="mt-1 w-full rounded-lg border border-neutral-700 bg-black p-2 text-sm text-white" /></label><button type="button" onClick={() => updateBlock({ ...selectedBlock, fields: [...selectedBlock.fields, createOnboardingField()] })} className="h-9 w-full rounded-lg border border-neutral-700 text-xs">Add field</button>{selectedBlock.fields.map((field) => <div key={field.id} className="rounded-lg border border-neutral-800 p-2"><select value={field.type} onChange={(event) => updateBlock({ ...selectedBlock, fields: selectedBlock.fields.map((item) => item.id === field.id ? { ...item, type: event.target.value as typeof field.type, multiple: event.target.value === "file" ? item.multiple : false } : item) })} className="h-8 w-full rounded border border-neutral-700 bg-black px-2 text-xs"><option value="text">Short text</option><option value="email">Email</option><option value="tel">Phone</option><option value="url">URL</option><option value="textarea">Long text</option><option value="file">File</option></select><label className="mt-2 flex items-center gap-2 text-xs text-neutral-400"><input type="checkbox" checked={field.required} onChange={(event) => updateBlock({ ...selectedBlock, fields: selectedBlock.fields.map((item) => item.id === field.id ? { ...item, required: event.target.checked } : item) })} />Required</label></div>)}</> : null}{selectedBlock.kind === "button" ? <label className="block text-xs text-neutral-500">Appearance<select value={selectedBlock.appearance} onChange={(event) => updateBlock({ ...selectedBlock, appearance: event.target.value as "primary" | "secondary" })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label> : null}{selectedBlock.kind !== "header" ? <button type="button" onClick={removeBlock} className="text-xs text-red-300">Delete block</button> : <p className="text-xs text-neutral-600">The Header is required and always stays first.</p>}</div> : <div className="space-y-4"><p className="text-xs leading-5 text-neutral-500">These six colours are shared with Agency Branding and client portals. Changes remain drafts until Publish.</p><section className="space-y-2 rounded-xl border border-neutral-800 p-2"><div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-neutral-300">Colour palette</h3><button type="button" onClick={addThemeSwatch} className="text-[11px] text-neutral-300 underline underline-offset-4">Add colour</button></div>{collaboration.document.theme.swatches.map((swatch) => <div key={swatch.id} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 ${swatch.hidden ? "opacity-50" : ""}`}><input type="color" aria-label={`${swatch.name} colour`} value={swatch.hex} onChange={(event) => updateThemeSwatch(swatch.id, { hex: event.target.value.toUpperCase() })} className="h-8 w-8 rounded border border-neutral-700 bg-transparent p-0" /><input value={swatch.name} onChange={(event) => updateThemeSwatch(swatch.id, { name: event.target.value })} aria-label="Colour name" className="h-8 min-w-0 rounded border border-neutral-700 bg-black px-2 text-xs text-white" /><button type="button" onClick={() => updateThemeSwatch(swatch.id, { hidden: !swatch.hidden })} className="text-[10px] text-neutral-400">{swatch.hidden ? "Restore" : "Hide"}</button></div>)}</section>{ONBOARDING_THEME_SLOTS.map((slot: OnboardingThemeSlot) => <label key={slot} className="block text-xs text-neutral-400">{ONBOARDING_THEME_SLOT_LABELS[slot]}<select value={collaboration.document.theme.assignments[slot]} onChange={(event) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: event.target.value } } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white">{collaboration.document.theme.swatches.filter((swatch) => !swatch.hidden || swatch.id === collaboration.document.theme.assignments[slot]).map((swatch) => <option key={swatch.id} value={swatch.id}>{swatch.name}</option>)}</select></label>)}{onboardingThemeWarnings(collaboration.document.theme).map((warning) => <p key={warning} className="rounded-lg border border-yellow-900 bg-yellow-950 p-2 text-[11px] text-yellow-200">{warning}</p>)}</div>}
+                    {selectedBlock ? <label className="mt-4 block text-xs text-neutral-500">Spacing after<select value={selectedBlock.layout.spacingAfter} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, spacingAfter: event.target.value as OnboardingBlock["layout"]["spacingAfter"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="compact">Compact</option><option value="normal">Normal</option><option value="spacious">Spacious</option></select></label> : null}
+                </div></> : <IconButton label="Expand right rail" onClick={() => rememberRail("right", true)}><BuilderIcon name="left" /></IconButton>}
+            </aside> : null}
         </div>
-    )
+        {!preview ? collaboration.presence.filter((person) => person.cursor).map((person) => <div key={`cursor:${person.userId}`} className="pointer-events-none fixed z-[80] flex items-center gap-1" style={{ left: person.cursor!.x, top: person.cursor!.y, color: person.color }}><span className="h-3 w-3 -translate-x-0.5 -translate-y-0.5 rotate-45 border-l-2 border-t-2" /><span className="rounded px-1 py-0.5 text-[10px] font-semibold text-black" style={{ backgroundColor: person.color }}>{person.name}</span></div>) : null}
+
+        {publishOpen ? <div role="dialog" aria-modal="true" aria-labelledby="publish-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"><section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 p-5 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><h2 id="publish-title" className="text-lg font-semibold">Review onboarding release</h2><p className="mt-1 text-sm text-neutral-500">One transaction publishes every item below or rolls everything back.</p></div><button type="button" onClick={() => setPublishOpen(false)} className="text-neutral-500">✕</button></div><div className="mt-5 space-y-2">{publishScope.modules.map((module) => <div key={module.id} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} steps · visual module draft</p></div>)}{publishScope.bookends.map((bookend) => <div key={bookend.kind} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium capitalize">{bookend.kind}</p><p className="mt-1 text-xs text-neutral-600">{bookend.steps.length} steps · {bookend.kind === "welcome" ? "future sessions only" : "future and active-incomplete sessions"}</p></div>)}{publishScope.theme ? <div className="rounded-xl border border-yellow-800 bg-yellow-950/40 p-3"><p className="text-sm font-medium text-yellow-100">Global Style</p><p className="mt-1 text-xs leading-5 text-yellow-200/70">Publishing colours immediately updates active and completed onboarding sessions and later client portal surfaces.</p></div> : null}</div><fieldset className="mt-5 space-y-2"><legend className="text-sm font-medium">Client scope</legend><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={!applyToActive} onChange={() => setApplyToActive(false)} />Future sessions only</label><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={applyToActive} onChange={() => setApplyToActive(true)} />Future + all affected active sessions</label></fieldset>{applyToActive ? <label className="mt-4 block text-sm text-neutral-400">Client explanation<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} className="mt-2 w-full rounded-xl border border-neutral-700 bg-black p-3 text-white" /></label> : null}{error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}<div className="mt-5 flex flex-wrap justify-between gap-2"><button type="button" onClick={() => void createPreviewLink()} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm">Copy frozen preview link</button><div className="flex gap-2"><button type="button" onClick={() => setPublishOpen(false)} className="h-10 rounded-lg border border-neutral-700 px-4 text-sm">Cancel</button><button type="button" disabled={pending || !publishCount} onClick={() => startTransition(publishChanges)} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-30">{pending ? "Publishing…" : "Publish release"}</button></div></div></section></div> : null}
+    </div>
 }

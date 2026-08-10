@@ -4,6 +4,7 @@ import { headers } from "next/headers"
 import { SERVICES, getModuleKeysForServices } from "@/lib/onboarding/services"
 import { FormResponse, OnboardingFormDefinition, StoredUpload } from "@/lib/onboarding/forms"
 import type { OnboardingHelpSettings, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
+import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
 import { legacyPublishedOnboardingConfiguration, loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import { getOnboardingRuntimeMode } from "@/lib/onboarding/runtime-mode"
 import {
@@ -68,11 +69,17 @@ export type SessionStep = CanonicalSessionStep & {
     workItemId?: string | null
     status?: "todo" | "doing" | "waiting" | "blocked" | "done" | "canceled"
     updatedAt?: string | null
+    blocks?: Array<OnboardingBlock & { sessionBlockId?: string; sourceBlockId?: string }>
+    navigation?: { backLabel: string; continueLabel: string }
+    bookendKind?: "welcome" | "completion" | null
 }
 
 export type OnboardingSessionNotice = {
     id: string
-    sessionModuleId: string
+    kind: "module" | "release"
+    sessionModuleId: string | null
+    affectedStepIds: string[]
+    sections: string[]
     explanation: string
     requiresCompletion: boolean
     firstSeenAt: string | null
@@ -98,6 +105,7 @@ export type PublicOnboardingSession = {
     help: OnboardingHelpSettings
     usesSnapshot: boolean
     notices: OnboardingSessionNotice[]
+    satisfiedBlockIds: Set<string>
 }
 
 type CanonicalStepWorkItem = {
@@ -166,7 +174,7 @@ async function loadSessionByToken(token: string) {
     return legacyResult.error ? null : legacyResult.data as CanonicalOnboardingSession | null
 }
 
-function snapshotStepToSessionStep(step: SessionSnapshotStep): SessionStep {
+function snapshotStepToSessionStep(step: SessionSnapshotStep, completionIsActionable = false): SessionStep {
     return {
         key: step.id,
         sessionStepId: step.id,
@@ -178,11 +186,14 @@ function snapshotStepToSessionStep(step: SessionSnapshotStep): SessionStep {
         moduleTitle: step.moduleTitle,
         estimatedTime: step.estimatedTime,
         why: step.why,
-        kind: step.kind === "completion" ? "final" : step.kind === "welcome" ? "video" : step.kind,
+        kind: step.kind === "completion" && !completionIsActionable ? "final" : step.kind === "form" ? "form" : "video",
         formKey: step.legacyFormKey ?? (step.kind === "form" ? step.id : undefined),
         form: formDefinitionFromSnapshot(step),
         videoUrl: step.videoUrl,
         videoPath: step.videoPath,
+        blocks: step.blocks,
+        navigation: step.navigation,
+        bookendKind: step.bookendKind,
     }
 }
 
@@ -286,7 +297,7 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
         .eq("id", session.workspace_id)
         .eq("status", "active")
 
-    const [{ data: workspace }, { data: relationship }, { data: modules }, { data: workItems }, publishedConfiguration, normalizedSnapshot, noticeResult] = await Promise.all([
+    const [{ data: workspace }, { data: relationship }, { data: modules }, { data: workItems }, publishedConfiguration, normalizedSnapshot, noticeResult, releaseNoticeResult] = await Promise.all([
         workspaceSlug ? workspaceQuery.eq("slug", workspaceSlug).maybeSingle() : workspaceQuery.maybeSingle(),
         supabaseAdmin
             .from("relationships")
@@ -311,7 +322,15 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
         session.snapshot_schema_version
             ? supabaseAdmin
                 .from("onboarding_session_notices")
-                .select("id, session_module_id, explanation, requires_completion, first_seen_at, module_completed_at")
+                .select("id, session_module_id, explanation, requires_completion, first_seen_at, module_completed_at, consolidated_release_id")
+                .eq("workspace_id", session.workspace_id)
+                .eq("session_id", session.id)
+                .order("created_at", { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
+        session.snapshot_schema_version
+            ? supabaseAdmin
+                .from("onboarding_release_notices")
+                .select("id, explanation, affected_sections, affected_session_step_ids, requires_completion, first_seen_at, completed_at")
                 .eq("workspace_id", session.workspace_id)
                 .eq("session_id", session.id)
                 .order("created_at", { ascending: false })
@@ -320,13 +339,34 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
 
     if (!workspace || !relationship) return null
 
+    type ModuleNoticeRow = {
+        id: unknown
+        session_module_id: unknown
+        explanation: unknown
+        requires_completion: unknown
+        first_seen_at: unknown
+        module_completed_at: unknown
+        consolidated_release_id?: unknown
+    }
+    let effectiveModuleNotices: ModuleNoticeRow[] = noticeResult.error ? [] : noticeResult.data ?? []
+    if (noticeResult.error && isMissingCanonicalOnboarding(noticeResult.error)) {
+        const legacyNoticeResult = await supabaseAdmin
+            .from("onboarding_session_notices")
+            .select("id, session_module_id, explanation, requires_completion, first_seen_at, module_completed_at")
+            .eq("workspace_id", session.workspace_id)
+            .eq("session_id", session.id)
+            .order("created_at", { ascending: false })
+        effectiveModuleNotices = legacyNoticeResult.error ? [] : legacyNoticeResult.data ?? []
+    }
+
     const moduleKeys = (modules ?? []).map((row) => row.module_key).filter((key): key is string => Boolean(key))
+    const isVisualSnapshot = Number(normalizedSnapshot?.schemaVersion ?? session.snapshot_schema_version ?? 1) >= 2
     const canonicalSteps: SessionStep[] = normalizedSnapshot
-        ? normalizedSnapshot.actionableSteps.map(snapshotStepToSessionStep)
+        ? normalizedSnapshot.actionableSteps.map((step) => snapshotStepToSessionStep(step, isVisualSnapshot))
         : getOnboardingStepsForModules(moduleKeys)
-    const completionStep: SessionStep = normalizedSnapshot?.completionStep
+    const completionStep: SessionStep | null = normalizedSnapshot?.completionStep
         ? snapshotStepToSessionStep(normalizedSnapshot.completionStep)
-        : FINAL_ONBOARDING_STEP
+        : isVisualSnapshot ? null : FINAL_ONBOARDING_STEP
     let canonicalWorkItems = workItems ?? []
 
     if (session.status === "active") {
@@ -375,6 +415,10 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
     })
     const completedKeys = new Set(completableSteps.filter((step) => step.status === "done").map((step) => step.key))
 
+    const requirementResult = isVisualSnapshot
+        ? await supabaseAdmin.from("onboarding_block_requirements").select("session_block_id").eq("workspace_id", session.workspace_id).eq("session_id", session.id)
+        : { data: [], error: null }
+
     return {
         session,
         workspace,
@@ -388,18 +432,35 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
             }),
         completableSteps,
         completedKeys,
-        steps: [...completableSteps, completionStep],
+        steps: completionStep ? [...completableSteps, completionStep] : completableSteps,
         theme: publishedConfiguration.theme,
         help: publishedConfiguration.help,
         usesSnapshot: Boolean(normalizedSnapshot),
-        notices: noticeResult.error ? [] : (noticeResult.data ?? []).map((notice) => ({
-            id: String(notice.id),
-            sessionModuleId: String(notice.session_module_id),
-            explanation: String(notice.explanation ?? "This module was updated. Please review it again."),
-            requiresCompletion: Boolean(notice.requires_completion),
-            firstSeenAt: typeof notice.first_seen_at === "string" ? notice.first_seen_at : null,
-            moduleCompletedAt: typeof notice.module_completed_at === "string" ? notice.module_completed_at : null,
-        })),
+        notices: [
+            ...(releaseNoticeResult.error ? [] : (releaseNoticeResult.data ?? []).map((notice) => ({
+                id: String(notice.id),
+                kind: "release" as const,
+                sessionModuleId: null,
+                affectedStepIds: Array.isArray(notice.affected_session_step_ids) ? notice.affected_session_step_ids.map(String) : [],
+                sections: Array.isArray(notice.affected_sections) ? notice.affected_sections.map(String) : [],
+                explanation: String(notice.explanation ?? "Parts of this onboarding were updated. Please review them again."),
+                requiresCompletion: Boolean(notice.requires_completion),
+                firstSeenAt: typeof notice.first_seen_at === "string" ? notice.first_seen_at : null,
+                moduleCompletedAt: typeof notice.completed_at === "string" ? notice.completed_at : null,
+            }))),
+            ...effectiveModuleNotices.filter((notice) => !notice.consolidated_release_id).map((notice) => ({
+                id: String(notice.id),
+                kind: "module" as const,
+                sessionModuleId: String(notice.session_module_id),
+                affectedStepIds: [],
+                sections: [],
+                explanation: String(notice.explanation ?? "This module was updated. Please review it again."),
+                requiresCompletion: Boolean(notice.requires_completion),
+                firstSeenAt: typeof notice.first_seen_at === "string" ? notice.first_seen_at : null,
+                moduleCompletedAt: typeof notice.module_completed_at === "string" ? notice.module_completed_at : null,
+            })),
+        ],
+        satisfiedBlockIds: new Set((requirementResult.data ?? []).map((row) => String(row.session_block_id))),
     }
 }
 
@@ -1144,7 +1205,7 @@ export async function markCanonicalSessionNoticeSeen(token: string, noticeId: st
     if (!notice) return { seen: false as const }
     if (!notice.firstSeenAt) {
         const { error } = await supabaseAdmin
-            .from("onboarding_session_notices")
+            .from(notice.kind === "release" ? "onboarding_release_notices" : "onboarding_session_notices")
             .update({ first_seen_at: new Date().toISOString() })
             .eq("workspace_id", resolved.session.workspace_id)
             .eq("session_id", resolved.session.id)
@@ -1383,7 +1444,7 @@ export async function createRelationshipOnboardingSession({
             configuration_revision_id: normalizedComposition.configurationRevisionId,
             welcome_revision_id: normalizedComposition.welcomeRevisionId,
             completion_revision_id: normalizedComposition.completionRevisionId,
-            snapshot_schema_version: 1,
+            snapshot_schema_version: normalizedComposition.audit.schemaVersion,
             composition_hash: normalizedComposition.compositionHash,
             composition_snapshot: normalizedComposition.audit,
         } : {}),
@@ -1450,10 +1511,10 @@ export async function createRelationshipOnboardingSession({
     ])
 
     const normalizedSnapshot = normalizedComposition
-        ? await loadNormalizedSessionSnapshot({ id: session.id, workspace_id: workspaceId, snapshot_schema_version: 1 })
+        ? await loadNormalizedSessionSnapshot({ id: session.id, workspace_id: workspaceId, snapshot_schema_version: normalizedComposition.audit.schemaVersion })
         : null
     const steps: SessionStep[] = normalizedSnapshot
-        ? normalizedSnapshot.actionableSteps.map(snapshotStepToSessionStep)
+        ? normalizedSnapshot.actionableSteps.map((step) => snapshotStepToSessionStep(step))
         : getOnboardingStepsForModules(selectedModules)
     const onboardingStageId = await ensureRelationshipStage({
         workspaceId,

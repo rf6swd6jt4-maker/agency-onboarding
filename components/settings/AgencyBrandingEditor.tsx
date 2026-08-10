@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { saveAgencyBranding } from "@/app/[workspaceSlug]/settings/branding-actions"
+import { publishVisualThemeDraft } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
 import { ONBOARDING_THEME_SLOTS, type OnboardingBrandSwatch, type OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { normalizeHexColour, ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
@@ -14,6 +15,8 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady 
     const [theme, setTheme] = useState(initialTheme)
     const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const [error, setError] = useState<string | null>(null)
+    const [publishPending, startPublish] = useTransition()
+    const [published, setPublished] = useState(false)
     const latestRef = useRef(theme)
     const lastSavedRef = useRef(themeKey(initialTheme))
     const timerRef = useRef<number | null>(null)
@@ -39,7 +42,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady 
                     return
                 }
                 lastSavedRef.current = payloadKey
-                if (themeKey(latestRef.current) === payloadKey) setSaveState("saved")
+                if (themeKey(latestRef.current) === payloadKey) { setSaveState("saved"); setPublished(false) }
             })
         }, 700)
         return () => { if (timerRef.current) window.clearTimeout(timerRef.current) }
@@ -70,7 +73,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady 
             </section>
             <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5"><h3 className="font-semibold">Semantic assignments</h3><p className="mt-1 text-sm leading-6 text-neutral-500">These roles are shared by onboarding now and the client portal later.</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{ONBOARDING_THEME_SLOTS.map((slot) => { const assigned = theme.swatches.find((swatch) => swatch.id === theme.assignments[slot]); const options = assigned?.hidden ? [assigned, ...visibleSwatches] : visibleSwatches; return <label key={slot} className="block text-sm text-neutral-300">{ONBOARDING_THEME_SLOT_LABELS[slot]}<select value={theme.assignments[slot]} disabled={!schemaReady} onChange={(event) => setTheme((current) => ({ ...current, assignments: { ...current.assignments, [slot]: event.target.value } }))} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white">{options.map((swatch) => <option key={swatch.id} value={swatch.id}>{swatch.name}{swatch.hidden ? " (hidden)" : ""}</option>)}</select></label>})}</div></section>
             {warnings.length ? <section className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100"><h3 className="font-medium">Contrast warnings</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-yellow-100/80">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p className="mt-2 text-xs text-yellow-100/70">Warnings do not block saving.</p></section> : null}
-            <div aria-live="polite" className="min-h-5 text-right text-xs text-neutral-500">{saveState === "saving" ? "Saving colours…" : saveState === "saved" ? "Colours saved" : saveState === "error" ? error : schemaReady ? "Changes save automatically" : "Read-only compatibility view"}</div>
+            <div className="flex items-center justify-between gap-3"><div aria-live="polite" className="min-h-5 text-xs text-neutral-500">{saveState === "saving" ? "Saving style draft…" : saveState === "saved" ? published ? "Style published" : "Unpublished style draft saved" : saveState === "error" ? error : schemaReady ? "Unpublished style draft" : "Read-only compatibility view"}</div><button type="button" disabled={!schemaReady || publishPending || published} onClick={() => startPublish(async () => { const outcome = await publishVisualThemeDraft(workspaceSlug, latestRef.current); if (!outcome.ok) setError(outcome.error); else setPublished(true) })} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">{publishPending ? "Publishing…" : "Publish style"}</button></div>
         </div>
         <OnboardingThemeProvider theme={theme} className="xl:sticky xl:top-5 xl:self-start"><section className="overflow-hidden rounded-2xl border border-neutral-700 bg-[var(--onboarding-page)] p-4 text-[var(--onboarding-text)] shadow-2xl shadow-black/30"><p className="text-xs font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">Live colour preview</p><article className="mt-4 rounded-xl border border-black/10 bg-[var(--onboarding-surface)] p-4"><p className="text-sm font-semibold">Tell us about your business</p><p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted)]">This sample uses the same semantic colours as the onboarding renderer.</p><div className="mt-4 h-2 overflow-hidden rounded-full bg-black/10"><div className="h-full w-1/2 rounded-full bg-[var(--onboarding-accent)]" /></div><button type="button" className="mt-5 w-full rounded-lg bg-[var(--onboarding-primary)] px-4 py-3 text-sm font-medium text-white">Save and continue</button></article></section></OnboardingThemeProvider>
     </div>

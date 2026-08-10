@@ -17,6 +17,7 @@ import {
     submitCanonicalFormStep,
 } from "@/lib/onboarding/canonical"
 import { createSignedRelationshipOnboardingUpload } from "@/lib/onboarding/uploads"
+import { supabaseAdmin } from "@/lib/supabase/admin"
 
 async function getPublicSession(token: string) {
     const session = await getCanonicalSessionByToken(token)
@@ -41,6 +42,22 @@ function createFillerResponse(form: OnboardingFormDefinition): FormResponse {
 
 export async function completeStep(token: string, stepKey: string) {
     await completeCanonicalStep(token, stepKey)
+}
+
+export async function satisfyBlockRequirement(token: string, sessionBlockId: string, kind: "button_opened" | "video_finished") {
+    try {
+        const resolved = await getPublicSession(token)
+        if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+        const { data, error } = await supabaseAdmin.rpc("satisfy_onboarding_block_requirement", {
+            p_token: token,
+            p_session_block_id: sessionBlockId,
+            p_requirement_kind: kind,
+        })
+        if (error) throw new Error(error.message)
+        return { ok: true as const, data }
+    } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : "Could not record the required action." }
+    }
 }
 
 export async function prepareDirectUpload(

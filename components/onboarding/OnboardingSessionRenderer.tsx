@@ -1,6 +1,11 @@
+"use client"
+
 import type { FormResponse, OnboardingFormDefinition } from "@/lib/onboarding/forms"
 import { OnboardingForm } from "@/components/onboarding/OnboardingForm"
 import { WhyWeAskCard } from "@/components/onboarding/WhyWeAskCard"
+import { OnboardingBlocks } from "@/components/onboarding/OnboardingBlocks"
+import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
+import { onboardingBlockLayoutClasses } from "@/lib/onboarding/block-layout"
 
 export type OnboardingRenderStep = {
     key: string
@@ -12,6 +17,8 @@ export type OnboardingRenderStep = {
     why: string
     videoUrl?: string | null
     form?: OnboardingFormDefinition | null
+    blocks?: Array<OnboardingBlock & { sessionBlockId?: string; sourceBlockId?: string }>
+    navigation?: { backLabel: string; continueLabel: string }
 }
 
 export type OnboardingSessionRenderModel = {
@@ -27,6 +34,8 @@ export type OnboardingSessionRenderModel = {
     notice?: React.ReactNode
     allowEditRequest?: boolean
     action?: React.ReactNode
+    satisfiedBlockIds?: string[]
+    backHref?: string | null
 }
 
 function embeddedVideoUrl(value: string) {
@@ -64,9 +73,48 @@ export function OnboardingSessionRenderer({
     notice,
     allowEditRequest = false,
     action,
+    satisfiedBlockIds = [],
+    backHref = null,
 }: OnboardingSessionRenderModel) {
     const isFinalStep = step.kind === "final"
     const videoEmbedUrl = step.videoUrl ? embeddedVideoUrl(step.videoUrl) : null
+    const visualHeader = step.blocks?.find((block) => block.kind === "header")
+
+    if (visualHeader?.kind === "header" && step.blocks?.length) {
+        return (
+            <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm sm:p-8">
+                <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">{step.moduleTitle}</p>
+                <div className={onboardingBlockLayoutClasses(visualHeader.layout)}>
+                    <h1 className="text-3xl font-semibold tracking-tight text-[var(--onboarding-text,#0F172A)]">{visualHeader.title}</h1>
+                    {visualHeader.description ? <p className="mt-4 text-lg leading-7 text-[var(--onboarding-muted,#475569)]">{visualHeader.description}</p> : null}
+                    {visualHeader.estimatedTime ? <div className="mt-5 inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualHeader.estimatedTime}</div> : null}
+                </div>
+                {notice}
+                {visualHeader.showComposedModuleSummary && showModuleSummary ? (
+                    <div className="mt-8 rounded-2xl bg-[var(--onboarding-page,#F8F7F3)] p-5">
+                        <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">Your onboarding includes:</p>
+                        <div className="mt-4 flex flex-wrap gap-2">{moduleTitles.length ? moduleTitles.map((moduleTitle) => <span key={moduleTitle} className="rounded-full bg-[color-mix(in_srgb,var(--onboarding-primary,#1E3A5F)_9%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">✓ {moduleTitle}</span>) : <span className="text-sm text-[var(--onboarding-muted,#475569)]">No onboarding modules assigned yet.</span>}</div>
+                    </div>
+                ) : null}
+                <OnboardingBlocks
+                    blocks={step.blocks}
+                    token={token}
+                    stepKey={step.key}
+                    initialResponse={initialResponse}
+                    locked={locked}
+                    preview={preview}
+                    previewNextHref={previewNextHref}
+                    onPreviewSubmit={onPreviewSubmit}
+                    allowEditRequest={allowEditRequest}
+                    initiallySatisfied={satisfiedBlockIds}
+                    continueAction={action}
+                    continueLabel={step.navigation?.continueLabel || "Complete and continue"}
+                    backLabel={step.navigation?.backLabel || "Back"}
+                    backHref={backHref}
+                />
+            </div>
+        )
+    }
 
     return (
         <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm sm:p-8">

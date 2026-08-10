@@ -1,4 +1,5 @@
 import { ONBOARDING_FORMS } from "@/lib/onboarding/forms"
+import * as Y from "yjs"
 import { MODULES } from "@/lib/onboarding/modules"
 import { SERVICES } from "@/lib/onboarding/services"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
@@ -21,6 +22,15 @@ import type {
 import { DEFAULT_ONBOARDING_THEME } from "@/lib/onboarding/theme"
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { modulePublishDiff } from "@/lib/onboarding/publish-impact"
+import {
+    upgradeBookendToV2,
+    upgradeModuleToV2,
+    type OnboardingBlock,
+    type OnboardingBookendDefinitionV2,
+    type OnboardingModuleDefinitionV2,
+    type OnboardingStepV2,
+    type VideoBlock,
+} from "@/lib/onboarding/block-definition"
 
 type UnknownRow = Record<string, unknown>
 
@@ -195,6 +205,11 @@ function mapStep(value: unknown, index: number, moduleCode: string): ConfiguredO
         videoUrl: text(step.videoUrl, step.video_url) ?? "",
         videoPath: text(step.videoPath, step.video_path) ?? null,
         fields: array(step.fields).map((field, fieldIndex) => mapField(field, fieldIndex, key)),
+        blocks: Number(step.schemaVersion) === 2 || Array.isArray(step.blocks) ? array(step.blocks) as OnboardingBlock[] : undefined,
+        navigation: step.navigation && typeof step.navigation === "object" ? {
+            backLabel: text(record(step.navigation).backLabel) ?? "Back",
+            continueLabel: text(record(step.navigation).continueLabel) ?? "Complete and continue",
+        } : undefined,
     }
 }
 
@@ -222,6 +237,7 @@ function mapModule(row: UnknownRow, revision?: UnknownRow): OnboardingModuleDefi
         steps: steps.map((step, index) => mapStep(step, index, code)),
         lastEditedAt: text(source.updated_at, source.created_at, row.updated_at) ?? null,
         lastEditedBy: text(source.updated_by, source.created_by, row.updated_by) ?? null,
+        schemaVersion: Number(definition.schemaVersion) === 2 ? 2 : 1,
     }
 }
 
@@ -238,7 +254,7 @@ function selectRevision(row: UnknownRow, revisions: UnknownRow[], preferDraft: b
     return sorted.find((revision) => text(revision.state, revision.status) === "published" || Boolean(revision.published_at))
 }
 
-function mapBookend(rows: UnknownRow[], kind: "welcome" | "completion", preferDraft = true) {
+function mapBookend(rows: UnknownRow[], kind: "welcome" | "completion", preferDraft = true): OnboardingBookendDefinition {
     const candidates = rows.filter((row) => text(row.kind, row.configuration_type, row.type) === kind)
     const ordered = [...candidates].sort((left, right) => integer(right.revision_number, right.version) - integer(left.revision_number, left.version))
     const source = preferDraft
@@ -258,6 +274,8 @@ function mapBookend(rows: UnknownRow[], kind: "welcome" | "completion", preferDr
         status: text(source.state, source.status) === "draft" ? "draft" as const : "published" as const,
         lastEditedAt: text(source.updated_at, source.created_at) ?? null,
         lastEditedBy: text(source.updated_by, source.created_by) ?? null,
+        schemaVersion: Number(definition.schemaVersion) === 2 ? 2 : 1,
+        visualSteps: Number(definition.schemaVersion) === 2 ? array(definition.steps) as OnboardingStepV2[] : undefined,
     }
 }
 
@@ -332,6 +350,34 @@ function mapTheme(themeRow: UnknownRow | undefined, swatchRows: UnknownRow[]) {
         updatedAt: text(themeRow?.updated_at, themeRow?.created_at) ?? null,
         updatedBy: text(themeRow?.updated_by, themeRow?.created_by) ?? null,
     }
+}
+
+function mapThemeDraftDefinition(value: unknown): OnboardingThemeDefinition | null {
+    const definition = record(value)
+    if (!Array.isArray(definition.swatches) || !definition.assignments || typeof definition.assignments !== "object") return null
+    return {
+        id: text(definition.id) ?? null,
+        swatches: definition.swatches as OnboardingThemeDefinition["swatches"],
+        assignments: record(definition.assignments) as OnboardingThemeDefinition["assignments"],
+        updatedAt: text(definition.updatedAt) ?? null,
+        updatedBy: text(definition.updatedBy) ?? null,
+    }
+}
+
+function collaborativeTheme(snapshotBase64: unknown, updates: Array<{ update_base64?: unknown }>) {
+    try {
+        const document = new Y.Doc()
+        if (typeof snapshotBase64 === "string" && snapshotBase64) Y.applyUpdate(document, new Uint8Array(Buffer.from(snapshotBase64, "base64")))
+        for (const update of updates) if (typeof update.update_base64 === "string") Y.applyUpdate(document, new Uint8Array(Buffer.from(update.update_base64, "base64")))
+        const value = document.getMap("builder").get("theme")
+        return mapThemeDraftDefinition(value instanceof Y.AbstractType ? value.toJSON() : value)
+    } catch {
+        return null
+    }
+}
+
+function newestTheme(...themes: Array<OnboardingThemeDefinition | null>) {
+    return themes.filter((theme): theme is OnboardingThemeDefinition => Boolean(theme)).sort((left, right) => Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? ""))[0] ?? null
 }
 
 async function queryRawConfiguration(workspaceId: string) {
@@ -528,7 +574,13 @@ async function loadAssignees(workspaceId: string) {
 }
 
 export async function loadOnboardingSettingsPageData(workspaceId: string): Promise<OnboardingSettingsPageData> {
-    const [raw, assignees] = await Promise.all([rawConfiguration(workspaceId), loadAssignees(workspaceId)])
+    const [raw, assignees, themeDraftResult, builderDocumentResult, builderUpdatesResult] = await Promise.all([
+        rawConfiguration(workspaceId),
+        loadAssignees(workspaceId),
+        supabaseAdmin.from("onboarding_theme_revisions").select("definition").eq("workspace_id", workspaceId).eq("status", "draft").maybeSingle(),
+        supabaseAdmin.from("onboarding_builder_documents").select("snapshot_base64").eq("workspace_id", workspaceId).maybeSingle(),
+        supabaseAdmin.from("onboarding_builder_updates").select("update_base64").eq("workspace_id", workspaceId).order("sequence").limit(2_000),
+    ])
     const publishedModules = raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false)))
         : fallbackModules()
@@ -556,13 +608,55 @@ export async function loadOnboardingSettingsPageData(workspaceId: string): Promi
         mandatory,
         welcome: mapBookend(raw.configurations, "welcome"),
         completion: mapBookend(raw.configurations, "completion"),
-        theme: mapTheme(raw.themes[0], raw.swatches),
+        theme: newestTheme(
+            mapThemeDraftDefinition(themeDraftResult.data?.definition),
+            collaborativeTheme(builderDocumentResult.data?.snapshot_base64, builderUpdatesResult.data ?? []),
+            mapTheme(raw.themes[0], raw.swatches),
+        ) ?? defaultTheme(),
         help: mapHelp(raw.configurations, whatsappVerified, text(whatsappHint.phone_number, whatsappHint.display_phone_number) ?? null),
         assignees,
     }
 }
 
-export async function loadOnboardingBuilderData(workspaceId: string, selectedModuleId?: string | null): Promise<OnboardingBuilderData> {
+async function hydrateVisualModule(
+    base: OnboardingModuleDefinition,
+    rawDefinition: UnknownRow,
+): Promise<OnboardingModuleDefinitionV2> {
+    const visual = Number(rawDefinition.schemaVersion) === 2
+        ? { ...base, schemaVersion: 2 as const, steps: array(rawDefinition.steps) } as OnboardingModuleDefinitionV2
+        : upgradeModuleToV2(base)
+    return {
+        ...visual,
+        steps: await Promise.all(visual.steps.map(async (step) => ({
+            ...step,
+            blocks: await Promise.all(step.blocks.map(async (block) => {
+                if (block.kind !== "video" || !block.upload?.path) return block
+                return { ...block, upload: { ...block.upload, resolvedUrl: await createPrivateUploadSignedUrl(block.upload.path) } } as VideoBlock
+            })),
+        }))),
+    }
+}
+
+async function hydrateVisualBookend(
+    base: OnboardingBookendDefinition,
+    rawDefinition: UnknownRow,
+): Promise<OnboardingBookendDefinitionV2> {
+    const visual = Number(rawDefinition.schemaVersion) === 2
+        ? { ...upgradeBookendToV2(base), schemaVersion: 2 as const, steps: array(rawDefinition.steps) } as OnboardingBookendDefinitionV2
+        : upgradeBookendToV2(base)
+    return {
+        ...visual,
+        steps: await Promise.all(visual.steps.map(async (step) => ({
+            ...step,
+            blocks: await Promise.all(step.blocks.map(async (block) => {
+                if (block.kind !== "video" || !block.upload?.path) return block
+                return { ...block, upload: { ...block.upload, resolvedUrl: await createPrivateUploadSignedUrl(block.upload.path) } } as VideoBlock
+            })),
+        }))),
+    }
+}
+
+export async function loadOnboardingBuilderData(workspaceId: string, selectedModuleId?: string | null, currentUserId?: string | null): Promise<OnboardingBuilderData> {
     const raw = await rawConfiguration(workspaceId)
     const rawEditableModules = raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, true)))
@@ -612,6 +706,33 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
     }))
     const welcome = mapBookend(raw.configurations, "welcome")
     const completion = mapBookend(raw.configurations, "completion")
+    const rawRevisionByModuleId = new Map(raw.modules.map((row) => [
+        text(row.id) ?? "",
+        record(selectRevision(row, raw.revisions, true)?.definition),
+    ]))
+    const visualModules = await Promise.all(editableModules.map((moduleDefinition) => hydrateVisualModule(
+        moduleDefinition,
+        rawRevisionByModuleId.get(moduleDefinition.id) ?? {},
+    )))
+    const selectedWelcomeRow = [...raw.configurations]
+        .filter((row) => text(row.configuration_type) === "welcome")
+        .sort((left, right) => integer(right.revision_number) - integer(left.revision_number))
+        .find((row) => text(row.status) === "draft")
+        ?? raw.configurations.find((row) => text(row.configuration_type) === "welcome" && text(row.status) === "published")
+    const selectedCompletionRow = [...raw.configurations]
+        .filter((row) => text(row.configuration_type) === "completion")
+        .sort((left, right) => integer(right.revision_number) - integer(left.revision_number))
+        .find((row) => text(row.status) === "draft")
+        ?? raw.configurations.find((row) => text(row.configuration_type) === "completion" && text(row.status) === "published")
+    const [visualWelcome, visualCompletion, documentResult, updateResult, profileResult, themeDraftResult] = await Promise.all([
+        hydrateVisualBookend(welcome, record(selectedWelcomeRow?.definition)),
+        hydrateVisualBookend(completion, record(selectedCompletionRow?.definition)),
+        supabaseAdmin.from("onboarding_builder_documents").select("visual_enabled, version, published_version, snapshot_base64, snapshot_sequence").eq("workspace_id", workspaceId).maybeSingle(),
+        supabaseAdmin.from("onboarding_builder_updates").select("sequence, update_id, update_base64").eq("workspace_id", workspaceId).order("sequence").limit(2_000),
+        currentUserId ? supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").eq("user_id", currentUserId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+        supabaseAdmin.from("onboarding_theme_revisions").select("definition").eq("workspace_id", workspaceId).eq("status", "draft").maybeSingle(),
+    ])
+    const builderTheme = mapThemeDraftDefinition(themeDraftResult.data?.definition) ?? mapTheme(raw.themes[0], raw.swatches)
     const whatsappHint = record(raw.whatsapp?.config_hint)
     const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
     return {
@@ -622,10 +743,34 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
         selectedModule: editableModules.find((moduleDefinition) => moduleDefinition.id === selectedModuleId) ?? editableModules[0] ?? null,
         welcome: { ...welcome, resolvedVideoUrl: welcome.videoPath ? await createPrivateUploadSignedUrl(welcome.videoPath) : welcome.videoUrl },
         completion: { ...completion, resolvedVideoUrl: completion.videoPath ? await createPrivateUploadSignedUrl(completion.videoPath) : completion.videoUrl },
-        theme: mapTheme(raw.themes[0], raw.swatches),
+        theme: builderTheme,
         help: mapHelp(raw.configurations, whatsappVerified, text(whatsappHint.phone_number, whatsappHint.display_phone_number) ?? null, false),
         editors: Object.fromEntries((profiles ?? []).map((profile) => [profile.user_id, profile.username])),
         publishImpactByModule,
+        services,
+        mandatory,
+        visualModules,
+        visualWelcome,
+        visualCompletion,
+        collaboration: {
+            visualEnabled: documentResult.data?.visual_enabled !== false,
+            version: integer(documentResult.data?.version),
+            publishedVersion: integer(documentResult.data?.published_version),
+            snapshotBase64: text(documentResult.data?.snapshot_base64) ?? null,
+            snapshotSequence: integer(documentResult.data?.snapshot_sequence),
+            updates: (updateResult.data ?? []).map((update) => ({
+                sequence: Number(update.sequence),
+                updateId: String(update.update_id),
+                updateBase64: String(update.update_base64),
+            })),
+            currentUser: currentUserId ? {
+                id: currentUserId,
+                name: String(profileResult.data?.username ?? currentUserId),
+                avatarSrc: profileResult.data?.avatar_path
+                    ? profileAvatarUrl(String(profileResult.data.username ?? currentUserId), String(profileResult.data.avatar_path))
+                    : null,
+            } : null,
+        },
     }
 }
 

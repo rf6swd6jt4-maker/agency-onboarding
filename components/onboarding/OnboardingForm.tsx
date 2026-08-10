@@ -27,6 +27,11 @@ type OnboardingFormProps = {
     preview?: boolean
     previewNextHref?: string | null
     onPreviewSubmit?: () => void
+    submitDisabled?: boolean
+    submitLabel?: string
+    showIntro?: boolean
+    formId?: string
+    hideSubmit?: boolean
 }
 
 function getStringValue(response: FormResponse | undefined, name: string) {
@@ -88,6 +93,11 @@ export function OnboardingForm({
     preview = false,
     previewNextHref,
     onPreviewSubmit,
+    submitDisabled = false,
+    submitLabel = "Save and continue",
+    showIntro = true,
+    formId,
+    hideSubmit = false,
 }: OnboardingFormProps) {
     const router = useRouter()
     const formRef = useRef<HTMLFormElement>(null)
@@ -328,6 +338,7 @@ export function OnboardingForm({
 
     return (
         <form
+            id={formId}
             ref={formRef}
             onSubmit={handleSubmit}
             onInput={scheduleDraftSave}
@@ -336,12 +347,12 @@ export function OnboardingForm({
         >
             {submitting && <LoadingOverlay label="Saving your answers..." />}
 
-            <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-5">
+            {showIntro ? <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-5">
                 <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">{form.title}</p>
                 <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">
                     {form.intro}
                 </p>
-            </div>
+            </div> : null}
 
             {form.fields.map((field) => (
                 <div key={field.name}>
@@ -457,16 +468,20 @@ export function OnboardingForm({
                 </div>
             ) : locked ? (
                 <p className="text-center text-sm text-[var(--onboarding-muted,#475569)]">This submitted step is read-only.</p>
+            ) : hideSubmit ? (
+                <p aria-live="polite" className="text-center text-xs text-[var(--onboarding-muted,#475569)]">
+                    {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft will retry when you reconnect" : ""}
+                </p>
             ) : (
                 <>
                     <p aria-live="polite" className="text-center text-xs text-[var(--onboarding-muted,#475569)]">
                         {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft will retry when you reconnect" : ""}
                     </p>
                     <button
-                        disabled={submitting}
+                        disabled={submitting || submitDisabled}
                         className="w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        {submitting ? "Uploading..." : "Save and continue"}
+                        {submitting ? "Uploading..." : submitLabel}
                     </button>
                 </>
             )}

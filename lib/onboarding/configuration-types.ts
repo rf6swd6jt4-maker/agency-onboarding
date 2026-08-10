@@ -1,4 +1,5 @@
 import type { FileAccept, FormFieldType } from "@/lib/onboarding/forms"
+import type { OnboardingBlock, OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2, OnboardingStepV2 } from "@/lib/onboarding/block-definition"
 
 export type OnboardingDefinitionStatus = "draft" | "published" | "archived"
 export type OnboardingServiceState = "active" | "retired" | "archived"
@@ -29,6 +30,8 @@ export type ConfiguredOnboardingStep = {
     videoPath: string | null
     resolvedVideoUrl?: string | null
     fields: ConfiguredOnboardingField[]
+    blocks?: OnboardingBlock[]
+    navigation?: { backLabel: string; continueLabel: string }
 }
 
 export type OnboardingModuleDefinition = {
@@ -43,6 +46,7 @@ export type OnboardingModuleDefinition = {
     steps: ConfiguredOnboardingStep[]
     lastEditedAt: string | null
     lastEditedBy: string | null
+    schemaVersion?: 1 | 2
 }
 
 export type OnboardingModuleSummary = Omit<OnboardingModuleDefinition, "steps"> & {
@@ -90,6 +94,8 @@ export type OnboardingBookendDefinition = {
     status: "draft" | "published"
     lastEditedAt: string | null
     lastEditedBy: string | null
+    schemaVersion?: 1 | 2
+    visualSteps?: OnboardingStepV2[]
 }
 
 export type MandatoryModuleConfiguration = {
@@ -164,6 +170,20 @@ export type OnboardingBuilderData = {
     help: OnboardingHelpSettings
     editors: Record<string, string>
     publishImpactByModule: Record<string, OnboardingModulePublishImpact>
+    services: OnboardingServiceDefinition[]
+    mandatory: MandatoryModuleConfiguration
+    visualModules: OnboardingModuleDefinitionV2[]
+    visualWelcome: OnboardingBookendDefinitionV2
+    visualCompletion: OnboardingBookendDefinitionV2
+    collaboration: {
+        visualEnabled: boolean
+        version: number
+        publishedVersion: number
+        snapshotBase64: string | null
+        snapshotSequence: number
+        updates: Array<{ sequence: number; updateId: string; updateBase64: string }>
+        currentUser: { id: string; name: string; avatarSrc: string | null } | null
+    }
 }
 
 export type OnboardingModulePublishImpact = {

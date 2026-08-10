@@ -33,7 +33,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
         )
     }
 
-    const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices } = resolved
+    const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds } = resolved
     const linearCurrentStep = completableSteps.find((step) => !completedKeys.has(step.key)) ?? steps[steps.length - 1]
     const requestedCandidate = steps.find((step) => step.key === requestedStepKey)
     const requestedStep = requestedCandidate && (session.status === "completed" || completedKeys.has(requestedCandidate.key) || requestedCandidate.key === linearCurrentStep.key)
@@ -56,18 +56,19 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
             : null,
     }))
     const currentForm = currentStep.kind === "form" ? currentStep.form ?? getOnboardingForm(currentStep.formKey) : null
-    const [submittedResponse, draft, storedVideoUrl] = await Promise.all([
+    const [submittedResponse, draft, storedVideoUrl, resolvedBlocks] = await Promise.all([
         currentStep.kind === "form" ? getFormResponseAsset(session.id, currentStep) : undefined,
         currentStep.kind === "form" && !stepIsLocked ? getCanonicalStepDraft(token, currentStep.key) : null,
         currentStep.videoPath ? createPrivateUploadSignedUrl(currentStep.videoPath) : null,
+        Promise.all((currentStep.blocks ?? []).map(async (block) => block.kind === "video" && block.upload?.path
+            ? { ...block, upload: { ...block.upload, resolvedUrl: await createPrivateUploadSignedUrl(block.upload.path) } }
+            : block)),
     ])
     const initialResponse = submittedResponse ?? draft?.response
     const videoUrl = storedVideoUrl ?? currentStep.videoUrl ?? ""
-    const migrationNotice = currentStep.sessionModuleId
-        ? notices.find((notice) => notice.sessionModuleId === currentStep.sessionModuleId && (
+    const migrationNotice = notices.find((notice) => (notice.sessionModuleId === currentStep.sessionModuleId || Boolean(currentStep.sessionStepId && notice.affectedStepIds.includes(currentStep.sessionStepId))) && (
             notice.requiresCompletion ? !notice.moduleCompletedAt : !notice.firstSeenAt
         )) ?? null
-        : null
 
     return (
         <OnboardingThemeProvider theme={theme}>
@@ -103,9 +104,9 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
             <ScrollToTopOnStepChange stepKey={currentStep.key} />
 
             <OnboardingSessionRenderer
-                step={{ ...currentStep, form: currentForm, videoUrl }}
+                step={{ ...currentStep, form: currentForm, videoUrl, blocks: resolvedBlocks }}
                 moduleTitles={moduleTitles}
-                showModuleSummary={currentStep.kind === "video" && (currentStep.moduleTitle === "General" || ["welcome", "welcome-video"].includes(currentStep.legacyStepKey ?? ""))}
+                showModuleSummary={Boolean(currentStep.blocks?.length) || (currentStep.kind === "video" && (currentStep.moduleTitle === "General" || ["welcome", "welcome-video"].includes(currentStep.legacyStepKey ?? "")))}
                 token={token}
                 initialResponse={initialResponse}
                 locked={stepIsLocked}
@@ -116,6 +117,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                         noticeId={migrationNotice.id}
                         explanation={migrationNotice.explanation}
                         requiresCompletion={migrationNotice.requiresCompletion}
+                        sections={migrationNotice.sections}
                     />
                 ) : null}
                 action={!isFinalStep && currentStep.kind === "video" && !stepIsLocked && session.status === "active" ? (
@@ -131,6 +133,8 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                         </button>
                     </form>
                 ) : null}
+                satisfiedBlockIds={[...satisfiedBlockIds]}
+                backHref={previousStep ? (customOnboardingDomain ? `/${token}?step=${previousStep.key}` : `/onboarding/session/${token}?step=${previousStep.key}`) : null}
             />
         </OnboardingLayout>
         </OnboardingThemeProvider>

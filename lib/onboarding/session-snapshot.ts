@@ -8,6 +8,7 @@ import type {
     OnboardingServiceDefinition,
 } from "@/lib/onboarding/configuration-types"
 import type { FileAccept, FormFieldType } from "@/lib/onboarding/forms"
+import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { orderOnboardingServices, resolveOrderedModuleSources } from "./session-composition-order"
 
@@ -44,6 +45,9 @@ export type SessionSnapshotStep = {
     legacyStepKey: string | null
     legacyFormKey: string | null
     fields: SessionSnapshotField[]
+    blocks: Array<OnboardingBlock & { sessionBlockId?: string; sourceBlockId?: string }>
+    navigation: { backLabel: string; continueLabel: string }
+    actionable: boolean
 }
 
 export type SessionSnapshotModule = {
@@ -60,7 +64,7 @@ export type SessionSnapshotModule = {
 }
 
 export type SessionCompositionSnapshot = {
-    schemaVersion: 1
+    schemaVersion: 1 | 2
     configurationRevisionId: string | null
     welcomeRevisionId: string | null
     completionRevisionId: string | null
@@ -139,6 +143,9 @@ function composedStep(
         legacyStepKey: step.key || null,
         legacyFormKey: step.kind === "form" ? step.key || null : null,
         fields: step.fields.map((field, index) => composedField(field, index * 10)),
+        blocks: step.blocks ?? [],
+        navigation: step.navigation ?? { backLabel: "Back", continueLabel: "Complete and continue" },
+        actionable: true,
     }
 }
 
@@ -166,6 +173,9 @@ function composedBookend(
         legacyStepKey: kind === "welcome" ? "welcome-video" : "final",
         legacyFormKey: null,
         fields: [],
+        blocks: [],
+        navigation: { backLabel: "Back", continueLabel: kind === "welcome" ? "Start onboarding" : "Continue" },
+        actionable: kind !== "completion",
     }
 }
 
@@ -202,8 +212,12 @@ export function composeOnboardingSession(input: ComposeInput): ComposedOnboardin
     }})
     const welcome = composedBookend(input.welcome, "welcome", 0)
     const completion = composedBookend(input.completion, "completion", (modules.reduce((count, module) => count + module.steps.length, 0) + 1) * 10)
+    const schemaVersion = input.modules.some((module) => module.schemaVersion === 2)
+        || input.welcome.schemaVersion === 2
+        || input.completion.schemaVersion === 2 ? 2 : 1
+    const bookendStepCount = (input.welcome.visualSteps?.length ?? 1) + (input.completion.visualSteps?.length ?? 1)
     const audit: SessionCompositionSnapshot = {
-        schemaVersion: 1,
+        schemaVersion,
         configurationRevisionId: input.configurationRevisionId ?? input.mandatory.publishedRevisionId,
         welcomeRevisionId: input.welcome.revisionId,
         completionRevisionId: input.completion.revisionId,
@@ -215,7 +229,7 @@ export function composeOnboardingSession(input: ComposeInput): ComposedOnboardin
             sourceServiceRevisionId: module.sourceServiceRevisionId,
             sortOrder: module.sortOrder,
         })),
-        stepCount: 2 + modules.reduce((count, module) => count + module.steps.length, 0),
+        stepCount: bookendStepCount + modules.reduce((count, module) => count + module.steps.length, 0),
         fieldCount: modules.reduce((count, module) => count + module.steps.reduce((stepCount, step) => stepCount + step.fields.length, 0), 0),
     }
     return {
@@ -251,10 +265,13 @@ function isMissingSnapshotSchema(error: { code?: string; message?: string } | nu
 
 export async function loadNormalizedSessionSnapshot(session: SnapshotSession) {
     if (!session.snapshot_schema_version) return null
-    const [moduleResult, stepResult, fieldResult] = await Promise.all([
+    let stepQuery = supabaseAdmin.from("relationship_onboarding_session_steps").select("*").eq("workspace_id", session.workspace_id).eq("session_id", session.id).order("sort_order")
+    if (Number(session.snapshot_schema_version) >= 2) stepQuery = stepQuery.is("superseded_at", null)
+    const [moduleResult, stepResult, fieldResult, blockResult] = await Promise.all([
         supabaseAdmin.from("relationship_onboarding_session_modules").select("*").eq("workspace_id", session.workspace_id).eq("session_id", session.id).order("sort_order"),
-        supabaseAdmin.from("relationship_onboarding_session_steps").select("*").eq("workspace_id", session.workspace_id).eq("session_id", session.id).order("sort_order"),
+        stepQuery,
         supabaseAdmin.from("relationship_onboarding_session_fields").select("*").eq("workspace_id", session.workspace_id).eq("session_id", session.id).order("sort_order"),
+        supabaseAdmin.from("relationship_onboarding_session_blocks").select("*").eq("workspace_id", session.workspace_id).eq("session_id", session.id).order("sort_order"),
     ])
     const error = moduleResult.error ?? stepResult.error ?? fieldResult.error
     if (error) {
@@ -262,6 +279,23 @@ export async function loadNormalizedSessionSnapshot(session: SnapshotSession) {
         throw new Error(error.message)
     }
     if (!stepResult.data?.length) return null
+
+    const blocksByStep = new Map<string, Array<OnboardingBlock & { sessionBlockId?: string; sourceBlockId?: string }>>()
+    if (!blockResult.error) {
+        for (const row of blockResult.data ?? []) {
+            const definition = row.definition && typeof row.definition === "object" && !Array.isArray(row.definition)
+                ? row.definition as unknown as OnboardingBlock
+                : null
+            if (!definition || !["header", "form", "video", "button"].includes(String(definition.kind))) continue
+            const stepId = String(row.session_step_id)
+            blocksByStep.set(stepId, [...(blocksByStep.get(stepId) ?? []), {
+                ...definition,
+                id: String(row.source_block_id),
+                sessionBlockId: String(row.id),
+                sourceBlockId: String(row.source_block_id),
+            }])
+        }
+    }
 
     const fieldsByStep = new Map<string, SessionSnapshotField[]>()
     for (const row of fieldResult.data ?? []) {
@@ -309,6 +343,12 @@ export async function loadNormalizedSessionSnapshot(session: SnapshotSession) {
             legacyStepKey,
             legacyFormKey: text(row.legacy_form_key),
             fields: fieldsByStep.get(String(row.id)) ?? [],
+            blocks: blocksByStep.get(String(row.id)) ?? [],
+            navigation: row.navigation && typeof row.navigation === "object" ? {
+                backLabel: String((row.navigation as Record<string, unknown>).backLabel ?? "Back"),
+                continueLabel: String((row.navigation as Record<string, unknown>).continueLabel ?? "Complete and continue"),
+            } : { backLabel: "Back", continueLabel: "Complete and continue" },
+            actionable: row.is_actionable !== false,
         }
     })
     const stepsByModule = new Map<string, SessionSnapshotStep[]>()
@@ -330,8 +370,13 @@ export async function loadNormalizedSessionSnapshot(session: SnapshotSession) {
     return {
         modules,
         steps,
-        actionableSteps: steps.filter((step) => step.kind !== "completion"),
-        completionStep: steps.find((step) => step.kind === "completion") ?? null,
+        schemaVersion: Number(session.snapshot_schema_version ?? 1),
+        actionableSteps: Number(session.snapshot_schema_version ?? 1) >= 2
+            ? steps.filter((step) => step.actionable)
+            : steps.filter((step) => step.kind !== "completion"),
+        completionStep: Number(session.snapshot_schema_version ?? 1) >= 2
+            ? null
+            : steps.find((step) => step.kind === "completion") ?? null,
     }
 }
 
