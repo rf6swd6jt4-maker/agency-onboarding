@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Y from "yjs"
 import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
 import { visibleBuilderPresence, type BuilderPresence } from "@/lib/onboarding/builder-presence"
@@ -18,6 +18,11 @@ export type VisualBuilderDocument = {
 
 export type BuilderSyncState = "syncing" | "synced" | "offline" | "error" | "publishing"
 export type BuilderRealtimeState = "connecting" | "connected" | "reconnecting" | "unavailable"
+
+type BuilderCollaboratorActivity = Pick<BuilderPresence, "selection" | "cursor"> & {
+    clientId: string
+    userId: string
+}
 
 const collaboratorColours = ["#67E8F9", "#A7F3D0", "#FDE68A", "#F9A8D4", "#C4B5FD", "#FDBA74"]
 const KEYED_ARRAY_KIND = "betelgeze-keyed-array"
@@ -264,15 +269,23 @@ export function useCollaborativeOnboardingDocument({
     const persistTimerRef = useRef<number | null>(null)
     const localOriginRef = useRef({ actor: collaboration.currentUser?.id ?? "anonymous" })
     const localPresenceRef = useRef<BuilderPresence | null>(null)
-    const presenceTimerRef = useRef<number | null>(null)
+    const localActivityRef = useRef<BuilderCollaboratorActivity | null>(null)
+    const activityTimerRef = useRef<number | null>(null)
+    const activityExpiryTimersRef = useRef(new Map<string, number>())
+    const presenceRetryTimerRef = useRef<number | null>(null)
     const [document, setDocument] = useState(initial)
     const [syncState, setSyncState] = useState<BuilderSyncState>("synced")
     const [realtimeState, setRealtimeState] = useState<BuilderRealtimeState>("connecting")
     const [realtimeError, setRealtimeError] = useState<string | null>(null)
     const [serverVersion, setServerVersion] = useState(collaboration.version)
     const serverVersionRef = useRef(collaboration.version)
-    const [presence, setPresence] = useState<BuilderPresence[]>([])
+    const [presenceMembers, setPresenceMembers] = useState<BuilderPresence[]>([])
+    const [remoteActivity, setRemoteActivity] = useState<Record<string, BuilderCollaboratorActivity>>({})
     const [undoState, setUndoState] = useState({ canUndo: false, canRedo: false })
+    const presence = useMemo(() => presenceMembers.map((person) => {
+        const activity = remoteActivity[person.clientId]
+        return activity?.userId === person.userId ? { ...person, selection: activity.selection, cursor: activity.cursor } : person
+    }), [presenceMembers, remoteActivity])
 
     const persistNextBatch = useCallback(async () => {
         const retry = retryUpdateRef.current
@@ -299,15 +312,11 @@ export function useCollaborativeOnboardingDocument({
         const version = Number(outcome.data?.version ?? 0)
         serverVersionRef.current = Math.max(serverVersionRef.current, version)
         setServerVersion((current) => Math.max(current, version))
-        const broadcastStatus = await channelRef.current?.send({
+        await channelRef.current?.send({
             type: "broadcast",
             event: "document-update",
             payload: { update: uint8ToBase64(batch.update), sequence: outcome.data?.sequence, version, sender: clientIdRef.current },
         }).catch(() => "error")
-        if (broadcastStatus !== "ok") {
-            setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-            setRealtimeError("Live presence lost connection. Changes will continue saving while it reconnects.")
-        }
         setSyncState("synced")
         return serverVersionRef.current
     }, [workspaceSlug])
@@ -349,6 +358,7 @@ export function useCollaborativeOnboardingDocument({
     }, [workspaceSlug])
 
     useEffect(() => {
+        const activityExpiryTimers = activityExpiryTimersRef.current
         const ydoc = new Y.Doc()
         const root = ydoc.getMap("builder")
         docRef.current = ydoc
@@ -389,32 +399,93 @@ export function useCollaborativeOnboardingDocument({
         const user = collaboration.currentUser
         let channel: ReturnType<typeof supabase.channel> | null = null
         let disposed = false
+        let realtimeConnected = false
+        let realtimeAccessToken: string | null = null
 
-        async function connectRealtime() {
-            setRealtimeState("connecting")
-            setRealtimeError(null)
-            const sessionResult = await supabase.auth.getSession().catch(() => null)
-            const sessionData = sessionResult?.data
-            const sessionError = sessionResult?.error
-            const accessToken = sessionData?.session?.access_token
+        const clearActivityExpiry = (clientId: string) => {
+            const timer = activityExpiryTimers.get(clientId)
+            if (timer) window.clearTimeout(timer)
+            activityExpiryTimers.delete(clientId)
+        }
+
+        const receiveActivity = (activity: BuilderCollaboratorActivity) => {
+            if (!activity.clientId || activity.clientId === clientIdRef.current || !activity.userId) return
+            setRemoteActivity((current) => ({ ...current, [activity.clientId]: activity }))
+            clearActivityExpiry(activity.clientId)
+            if (!activity.cursor) return
+            activityExpiryTimers.set(activity.clientId, window.setTimeout(() => {
+                activityExpiryTimers.delete(activity.clientId)
+                setRemoteActivity((current) => {
+                    const existing = current[activity.clientId]
+                    if (!existing?.cursor) return current
+                    return { ...current, [activity.clientId]: { ...existing, cursor: null } }
+                })
+            }, 2_500))
+        }
+
+        const sendLocalActivity = () => {
+            if (!channel || !localActivityRef.current) return
+            void channel.send({
+                type: "broadcast",
+                event: "collaborator-activity",
+                payload: localActivityRef.current,
+            }).catch(() => "error")
+        }
+
+        const trackLocalPresence = async () => {
+            if (!channel || !localPresenceRef.current || disposed) return
+            const status = await channel.track(localPresenceRef.current).catch(() => "error" as const)
             if (disposed) return
-            if (sessionError || !accessToken || !user) {
-                setRealtimeState("unavailable")
-                setRealtimeError("Live presence could not authenticate. Changes will continue saving in the background.")
+            if (status === "ok") {
+                realtimeConnected = true
+                if (presenceRetryTimerRef.current) window.clearTimeout(presenceRetryTimerRef.current)
+                presenceRetryTimerRef.current = null
+                setRealtimeState("connected")
+                setRealtimeError(null)
+                sendLocalActivity()
                 return
             }
+            realtimeConnected = false
+            setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
+            setRealtimeError("Live presence could not connect. Changes will continue saving in the background.")
+            if (!presenceRetryTimerRef.current) {
+                presenceRetryTimerRef.current = window.setTimeout(() => {
+                    presenceRetryTimerRef.current = null
+                    void trackLocalPresence()
+                }, 8_000)
+            }
+        }
+
+        const refreshRealtimeAuth = async () => {
+            const sessionResult = await supabase.auth.getSession().catch(() => null)
+            const accessToken = sessionResult?.data?.session?.access_token
+            if (!accessToken || accessToken === realtimeAccessToken || disposed) return Boolean(accessToken)
             try {
                 await supabase.realtime.setAuth(accessToken)
+                realtimeAccessToken = accessToken
+                return true
             } catch {
                 if (!disposed) {
                     setRealtimeState("unavailable")
                     setRealtimeError("Live presence could not authenticate. Changes will continue saving in the background.")
                 }
+                return false
+            }
+        }
+
+        async function connectRealtime() {
+            setRealtimeState("connecting")
+            setRealtimeError(null)
+            const authenticated = await refreshRealtimeAuth()
+            if (disposed) return
+            if (!authenticated || !user) {
+                setRealtimeState("unavailable")
+                setRealtimeError("Live presence could not authenticate. Changes will continue saving in the background.")
                 return
             }
             if (disposed) return
             channel = supabase.channel(`onboarding-builder:${workspaceSlug}`, {
-                config: { private: true, broadcast: { self: false, ack: true }, presence: { key: clientIdRef.current } },
+                config: { private: true, broadcast: { self: false, ack: false }, presence: { key: clientIdRef.current } },
             })
             channelRef.current = channel
             channel
@@ -429,28 +500,37 @@ export function useCollaborativeOnboardingDocument({
                 .on("broadcast", { event: "release-lock" }, ({ payload }) => {
                     setSyncState(payload?.locked ? "publishing" : navigator.onLine ? "synced" : "offline")
                 })
+                .on("broadcast", { event: "collaborator-activity" }, ({ payload }) => {
+                    if (!payload || typeof payload !== "object") return
+                    receiveActivity({
+                        clientId: String(payload.clientId ?? ""),
+                        userId: String(payload.userId ?? ""),
+                        selection: typeof payload.selection === "string" ? payload.selection : null,
+                        cursor: payload.cursor && Number.isFinite(Number(payload.cursor.xRatio)) && Number.isFinite(Number(payload.cursor.yRatio))
+                            ? { xRatio: Math.max(0, Math.min(1, Number(payload.cursor.xRatio))), yRatio: Math.max(0, Math.min(1, Number(payload.cursor.yRatio))) }
+                            : null,
+                    })
+                })
                 .on("presence", { event: "sync" }, () => {
                     if (!channel) return
-                    setPresence(visibleBuilderPresence(channel.presenceState<BuilderPresence>(), clientIdRef.current))
+                    const visible = visibleBuilderPresence(channel.presenceState<BuilderPresence>(), clientIdRef.current)
+                    const activeClientIds = new Set(visible.map((person) => person.clientId))
+                    setPresenceMembers(visible)
+                    setRemoteActivity((current) => Object.fromEntries(Object.entries(current).filter(([clientId]) => activeClientIds.has(clientId))))
+                    for (const clientId of activityExpiryTimers.keys()) if (!activeClientIds.has(clientId)) clearActivityExpiry(clientId)
                 })
                 .subscribe(async (status, error) => {
                     if (disposed || !channel) return
                     if (status === "SUBSCRIBED") {
                         localPresenceRef.current = { clientId: clientIdRef.current, userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null }
-                        const [trackStatus, refreshed] = await Promise.all([
-                            channel.track(localPresenceRef.current).catch(() => "error" as const),
-                            refreshFromServer(),
-                        ])
-                        if (disposed) return
-                        if (trackStatus === "ok" && refreshed) {
-                            setRealtimeState("connected")
-                            setRealtimeError(null)
-                        } else {
-                            setRealtimeState("unavailable")
-                            setRealtimeError(trackStatus !== "ok" ? "Live presence could not connect. Changes will continue saving in the background." : "Live catch-up is temporarily unavailable. Changes will continue saving in the background.")
-                        }
+                        localActivityRef.current = { clientId: clientIdRef.current, userId: user.id, selection: null, cursor: null }
+                        await Promise.all([trackLocalPresence(), refreshFromServer()])
                         if (initialWasEmpty) void flush()
                     } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                        realtimeConnected = false
+                        setPresenceMembers([])
+                        setRemoteActivity({})
+                        for (const clientId of activityExpiryTimers.keys()) clearActivityExpiry(clientId)
                         setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
                         setRealtimeError(error?.message ?? "Live presence disconnected. Changes will continue saving while it reconnects.")
                     }
@@ -458,24 +538,35 @@ export function useCollaborativeOnboardingDocument({
         }
         void connectRealtime()
         const connectionTimeout = window.setTimeout(() => {
-            setRealtimeState((current) => current === "connected" ? current : "unavailable")
-            setRealtimeError((current) => current ?? "Live presence is taking too long to connect. Changes will continue saving in the background.")
+            if (realtimeConnected) return
+            setRealtimeState("unavailable")
+            setRealtimeError((message) => message ?? "Live presence is taking too long to connect. Changes will continue saving in the background.")
         }, 8_000)
         const refreshTimer = window.setInterval(() => {
             if (!navigator.onLine) return
             void refreshFromServer()
         }, 4_000)
+        const authRefreshTimer = window.setInterval(() => {
+            if (!navigator.onLine) return
+            void refreshRealtimeAuth()
+        }, 60_000)
         const updateOnlineState = () => {
             if (!navigator.onLine) {
+                realtimeConnected = false
                 setSyncState("offline")
                 setRealtimeState("unavailable")
                 setRealtimeError("Offline — changes will save when the connection returns.")
+                setPresenceMembers([])
+                setRemoteActivity({})
                 return
             }
             setSyncState("syncing")
             setRealtimeState("reconnecting")
             void flush().then(() => setSyncState("synced"))
             void refreshFromServer()
+            void refreshRealtimeAuth().then((authenticated) => {
+                if (authenticated) void trackLocalPresence()
+            })
         }
         window.addEventListener("online", updateOnlineState)
         window.addEventListener("offline", updateOnlineState)
@@ -487,9 +578,13 @@ export function useCollaborativeOnboardingDocument({
         return () => {
             disposed = true
             if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
-            if (presenceTimerRef.current) window.clearTimeout(presenceTimerRef.current)
+            if (activityTimerRef.current) window.clearTimeout(activityTimerRef.current)
+            if (presenceRetryTimerRef.current) window.clearTimeout(presenceRetryTimerRef.current)
+            for (const timer of activityExpiryTimers.values()) window.clearTimeout(timer)
+            activityExpiryTimers.clear()
             window.clearTimeout(connectionTimeout)
             window.clearInterval(refreshTimer)
+            window.clearInterval(authRefreshTimer)
             void flush()
             window.removeEventListener("online", updateOnlineState)
             window.removeEventListener("offline", updateOnlineState)
@@ -511,23 +606,20 @@ export function useCollaborativeOnboardingDocument({
         docRef.current.transact(() => writeDocument(rootRef.current!, next), localOriginRef.current)
     }, [syncState])
 
-    const updatePresence = useCallback((update: Partial<Pick<BuilderPresence, "selection" | "cursor">>) => {
+    const updateActivity = useCallback((update: Partial<Pick<BuilderPresence, "selection" | "cursor">>) => {
         const user = collaboration.currentUser
         if (!user || realtimeState !== "connected") return
-        localPresenceRef.current = { clientId: clientIdRef.current, userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null, ...localPresenceRef.current, ...update }
-        if (presenceTimerRef.current) return
-        presenceTimerRef.current = window.setTimeout(() => {
-            presenceTimerRef.current = null
-            if (!localPresenceRef.current || !channelRef.current) return
-            void channelRef.current.track(localPresenceRef.current).then((status) => {
-                if (status === "ok") return
-                setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-                setRealtimeError("Live presence disconnected. Changes will continue saving while it reconnects.")
-            }).catch(() => {
-                setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-                setRealtimeError("Live presence disconnected. Changes will continue saving while it reconnects.")
-            })
-        }, 70)
+        localActivityRef.current = { clientId: clientIdRef.current, userId: user.id, selection: null, cursor: null, ...localActivityRef.current, ...update }
+        if (activityTimerRef.current) return
+        activityTimerRef.current = window.setTimeout(() => {
+            activityTimerRef.current = null
+            if (!localActivityRef.current || !channelRef.current) return
+            void channelRef.current.send({
+                type: "broadcast",
+                event: "collaborator-activity",
+                payload: localActivityRef.current,
+            }).catch(() => "error")
+        }, 80)
     }, [collaboration.currentUser, realtimeState])
 
     return {
@@ -540,7 +632,7 @@ export function useCollaborativeOnboardingDocument({
         serverVersion,
         presence,
         editable: ["synced", "syncing"].includes(syncState),
-        updatePresence,
+        updateActivity,
         setReleaseLock: async (locked: boolean) => {
             setSyncState(locked ? "publishing" : navigator.onLine ? "synced" : "offline")
             await channelRef.current?.send({ type: "broadcast", event: "release-lock", payload: { locked, sender: clientIdRef.current } })

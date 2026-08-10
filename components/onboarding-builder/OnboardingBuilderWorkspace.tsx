@@ -194,10 +194,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         }
     }, [groups, selection.groupKey])
 
-    const updatePresence = collaboration.updatePresence
+    const updateActivity = collaboration.updateActivity
     useEffect(() => {
-        updatePresence({ selection: selection.groupKey && selection.stepId ? `${selection.groupKey}:${selection.stepId}:${selection.blockId ?? "step"}` : null })
-    }, [selection.blockId, selection.groupKey, selection.stepId, updatePresence])
+        updateActivity({ selection: selection.groupKey && selection.stepId ? `${selection.groupKey}:${selection.stepId}:${selection.blockId ?? "step"}` : null })
+    }, [selection.blockId, selection.groupKey, selection.stepId, updateActivity])
 
     const resolved = selectedStep(groups, selection)
     const currentGroup = resolved.group
@@ -334,7 +334,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     function chooseGroup(group: DefinitionGroup) {
         setSelection({ groupKey: group.key, stepId: group.definition.steps[0]?.id ?? "", blockId: null })
-        collaboration.updatePresence({ selection: group.key })
+        collaboration.updateActivity({ selection: group.key })
     }
 
     function addStep() {
@@ -440,7 +440,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         setNotice("Frozen 24-hour preview link copied.")
     }
 
-    return <div onPointerMove={(event) => collaboration.updatePresence({ cursor: normalizedBuilderCursor(event.clientX, event.clientY, window.innerWidth, window.innerHeight) })} onPointerLeave={() => collaboration.updatePresence({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
+    return <div onPointerMove={(event) => collaboration.updateActivity({ cursor: normalizedBuilderCursor(event.clientX, event.clientY, window.innerWidth, window.innerHeight) })} onPointerLeave={() => collaboration.updateActivity({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-neutral-800 bg-black px-3 sm:px-4">
             <a href={`/${workspaceSlug}/settings#onboarding`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white"><BuilderIcon name="back" /><span className="hidden sm:inline">Back to Betelgeze</span></a>
             <span className="hidden h-5 w-px bg-neutral-800 sm:block" />
