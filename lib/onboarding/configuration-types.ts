@@ -182,6 +182,7 @@ export type OnboardingBuilderData = {
         snapshotBase64: string | null
         snapshotSequence: number
         updates: Array<{ sequence: number; updateId: string; updateBase64: string }>
+        collaborators: Array<{ id: string; name: string; avatarSrc: string | null }>
         currentUser: { id: string; name: string; avatarSrc: string | null } | null
     }
 }

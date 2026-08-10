@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react"
 import { createOnboardingModule } from "@/app/[workspaceSlug]/onboarding-builder/actions"
 import { publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
+import { Avatar } from "@/components/account/Avatar"
 import { SortableAuthoringList } from "@/components/onboarding-builder/SortableAuthoringList"
 import { VisualBuilderCanvas } from "@/components/onboarding-builder/VisualBuilderCanvas"
 import { useCollaborativeOnboardingDocument, type VisualBuilderDocument } from "@/components/onboarding-builder/useCollaborativeOnboardingDocument"
@@ -126,17 +127,28 @@ function railPreference(key: string, fallback: boolean) {
 export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data, initialBookend }: { workspaceSlug: string; workspaceName: string; data: OnboardingBuilderData; initialBookend?: "welcome" | "completion" | null }) {
     const initialDocument = useMemo<VisualBuilderDocument>(() => ({ modules: data.visualModules, welcome: data.visualWelcome, completion: data.visualCompletion, theme: data.theme, linkedChangeSets: [] }), [data])
     const collaboration = useCollaborativeOnboardingDocument({ workspaceSlug, initial: initialDocument, collaboration: data.collaboration })
-    const collaborationStatus = collaboration.syncState === "publishing"
-        ? { label: "Publish in progress", tone: "yellow" as const }
-        : collaboration.syncState === "offline"
-            ? { label: "Offline — editing paused", tone: "red" as const }
-            : collaboration.syncState === "error"
-                ? { label: "Save failed", tone: "red" as const }
-                : collaboration.realtimeState === "connected"
-                    ? { label: collaboration.syncState === "syncing" ? "Live · Saving" : "Live · Saved", tone: "green" as const }
-                    : collaboration.realtimeState === "unavailable"
-                        ? { label: collaboration.syncState === "syncing" ? "Saving · Presence unavailable" : "Saved · Presence unavailable", tone: "yellow" as const }
-                        : { label: collaboration.syncState === "syncing" ? "Saving · Connecting presence" : "Saved · Connecting presence", tone: "yellow" as const }
+    const saveStatus = collaboration.syncState === "synced"
+        ? { label: "Saved", tone: "green" as const }
+        : collaboration.syncState === "syncing" || collaboration.syncState === "publishing"
+            ? { label: "Saving…", tone: "yellow" as const }
+            : { label: "Save failed", tone: "red" as const }
+    const collaborators = useMemo(() => {
+        const known = new Map(data.collaboration.collaborators.map((person) => [person.id, person]))
+        if (data.collaboration.currentUser) known.set(data.collaboration.currentUser.id, data.collaboration.currentUser)
+        for (const person of collaboration.presence) if (!known.has(person.userId)) known.set(person.userId, { id: person.userId, name: person.name, avatarSrc: person.avatarSrc })
+        const active = new Map(collaboration.presence.map((person) => [person.userId, person]))
+        return [...known.values()]
+            .map((person) => {
+                const remotePresence = active.get(person.id)
+                const isCurrentUser = person.id === data.collaboration.currentUser?.id
+                return {
+                    ...person,
+                    connected: isCurrentUser ? collaboration.realtimeState === "connected" : Boolean(remotePresence),
+                    color: isCurrentUser ? "#FFFFFF" : remotePresence?.color ?? "#525252",
+                }
+            })
+            .sort((left, right) => Number(right.id === data.collaboration.currentUser?.id) - Number(left.id === data.collaboration.currentUser?.id))
+    }, [collaboration.presence, collaboration.realtimeState, data.collaboration])
     const activeServices = data.services.filter((service) => service.state === "active")
     const servicePreferenceKey = `betelgeze:onboarding-builder:${workspaceSlug}:services`
     const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(() => activeServices.slice(0, 1).map((service) => service.id))
@@ -438,8 +450,8 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 <div className="flex max-w-[28rem] flex-wrap gap-1">{activeServices.map((service) => <button key={service.id} type="button" onClick={() => { const next = selectedServiceIds.includes(service.id) ? selectedServiceIds.filter((id) => id !== service.id) : [...selectedServiceIds, service.id]; setSelectedServiceIds(next); window.localStorage.setItem(servicePreferenceKey, JSON.stringify(next)); setFocusedModuleId(null) }} className={`rounded-md border px-2 py-1 text-[11px] ${selectedServiceIds.includes(service.id) ? "border-neutral-500 bg-neutral-800 text-white" : "border-neutral-800 text-neutral-500 hover:text-neutral-300"}`}>{service.name}</button>)}</div>
             </div>
             <div className="ml-auto flex items-center gap-1.5">
-                <div className="hidden items-center -space-x-1.5 sm:flex">{[...(data.collaboration.currentUser && collaboration.realtimeState === "connected" ? [{ ...data.collaboration.currentUser, color: "#FFFFFF" }] : []), ...collaboration.presence].slice(0, 5).map((person) => <span key={"clientId" in person ? person.clientId : person.id} title={person.name} className="flex h-7 w-7 items-center justify-center rounded-full border-2 bg-neutral-800 text-[10px] font-semibold" style={{ borderColor: person.color }}>{person.name.slice(0, 2).toUpperCase()}</span>)}</div>
-                <span title={collaboration.realtimeError ?? undefined} className="hidden text-[11px] text-neutral-500 xl:inline"><Status label={collaborationStatus.label} tone={collaborationStatus.tone} /></span>
+                <div aria-label="Builder collaborators" className="flex items-center -space-x-1.5">{collaborators.map((person) => <span key={person.id} title={`${person.name} — ${person.connected ? "Connected" : "Disconnected"}`} className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-neutral-900 transition" style={{ borderColor: person.color }}><span className={`h-full w-full transition ${person.connected ? "" : "grayscale opacity-40"}`}><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full" /></span></span>)}</div>
+                <span className="text-[11px] text-neutral-500"><Status label={saveStatus.label} tone={saveStatus.tone} /></span>
                 <IconButton label="Undo your last edit" onClick={collaboration.undo} disabled={!collaboration.undoState.canUndo || !collaboration.editable}><BuilderIcon name="undo" /></IconButton>
                 <IconButton label="Redo your last edit" onClick={collaboration.redo} disabled={!collaboration.undoState.canRedo || !collaboration.editable}><BuilderIcon name="redo" /></IconButton>
                 <div className="hidden rounded-lg border border-neutral-800 p-0.5 sm:flex"><button type="button" aria-label="Desktop preview" onClick={() => setViewport("desktop")} className={`h-8 w-8 rounded-md ${viewport === "desktop" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}><BuilderIcon name="desktop" /></button><button type="button" aria-label="Mobile preview" onClick={() => setViewport("mobile")} className={`h-8 w-8 rounded-md ${viewport === "mobile" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}><BuilderIcon name="mobile" /></button></div>

@@ -573,6 +573,19 @@ async function loadAssignees(workspaceId: string) {
     })
 }
 
+async function loadBuilderCollaborators(workspaceId: string) {
+    const { data: memberships } = await supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", workspaceId).in("role", ["owner", "admin"]).order("created_at")
+    const userIds = (memberships ?? []).map((membership) => membership.user_id)
+    if (!userIds.length) return []
+    const { data: profiles } = await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", userIds)
+    const profileById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]))
+    return userIds.map((id) => {
+        const profile = profileById.get(id)
+        const name = profile?.username ?? id
+        return { id, name, avatarSrc: profile?.avatar_path ? profileAvatarUrl(name, profile.avatar_path) : null }
+    })
+}
+
 export async function loadOnboardingSettingsPageData(workspaceId: string): Promise<OnboardingSettingsPageData> {
     const [raw, assignees, themeDraftResult, builderDocumentResult, builderUpdatesResult] = await Promise.all([
         rawConfiguration(workspaceId),
@@ -724,13 +737,14 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
         .sort((left, right) => integer(right.revision_number) - integer(left.revision_number))
         .find((row) => text(row.status) === "draft")
         ?? raw.configurations.find((row) => text(row.configuration_type) === "completion" && text(row.status) === "published")
-    const [visualWelcome, visualCompletion, documentResult, updateResult, profileResult, themeDraftResult] = await Promise.all([
+    const [visualWelcome, visualCompletion, documentResult, updateResult, profileResult, themeDraftResult, collaborators] = await Promise.all([
         hydrateVisualBookend(welcome, record(selectedWelcomeRow?.definition)),
         hydrateVisualBookend(completion, record(selectedCompletionRow?.definition)),
         supabaseAdmin.from("onboarding_builder_documents").select("visual_enabled, version, published_version, snapshot_base64, snapshot_sequence").eq("workspace_id", workspaceId).maybeSingle(),
         supabaseAdmin.from("onboarding_builder_updates").select("sequence, update_id, update_base64").eq("workspace_id", workspaceId).order("sequence").limit(2_000),
         currentUserId ? supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").eq("user_id", currentUserId).maybeSingle() : Promise.resolve({ data: null, error: null }),
         supabaseAdmin.from("onboarding_theme_revisions").select("definition").eq("workspace_id", workspaceId).eq("status", "draft").maybeSingle(),
+        loadBuilderCollaborators(workspaceId),
     ])
     const builderTheme = mapThemeDraftDefinition(themeDraftResult.data?.definition) ?? mapTheme(raw.themes[0], raw.swatches)
     const whatsappHint = record(raw.whatsapp?.config_hint)
@@ -763,6 +777,7 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
                 updateId: String(update.update_id),
                 updateBase64: String(update.update_base64),
             })),
+            collaborators,
             currentUser: currentUserId ? {
                 id: currentUserId,
                 name: String(profileResult.data?.username ?? currentUserId),
