@@ -135,8 +135,8 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 : collaboration.realtimeState === "connected"
                     ? { label: collaboration.syncState === "syncing" ? "Live · Saving" : "Live · Saved", tone: "green" as const }
                     : collaboration.realtimeState === "unavailable"
-                        ? { label: "Collaboration unavailable", tone: "red" as const }
-                        : { label: "Connecting collaboration", tone: "yellow" as const }
+                        ? { label: collaboration.syncState === "syncing" ? "Saving · Presence unavailable" : "Saved · Presence unavailable", tone: "yellow" as const }
+                        : { label: collaboration.syncState === "syncing" ? "Saving · Connecting presence" : "Saved · Connecting presence", tone: "yellow" as const }
     const activeServices = data.services.filter((service) => service.state === "active")
     const servicePreferenceKey = `betelgeze:onboarding-builder:${workspaceSlug}:services`
     const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(() => activeServices.slice(0, 1).map((service) => service.id))

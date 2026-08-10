@@ -289,7 +289,7 @@ export function useCollaborativeOnboardingDocument({
             updateId: batch.updateId,
             updateBase64: uint8ToBase64(batch.update),
             definitionIds: batch.definitionIds,
-        })
+        }).catch(() => ({ ok: false as const, error: "The Builder could not reach the server." }))
         if (!outcome.ok) {
             retryUpdateRef.current = batch
             setSyncState(navigator.onLine ? "error" : "offline")
@@ -306,7 +306,7 @@ export function useCollaborativeOnboardingDocument({
         }).catch(() => "error")
         if (broadcastStatus !== "ok") {
             setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-            setRealtimeError("Live collaboration lost connection. Editing is paused while it reconnects.")
+            setRealtimeError("Live presence lost connection. Changes will continue saving while it reconnects.")
         }
         setSyncState("synced")
         return serverVersionRef.current
@@ -329,7 +329,7 @@ export function useCollaborativeOnboardingDocument({
     const refreshFromServer = useCallback(async () => {
         if (refreshingRef.current) return refreshingRef.current
         const refresh = (async () => {
-            const outcome = await refreshBuilderUpdates(window.fetch, workspaceSlug, lastSequenceRef.current)
+            const outcome = await refreshBuilderUpdates(window.fetch, workspaceSlug, lastSequenceRef.current).catch(() => ({ ok: false as const, error: "The Builder could not reach the server." }))
             if (!outcome.ok || !docRef.current) return false
             if (outcome.data?.snapshotBase64) {
                 Y.applyUpdate(docRef.current, base64ToUint8(outcome.data.snapshotBase64), "remote")
@@ -393,12 +393,14 @@ export function useCollaborativeOnboardingDocument({
         async function connectRealtime() {
             setRealtimeState("connecting")
             setRealtimeError(null)
-            const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-            const accessToken = sessionData.session?.access_token
+            const sessionResult = await supabase.auth.getSession().catch(() => null)
+            const sessionData = sessionResult?.data
+            const sessionError = sessionResult?.error
+            const accessToken = sessionData?.session?.access_token
             if (disposed) return
             if (sessionError || !accessToken || !user) {
                 setRealtimeState("unavailable")
-                setRealtimeError("Live collaboration could not authenticate. Editing is paused.")
+                setRealtimeError("Live presence could not authenticate. Changes will continue saving in the background.")
                 return
             }
             try {
@@ -406,7 +408,7 @@ export function useCollaborativeOnboardingDocument({
             } catch {
                 if (!disposed) {
                     setRealtimeState("unavailable")
-                    setRealtimeError("Live collaboration could not authenticate. Editing is paused.")
+                    setRealtimeError("Live presence could not authenticate. Changes will continue saving in the background.")
                 }
                 return
             }
@@ -436,7 +438,7 @@ export function useCollaborativeOnboardingDocument({
                     if (status === "SUBSCRIBED") {
                         localPresenceRef.current = { clientId: clientIdRef.current, userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null }
                         const [trackStatus, refreshed] = await Promise.all([
-                            channel.track(localPresenceRef.current),
+                            channel.track(localPresenceRef.current).catch(() => "error" as const),
                             refreshFromServer(),
                         ])
                         if (disposed) return
@@ -445,16 +447,20 @@ export function useCollaborativeOnboardingDocument({
                             setRealtimeError(null)
                         } else {
                             setRealtimeState("unavailable")
-                            setRealtimeError(trackStatus !== "ok" ? "Live presence could not connect. Editing is paused." : "Collaborative changes could not be refreshed. Editing is paused.")
+                            setRealtimeError(trackStatus !== "ok" ? "Live presence could not connect. Changes will continue saving in the background." : "Live catch-up is temporarily unavailable. Changes will continue saving in the background.")
                         }
                         if (initialWasEmpty) void flush()
                     } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
                         setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-                        setRealtimeError(error?.message ?? "Live collaboration disconnected. Editing is paused while it reconnects.")
+                        setRealtimeError(error?.message ?? "Live presence disconnected. Changes will continue saving while it reconnects.")
                     }
                 })
         }
         void connectRealtime()
+        const connectionTimeout = window.setTimeout(() => {
+            setRealtimeState((current) => current === "connected" ? current : "unavailable")
+            setRealtimeError((current) => current ?? "Live presence is taking too long to connect. Changes will continue saving in the background.")
+        }, 8_000)
         const refreshTimer = window.setInterval(() => {
             if (!navigator.onLine) return
             void refreshFromServer()
@@ -463,7 +469,7 @@ export function useCollaborativeOnboardingDocument({
             if (!navigator.onLine) {
                 setSyncState("offline")
                 setRealtimeState("unavailable")
-                setRealtimeError("Offline — editing and live collaboration are paused.")
+                setRealtimeError("Offline — changes will save when the connection returns.")
                 return
             }
             setSyncState("syncing")
@@ -482,6 +488,7 @@ export function useCollaborativeOnboardingDocument({
             disposed = true
             if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
             if (presenceTimerRef.current) window.clearTimeout(presenceTimerRef.current)
+            window.clearTimeout(connectionTimeout)
             window.clearInterval(refreshTimer)
             void flush()
             window.removeEventListener("online", updateOnlineState)
@@ -496,13 +503,13 @@ export function useCollaborativeOnboardingDocument({
     }, [collaboration, flush, refreshFromServer, workspaceSlug])
 
     const updateDocument = useCallback((recipe: (current: VisualBuilderDocument) => VisualBuilderDocument) => {
-        if (!rootRef.current || !docRef.current || !navigator.onLine || realtimeState !== "connected" || !["synced", "syncing"].includes(syncState)) return
+        if (!rootRef.current || !docRef.current || !navigator.onLine || !["synced", "syncing"].includes(syncState)) return
         const current = readDocument(rootRef.current, initialRef.current)
         let next = recipe(current)
         if (JSON.stringify(current.theme) !== JSON.stringify(next.theme)) next = { ...next, theme: { ...next.theme, updatedAt: new Date().toISOString() } }
         changedDefinitions(current, next).forEach((id) => pendingDefinitionIdsRef.current.add(id))
         docRef.current.transact(() => writeDocument(rootRef.current!, next), localOriginRef.current)
-    }, [realtimeState, syncState])
+    }, [syncState])
 
     const updatePresence = useCallback((update: Partial<Pick<BuilderPresence, "selection" | "cursor">>) => {
         const user = collaboration.currentUser
@@ -515,10 +522,10 @@ export function useCollaborativeOnboardingDocument({
             void channelRef.current.track(localPresenceRef.current).then((status) => {
                 if (status === "ok") return
                 setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-                setRealtimeError("Live presence disconnected. Editing is paused while it reconnects.")
+                setRealtimeError("Live presence disconnected. Changes will continue saving while it reconnects.")
             }).catch(() => {
                 setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
-                setRealtimeError("Live presence disconnected. Editing is paused while it reconnects.")
+                setRealtimeError("Live presence disconnected. Changes will continue saving while it reconnects.")
             })
         }, 70)
     }, [collaboration.currentUser, realtimeState])
@@ -532,7 +539,7 @@ export function useCollaborativeOnboardingDocument({
         realtimeError,
         serverVersion,
         presence,
-        editable: realtimeState === "connected" && ["synced", "syncing"].includes(syncState),
+        editable: ["synced", "syncing"].includes(syncState),
         updatePresence,
         setReleaseLock: async (locked: boolean) => {
             setSyncState(locked ? "publishing" : navigator.onLine ? "synced" : "offline")
