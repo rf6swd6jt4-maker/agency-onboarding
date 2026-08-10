@@ -286,13 +286,30 @@ Configure the Stripe webhook endpoint to send at least:
 - `invoice.marked_uncollectible`
 
 Onboarding links and active-module update notices are delivered through the
-durable onboarding outbox. Set `CRON_SECRET`, then schedule either `GET` or
-`POST /api/cron/onboarding-outbox` with this header:
+durable onboarding outbox. Development uses
+[cron-job.org](https://cron-job.org/) as the external scheduler so the job can
+run frequently while the application remains on Vercel Hobby. Do not register
+this as a frequent Vercel Cron Job.
+
+Create a long random `CRON_SECRET` in the Vercel production environment, then
+create a cron-job.org job with:
+
+- URL: `https://<production-domain>/api/cron/onboarding-outbox`
+- Schedule: every 15 minutes
+- Request method: `GET` (the route also accepts `POST`)
+- Custom header name: `Authorization`
+- Custom header value: `Bearer <the exact CRON_SECRET value>`
+- Failure notifications: enabled
+
+The resulting request must contain:
 
 ```text
 Authorization: Bearer CRON_SECRET
 ```
 
-Run it at least every 15 minutes so failed or abandoned delivery claims are
-reclaimed promptly. The endpoint fails closed when `CRON_SECRET` is missing or
-incorrect and returns aggregate counts only.
+Use cron-job.org's test-run action after the production deployment. A successful
+empty run returns HTTP 200 with aggregate zero counts; HTTP 401 means the
+environment value or custom header does not match. Run it at least every 15
+minutes so failed or abandoned delivery claims are reclaimed promptly. The
+endpoint fails closed when `CRON_SECRET` is missing or incorrect and returns
+aggregate counts only.

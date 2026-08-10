@@ -26,6 +26,7 @@ const publicActions = readFileSync("app/onboarding/session/[token]/actions.ts", 
 const onboardingForm = readFileSync("components/onboarding/OnboardingForm.tsx", "utf8")
 const onboardingOperations = readFileSync("supabase/migrations/20260810101000_custom_onboarding_operations.sql", "utf8")
 const environmentExample = readFileSync(".env.example", "utf8")
+const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
 
 test("paid automation creates or resumes the sale-linked immutable session before consent delivery", () => {
@@ -209,6 +210,10 @@ test("outbox retry route fails closed and never returns queue payloads", () => {
     assert.match(outboxRoute, /processAllOnboardingOutboxes/u)
     assert.doesNotMatch(outboxRoute, /payload:/u)
     assert.match(environmentExample, /CRON_SECRET=/u)
+    assert.match(environmentExample, /cron-job\.org onboarding outbox scheduler/u)
+    assert.match(readme, /cron-job\.org[\s\S]+every 15 minutes/u)
+    assert.match(readme, /Custom header name: `Authorization`/u)
+    assert.match(readme, /Do not register[\s\S]+Vercel Cron Job/u)
 })
 
 test("publishing wakes the scoped outbox only after a successful publish result", () => {
