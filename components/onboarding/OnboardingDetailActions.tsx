@@ -18,6 +18,64 @@ export function CopyOnboardingLink({ path }: { path: string }) {
     )
 }
 
+export function OnboardingLinkControls({
+    initialPath,
+    revoked,
+    revokeAction,
+    rotateAction,
+}: {
+    initialPath: string | null
+    revoked: boolean
+    revokeAction: () => Promise<{ ok: true; revoked: true }>
+    rotateAction: () => Promise<{ ok: true; path: string }>
+}) {
+    const [path, setPath] = useState(initialPath)
+    const [isRevoked, setIsRevoked] = useState(revoked)
+    const [pending, startTransition] = useTransition()
+    const [error, setError] = useState<string | null>(null)
+
+    function rotate() {
+        setError(null)
+        startTransition(async () => {
+            try {
+                const outcome = await rotateAction()
+                setPath(outcome.path)
+                setIsRevoked(false)
+            } catch (caught) {
+                setError(caught instanceof Error ? caught.message : "Could not rotate the link")
+            }
+        })
+    }
+
+    function revoke() {
+        if (!window.confirm("Revoke this onboarding link? Progress and submitted information will be preserved.")) return
+        setError(null)
+        startTransition(async () => {
+            try {
+                await revokeAction()
+                setIsRevoked(true)
+            } catch (caught) {
+                setError(caught instanceof Error ? caught.message : "Could not revoke the link")
+            }
+        })
+    }
+
+    return (
+        <div>
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+                {path && !isRevoked ? <CopyOnboardingLink path={path} /> : null}
+                {path && !isRevoked ? <a href={path} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black">Preview session</a> : null}
+                <button type="button" disabled={pending} onClick={rotate} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-neutral-700 px-3 text-sm text-neutral-200 disabled:opacity-50">
+                    {pending ? "Updating…" : path ? "Rotate link" : "Create new link"}
+                </button>
+                <button type="button" disabled={pending || isRevoked || !path} onClick={revoke} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-red-500/40 px-3 text-sm text-red-100 disabled:opacity-40">Revoke</button>
+            </div>
+            {isRevoked ? <p className="mt-2 text-sm text-amber-200">The current link is revoked. Rotate it to restore access without resetting progress.</p> : null}
+            {error ? <p role="alert" className="mt-2 text-sm text-red-200">{error}</p> : null}
+        </div>
+    )
+}
+
 export function OnboardingDangerZone({
     hasSession,
     archiveAction,

@@ -23,10 +23,10 @@ export const PUBLIC_WORKSPACE_PANELS = [
 
 // Private panels are visible but locked for Staff and accessible to Owner/Admin.
 export const PRIVATE_WORKSPACE_PANELS = [
-    { key: "onboarding-builder", label: "Onboarding Builder", route: "onboarding-builder", access: "private", description: "Build workspace onboarding modules and session structure", keywords: ["onboarding modules", "session builder", "forms builder"] },
+    { key: "onboarding-builder", label: "Onboarding Builder", route: "onboarding-builder", access: "private", description: "Build workspace onboarding modules and session structure", keywords: ["onboarding modules", "session builder", "forms builder", "form fields", "welcome", "completion"] },
     { key: "leadgen", label: "Lead Gen", route: "leadgen", access: "private", description: "Lead generation dashboard", keywords: ["leads", "lead generation"] },
     { key: "admin", label: "Admin", route: "admin", access: "private", description: "Private OKRs, activity, maintenance, and automation-failure follow-up", keywords: ["admin tools", "okr", "objectives", "key results", "metrics", "activity console", "automation history", "maintenance", "automation failures", "admin work items", "goals"] },
-    { key: "settings", label: "Settings", route: "settings", access: "private", description: "Unified workspace settings", keywords: ["workspace settings"] },
+    { key: "settings", label: "Settings", route: "settings", access: "private", description: "Unified workspace settings", keywords: ["workspace settings", "services", "agency branding", "onboarding colours"] },
 ] as const satisfies readonly WorkspacePanelDefinition[]
 
 export const WORKSPACE_PANELS = [...PUBLIC_WORKSPACE_PANELS, ...PRIVATE_WORKSPACE_PANELS] as const

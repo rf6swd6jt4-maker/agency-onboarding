@@ -7,6 +7,7 @@ const STRIPE_API_BASE = "https://api.stripe.com/v1"
 type StripeRequestOptions = {
     method?: "GET" | "POST"
     params?: Record<string, string | number | boolean | null | undefined>
+    idempotencyKey?: string
 }
 
 export type StripeInvoiceLineItemInput = {
@@ -34,6 +35,12 @@ export type StripeInvoiceResult = {
     invoiceStatus: string | null
     hostedInvoiceUrl: string | null
     invoicePdf: string | null
+    rawInvoice: unknown
+}
+
+export type VoidStripeInvoiceResult = {
+    invoiceId: string
+    invoiceStatus: string
     rawInvoice: unknown
 }
 
@@ -89,7 +96,7 @@ function appendStripeParam(
 
 async function stripeRequest(
     path: string,
-    { method = "POST", params = {} }: StripeRequestOptions = {},
+    { method = "POST", params = {}, idempotencyKey }: StripeRequestOptions = {},
     secretKey = getStripeSecretKey()
 ) {
     const body = new URLSearchParams()
@@ -107,6 +114,7 @@ async function stripeRequest(
         headers: {
             Authorization: `Bearer ${secretKey}`,
             "Content-Type": "application/x-www-form-urlencoded",
+            ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
         },
         body: method === "POST" ? encodedParams : undefined,
     })
@@ -180,6 +188,7 @@ export async function createAndSendStripeInvoice({
 }: CreateStripeInvoiceInput): Promise<StripeInvoiceResult> {
     const key = secretKey ?? getStripeSecretKey()
     const customer = await stripeRequest("/customers", {
+        idempotencyKey: `${saleId}:customer`,
         params: {
             name,
             email: email || undefined,
@@ -190,6 +199,7 @@ export async function createAndSendStripeInvoice({
     const customerId = asStripeId(customer, "customer")
 
     const invoice = await stripeRequest("/invoices", {
+        idempotencyKey: `${saleId}:invoice`,
         params: {
             customer: customerId,
             collection_method: "send_invoice",
@@ -202,8 +212,9 @@ export async function createAndSendStripeInvoice({
     }, key)
     const draftInvoiceId = asStripeId(invoice, "invoice")
 
-    for (const lineItem of lineItems) {
+    for (const [lineItemIndex, lineItem] of lineItems.entries()) {
         const invoiceItem = await stripeRequest("/invoiceitems", {
+            idempotencyKey: `${saleId}:invoice-item:${lineItemIndex}`,
             params: {
                 customer: customerId,
                 invoice: draftInvoiceId,
@@ -248,7 +259,7 @@ export async function createAndSendStripeInvoice({
     }
 
     const finalizedInvoice = await stripeRequest(
-        `/invoices/${encodeURIComponent(draftInvoiceId)}/finalize`, {}, key
+        `/invoices/${encodeURIComponent(draftInvoiceId)}/finalize`, { idempotencyKey: `${saleId}:finalize` }, key
     )
     const { invoiceId } = getInvoiceFields(finalizedInvoice)
 
@@ -257,7 +268,7 @@ export async function createAndSendStripeInvoice({
     }
 
     const sentInvoice = await stripeRequest(
-        `/invoices/${encodeURIComponent(invoiceId)}/send`, {}, key
+        `/invoices/${encodeURIComponent(invoiceId)}/send`, { idempotencyKey: `${saleId}:send` }, key
     )
     const sentFields = getInvoiceFields(sentInvoice)
 
@@ -268,6 +279,27 @@ export async function createAndSendStripeInvoice({
         hostedInvoiceUrl: sentFields.hostedInvoiceUrl,
         invoicePdf: sentFields.invoicePdf,
         rawInvoice: sentInvoice,
+    }
+}
+
+export async function voidStripeInvoice(input: {
+    invoiceId: string
+    secretKey?: string
+    idempotencyKey: string
+}): Promise<VoidStripeInvoiceResult> {
+    const invoice = await stripeRequest(
+        `/invoices/${encodeURIComponent(input.invoiceId)}/void`,
+        { idempotencyKey: input.idempotencyKey },
+        input.secretKey ?? getStripeSecretKey(),
+    )
+    const fields = getInvoiceFields(invoice)
+    if (!fields.invoiceId || fields.invoiceStatus !== "void") {
+        throw new Error("Stripe did not confirm that the invoice was voided")
+    }
+    return {
+        invoiceId: fields.invoiceId,
+        invoiceStatus: fields.invoiceStatus,
+        rawInvoice: invoice,
     }
 }
 

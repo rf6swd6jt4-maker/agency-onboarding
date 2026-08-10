@@ -1,10 +1,19 @@
 "use server"
 
-import { getOnboardingForm, OnboardingFormDefinition, FormResponse } from "@/lib/onboarding/forms"
+import {
+    getOnboardingForm,
+    OnboardingFormDefinition,
+    FormResponse,
+    validateOnboardingUploadFile,
+} from "@/lib/onboarding/forms"
 import {
     completeCanonicalStep,
     getCanonicalSessionByToken,
     getPublicOnboardingPath,
+    markCanonicalSessionNoticeSeen,
+    ONBOARDING_SESSION_UPDATED_MESSAGE,
+    requestCanonicalStepEdit,
+    saveCanonicalStepDraft,
     submitCanonicalFormStep,
 } from "@/lib/onboarding/canonical"
 import { createSignedRelationshipOnboardingUpload } from "@/lib/onboarding/uploads"
@@ -37,17 +46,29 @@ export async function completeStep(token: string, stepKey: string) {
 export async function prepareDirectUpload(
     token: string,
     stepKey: string,
+    fieldName: string,
     file: {
         name: string
         size: number
         type: string
     }
 ) {
-    const { session } = await getPublicSession(token)
+    const resolved = await getPublicSession(token)
+    if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+    const stepIndex = resolved.completableSteps.findIndex((candidate) => candidate.key === stepKey)
+    const step = resolved.completableSteps[stepIndex]
+    const form = step?.form ?? getOnboardingForm(step?.formKey)
+    const field = form?.fields.find((candidate) => candidate.name === fieldName)
+    if (!step && resolved.usesSnapshot) throw new Error(ONBOARDING_SESSION_UPDATED_MESSAGE)
+    if (!step || step.kind !== "form" || !field || field.type !== "file") throw new Error("Unknown upload field")
+    if (resolved.completedKeys.has(step.key)) throw new Error("Submitted steps are locked")
+    const firstIncompleteIndex = resolved.completableSteps.findIndex((candidate) => !resolved.completedKeys.has(candidate.key))
+    if (stepIndex !== firstIncompleteIndex) throw new Error("Complete the earlier onboarding step first.")
+    validateOnboardingUploadFile(field, file)
     return createSignedRelationshipOnboardingUpload(
-        session.workspace_id,
-        session.relationship_id,
-        session.id,
+        resolved.session.workspace_id,
+        resolved.session.relationship_id,
+        resolved.session.id,
         stepKey,
         file
     )
@@ -56,19 +77,40 @@ export async function prepareDirectUpload(
 export async function submitPreparedFormStep(
     token: string,
     stepKey: string,
-    formKey: string,
     response: FormResponse
 ) {
     try {
-        const form = getOnboardingForm(formKey)
-        if (!form) throw new Error("Unknown onboarding form")
-        await submitCanonicalFormStep(token, stepKey, form, response)
+        await submitCanonicalFormStep(token, stepKey, response)
         return { ok: true as const }
     } catch (error) {
         return {
             ok: false as const,
             error: error instanceof Error ? error.message : "Could not save this onboarding step.",
         }
+    }
+}
+
+export async function saveStepDraft(token: string, stepKey: string, response: FormResponse) {
+    try {
+        return { ok: true as const, ...(await saveCanonicalStepDraft(token, stepKey, response)) }
+    } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : "Could not save this draft." }
+    }
+}
+
+export async function requestStepEdit(token: string, stepKey: string) {
+    try {
+        return { ok: true as const, ...(await requestCanonicalStepEdit(token, stepKey)) }
+    } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : "Could not record your request." }
+    }
+}
+
+export async function markSessionNoticeSeen(token: string, noticeId: string) {
+    try {
+        return { ok: true as const, ...(await markCanonicalSessionNoticeSeen(token, noticeId)) }
+    } catch {
+        return { ok: false as const }
     }
 }
 
@@ -82,9 +124,10 @@ export async function skipTestStep(
         if (!session.is_test) throw new Error("Invalid test onboarding session")
 
         if (formKey) {
-            const form = getOnboardingForm(formKey)
+            const step = (await getPublicSession(token)).completableSteps.find((candidate) => candidate.key === stepKey)
+            const form = step?.form ?? getOnboardingForm(formKey)
             if (form) {
-                await submitCanonicalFormStep(token, stepKey, form, createFillerResponse(form))
+                await submitCanonicalFormStep(token, stepKey, createFillerResponse(form))
                 return { ok: true as const, nextPath: await getPublicOnboardingPath(token) }
             }
         }

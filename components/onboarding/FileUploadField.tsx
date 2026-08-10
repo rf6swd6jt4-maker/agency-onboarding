@@ -89,11 +89,11 @@ export function FileUploadField({
 
     return (
         <div>
-            <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white px-4 py-8 text-center transition hover:border-[#1E3A5F] hover:bg-blue-50/30">
-                <span className="text-base font-semibold text-slate-950">
+            <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-8 text-center transition hover:border-[var(--onboarding-primary,#1E3A5F)]">
+                <span className="text-base font-semibold text-[var(--onboarding-text,#0F172A)]">
                     Tap to choose {multiple ? "files" : "a file"}
                 </span>
-                <span className="mt-2 text-sm leading-6 text-slate-500">
+                <span className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">
                     Images preview before you submit. Videos upload directly
                     and show progress.
                 </span>
@@ -121,7 +121,7 @@ export function FileUploadField({
                     {previews.map(({ file, url }, index) => (
                         <div
                             key={getFileKey(file)}
-                            className="relative overflow-hidden rounded-xl border border-slate-200 bg-white"
+                            className="relative overflow-hidden rounded-xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)]"
                         >
                             {(() => {
                                 const removeIconTone =
@@ -157,7 +157,7 @@ export function FileUploadField({
                                     className="h-36 w-full object-cover"
                                 />
                             ) : (
-                                <div className="flex h-24 items-center justify-center bg-slate-100 px-4 text-center text-sm font-medium text-slate-600">
+                                <div className="flex h-24 items-center justify-center bg-[var(--onboarding-page,#F8F7F3)] px-4 text-center text-sm font-medium text-[var(--onboarding-muted,#475569)]">
                                     {file.type.startsWith("video/")
                                         ? "Video selected"
                                         : "File selected"}
@@ -165,10 +165,10 @@ export function FileUploadField({
                             )}
 
                             <div className="p-3">
-                                <p className="truncate text-sm font-medium text-slate-900">
+                                <p className="truncate text-sm font-medium text-[var(--onboarding-text,#0F172A)]">
                                     {file.name}
                                 </p>
-                                <p className="mt-1 text-xs text-slate-500">
+                                <p className="mt-1 text-xs text-[var(--onboarding-muted,#475569)]">
                                     {(file.size / 1024 / 1024).toFixed(1)} MB
                                 </p>
                             </div>
@@ -178,7 +178,7 @@ export function FileUploadField({
             )}
 
             {existingFiles.length > 0 && (
-                <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+                <div className="mt-4 rounded-xl bg-[var(--onboarding-page,#F8F7F3)] p-3 text-sm text-[var(--onboarding-muted,#475569)]">
                     {existingFiles.length} file
                     {existingFiles.length === 1 ? "" : "s"} already uploaded.
                     Choosing more files will add to them.

@@ -2,12 +2,13 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
-import { CopyOnboardingLink, OnboardingDangerZone } from "@/components/onboarding/OnboardingDetailActions"
-import { archiveOnboarding, restartOnboarding } from "./actions"
+import { CopyOnboardingLink, OnboardingDangerZone, OnboardingLinkControls } from "@/components/onboarding/OnboardingDetailActions"
+import { archiveOnboarding, restartOnboarding, revokeOnboardingToken, rotateOnboardingToken } from "./actions"
 import { getOnboardingForm } from "@/lib/onboarding/forms"
 import { getOnboardingStepsForModules, type CanonicalSessionStep } from "@/lib/onboarding/canonical-helpers"
 import { MODULES } from "@/lib/onboarding/modules"
-import { SERVICES } from "@/lib/onboarding/services"
+import { relationshipServiceDisplayName } from "@/lib/onboarding/service-display"
+import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { RoundPill } from "@/components/ui"
 import {
     assetHref,
@@ -18,6 +19,8 @@ import { getProgressPercentage } from "@/lib/onboarding/progress"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
+import { loadNormalizedSessionSnapshot } from "@/lib/onboarding/session-snapshot"
+import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
 
 export const dynamic = "force-dynamic"
 
@@ -59,6 +62,8 @@ type OnboardingStepDetail = {
     moduleTitle: string
     kind: CanonicalSessionStep["kind"]
     formKey?: string
+    fieldLabels: Record<string, string>
+    editRequested: boolean
     item: WorkItemRow | null
     submission: AssetRow | null
     uploads: AssetRow[]
@@ -92,12 +97,12 @@ function formatFieldLabel(key: string, formKey?: string) {
     return form?.fields.find((field) => field.name === key)?.label ?? key.replace(/_/g, " ")
 }
 
-function responseEntries(submission: AssetRow | null, formKey?: string) {
+function responseEntries(submission: AssetRow | null, fieldLabels: Record<string, string>, formKey?: string) {
     const response = metadataRecord(submission?.metadata).response
     if (!response || typeof response !== "object" || Array.isArray(response)) return []
     return Object.entries(response as Record<string, unknown>).map(([key, value]) => ({
         key,
-        label: formatFieldLabel(key, formKey),
+        label: fieldLabels[key] ?? formatFieldLabel(key, formKey),
         value,
     }))
 }
@@ -152,17 +157,19 @@ function FileIcon({ className = "h-4 w-4" }: { className?: string }) {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className={`${className} fill-none stroke-current stroke-2`}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
 }
 
-function buildStepDetails(steps: CanonicalSessionStep[], workItems: WorkItemRow[], assets: AssetRow[]) {
+type StaffSessionStep = CanonicalSessionStep & { sessionStepId?: string | null; fieldLabels?: Record<string, string> }
+
+function buildStepDetails(steps: StaffSessionStep[], workItems: WorkItemRow[], assets: AssetRow[], editRequestStepIds = new Set<string>()) {
     const itemByStep = new Map<string, WorkItemRow>()
     for (const item of workItems) {
-        const stepKey = metadataValue(item.metadata, "step_key")
+        const stepKey = metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")
         if (stepKey) itemByStep.set(stepKey, item)
     }
 
     const submissionsByStep = new Map<string, AssetRow>()
     const uploadsByStep = new Map<string, AssetRow[]>()
     for (const asset of assets) {
-        const stepKey = metadataValue(asset.metadata, "step_key")
+        const stepKey = metadataValue(asset.metadata, "session_step_id") || metadataValue(asset.metadata, "step_key")
         if (!stepKey) continue
         if (asset.native_kind === "onboarding_form_submission") {
             const existing = submissionsByStep.get(stepKey)
@@ -190,6 +197,8 @@ function buildStepDetails(steps: CanonicalSessionStep[], workItems: WorkItemRow[
             moduleTitle: metadataValue(item?.metadata, "module_title") || step.moduleTitle,
             kind: step.kind,
             formKey: step.formKey,
+            fieldLabels: step.fieldLabels ?? {},
+            editRequested: Boolean(step.sessionStepId && editRequestStepIds.has(step.sessionStepId)),
             item,
             submission,
             uploads,
@@ -294,7 +303,7 @@ function AnswerValue({ value }: { value: unknown }) {
 }
 
 function StepInformationSection({ step, workspaceSlug }: { step: OnboardingStepDetail; workspaceSlug: string }) {
-    const answers = responseEntries(step.submission, step.formKey)
+    const answers = responseEntries(step.submission, step.fieldLabels, step.formKey)
     const uploadsByField = new Map<string, AssetRow[]>()
     const ungroupedUploads: AssetRow[] = []
     for (const upload of step.uploads) {
@@ -310,6 +319,7 @@ function StepInformationSection({ step, workspaceSlug }: { step: OnboardingStepD
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">{step.index + 1}. {step.moduleTitle}</span>
                         <span className={`rounded-full border px-2.5 py-1 text-xs capitalize ${statusTone(step.status)}`}>{statusLabel(step.status)}</span>
+                        {step.editRequested ? <span className="rounded-full border border-amber-400/40 bg-amber-950/30 px-2.5 py-1 text-xs text-amber-100">Client requested an edit</span> : null}
                     </div>
                     <h3 className="mt-2 text-xl font-semibold tracking-tight text-neutral-100">{step.title}</h3>
                     <p className="mt-2 max-w-4xl text-sm leading-6 text-neutral-400">{step.description}</p>
@@ -389,7 +399,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
     ] = await Promise.all([
         supabaseAdmin
             .from("relationship_onboarding_sessions")
-            .select("id, session_token, status, is_test, created_at, updated_at, completed_at")
+            .select("*")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
             .in("status", ["active", "completed"])
@@ -404,15 +414,31 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
             .order("created_at", { ascending: true }),
         supabaseAdmin
             .from("relationship_services")
-            .select("service_key, due_date")
+            .select("service_key, service_revision_id, due_date")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
             .order("created_at", { ascending: true }),
     ])
 
     const moduleKeys = (modules ?? []).map((module) => module.module_key).filter((key): key is string => Boolean(key))
-    const canonicalSteps = session ? getOnboardingStepsForModules(moduleKeys) : []
-    const [{ data: workItems }, { data: assets }] = session
+    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, (services ?? []).map((service) => service.service_revision_id))
+    const normalizedSnapshot = session ? await loadNormalizedSessionSnapshot(session) : null
+    const canonicalSteps: StaffSessionStep[] = normalizedSnapshot
+        ? normalizedSnapshot.actionableSteps.map((step) => ({
+            key: step.id,
+            sessionStepId: step.id,
+            title: step.title,
+            description: step.description,
+            moduleTitle: step.moduleTitle,
+            estimatedTime: step.estimatedTime,
+            why: step.why,
+            kind: step.kind === "completion" ? "final" : step.kind === "welcome" ? "video" : step.kind,
+            formKey: step.legacyFormKey ?? undefined,
+            videoUrl: step.videoUrl,
+            fieldLabels: Object.fromEntries(step.fields.map((field) => [field.id, field.label])),
+        }))
+        : session ? getOnboardingStepsForModules(moduleKeys) : []
+    const [{ data: workItems }, { data: assets }, { data: editRequests }] = session
         ? await Promise.all([
             supabaseAdmin
                 .from("work_items")
@@ -428,13 +454,16 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                 .in("native_kind", ["onboarding_form_submission", "onboarding_upload"])
                 .like("native_key", `${session.id}:%`)
                 .order("updated_at", { ascending: false }),
+            normalizedSnapshot
+                ? supabaseAdmin.from("onboarding_edit_requests").select("session_step_id").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("status", "pending")
+                : Promise.resolve({ data: [] as Array<{ session_step_id: string }> }),
         ])
-        : [{ data: [] }, { data: [] }]
+        : [{ data: [] }, { data: [] }, { data: [] }]
 
-    const steps = buildStepDetails(canonicalSteps, (workItems ?? []) as WorkItemRow[], (assets ?? []) as AssetRow[])
+    const steps = buildStepDetails(canonicalSteps, (workItems ?? []) as WorkItemRow[], (assets ?? []) as AssetRow[], new Set((editRequests ?? []).map((request) => request.session_step_id)))
     const submittedCount = steps.filter((step) => step.status === "submitted" || step.status === "reviewed").length
     const percentage = getProgressPercentage(steps.map((step) => ({ key: step.key })), steps.filter((step) => step.status === "submitted" || step.status === "reviewed").map((step) => step.key))
-    const onboardingUrl = session ? `/onboarding/session/${session.session_token}` : null
+    const onboardingUrl = session ? getOnboardingUrl(workspace.slug, session.session_token, workspace.custom_onboarding_domain, workspace.custom_onboarding_domain_status === "verified") : null
     const canManage = role === "owner" || role === "admin"
     const sessionCompleted = session?.status === "completed"
     const timeline = computeTimeline(steps, Boolean(session), sessionCompleted)
@@ -453,11 +482,16 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                                     <p className="mt-3 text-sm text-neutral-400">{relationship.business_name ?? "No company saved"}</p>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         {(services ?? []).map((service) => (
-                                            <RoundPill key={service.service_key} tone="emerald">
-                                                {SERVICES[service.service_key]?.title ?? service.service_key}
+                                            <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">
+                                                {relationshipServiceDisplayName(service, serviceRevisions)}
                                             </RoundPill>
                                         ))}
-                                        {(modules ?? []).map((module) => (
+                                        {(normalizedSnapshot?.modules ?? []).map((snapshotModule) => (
+                                            <RoundPill key={snapshotModule.id} tone="sky">
+                                                {snapshotModule.title}
+                                            </RoundPill>
+                                        ))}
+                                        {!normalizedSnapshot && (modules ?? []).map((module) => (
                                             <RoundPill key={module.module_key} tone="sky">
                                                 {MODULES[module.module_key]?.title ?? module.module_key}
                                             </RoundPill>
@@ -517,7 +551,14 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                                     <h2 className="text-lg font-semibold">Onboarding link</h2>
                                     <p className="mt-1 text-sm text-neutral-500">The client-facing canonical session link for this relationship.</p>
                                 </div>
-                                {onboardingUrl ? (
+                                {session && canManage ? (
+                                    <OnboardingLinkControls
+                                        initialPath={onboardingUrl}
+                                        revoked={Boolean(session.token_revoked_at)}
+                                        revokeAction={revokeOnboardingToken.bind(null, workspace.slug, relationship.id)}
+                                        rotateAction={rotateOnboardingToken.bind(null, workspace.slug, relationship.id)}
+                                    />
+                                ) : onboardingUrl && !session?.token_revoked_at ? (
                                     <div className="grid grid-cols-2 gap-2 sm:flex">
                                         <CopyOnboardingLink path={onboardingUrl} />
                                         <a href={onboardingUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black">

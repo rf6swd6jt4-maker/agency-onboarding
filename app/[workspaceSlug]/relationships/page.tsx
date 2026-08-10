@@ -9,7 +9,8 @@ import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { RelationshipStage, RoundPill, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
-import { SERVICES } from "@/lib/onboarding/services"
+import { relationshipServiceDisplayName, type StoredRelationshipService } from "@/lib/onboarding/service-display"
+import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
 import {
     RELATIONSHIP_PHASES,
@@ -81,15 +82,16 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
     const servicesResult = relationshipIds.length
         ? await supabaseAdmin
             .from("relationship_services")
-            .select("relationship_id, service_key")
+            .select("relationship_id, service_key, service_revision_id")
             .in("relationship_id", relationshipIds)
             .order("created_at", { ascending: true })
-        : { data: [] as Array<{ relationship_id: string; service_key: string }> }
-    const servicesByRelationshipId = new Map<string, string[]>()
+        : { data: [] as Array<{ relationship_id: string; service_key: string; service_revision_id: string | null }> }
+    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, (servicesResult.data ?? []).map((service) => service.service_revision_id))
+    const servicesByRelationshipId = new Map<string, Array<StoredRelationshipService & { relationship_id: string }>>()
     for (const service of servicesResult.data ?? []) {
-        const existingKeys = servicesByRelationshipId.get(service.relationship_id) ?? []
-        if (!existingKeys.includes(service.service_key)) {
-            servicesByRelationshipId.set(service.relationship_id, [...existingKeys, service.service_key])
+        const existing = servicesByRelationshipId.get(service.relationship_id) ?? []
+        if (!existing.some((candidate) => candidate.service_key === service.service_key)) {
+            servicesByRelationshipId.set(service.relationship_id, [...existing, service])
         }
     }
     const phaseCounts = new Map<RelationshipPhase, number>()
@@ -147,8 +149,8 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                 ? `${relationship.primary_person_name} – ${relationship.business_name}`
                                 : relationship.primary_person_name
                             const isTest = Boolean(relationship.source_metadata.is_test) || Boolean(relationship.client_id && testClientIds.has(relationship.client_id))
-                            const serviceKeys = servicesByRelationshipId.get(relationship.id) ?? []
-                            const serviceLabels = serviceKeys.map((serviceKey) => SERVICES[serviceKey]?.title ?? serviceKey)
+                            const relationshipServices = servicesByRelationshipId.get(relationship.id) ?? []
+                            const serviceLabels = relationshipServices.map((service) => relationshipServiceDisplayName(service, serviceRevisions))
                             const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
                             const workStatus = relationshipWorkStatus(openWorkCount)
                             const relationshipActions = [
@@ -175,9 +177,9 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
                                         <span className="hidden min-w-0 truncate text-neutral-400 md:inline">{relationship.primary_email ?? "No email saved"}</span>
                                         <span className="hidden min-w-0 truncate capitalize text-neutral-500 lg:inline">{location ?? "Location unset"}</span>
                                         <div className="hidden min-w-0 items-center gap-3 overflow-hidden xl:flex">
-                                            {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald" className="shrink-0">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                            {relationshipServices.map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald" className="shrink-0">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
                                         </div>
-                                        {serviceKeys.length === 0 ? <span className="hidden text-neutral-500 sm:inline">No assigned services</span> : null}
+                                        {relationshipServices.length === 0 ? <span className="hidden text-neutral-500 sm:inline">No assigned services</span> : null}
                                         <ListTrailing>
                                             <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
                                             <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(relationship.updated_at)}</span>

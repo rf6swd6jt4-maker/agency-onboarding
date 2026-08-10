@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto"
 import { createAndSendStripeInvoice } from "@/lib/stripe/api"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { SERVICES } from "@/lib/onboarding/services"
@@ -5,6 +6,18 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import { normalizeMessageAddress } from "@/lib/client-messages/addresses"
 import { recordAdminActivity } from "@/lib/admin/activity"
+import {
+    legacyPublishedOnboardingConfiguration,
+    loadPublishedOnboardingConfiguration,
+} from "@/lib/onboarding/configuration"
+import {
+    compareOnboardingCompositions,
+    getOnboardingRuntimeMode,
+    resolveDealOnboardingComposition,
+    versionedServiceDefinitionForDeal,
+} from "@/lib/onboarding/runtime-mode"
+import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
+import { relationshipFulfilmentServiceDefinition } from "@/lib/onboarding/service-display"
 
 type WorkflowRole = "task" | "lifecycle_stage" | "service_group" | "review" | "automation"
 type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
@@ -316,12 +329,20 @@ export async function createOnboardingReviewWork(input: {
 }
 
 async function serviceRows(workspaceId: string, relationshipId: string) {
-    const { data, error } = await supabaseAdmin.from("relationship_services")
+    const result = await supabaseAdmin.from("relationship_services")
+        .select("service_key, service_revision_id, assignee_user_id")
+        .eq("workspace_id", workspaceId).eq("relationship_id", relationshipId)
+        .order("created_at")
+    if (!result.error) return result.data ?? []
+    if (result.error.code !== "42703" && !result.error.message.toLowerCase().includes("schema cache")) {
+        throw new Error(result.error.message)
+    }
+    const legacy = await supabaseAdmin.from("relationship_services")
         .select("service_key, assignee_user_id")
         .eq("workspace_id", workspaceId).eq("relationship_id", relationshipId)
         .order("created_at")
-    if (error) throw new Error(error.message)
-    return data ?? []
+    if (legacy.error) throw new Error(legacy.error.message)
+    return (legacy.data ?? []).map((service) => ({ ...service, service_revision_id: null }))
 }
 
 async function setRelationshipFulfilmentPhase(workspaceId: string, relationshipId: string) {
@@ -376,13 +397,17 @@ export async function createFulfilmentWork(input: {
     })
     await ensureNextLifecycleStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "fulfilment", stageId })
     const services = await serviceRows(input.workspaceId, input.relationshipId)
+    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(input.workspaceId, services.map((service) => service.service_revision_id))
     let serviceIndex = 0
     for (const service of services) {
-        const definition = SERVICES[service.service_key]
+        const definition = relationshipFulfilmentServiceDefinition(
+            service.service_key,
+            service.service_revision_id ? serviceRevisions.get(service.service_revision_id)?.name : null,
+        )
         const serviceId = await createWorkflowItem({
             workspaceId: input.workspaceId,
             relationshipId: input.relationshipId,
-            title: definition?.title ?? service.service_key,
+            title: definition.name,
             phase: "fulfilment",
             role: "service_group",
             completionMode: "all_required_children",
@@ -394,9 +419,8 @@ export async function createFulfilmentWork(input: {
             sortOrder: serviceIndex++ * 10,
         })
         let previousStepId: string | null = null
-        const steps = definition?.sopSteps?.length ? definition.sopSteps : [{ key: "complete", title: `Complete ${definition?.title ?? service.service_key}`, description: "Complete this service's delivery work." }]
-        for (const [stepIndex, step] of steps.entries()) {
-            const stepDays = Math.max(1, Math.floor(Math.max(1, timeframe) / Math.max(1, steps.length)))
+        for (const [stepIndex, step] of definition.steps.entries()) {
+            const stepDays = Math.max(1, Math.floor(Math.max(1, timeframe) / Math.max(1, definition.steps.length)))
             const stepId = await createWorkflowItem({
                 workspaceId: input.workspaceId,
                 relationshipId: input.relationshipId,
@@ -407,7 +431,7 @@ export async function createFulfilmentWork(input: {
                 parentId: serviceId,
                 assigneeId: service.assignee_user_id,
                 startDate: addDays(startDate, stepIndex * stepDays),
-                dueDate: stepIndex === steps.length - 1 ? dueDate : addDays(startDate, (stepIndex + 1) * stepDays - 1),
+                dueDate: stepIndex === definition.steps.length - 1 ? dueDate : addDays(startDate, (stepIndex + 1) * stepDays - 1),
                 nativeKey: `${input.relationshipId}:fulfilment:${service.service_key}:${step.key}`,
                 sortOrder: stepIndex * 10,
             })
@@ -477,42 +501,265 @@ export async function completeWorkflowParents(input: { workspaceId: string; rela
     }
 }
 
+function isMissingInvoiceFreezeRpc(error: { code?: string; message?: string } | null | undefined) {
+    const message = error?.message?.toLowerCase() ?? ""
+    return error?.code === "42883" || error?.code === "PGRST202" || message.includes("freeze_client_sale_configuration") && (message.includes("schema cache") || message.includes("does not exist"))
+}
+
+function isMissingInvoiceSnapshotColumn(error: { code?: string; message?: string } | null | undefined) {
+    const message = error?.message?.toLowerCase() ?? ""
+    return error?.code === "42703" || error?.code === "PGRST204" || message.includes("snapshot_frozen_at") && message.includes("schema cache")
+}
+
+type RelationshipInvoiceService = {
+    service_key: string
+    price_cents: number | null
+    currency: string | null
+    service_id?: string | null
+    service_revision_id?: string | null
+}
+
+function versionedInvoiceConfigurationIssue(
+    configuration: Awaited<ReturnType<typeof loadPublishedOnboardingConfiguration>>,
+    selectedServices: RelationshipInvoiceService[],
+    serviceDefinitions: Array<ReturnType<typeof versionedServiceDefinitionForDeal>>
+) {
+    if (!configuration.schemaReady) return null
+    if (
+        !configuration.mandatory.publishedRevisionId ||
+        configuration.welcome.status !== "published" ||
+        !configuration.welcome.revisionId ||
+        configuration.completion.status !== "published" ||
+        !configuration.completion.revisionId
+    ) {
+        return "Publish the mandatory onboarding configuration, welcome, and completion before sending the invoice"
+    }
+    for (const [index, selected] of selectedServices.entries()) {
+        const definition = serviceDefinitions[index]
+        if (
+            !definition ||
+            definition.state !== "active" ||
+            !selected.service_id ||
+            !selected.service_revision_id ||
+            definition.revisionId !== selected.service_revision_id
+        ) {
+            return `Choose a current Active service revision for ${selected.service_key} before sending the invoice`
+        }
+        for (const assignment of definition.modules) {
+            const moduleDefinition = configuration.modules.find(
+                (candidate) => candidate.id === assignment.moduleId
+            )
+            if (
+                !moduleDefinition ||
+                moduleDefinition.status !== "published" ||
+                !moduleDefinition.revisionId
+            ) {
+                return `Publish every onboarding module used by ${definition.name} before sending the invoice`
+            }
+        }
+    }
+    return null
+}
+
+async function preflightRelationshipInvoice(input: {
+    workspaceId: string
+    whatsappPhone: string
+    services: RelationshipInvoiceService[]
+    resumesFrozenVersionedSale?: boolean
+}) {
+    const configuration = await loadPublishedOnboardingConfiguration(input.workspaceId)
+    const runtimeMode = getOnboardingRuntimeMode()
+    const legacyConfiguration = legacyPublishedOnboardingConfiguration()
+    const normalizedPhone = normalizeMessageAddress(input.whatsappPhone)
+    if (!normalizedPhone || normalizedPhone.replace(/\D/g, "").length < 8) throw new Error("Add a usable client WhatsApp number before sending the invoice")
+    if (configuration.schemaReady && !configuration.help.whatsappVerified) {
+        throw new Error("Verify the workspace WhatsApp connection before sending the invoice")
+    }
+    const currencies = new Set(input.services.map((service) => (service.currency ?? "usd").toUpperCase()))
+    if (currencies.size !== 1) throw new Error("Every selected service must use the same invoice currency")
+    const versionedServiceDefinitions = input.services.map((selected) =>
+        versionedServiceDefinitionForDeal(configuration, selected)
+    )
+    const versionedIssue = versionedInvoiceConfigurationIssue(
+        configuration,
+        input.services,
+        versionedServiceDefinitions
+    )
+    if (!input.resumesFrozenVersionedSale && runtimeMode === "versioned" && versionedIssue) {
+        throw new Error(versionedIssue)
+    }
+
+    const legacyServiceDefinitions = input.services.map((selected) =>
+        legacyConfiguration.services.find((service) => service.code === selected.service_key)
+    )
+    if (
+        !input.resumesFrozenVersionedSale &&
+        runtimeMode !== "versioned" &&
+        legacyServiceDefinitions.some((service) => !service)
+    ) {
+        const missingCodes = input.services
+            .filter((_, index) => !legacyServiceDefinitions[index])
+            .map((service) => service.service_key)
+            .join(", ")
+        throw new Error(
+            `Rollback onboarding mode cannot send services without a hard-coded legacy mapping: ${missingCodes}. Switch ONBOARDING_RUNTIME_MODE to versioned or replace those services.`
+        )
+    }
+
+    const serviceDefinitions = input.resumesFrozenVersionedSale || runtimeMode === "versioned"
+        ? versionedServiceDefinitions
+        : legacyServiceDefinitions
+    let shadowComparison = null
+    if (!input.resumesFrozenVersionedSale && runtimeMode === "shadow") {
+        const versionedPlan = resolveDealOnboardingComposition(
+            configuration,
+            input.services,
+            "versioned"
+        )
+        const legacyPlan = resolveDealOnboardingComposition(
+            legacyConfiguration,
+            input.services,
+            "legacy"
+        )
+        shadowComparison = {
+            versioned_ready: configuration.schemaReady && !versionedIssue,
+            ...compareOnboardingCompositions(
+                versionedPlan.composition,
+                legacyPlan.composition
+            ),
+        }
+    }
+    return {
+        configuration,
+        normalizedPhone,
+        runtimeMode,
+        serviceDefinitions,
+        usesVersionedLive: input.resumesFrozenVersionedSale || runtimeMode === "versioned" && configuration.schemaReady,
+        shadowComparison,
+    }
+}
+
+async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipId: string) {
+    const result = await supabaseAdmin.from("client_sales")
+        .select("id, correlation_id")
+        .eq("workspace_id", workspaceId)
+        .eq("relationship_id", relationshipId)
+        .eq("status", "draft")
+        .not("snapshot_frozen_at", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    if (result.error) {
+        if (isMissingInvoiceSnapshotColumn(result.error)) return null
+        throw new Error(result.error.message)
+    }
+    return result.data
+}
+
 export async function sendRelationshipInvoice(input: {
     workspaceId: string
     relationshipId: string
     workItemId: string
     actorId: string
 }) {
-    const [{ data: relationship }, { data: services }] = await Promise.all([
-        supabaseAdmin.from("relationships").select("primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, project_timeframe_days").eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).single(),
-        supabaseAdmin.from("relationship_services").select("service_key, price_cents, currency").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId),
-    ])
-    const selectedServices = services ?? []
-    const lineItems = selectedServices.filter((service) => typeof service.price_cents === "number" && service.price_cents > 0).map((service) => ({
+    const { data: relationship } = await supabaseAdmin.from("relationships")
+        .select("primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, project_timeframe_days")
+        .eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).single()
+    const serviceResult = await supabaseAdmin.from("relationship_services")
+        .select("service_key, price_cents, currency, service_id, service_revision_id")
+        .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).order("created_at")
+    let selectedServices: RelationshipInvoiceService[]
+    if (serviceResult.error?.code === "42703" || serviceResult.error?.message.toLowerCase().includes("schema cache")) {
+        const legacyServiceResult = await supabaseAdmin.from("relationship_services")
+            .select("service_key, price_cents, currency")
+            .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).order("created_at")
+        if (legacyServiceResult.error) throw new Error(legacyServiceResult.error.message)
+        selectedServices = legacyServiceResult.data ?? []
+    } else {
+        if (serviceResult.error) throw new Error(serviceResult.error.message)
+        selectedServices = serviceResult.data ?? []
+    }
+    if (!relationship || !relationship.primary_email || !relationship.whatsapp_phone || !selectedServices.length || selectedServices.some((service) => typeof service.price_cents !== "number" || service.price_cents <= 0)) {
+        throw new Error("Add a billing email, WhatsApp phone, and a positive price for every selected service before sending the invoice")
+    }
+    const resumableSale = await findResumableFrozenInvoiceSale(input.workspaceId, input.relationshipId)
+    const preflight = await preflightRelationshipInvoice({
+        workspaceId: input.workspaceId,
+        whatsappPhone: relationship.whatsapp_phone,
+        services: selectedServices,
+        resumesFrozenVersionedSale: Boolean(resumableSale),
+    })
+    const currency = (selectedServices[0]?.currency ?? "usd").toLowerCase()
+    let lineItems = selectedServices.map((service, index) => ({
         serviceKey: service.service_key,
-        description: SERVICES[service.service_key]?.title ?? service.service_key,
-        amount: service.price_cents,
+        description: preflight.serviceDefinitions[index]?.name ?? SERVICES[service.service_key]?.title ?? service.service_key,
+        amount: service.price_cents!,
     }))
-    if (!relationship || !relationship.primary_email || !relationship.whatsapp_phone || !selectedServices.length || lineItems.length !== selectedServices.length) throw new Error("Add a billing email, WhatsApp phone, and a positive price for every selected service before sending the invoice")
-    const currency = selectedServices[0]?.currency ?? "usd"
     // Validate the integration before creating a sale record. This keeps a missing
     // or disconnected Stripe setup from leaving a retryable-looking draft behind.
     const config = await getWorkspaceProviderConfig(input.workspaceId, "stripe")
-    const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales").insert({
-        workspace_id: input.workspaceId,
-        relationship_id: input.relationshipId,
-        client_name: relationship.business_name ?? relationship.primary_person_name,
-        client_email: relationship.primary_email,
-        client_phone: normalizeMessageAddress(relationship.whatsapp_phone),
-        service_keys: lineItems.map((item) => item.serviceKey),
-        line_items: lineItems,
-        project_timeframe_days: relationship.project_timeframe_days,
-        currency,
-        total_amount: lineItems.reduce((total, item) => total + item.amount, 0),
-        status: "draft",
-        created_by: input.actorId,
-    }).select("id").single()
-    if (saleError || !sale) throw new Error(saleError?.message ?? "Could not create invoice record")
+    const correlationId = randomUUID()
+    let sale = resumableSale
+    if (!sale) {
+        const salePayload = {
+            workspace_id: input.workspaceId,
+            relationship_id: input.relationshipId,
+            client_name: relationship.business_name ?? relationship.primary_person_name,
+            client_email: relationship.primary_email,
+            client_phone: preflight.normalizedPhone,
+            service_keys: lineItems.map((item) => item.serviceKey),
+            line_items: lineItems,
+            project_timeframe_days: relationship.project_timeframe_days,
+            currency,
+            total_amount: lineItems.reduce((total, item) => total + item.amount, 0),
+            status: "draft",
+            created_by: input.actorId,
+            ...(preflight.configuration.schemaReady ? { correlation_id: correlationId } : {}),
+        }
+        const insertedSale = await supabaseAdmin.from("client_sales").insert(salePayload).select("id, correlation_id").single()
+        if (insertedSale.error || !insertedSale.data) throw new Error(insertedSale.error?.message ?? "Could not create invoice record")
+        sale = insertedSale.data
+    }
+    const saleCorrelationId = sale.correlation_id ?? correlationId
+    if (preflight.usesVersionedLive) {
+        const { error: freezeError } = await supabaseAdmin.rpc("freeze_client_sale_configuration", {
+            p_workspace_id: input.workspaceId,
+            p_relationship_id: input.relationshipId,
+            p_actor_user_id: input.actorId,
+            p_sale_id: sale.id,
+            p_correlation_id: saleCorrelationId,
+        })
+        if (freezeError) {
+            if (isMissingInvoiceFreezeRpc(freezeError)) throw new Error("The onboarding invoice migration is incomplete. Apply the latest database migration before sending invoices")
+            throw new Error(freezeError.message)
+        }
+        const { data: frozenItems, error: frozenItemsError } = await supabaseAdmin.from("client_sale_items")
+            .select("service_code, service_name, amount_cents, currency, sort_order")
+            .eq("workspace_id", input.workspaceId).eq("client_sale_id", sale.id).order("sort_order")
+        if (frozenItemsError || !frozenItems?.length) throw new Error(frozenItemsError?.message ?? "The invoice snapshot contains no services")
+        lineItems = frozenItems.map((item) => ({ serviceKey: item.service_code, description: item.service_name, amount: item.amount_cents }))
+    }
+    if (preflight.runtimeMode === "shadow" && preflight.shadowComparison) {
+        await recordAdminActivity({
+            workspaceId: input.workspaceId,
+            category: "onboarding",
+            eventKey: "onboarding.composition.shadow_compared",
+            summary: "Versioned and legacy onboarding compositions compared",
+            entityType: "client_sale",
+            entityId: sale.id,
+            actorUserId: input.actorId,
+            correlationId: saleCorrelationId,
+            idempotencyKey: `onboarding.composition.shadow_compared:${sale.id}`,
+            metadata: {
+                relationship_id: input.relationshipId,
+                sale_id: sale.id,
+                versioned_ready: preflight.shadowComparison.versioned_ready,
+                matches: preflight.shadowComparison.matches,
+                versioned: preflight.shadowComparison.versioned,
+                legacy: preflight.shadowComparison.legacy,
+            },
+        })
+    }
     const invoice = await createAndSendStripeInvoice({
         saleId: sale.id,
         name: relationship.business_name ?? relationship.primary_person_name,
@@ -525,12 +772,27 @@ export async function sendRelationshipInvoice(input: {
         daysUntilDue: 7,
         secretKey: config.secret_key,
     })
-    await recordAdminActivity({ workspaceId: input.workspaceId, category: "billing", eventKey: "stripe.invoice.sent", summary: "Stripe invoice sent", entityType: "stripe_invoice", entityId: invoice.invoiceId, direction: "outbound", actorUserId: input.actorId, metadata: { relationship_id: input.relationshipId, sale_id: sale.id } })
-    await Promise.all([
-        supabaseAdmin.from("client_sales").update({ status: "invoice_sent", stripe_customer_id: invoice.customerId, stripe_invoice_id: invoice.invoiceId, stripe_invoice_status: invoice.invoiceStatus, stripe_hosted_invoice_url: invoice.hostedInvoiceUrl, stripe_invoice_pdf: invoice.invoicePdf, raw_payload: invoice.rawInvoice }).eq("id", sale.id),
+    const [{ error: statusError }, { error: workError }] = await Promise.all([
+        supabaseAdmin.from("client_sales").update({ status: "invoice_sent", stripe_customer_id: invoice.customerId, stripe_invoice_id: invoice.invoiceId, stripe_invoice_status: invoice.invoiceStatus, stripe_hosted_invoice_url: invoice.hostedInvoiceUrl, stripe_invoice_pdf: invoice.invoicePdf, raw_payload: invoice.rawInvoice, updated_at: new Date().toISOString() }).eq("workspace_id", input.workspaceId).eq("id", sale.id),
         completeWorkflowItem(input.workspaceId, input.workItemId),
     ])
+    if (statusError || workError) throw new Error(statusError?.message ?? workError?.message ?? "Could not record the sent invoice")
     await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "invoiced" })
+    await recordAdminActivity({
+        workspaceId: input.workspaceId,
+        category: "billing",
+        eventKey: "stripe.invoice.sent",
+        summary: "Stripe invoice sent",
+        entityType: "stripe_invoice",
+        entityId: invoice.invoiceId,
+        direction: "outbound",
+        actorUserId: input.actorId,
+        correlationId: saleCorrelationId,
+        idempotencyKey: `stripe.invoice.sent:${sale.id}`,
+        outcome: "succeeded",
+        metricClassification: "internal_call",
+        metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length },
+    })
 }
 
 export async function advanceRelationshipWorkflow(input: { workspaceId: string; relationshipId: string; workItemId: string; action: string | null; actorId: string }) {

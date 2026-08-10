@@ -39,6 +39,10 @@ function includesQuery(values: Array<unknown>, query: string) {
         .includes(query)
 }
 
+function jsonRecord(value: unknown) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
 function result(id: string, type: string, label: string, description: string, href: string, options: Pick<SearchResult, "hubHref" | "path" | "recordId"> = {}): SearchResult {
     return { id, type, label, description, href, ...options }
 }
@@ -68,7 +72,10 @@ function staticNavigationResults(workspace: { name: string; slug: string }, quer
             { id: "tab-leads", type: "Tab", label: "Leads", description: "Qualified and discovered lead list", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen > Leads`, keywords: ["leadgen companies", "lead list"] },
             { id: "tab-polls", type: "Tab", label: "Polls", description: "Lead generation poll history", href: workspaceHref(workspace.slug, "leadgen/polls"), path: `${workspace.name} > Lead Gen > Polls`, keywords: ["runs", "automation history"] },
             { id: "settings-workspace", type: "Settings", label: "Workspace", description: "Edit the workspace name", href: workspaceHref(workspace.slug, "settings#workspace"), path: `${settingsPath} > Workspace`, keywords: ["name", "identity"] },
-            { id: "settings-onboarding-domain", type: "Settings", label: "Onboarding Domain", description: "Client portal hostname", href: workspaceHref(workspace.slug, "settings#onboarding-domain"), path: `${settingsPath} > Onboarding Domain`, keywords: ["custom domain", "hostname", "portal"] },
+            { id: "settings-services", type: "Settings", label: "Services", description: "Service catalogue, prices, assignees, and onboarding module assignments", href: workspaceHref(workspace.slug, "settings#services"), path: `${settingsPath} > Services`, keywords: ["catalogue", "pricing", "service modules"] },
+            { id: "settings-onboarding", type: "Settings", label: "Onboarding Settings", description: "Mandatory modules, bookends, client help, and custom domain", href: workspaceHref(workspace.slug, "settings#onboarding"), path: `${settingsPath} > Onboarding`, keywords: ["mandatory modules", "welcome", "completion", "builder"] },
+            { id: "settings-agency-branding", type: "Settings", label: "Agency Branding", description: "Client-facing onboarding and portal colours", href: workspaceHref(workspace.slug, "settings#agency-branding"), path: `${settingsPath} > Agency Branding`, keywords: ["colours", "colors", "theme", "client portal branding"] },
+            { id: "settings-onboarding-domain", type: "Settings", label: "Onboarding Domain", description: "Verified client onboarding hostname", href: workspaceHref(workspace.slug, "settings#onboarding-domain"), path: `${settingsPath} > Onboarding Domain`, keywords: ["custom domain", "hostname", "portal"] },
             { id: "settings-connections", type: "Settings", label: "Connections", description: "Stripe and WhatsApp credentials", href: workspaceHref(workspace.slug, "settings#connections"), path: `${settingsPath} > Connections`, keywords: ["stripe", "whatsapp", "meta"] },
             { id: "settings-users", type: "Settings", label: "Users", description: "Access and invitations", href: workspaceHref(workspace.slug, "settings#users"), path: `${settingsPath} > Users`, keywords: ["team", "staff", "invite"] },
             { id: "settings-officers", type: "Settings", label: "Officers", description: "Global and category responsibility for maintenance failures", href: workspaceHref(workspace.slug, "settings#officers"), path: `${settingsPath} > Officers`, keywords: ["responsible officers", "global officer", "maintenance routing", "failure assignee"] },
@@ -189,10 +196,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
     }
 
     if (canAccessPrivatePanels) {
-        const [{ data: okrs }, { data: keyResults }, { data: adminActivity }] = await Promise.all([
+        const [{ data: okrs }, { data: keyResults }, { data: adminActivity }, moduleResult, moduleRevisionResult, serviceResult, serviceRevisionResult] = await Promise.all([
             supabaseAdmin.from("workspace_okrs").select("id, objective, objective_type, description, status, period_start, period_end").eq("workspace_id", workspace.id).limit(60),
             supabaseAdmin.from("workspace_okr_key_results").select("id, okr_id, name, description, unit, comparator, baseline_value, target_value").eq("workspace_id", workspace.id).limit(100),
             supabaseAdmin.from("workspace_admin_activity").select("id, category, level, event_key, summary, entity_type, entity_id, source_href, occurred_at").eq("workspace_id", workspace.id).order("occurred_at", { ascending: false }).limit(100),
+            supabaseAdmin.from("onboarding_modules").select("id, internal_code, status, updated_at").eq("workspace_id", workspace.id).limit(100),
+            supabaseAdmin.from("onboarding_module_revisions").select("id, module_id, revision_number, status, definition, updated_at").eq("workspace_id", workspace.id).order("updated_at", { ascending: false }).limit(200),
+            supabaseAdmin.from("onboarding_services").select("id, internal_code, state, updated_at").eq("workspace_id", workspace.id).limit(100),
+            supabaseAdmin.from("onboarding_service_revisions").select("id, service_id, revision_number, name, description, is_test, published_at").eq("workspace_id", workspace.id).order("published_at", { ascending: false }).limit(200),
         ])
         for (const okr of (okrs ?? []).filter((item) => includesQuery([item.id, item.objective, item.objective_type, item.description, item.status], query)).slice(0, 6)) {
             const displayTitle = okrDisplayTitle({ objectiveType: okr.objective_type as WorkspaceOkrType | null, objective: okr.objective, deadline: okr.period_end })
@@ -206,9 +217,29 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
             }))
         }
         for (const event of (adminActivity ?? []).filter((item) => includesQuery([item.id, item.category, item.level, item.event_key, item.summary, item.entity_type, item.entity_id], query)).slice(0, 6)) {
-            results.push(result(`admin-activity-${event.id}`, "Admin activity", event.summary, `${event.category} · ${event.level}`, event.source_href ?? `/${workspace.slug}/admin/activity`, {
+            results.push(result(`admin-activity-${event.id}`, "Admin activity", event.summary, `${event.category} · ${event.level}`, `/${workspace.slug}/admin/activity/${event.id}`, {
                 hubHref: `/${workspace.slug}/admin/activity`, path: `${workspace.name} > Admin > Activity`, recordId: shortId(event.id),
             }))
+        }
+        if (!moduleResult.error && !moduleRevisionResult.error) {
+            const latestByModule = new Map<string, (typeof moduleRevisionResult.data)[number]>()
+            for (const revision of moduleRevisionResult.data ?? []) if (!latestByModule.has(revision.module_id)) latestByModule.set(revision.module_id, revision)
+            for (const moduleMatch of (moduleResult.data ?? []).flatMap((item) => {
+                const revision = latestByModule.get(item.id)
+                const definition = jsonRecord(revision?.definition)
+                const name = typeof definition.name === "string" ? definition.name : item.internal_code
+                const description = typeof definition.description === "string" ? definition.description : "Reusable onboarding module"
+                return includesQuery([item.id, item.internal_code, name, description], query) ? [{ item, revision, name, description }] : []
+            }).slice(0, 6)) results.push(result(`onboarding-module-${moduleMatch.item.id}`, "Onboarding module", moduleMatch.name, moduleMatch.description || `${moduleMatch.revision?.status ?? moduleMatch.item.status} module`, `/${workspace.slug}/onboarding-builder?module=${encodeURIComponent(moduleMatch.item.id)}`, { path: `${workspace.name} > Onboarding Builder`, recordId: shortId(moduleMatch.item.id) }))
+        }
+        if (!serviceResult.error && !serviceRevisionResult.error) {
+            const latestByService = new Map<string, (typeof serviceRevisionResult.data)[number]>()
+            for (const revision of serviceRevisionResult.data ?? []) if (!latestByService.has(revision.service_id)) latestByService.set(revision.service_id, revision)
+            for (const service of (serviceResult.data ?? []).flatMap((item) => {
+                const revision = latestByService.get(item.id)
+                const name = revision?.name ?? item.internal_code
+                return includesQuery([item.id, item.internal_code, name, revision?.description], query) ? [{ item, revision, name }] : []
+            }).slice(0, 6)) results.push(result(`onboarding-service-${service.item.id}`, "Service", service.name, service.revision?.description ?? `${service.item.state} service`, `/${workspace.slug}/settings?service=${encodeURIComponent(service.item.id)}#services`, { path: `${workspace.name} > Settings > Services`, recordId: shortId(service.item.id) }))
         }
     }
 

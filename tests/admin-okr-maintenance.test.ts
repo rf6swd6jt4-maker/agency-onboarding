@@ -338,10 +338,12 @@ test("service-role query paths explicitly exclude private work for Staff surface
 test("maintenance is event-driven and logs to console before creating Work Items", async () => {
     const [maintenance, migration] = await Promise.all([
         readFile("lib/admin/maintenance.ts", "utf8"),
-        readFile("supabase/migrations/20260804180000_coded_admin_work_items.sql", "utf8"),
+        readFile("supabase/migrations/20260810100000_custom_onboarding_foundation.sql", "utf8"),
     ])
-    assert.ok(maintenance.indexOf('console.error("Platform automation failure"') < maintenance.indexOf('supabaseAdmin.rpc("upsert_platform_failure_work_item"'))
+    assert.ok(maintenance.indexOf('console.error("Platform automation failure"') < maintenance.indexOf('supabaseAdmin.rpc("report_platform_failure"'))
     assert.match(maintenance, /resolveMaintenanceError/)
+    assert.match(migration, /v_count_24h >= 3/)
+    assert.match(migration, /p_severity = 'critical'/)
     assert.match(migration, /format\('Bug: %s - %s'/)
     assert.match(migration, /'Admin work: ' \|\| p_summary/)
     await assert.rejects(access("vercel.json"))
@@ -441,11 +443,11 @@ test("workspace error screens report authenticated incidents to maintenance and 
     assert.match(endpoint, /reportPlatformFailure/)
 })
 
-test("global officer overrides category routing while preserving category fallbacks", async () => {
-    const [migration, triggerFix, maintenance, settings, officerSettings, settingsActions, maintenancePage, adminPage] = await Promise.all([
+test("the global Maintenance officer overrides category routes", async () => {
+    const [migration, triggerFix, maintenanceMigration, settings, officerSettings, settingsActions, maintenancePage, adminPage] = await Promise.all([
         readFile("supabase/migrations/20260804160000_global_maintenance_officer.sql", "utf8"),
         readFile("supabase/migrations/20260804170000_fix_admin_officer_validation.sql", "utf8"),
-        readFile("lib/admin/maintenance.ts", "utf8"),
+        readFile("supabase/migrations/20260810100000_custom_onboarding_foundation.sql", "utf8"),
         readFile("app/[workspaceSlug]/settings/page.tsx", "utf8"),
         readFile("components/admin/WorkspaceOfficerSettings.tsx", "utf8"),
         readFile("app/[workspaceSlug]/settings/actions.ts", "utf8"),
@@ -456,7 +458,7 @@ test("global officer overrides category routing while preserving category fallba
     assert.match(triggerFix, /to_jsonb\(new\)->>'owner_user_id'/)
     assert.match(triggerFix, /to_jsonb\(new\)->>'responsible_user_id'/)
     assert.doesNotMatch(triggerFix, /new\.owner_user_id|new\.responsible_user_id/)
-    assert.ok(maintenance.indexOf('route.category === "global"') < maintenance.indexOf("route.category === category"))
+    assert.match(maintenanceMigration, /order by case when route\.category = 'global' then 0 else 1 end/)
     assert.match(settings, /id="officers"/)
     assert.match(settings, /key=\{`\$\{officerRoutes\.get\("global"\)/)
     assert.match(officerSettings, /The category choices below stay saved and resume automatically/)

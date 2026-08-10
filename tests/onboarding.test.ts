@@ -30,10 +30,14 @@ import {
 } from "../lib/onboarding/project-timeframe.ts"
 import {
     classifyUploadAsset,
+    onboardingSnapshotStepNativeKey,
+    onboardingSnapshotSubmissionNativeKey,
+    onboardingSnapshotUploadNativeKey,
     onboardingStepNativeKey,
     onboardingSubmissionNativeKey,
     onboardingUploadNativeKey,
 } from "../lib/onboarding/canonical-keys.ts"
+import { resolveOrderedModuleSources } from "../lib/onboarding/session-composition-order.ts"
 
 test("counts unique completed onboarding steps", () => {
     const steps = [{ key: "welcome" }, { key: "business-info" }]
@@ -77,6 +81,56 @@ test("builds stable canonical onboarding native keys", () => {
     assert.equal(onboardingStepNativeKey("session-1", "business-info"), "session-1:business-info")
     assert.equal(onboardingSubmissionNativeKey("session-1", "business-info"), "session-1:business-info:submission")
     assert.equal(onboardingUploadNativeKey("session-1", "logo", "workspace/path/logo.png"), "session-1:logo:upload:workspace/path/logo.png")
+})
+
+test("builds stable snapshot onboarding native keys without colliding with legacy keys", () => {
+    assert.equal(onboardingSnapshotStepNativeKey("session-1", "step-1"), "session-1:step:step-1")
+    assert.equal(onboardingSnapshotSubmissionNativeKey("session-1", "step-1"), "session-1:step:step-1:submission")
+    assert.equal(onboardingSnapshotUploadNativeKey("session-1", "step-1", "workspace/path/logo.png"), "session-1:step:step-1:upload:workspace/path/logo.png")
+})
+
+test("orders service modules by descending priority and deduplicates stable module identities", () => {
+    const modules = [
+        { id: "mandatory", revisionId: "mandatory-r1", status: "published" },
+        { id: "shared", revisionId: "shared-r1", status: "published" },
+        { id: "high-only", revisionId: "high-r1", status: "published" },
+        { id: "low-only", revisionId: "low-r1", status: "published" },
+        { id: "draft", revisionId: "draft-r1", status: "draft" },
+    ]
+    const sources = resolveOrderedModuleSources({
+        modules,
+        mandatoryModuleIds: ["mandatory", "shared"],
+        services: [
+            {
+                revisionId: "low-service-r1",
+                code: "low",
+                state: "active",
+                displayPriority: 10,
+                modules: [
+                    { moduleId: "low-only", sortOrder: 0 },
+                    { moduleId: "shared", sortOrder: 10 },
+                ],
+            },
+            {
+                revisionId: "high-service-r1",
+                code: "high",
+                state: "active",
+                displayPriority: 100,
+                modules: [
+                    { moduleId: "shared", sortOrder: 0 },
+                    { moduleId: "high-only", sortOrder: 10 },
+                    { moduleId: "draft", sortOrder: 20 },
+                ],
+            },
+        ],
+    })
+
+    assert.deepEqual(sources, [
+        { moduleId: "mandatory", sourceKind: "mandatory", sourceServiceRevisionId: null },
+        { moduleId: "shared", sourceKind: "mandatory", sourceServiceRevisionId: null },
+        { moduleId: "high-only", sourceKind: "service", sourceServiceRevisionId: "high-service-r1" },
+        { moduleId: "low-only", sourceKind: "service", sourceServiceRevisionId: "low-service-r1" },
+    ])
 })
 
 test("classifies onboarding uploads as canonical asset kinds", () => {
@@ -197,8 +251,10 @@ test("looks up configured form definitions", () => {
 })
 
 test("maps upload accept helpers for browser file inputs", () => {
-    assert.equal(getFileAcceptValue("image"), "image/*,.svg,.pdf")
+    assert.equal(getFileAcceptValue("image"), "image/*")
     assert.equal(getFileAcceptValue("video"), "video/*")
+    assert.match(getFileAcceptValue("document") ?? "", /\.pdf/u)
+    assert.match(getFileAcceptValue("document") ?? "", /\.docx/u)
 })
 
 test("normalizes WhatsApp bridge addresses", () => {

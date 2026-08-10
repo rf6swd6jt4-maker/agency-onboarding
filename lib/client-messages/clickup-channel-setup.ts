@@ -35,6 +35,8 @@ import {
 import { downloadOnboardingUpload } from "@/lib/onboarding/uploads"
 import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
 import { recordClientAdminActivity } from "@/lib/admin/activity"
+import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
+import { relationshipFulfilmentServiceDefinition } from "@/lib/onboarding/service-display"
 
 function getChannelId(response: unknown): string | null {
     if (!response || typeof response !== "object") return null
@@ -271,18 +273,50 @@ async function getClientOnboardingSteps(clientId: string) {
 }
 
 async function getClientServices(clientId: string) {
-    const { data } = await supabaseAdmin
+    const { data: client } = await supabaseAdmin
+        .from("clients")
+        .select("workspace_id, relationship_id")
+        .eq("id", clientId)
+        .maybeSingle()
+
+    if (client?.workspace_id && client.relationship_id) {
+        const selected = await supabaseAdmin
+            .from("relationship_services")
+            .select("service_key, service_revision_id")
+            .eq("workspace_id", client.workspace_id)
+            .eq("relationship_id", client.relationship_id)
+            .order("created_at")
+        if (!selected.error) {
+            const revisions = await loadOnboardingServiceRevisionDisplays(
+                client.workspace_id,
+                (selected.data ?? []).map((service) => service.service_revision_id),
+            )
+            return (selected.data ?? []).map((service) => {
+                const revisionName = service.service_revision_id ? revisions.get(service.service_revision_id)?.name : null
+                const fulfilment = relationshipFulfilmentServiceDefinition(service.service_key, revisionName)
+                return {
+                    definition: {
+                        key: fulfilment.code,
+                        title: fulfilment.name,
+                        sopSteps: fulfilment.steps,
+                    },
+                }
+            })
+        }
+        if (selected.error.code !== "42703" && !selected.error.message.toLowerCase().includes("schema cache")) {
+            throw new Error(`Could not load relationship services for ClickUp: ${selected.error.message}`)
+        }
+    }
+
+    const { data, error } = await supabaseAdmin
         .from("client_services")
         .select("service_key")
         .eq("client_id", clientId)
-
-    return (
-        data
-            ?.map((row) => ({
-                definition: SERVICES[row.service_key],
-            }))
-            .filter((row) => row.definition) ?? []
-    )
+    if (error) throw new Error(`Could not load client services for ClickUp: ${error.message}`)
+    return (data ?? []).flatMap((row) => {
+        const definition = SERVICES[row.service_key]
+        return definition ? [{ definition }] : []
+    })
 }
 
 function formatUpload(upload: StoredUpload) {

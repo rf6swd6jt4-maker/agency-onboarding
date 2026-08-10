@@ -7,9 +7,13 @@ import { AdaptiveTargetingSettings } from "@/components/leadgen/AdaptiveTargetin
 import { ManualSettingsForm, SettingsSectionActions } from "@/components/leadgen/ManualSettingsForm"
 import { SourceSettingsCard } from "@/components/leadgen/SourceSettingsCard"
 import { SettingsSectionNav, type SettingsSectionNavItem } from "@/components/workspace/SettingsSectionNav"
+import { AgencyBrandingEditor } from "@/components/settings/AgencyBrandingEditor"
+import { OnboardingSettings } from "@/components/settings/OnboardingSettings"
+import { ServiceCatalogue } from "@/components/settings/ServiceCatalogue"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
+import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import { listMaintenanceRouting, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel } from "@/lib/admin/maintenance"
@@ -37,7 +41,7 @@ const settingsSections = [
     { id: "services", label: "Services", detail: "Catalogue and default pricing" },
     { id: "onboarding", label: "Onboarding", detail: "Domain and session builder" },
     { id: "client-portal", label: "Client Portal", detail: "Future portal settings" },
-    { id: "agency-branding", label: "Agency Branding", detail: "Shared client-facing identity" },
+    { id: "agency-branding", label: "Agency Branding", detail: "Onboarding and portal colours" },
     { id: "connections", label: "Connections", detail: "Stripe and WhatsApp" },
     { id: "users", label: "Users", detail: "Access and invitations" },
     { id: "officers", label: "Officers", detail: "Maintenance responsibility" },
@@ -83,7 +87,7 @@ function SettingsPlaceholder({
 
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
-    searchParams: Promise<{ officers?: string }>
+    searchParams: Promise<{ officers?: string; service?: string }>
 }
 
 export default async function SettingsPage({ params, searchParams }: PageProps) {
@@ -96,6 +100,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         integrationResult,
         leadgenSettings,
         maintenanceRouting,
+        onboardingSettings,
     ] = await Promise.all([
         workspace.banner_path ? createUploadSignedUrl(workspace.banner_path) : null,
         workspace.logo_path ? createUploadSignedUrl(workspace.logo_path) : null,
@@ -110,6 +115,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
             .eq("workspace_id", workspace.id),
         loadLeadgenSettingsPageData(workspace.id),
         listMaintenanceRouting(workspace.id),
+        loadOnboardingSettingsPageData(workspace.id),
     ])
 
     const users = await Promise.all((membershipsResult.data ?? []).map(async (membership) => ({
@@ -173,27 +179,32 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Services"
                             description="Manage the services your agency offers and the default prices used when preparing client work."
                         >
-                            <SettingsPlaceholder
-                                title="Service catalogue"
-                                description="Workspace service management and default pricing will be configured here. The current onboarding, invoicing, and fulfilment flows continue using the existing service definitions until that catalogue is introduced."
+                            <ServiceCatalogue
+                                workspaceSlug={workspace.slug}
+                                services={onboardingSettings.services}
+                                modules={onboardingSettings.modules}
+                                assignees={onboardingSettings.assignees}
+                                schemaReady={onboardingSettings.schemaReady}
+                                initialServiceId={query.service}
                             />
                         </UnifiedSection>
 
                         <UnifiedSection
                             id="onboarding"
                             title="Onboarding"
-                            description="Manage the client onboarding domain now, with session structure and form-building controls to follow."
+                            description="Compose mandatory modules, manage client help, open Builder, and control the domain used for onboarding sessions."
                         >
-                            <WorkspaceOnboardingDomain
-                                domain={workspace.custom_onboarding_domain}
-                                status={workspace.custom_onboarding_domain_status}
-                                records={workspace.custom_onboarding_domain_records}
-                                error={workspace.custom_onboarding_domain_error}
-                                saveAction={saveWorkspaceOnboardingDomain.bind(null, workspace.slug)}
-                                verifyAction={verifyWorkspaceOnboardingDomain.bind(null, workspace.slug)}
-                                cancelAction={cancelWorkspaceOnboardingDomain.bind(null, workspace.slug)}
-                                canManage={role === "owner" || role === "admin"}
-                            />
+                            <OnboardingSettings workspaceSlug={workspace.slug} modules={onboardingSettings.modules} mandatory={onboardingSettings.mandatory} welcome={onboardingSettings.welcome} completion={onboardingSettings.completion} help={onboardingSettings.help} schemaReady={onboardingSettings.schemaReady} />
+                            <div id="onboarding-domain" className="scroll-mt-5"><WorkspaceOnboardingDomain
+                                    domain={workspace.custom_onboarding_domain}
+                                    status={workspace.custom_onboarding_domain_status}
+                                    records={workspace.custom_onboarding_domain_records}
+                                    error={workspace.custom_onboarding_domain_error}
+                                    saveAction={saveWorkspaceOnboardingDomain.bind(null, workspace.slug)}
+                                    verifyAction={verifyWorkspaceOnboardingDomain.bind(null, workspace.slug)}
+                                    cancelAction={cancelWorkspaceOnboardingDomain.bind(null, workspace.slug)}
+                                    canManage={role === "owner" || role === "admin"}
+                                /></div>
                         </UnifiedSection>
 
                         <UnifiedSection
@@ -210,12 +221,9 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                         <UnifiedSection
                             id="agency-branding"
                             title="Agency Branding"
-                            description="Manage the branding used across onboarding sessions, the future client portal, and other client-facing experiences."
+                            description="Manage the shared colours used across onboarding sessions and the future client portal."
                         >
-                            <SettingsPlaceholder
-                                title="Client-facing theme"
-                                description="Colour controls for onboarding sessions, the future client portal, and other client-facing interfaces will be added here. No configurable client-facing colour theme is active yet."
-                            />
+                            <AgencyBrandingEditor workspaceSlug={workspace.slug} initialTheme={onboardingSettings.theme} schemaReady={onboardingSettings.schemaReady} />
                         </UnifiedSection>
 
                         <UnifiedSection

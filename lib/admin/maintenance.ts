@@ -1,8 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { recordAdminActivity, type AdminActivityCategory } from "@/lib/admin/activity"
 import { maintenanceBugTitle, resolveMaintenanceError } from "@/lib/admin/error-catalogue"
+import { sanitizeAdminActivityPayload } from "@/lib/admin/activity-sanitizer"
 
-export const MAINTENANCE_CATEGORIES = ["leadgen", "onboarding", "billing", "communications", "integrations", "system_health"] as const
+export const MAINTENANCE_CATEGORIES = ["services", "leadgen", "onboarding", "billing", "communications", "integrations", "system_health"] as const
 export type MaintenanceCategory = (typeof MAINTENANCE_CATEGORIES)[number]
 export const MAINTENANCE_ROUTE_KEYS = ["global", ...MAINTENANCE_CATEGORIES] as const
 export type MaintenanceRouteKey = (typeof MAINTENANCE_ROUTE_KEYS)[number]
@@ -19,6 +19,9 @@ export type PlatformFailureInput = {
     diagnostics?: Record<string, unknown>
     occurredAt?: string
     sourceHref?: string | null
+    actorUserId?: string | null
+    correlationId?: string | null
+    idempotencyKey?: string | null
 }
 
 export type MaintenanceWorkItem = {
@@ -51,25 +54,17 @@ export function platformFailureFingerprint(parts: Array<string | number | null |
         .slice(0, 240)
 }
 
-async function responsibleOfficer(workspaceId: string, category: MaintenanceCategory) {
-    const { data: routes } = await supabaseAdmin.from("workspace_maintenance_routing")
-        .select("category, responsible_user_id").eq("workspace_id", workspaceId).in("category", ["global", category])
-    const globalOfficer = routes?.find((route) => route.category === "global")?.responsible_user_id
-    if (globalOfficer) return globalOfficer
-    const categoryOfficer = routes?.find((route) => route.category === category)?.responsible_user_id
-    if (categoryOfficer) return categoryOfficer
-    const { data: owner } = await supabaseAdmin.from("workspace_memberships")
-        .select("user_id").eq("workspace_id", workspaceId).eq("role", "owner").order("created_at").limit(1).maybeSingle()
-    return owner?.user_id ?? null
-}
-
-export async function reportPlatformFailure(input: PlatformFailureInput): Promise<{ ok: boolean; workItemId?: string }> {
+export async function reportPlatformFailure(input: PlatformFailureInput): Promise<{ ok: boolean; workItemId?: string; eventId?: string; occurrenceCount24h?: number; thresholdReached?: boolean }> {
     if (!input.workspaceId || !input.fingerprint.trim()) return { ok: false }
     try {
         const occurredAt = input.occurredAt ?? new Date().toISOString()
         const errorDefinition = resolveMaintenanceError(input)
         const title = maintenanceBugTitle(errorDefinition)
-        const diagnostics = { ...(input.diagnostics ?? {}), error_code: errorDefinition.code, error_name: errorDefinition.name }
+        const diagnostics = sanitizeAdminActivityPayload({
+            ...(input.diagnostics ?? {}),
+            error_code: errorDefinition.code,
+            error_name: errorDefinition.name,
+        }) as Record<string, unknown>
         console.error("Platform automation failure", {
             workspaceId: input.workspaceId,
             category: input.category,
@@ -81,7 +76,7 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
             summary: input.summary,
             diagnostics,
         })
-        const { data, error } = await supabaseAdmin.rpc("upsert_platform_failure_work_item", {
+        const { data, error } = await supabaseAdmin.rpc("report_platform_failure", {
             p_workspace_id: input.workspaceId,
             p_category: input.category,
             p_source: input.source,
@@ -92,32 +87,27 @@ export async function reportPlatformFailure(input: PlatformFailureInput): Promis
             p_diagnostics: diagnostics,
             p_occurred_at: occurredAt,
             p_source_href: input.sourceHref ?? null,
+            p_actor_user_id: input.actorUserId ?? null,
+            p_correlation_id: input.correlationId ?? null,
+            p_idempotency_key: input.idempotencyKey ?? null,
         })
         const row = Array.isArray(data) ? data[0] : data
-        if (error || !row?.work_item_id) {
-            console.warn("Could not create maintenance Work Item after platform error", { fingerprint: input.fingerprint, message: error?.message })
+        if (error || !row?.ok) {
+            console.warn("Could not record platform failure", { fingerprint: input.fingerprint, message: error?.message })
             return { ok: false }
         }
-        const officerId = await responsibleOfficer(input.workspaceId, input.category)
-        if (officerId) {
-            await supabaseAdmin.from("work_item_assignees").upsert({ workspace_id: input.workspaceId, work_item_id: row.work_item_id, user_id: officerId }, { onConflict: "work_item_id,user_id" })
-            await supabaseAdmin.from("work_items").update({ execution_owner_id: officerId }).eq("workspace_id", input.workspaceId).eq("id", row.work_item_id).is("execution_owner_id", null)
+        return {
+            ok: true,
+            workItemId: typeof row.work_item_id === "string" ? row.work_item_id : undefined,
+            eventId: typeof row.event_id === "string" ? row.event_id : undefined,
+            occurrenceCount24h: Number(row.occurrence_count_24h ?? 0),
+            thresholdReached: Boolean(row.threshold_reached),
         }
-        await recordAdminActivity({
-            workspaceId: input.workspaceId,
-            category: (input.category === "system_health" ? "system" : input.category) as AdminActivityCategory,
-            level: "error",
-            eventKey: `${input.source}.${input.operation}.failed`,
-            summary: input.summary,
-            entityType: "maintenance_work_item",
-            entityId: row.work_item_id,
-            sourceHref: input.sourceHref,
-            metadata: { fingerprint: input.fingerprint, error_code: errorDefinition.code, error_name: errorDefinition.name, diagnostics: input.diagnostics ?? {}, occurrence_time: occurredAt },
-            occurredAt,
-        })
-        return { ok: true, workItemId: row.work_item_id }
     } catch (error) {
-        console.warn("Could not create maintenance Work Item after platform error", { fingerprint: input.fingerprint, error })
+        console.warn("Could not create maintenance Work Item after platform error", {
+            fingerprint: input.fingerprint,
+            error: sanitizeAdminActivityPayload(error instanceof Error ? error.message : error),
+        })
         return { ok: false }
     }
 }
@@ -133,7 +123,10 @@ export async function reportClientPlatformFailure(input: Omit<PlatformFailureInp
             sourceHref: workspace?.slug && client.relationship_id ? `/${workspace.slug}/relationships/${client.relationship_id}` : null,
         })
     } catch (error) {
-        console.warn("Could not resolve client platform failure", { clientId: input.clientId, error })
+        console.warn("Could not resolve client platform failure", {
+            clientId: input.clientId,
+            error: sanitizeAdminActivityPayload(error instanceof Error ? error.message : error),
+        })
         return { ok: false }
     }
 }

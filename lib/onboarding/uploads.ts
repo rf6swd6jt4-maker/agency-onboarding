@@ -9,9 +9,13 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { getRequiredEnv } from "@/lib/env"
-import { getUploadKind, StoredUpload } from "@/lib/onboarding/forms"
+import {
+    getUploadKind,
+    MAX_ONBOARDING_UPLOAD_SIZE,
+    StoredUpload,
+} from "@/lib/onboarding/forms"
 
-export const MAX_ONBOARDING_UPLOAD_SIZE = 500 * 1024 * 1024
+export { MAX_ONBOARDING_UPLOAD_SIZE } from "@/lib/onboarding/forms"
 
 const R2_SIGNED_URL_TTL_SECONDS = 60 * 60
 const R2_BRIDGE_MEDIA_SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -224,6 +228,56 @@ export async function createSignedAssetUpload(
             size: file.size,
             type: contentType,
             kind,
+            provider: "r2" as const,
+        },
+    }
+}
+
+export async function createSignedBuilderMediaUpload(
+    workspaceId: string,
+    moduleId: string,
+    revisionId: string,
+    file: {
+        name: string
+        size: number
+        type: string
+    }
+) {
+    if (!file.name.trim()) {
+        throw new Error("Builder video uploads need a file name.")
+    }
+    if (!Number.isSafeInteger(file.size) || file.size <= 0) {
+        throw new Error("Builder video uploads must contain a non-empty file.")
+    }
+    if (file.size > MAX_ONBOARDING_UPLOAD_SIZE) {
+        throw new Error(`${file.name} is larger than the 500MB upload limit.`)
+    }
+    if (!file.type.startsWith("video/")) {
+        throw new Error("Builder video uploads must be a video file.")
+    }
+
+    const fileName = sanitizeFileName(file.name) || "module-video"
+    const contentType = file.type
+    const path = `${workspaceId}/onboarding-builder/${moduleId}/${revisionId}/${randomUUID()}-${fileName}`
+    const uploadUrl = await getSignedUrl(
+        getR2Client(),
+        new PutObjectCommand({
+            Bucket: getR2BucketName(),
+            Key: path,
+            ContentType: contentType,
+        }),
+        { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }
+    )
+    const previewUrl = await createPrivateUploadSignedUrl(path)
+
+    return {
+        uploadUrl,
+        previewUrl,
+        storedVideo: {
+            name: file.name,
+            path,
+            size: file.size,
+            type: contentType,
             provider: "r2" as const,
         },
     }

@@ -1,17 +1,28 @@
-export function NeedHelpCard() {
+import type { OnboardingHelpSettings } from "@/lib/onboarding/configuration-types"
+
+export function NeedHelpCard({ help }: { help: OnboardingHelpSettings }) {
+    const whatsappNumber = help.whatsappVerified && help.whatsappEnabled
+        ? help.whatsappNumber?.replace(/\D/g, "")
+        : null
     return (
-        <div className="rounded-2xl bg-[#1E3A5F] p-5 text-white">
-            <p className="text-sm font-semibold uppercase tracking-wide text-blue-100">
+        <div className="rounded-2xl bg-[var(--onboarding-primary,#1E3A5F)] p-5 text-white">
+            <p className="text-sm font-semibold uppercase tracking-wide text-white/80">
                 Need help?
             </p>
 
-            <p className="mt-3 text-sm leading-6 text-blue-50">
-                Not sure what we’re asking for? Don’t worry. We can walk you
-                through it.
+            <p className="mt-3 text-sm leading-6 text-white/90">
+                {help.text}
             </p>
-
-        <button className="mt-5 w-full rounded-xl border border-white/30 px-4 py-3 text-sm font-medium transition active:scale-[0.99] active:opacity-80">                Call us
-            </button>
+            {whatsappNumber ? (
+                <a
+                    href={`https://wa.me/${whatsappNumber}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-5 block w-full rounded-xl border border-white/30 px-4 py-3 text-center text-sm font-medium transition active:scale-[0.99] active:opacity-80"
+                >
+                    Ask on WhatsApp
+                </a>
+            ) : null}
         </div>
     )
 }

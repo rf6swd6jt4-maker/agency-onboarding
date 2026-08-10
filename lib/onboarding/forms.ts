@@ -8,6 +8,41 @@ export type FormFieldType =
 
 export type FileAccept = "image" | "video" | "document" | "any"
 
+export const MAX_ONBOARDING_UPLOAD_SIZE = 500 * 1024 * 1024
+
+const DOCUMENT_MIME_TYPES = new Set([
+    "application/msword",
+    "application/pdf",
+    "application/rtf",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/csv",
+    "text/plain",
+    "text/rtf",
+])
+
+const DOCUMENT_EXTENSIONS = new Set([
+    ".csv",
+    ".doc",
+    ".docx",
+    ".odp",
+    ".ods",
+    ".odt",
+    ".pdf",
+    ".ppt",
+    ".pptx",
+    ".rtf",
+    ".txt",
+    ".xls",
+    ".xlsx",
+])
+
 export type FormFieldDefinition = {
     name: string
     label: string
@@ -412,13 +447,40 @@ export function getOnboardingForm(formKey?: string) {
 export function getFileAcceptValue(accept?: FileAccept) {
     switch (accept) {
         case "image":
-            return "image/*,.svg,.pdf"
+            return "image/*"
         case "video":
             return "video/*"
         case "document":
-            return ".pdf,.doc,.docx,.txt"
+            return [...DOCUMENT_EXTENSIONS].join(",")
         default:
             return undefined
+    }
+}
+
+export function validateOnboardingUploadFile(
+    field: Pick<FormFieldDefinition, "accept" | "label">,
+    file: { name: string; size: number; type: string }
+) {
+    if (!file.name.trim() || !Number.isFinite(file.size) || file.size <= 0) {
+        throw new Error("Choose a valid file")
+    }
+    if (file.size > MAX_ONBOARDING_UPLOAD_SIZE) {
+        throw new Error(`${file.name} is larger than the 500MB upload limit.`)
+    }
+
+    const accept = field.accept ?? "any"
+    const contentType = file.type.trim().toLowerCase().split(";", 1)[0]
+    if (accept === "image" && !contentType.startsWith("image/")) {
+        throw new Error(`${field.label} accepts image files.`)
+    }
+    if (accept === "video" && !contentType.startsWith("video/")) {
+        throw new Error(`${field.label} accepts video files.`)
+    }
+    if (accept === "document") {
+        const extension = file.name.toLowerCase().match(/\.[a-z0-9]+$/u)?.[0] ?? ""
+        if (!DOCUMENT_MIME_TYPES.has(contentType) && !DOCUMENT_EXTENSIONS.has(extension)) {
+            throw new Error(`${field.label} accepts document files.`)
+        }
     }
 }
 

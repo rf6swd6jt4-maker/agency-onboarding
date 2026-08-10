@@ -271,9 +271,11 @@ Flow:
    timeframe, selected services, and service line amounts.
 2. Stripe emails the invoice to the client.
 3. Stripe posts paid invoice events to `/api/stripe/webhook`.
-4. The app sends the approved WhatsApp consent template.
-5. When the client replies `CONFIRM`, the app creates the onboarding client,
-   ClickUp folder/tasks/chat channel, and sends the onboarding link by WhatsApp.
+4. Payment atomically creates or resumes the sale-linked onboarding session,
+   then the app sends the approved WhatsApp consent template.
+5. When the client replies `CONFIRM`, the app reuses that session, creates any
+   remaining client/ClickUp infrastructure, and queues the onboarding link for
+   durable WhatsApp delivery.
 
 Configure the Stripe webhook endpoint to send at least:
 
@@ -282,3 +284,15 @@ Configure the Stripe webhook endpoint to send at least:
 - `invoice.payment_failed`
 - `invoice.voided`
 - `invoice.marked_uncollectible`
+
+Onboarding links and active-module update notices are delivered through the
+durable onboarding outbox. Set `CRON_SECRET`, then schedule either `GET` or
+`POST /api/cron/onboarding-outbox` with this header:
+
+```text
+Authorization: Bearer CRON_SECRET
+```
+
+Run it at least every 15 minutes so failed or abandoned delivery claims are
+reclaimed promptly. The endpoint fails closed when `CRON_SECRET` is missing or
+incorrect and returns aggregate counts only.

@@ -14,7 +14,8 @@ import { MODULES } from "@/lib/onboarding/modules"
 import { getOnboardingUrl } from "@/lib/onboarding/custom-domain"
 import { getOnboardingStepsForModules } from "@/lib/onboarding/canonical-helpers"
 import { getProgressPercentage } from "@/lib/onboarding/progress"
-import { SERVICES } from "@/lib/onboarding/services"
+import { relationshipServiceDisplayName, type StoredRelationshipService } from "@/lib/onboarding/service-display"
+import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { isOnboardingStuck } from "@/lib/onboarding/stuck"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
 import {
@@ -84,7 +85,7 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
             .order("created_at", { ascending: true }),
         supabaseAdmin
             .from("relationship_services")
-            .select("relationship_id, service_key")
+            .select("relationship_id, service_key, service_revision_id")
             .eq("workspace_id", workspace.id)
             .order("created_at", { ascending: true }),
     ])
@@ -101,9 +102,10 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
     for (const onboardingModule of modules ?? []) {
         moduleKeysByRelationship.set(onboardingModule.relationship_id, [...(moduleKeysByRelationship.get(onboardingModule.relationship_id) ?? []), onboardingModule.module_key])
     }
-    const serviceKeysByRelationship = new Map<string, string[]>()
+    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, (services ?? []).map((service) => service.service_revision_id))
+    const servicesByRelationship = new Map<string, Array<StoredRelationshipService & { relationship_id: string }>>()
     for (const service of services ?? []) {
-        serviceKeysByRelationship.set(service.relationship_id, [...(serviceKeysByRelationship.get(service.relationship_id) ?? []), service.service_key])
+        servicesByRelationship.set(service.relationship_id, [...(servicesByRelationship.get(service.relationship_id) ?? []), service])
     }
 
     const workItemsBySession = new Map<string, NonNullable<typeof workItems>>()
@@ -203,9 +205,9 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
                             : relationship.primary_person_name
                         const creator = session.created_by ? creatorById.get(session.created_by) : null
                         const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
-                        const serviceKeys = serviceKeysByRelationship.get(relationship.id) ?? []
+                        const relationshipServices = servicesByRelationship.get(relationship.id) ?? []
                         const moduleKeys = moduleKeysByRelationship.get(relationship.id) ?? []
-                        const serviceLabels = serviceKeys.map((serviceKey) => SERVICES[serviceKey]?.title ?? serviceKey)
+                        const serviceLabels = relationshipServices.map((service) => relationshipServiceDisplayName(service, serviceRevisions))
                         const actions = [
                             { label: "Open onboarding", href: onboardingHref },
                             { label: "Copy onboarding link", copyText: getOnboardingUrl({
@@ -231,10 +233,10 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
                                     {relationship.primary_contact_role ? <span className="hidden shrink-0 text-neutral-400 xl:inline">{relationship.primary_contact_role}</span> : null}
                                     <span className="hidden shrink-0 sm:inline">{stats}</span>
                                     <div className="hidden min-w-0 items-center gap-1.5 overflow-hidden lg:flex">
-                                    {serviceKeys.map((serviceKey) => <RoundPill key={serviceKey} tone="emerald">{SERVICES[serviceKey]?.title ?? serviceKey}</RoundPill>)}
+                                    {relationshipServices.map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
                                     {moduleKeys.map((moduleKey) => <RoundPill key={moduleKey} tone="sky">{MODULES[moduleKey]?.title ?? moduleKey}</RoundPill>)}
                                     </div>
-                                    {serviceKeys.length === 0 ? <span className="hidden text-neutral-500 sm:inline">No assigned services</span> : null}
+                                    {relationshipServices.length === 0 ? <span className="hidden text-neutral-500 sm:inline">No assigned services</span> : null}
                                     <ListTrailing>
                                         <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
                                         <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(latestActivity)}</span>

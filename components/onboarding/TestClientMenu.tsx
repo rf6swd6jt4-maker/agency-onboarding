@@ -41,14 +41,14 @@ export function TestClientMenu({
                 Test menu
             </summary>
 
-            <div className="absolute right-0 top-12 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-xl">
+            <div className="absolute right-0 top-12 z-40 w-72 rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                     Test client
                 </p>
 
-                <p className="mt-2 text-sm text-slate-600">
+                <p className="mt-2 text-sm text-[var(--onboarding-muted,#475569)]">
                     Current step:{" "}
-                    <span className="font-semibold text-slate-950">
+                    <span className="font-semibold text-[var(--onboarding-text,#0F172A)]">
                         {currentStepTitle}
                     </span>
                 </p>
@@ -56,7 +56,7 @@ export function TestClientMenu({
                 <form onSubmit={skip} className="mt-4">
                     {pending ? <FormPendingOverlay /> : null}
 
-                    <button disabled={pending} className="w-full rounded-lg bg-[#1E3A5F] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
+                    <button disabled={pending} className="w-full rounded-lg bg-[var(--onboarding-primary,#1E3A5F)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">
                         Skip this step
                     </button>
                 </form>
@@ -66,12 +66,12 @@ export function TestClientMenu({
                 {previousStepHref ? (
                     <Link
                         href={previousStepHref}
-                        className="mt-3 block rounded-lg border border-slate-200 px-3 py-2 text-center text-sm font-semibold text-slate-700"
+                        className="mt-3 block rounded-lg border border-black/10 px-3 py-2 text-center text-sm font-semibold text-[var(--onboarding-primary,#1E3A5F)]"
                     >
                         Previous step
                     </Link>
                 ) : (
-                    <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-center text-sm text-slate-400">
+                    <p className="mt-3 rounded-lg bg-[var(--onboarding-page,#F8F7F3)] px-3 py-2 text-center text-sm text-[var(--onboarding-muted,#475569)] opacity-70">
                         No previous step
                     </p>
                 )}

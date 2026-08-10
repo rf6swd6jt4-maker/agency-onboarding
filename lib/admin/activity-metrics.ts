@@ -19,18 +19,12 @@ export type AdminActivityMetric = {
 
 const TREND_HOURS = 24
 
-function requestDirection(event: AdminActivityEvent): "outbound" | "inbound" | null {
-    const explicitDirection = event.metadata?.request_direction
-    if (explicitDirection === "outbound" || explicitDirection === "inbound") return explicitDirection
-
-    if (event.event_key.includes("webhook.received")) return "inbound"
-    if (event.event_key.startsWith("whatsapp.message.") && typeof event.metadata?.status === "string") return "inbound"
-    if (event.event_key.startsWith("whatsapp.") && event.event_key.endsWith(".sent")) return "outbound"
-    if (event.event_key.startsWith("clickup.")) return "outbound"
-    if (event.event_key.startsWith("r2.")) return "outbound"
-    if (event.event_key.startsWith("stripe.") && event.event_key.endsWith(".sent")) return "outbound"
-    if (event.level === "error" && ["billing", "communications", "integrations", "leadgen"].includes(event.category)) return "outbound"
-    return null
+function metricClassification(event: AdminActivityEvent) {
+    if (event.metric_classification) return event.metric_classification
+    const legacyDirection = event.metadata?.request_direction
+    if (legacyDirection === "outbound") return "internal_call" as const
+    if (legacyDirection === "inbound") return "external_call" as const
+    return "audit" as const
 }
 
 function startOfHour(value: Date) {
@@ -56,11 +50,12 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
         const bucketIndex = Math.floor((occurredAt - firstHour.getTime()) / (60 * 60 * 1000))
         if (bucketIndex < 0 || bucketIndex >= buckets.length) continue
         const bucket = buckets[bucketIndex]
+        const classification = metricClassification(event)
+        if (classification === "audit") continue
         bucket.requests += 1
-        if (event.level === "error") bucket.errors += 1
-        const direction = requestDirection(event)
-        if (direction === "outbound") bucket.internalCalls += 1
-        if (direction === "inbound") bucket.externalCalls += 1
+        if (event.outcome === "failed" || event.level === "error") bucket.errors += 1
+        if (classification === "internal_call") bucket.internalCalls += 1
+        if (classification === "external_call") bucket.externalCalls += 1
     }
 
     const metric = (

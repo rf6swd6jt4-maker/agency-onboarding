@@ -1,8 +1,10 @@
 "use server"
 
+import { randomUUID } from "crypto"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { createOnboardingClient } from "@/lib/onboarding/client-creation"
+import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import {
     assetHref,
     normalizeRelationshipPhase,
@@ -14,6 +16,8 @@ import {
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, sendRelationshipInvoice } from "@/lib/relationship-workflow"
+import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
+import { voidStripeInvoice } from "@/lib/stripe/api"
 
 const creatablePhases = new Set<RelationshipPhase>([
     "lead",
@@ -63,10 +67,12 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
     const primaryPersonName = formString(formData, "primary_person_name")
     const businessName = nullableFormString(formData, "business_name")
     const phase = normalizeRelationshipPhase(formString(formData, "lifecycle_phase"))
+    const isTest = formData.get("is_test") === "on"
 
     if (!primaryPersonName || !creatablePhases.has(phase)) {
         return { ok: false, error: "missing-fields" }
     }
+    if (phase === "onboarding" && !isTest) return { ok: false, error: "payment-required" }
 
     const { data: relationship, error } = await supabaseAdmin
         .from("relationships")
@@ -89,7 +95,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
             source_metadata: {
                 created_from: "manual_relationship_form",
                 created_by: user.id,
-                is_test: formData.get("is_test") === "on",
+                is_test: isTest,
             },
         })
         .select("id")
@@ -115,7 +121,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
                 createOnboardingWork: false,
                 activitySource: "Relationship manual creation",
                 createdBy: user.id,
-                isTest: formData.get("is_test") === "on",
+                isTest,
             })
         } else if (!["nurturing", "completed_lost"].includes(phase)) {
             await ensureRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: phase as Exclude<RelationshipPhase, "nurturing" | "completed_lost">, assigneeId: user.id })
@@ -135,38 +141,187 @@ function priceCents(value: string) {
     return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : 0
 }
 
+function currencyCode(value: string) {
+    const currency = value.trim().toUpperCase()
+    if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Use a three-letter currency code, such as USD")
+    return currency
+}
+
 export async function saveRelationshipCommercialDetails(slug: string, relationshipId: string, formData: FormData) {
-    const { workspace } = await requireWorkspace(slug, "admin")
+    const { workspace, user } = await requireWorkspace(slug, "admin")
     const serviceKeys = [...new Set(formData.getAll("service_key").map(String).filter(Boolean))]
     const sellerId = nullableFormString(formData, "seller_user_id")
     const managerId = nullableFormString(formData, "fulfilment_manager_user_id")
     const whatsappPhone = nullableFormString(formData, "whatsapp_phone")
     const timeframe = Number(formData.get("project_timeframe_days") ?? 0)
-    const { data: relationship, error: relationshipError } = await supabaseAdmin.from("relationships").select("lifecycle_phase").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle()
+    const [{ data: relationship, error: relationshipError }, existingServicesResult, { data: frozenSales }, configuration] = await Promise.all([
+        supabaseAdmin.from("relationships").select("lifecycle_phase").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
+        supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId),
+        supabaseAdmin.from("client_sales").select("id, status").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId).in("status", [
+            "invoice_sent", "payment_failed", "paid", "test_paid", "paid_consent_template_sending", "paid_awaiting_whatsapp_confirm",
+            "paid_consent_template_failed", "whatsapp_confirmed", "onboarding_created", "onboarding_link_sent", "onboarding_link_failed",
+        ]).limit(1),
+        loadPublishedOnboardingConfiguration(workspace.id),
+    ])
     if (relationshipError || !relationship) throw new Error(relationshipError?.message ?? "Relationship not found")
-    const { error } = await supabaseAdmin.from("relationships").update({
-        seller_user_id: sellerId,
-        fulfilment_manager_user_id: managerId,
-        whatsapp_phone: whatsappPhone,
-        project_timeframe_days: Number.isFinite(timeframe) && timeframe > 0 ? Math.round(timeframe) : null,
-        updated_at: new Date().toISOString(),
-    }).eq("workspace_id", workspace.id).eq("id", relationshipId)
-    if (error) throw new Error(error.message)
+    let existingServices = existingServicesResult.data ?? []
+    if (existingServicesResult.error) {
+        if (existingServicesResult.error.code !== "42703" && !existingServicesResult.error.message.toLowerCase().includes("schema cache")) throw new Error(existingServicesResult.error.message)
+        const legacy = await supabaseAdmin.from("relationship_services")
+            .select("service_key, price_cents, currency, assignee_user_id")
+            .eq("workspace_id", workspace.id).eq("relationship_id", relationshipId)
+        if (legacy.error) throw new Error(legacy.error.message)
+        existingServices = (legacy.data ?? []).map((service) => ({ ...service, service_id: null, service_revision_id: null }))
+    }
+    const existingByKey = new Map((existingServices ?? []).map((service) => [service.service_key, service]))
+    const catalogueByCode = new Map(configuration.services.map((service) => [service.code, service]))
+    const submittedPrices = new Map(serviceKeys.map((serviceKey) => [serviceKey, priceCents(formString(formData, `service_price_${serviceKey}`))]))
+    const submittedCurrencies = new Map(serviceKeys.map((serviceKey) => [serviceKey, currencyCode(formString(formData, `service_currency_${serviceKey}`) || catalogueByCode.get(serviceKey)?.currency || existingByKey.get(serviceKey)?.currency || "USD")]))
+    const existingPrices = new Map((existingServices ?? []).map((service) => [service.service_key, Number(service.price_cents) || 0]))
+    const existingCurrencies = new Map((existingServices ?? []).map((service) => [service.service_key, String(service.currency ?? "USD").toUpperCase()]))
+    const commercialChanged = serviceKeys.length !== existingPrices.size || serviceKeys.some((serviceKey) => (
+        existingPrices.get(serviceKey) !== submittedPrices.get(serviceKey)
+        || existingCurrencies.get(serviceKey) !== submittedCurrencies.get(serviceKey)
+    ))
+    if (frozenSales?.length && commercialChanged) throw new Error("Void and replace the sent invoice before changing services or negotiated prices")
 
-    await supabaseAdmin.from("relationship_services").delete().eq("workspace_id", workspace.id).eq("relationship_id", relationshipId)
-    if (serviceKeys.length) {
-        const { error: serviceError } = await supabaseAdmin.from("relationship_services").insert(serviceKeys.map((serviceKey) => ({
+    for (const serviceKey of serviceKeys) {
+        const existing = existingByKey.get(serviceKey)
+        const catalogue = catalogueByCode.get(serviceKey)
+        if (configuration.schemaReady && !existing && (!catalogue || catalogue.state !== "active" || !catalogue.revisionId)) {
+            throw new Error(`${serviceKey} is not a current Active service and cannot be added to this relationship`)
+        }
+        const postedServiceId = nullableFormString(formData, `service_id_${serviceKey}`)
+        const postedRevisionId = nullableFormString(formData, `service_revision_id_${serviceKey}`)
+        const expectedServiceId = existing?.service_id ?? catalogue?.id ?? null
+        const expectedRevisionId = existing?.service_revision_id ?? catalogue?.revisionId ?? null
+        if (configuration.schemaReady && (
+            (postedServiceId && postedServiceId !== expectedServiceId)
+            || (postedRevisionId && postedRevisionId !== expectedRevisionId)
+        )) throw new Error(`The selected revision for ${serviceKey} changed. Reload and review the deal before saving`)
+    }
+    const versionedRows = serviceKeys.map((serviceKey) => {
+        const existing = existingByKey.get(serviceKey)
+        const service = catalogueByCode.get(serviceKey)
+        const serviceId = existing?.service_id ?? service?.id ?? null
+        const serviceRevisionId = existing?.service_revision_id ?? service?.revisionId ?? null
+        return {
             workspace_id: workspace.id,
             relationship_id: relationshipId,
             service_key: serviceKey,
-            price_cents: priceCents(formString(formData, `service_price_${serviceKey}`)),
-            currency: "usd",
+            price_cents: submittedPrices.get(serviceKey) ?? 0,
+            currency: submittedCurrencies.get(serviceKey) ?? "USD",
             assignee_user_id: nullableFormString(formData, `service_assignee_${serviceKey}`),
-        })))
+            ...(configuration.schemaReady && serviceId && serviceRevisionId ? { service_id: serviceId, service_revision_id: serviceRevisionId } : {}),
+        }
+    })
+    let savedTransactionally = false
+    if (configuration.schemaReady) {
+        const { error: rpcError } = await supabaseAdmin.rpc("save_relationship_commercial_configuration", {
+            p_workspace_id: workspace.id,
+            p_actor_user_id: user.id,
+            p_relationship_id: relationshipId,
+            p_details: {
+                seller_user_id: sellerId,
+                fulfilment_manager_user_id: managerId,
+                whatsapp_phone: whatsappPhone,
+                project_timeframe_days: Number.isFinite(timeframe) && timeframe > 0 ? Math.round(timeframe) : null,
+            },
+            p_services: versionedRows.map((row) => ({
+                service_key: row.service_key,
+                service_id: "service_id" in row ? row.service_id : null,
+                service_revision_id: "service_revision_id" in row ? row.service_revision_id : null,
+                price_cents: row.price_cents,
+                currency: row.currency,
+                assignee_user_id: row.assignee_user_id,
+            })),
+        })
+        if (rpcError) {
+            const missingRpc = rpcError.code === "42883" || rpcError.code === "PGRST202" || rpcError.message.toLowerCase().includes("schema cache")
+            if (!missingRpc) throw new Error(rpcError.message)
+        } else {
+            savedTransactionally = true
+        }
+    }
+    if (!savedTransactionally) {
+        const { error } = await supabaseAdmin.from("relationships").update({
+            seller_user_id: sellerId,
+            fulfilment_manager_user_id: managerId,
+            whatsapp_phone: whatsappPhone,
+            project_timeframe_days: Number.isFinite(timeframe) && timeframe > 0 ? Math.round(timeframe) : null,
+            updated_at: new Date().toISOString(),
+        }).eq("workspace_id", workspace.id).eq("id", relationshipId)
+        if (error) throw new Error(error.message)
+        if (!frozenSales?.length) {
+            const { error: deleteError } = await supabaseAdmin.from("relationship_services").delete().eq("workspace_id", workspace.id).eq("relationship_id", relationshipId)
+            if (deleteError) throw new Error(deleteError.message)
+        }
+    }
+    if (!savedTransactionally && !frozenSales?.length && versionedRows.length) {
+        let { error: serviceError } = await supabaseAdmin.from("relationship_services").insert(versionedRows)
+        if (serviceError?.code === "42703") {
+            const legacyRows = versionedRows.map((row) => ({
+                workspace_id: row.workspace_id,
+                relationship_id: row.relationship_id,
+                service_key: row.service_key,
+                price_cents: row.price_cents,
+                currency: row.currency,
+                assignee_user_id: row.assignee_user_id,
+            }))
+            serviceError = (await supabaseAdmin.from("relationship_services").insert(legacyRows)).error
+        }
         if (serviceError) throw new Error(serviceError.message)
     }
     if (relationship.lifecycle_phase === "potential_client") await ensureSalesStage({ workspaceId: workspace.id, relationshipId, sellerId })
     relationshipRevalidatePaths(slug, relationshipId)
+}
+
+export async function voidAndReopenRelationshipInvoice(slug: string, relationshipId: string, saleId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+        const { workspace, user } = await requireWorkspace(slug, "admin")
+        const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales")
+            .select("id, relationship_id, status, stripe_invoice_id, stripe_invoice_status, correlation_id, onboarding_session_id")
+            .eq("workspace_id", workspace.id)
+            .eq("relationship_id", relationshipId)
+            .eq("id", saleId)
+            .maybeSingle()
+        if (saleError || !sale) throw new Error(saleError?.message ?? "Invoice not found")
+        const alreadyVoided = sale.status === "invoice_inactive" && ["void", "voided"].includes(String(sale.stripe_invoice_status ?? "").toLowerCase())
+        if (!sale.stripe_invoice_id || (!alreadyVoided && !["invoice_sent", "payment_failed"].includes(sale.status))) {
+            return { ok: false, error: sale.onboarding_session_id || sale.status.startsWith("paid") ? "Paid or onboarding invoices cannot be voided from this deal." : "This invoice is no longer eligible to be voided." }
+        }
+
+        const correlationId = sale.correlation_id ?? randomUUID()
+        const providerResult = alreadyVoided
+            ? { invoiceId: sale.stripe_invoice_id, invoiceStatus: "void" }
+            : await (async () => {
+                const config = await getWorkspaceProviderConfig(workspace.id, "stripe")
+                return voidStripeInvoice({
+                    invoiceId: sale.stripe_invoice_id!,
+                    secretKey: config.secret_key,
+                    idempotencyKey: `${sale.id}:staff-void`,
+                })
+            })()
+        const { error: reopenError } = await supabaseAdmin.rpc("reopen_voided_client_sale", {
+            p_workspace_id: workspace.id,
+            p_actor_user_id: user.id,
+            p_relationship_id: relationshipId,
+            p_sale_id: sale.id,
+            p_correlation_id: correlationId,
+            p_provider_summary: {
+                invoice_id: providerResult.invoiceId,
+                invoice_status: providerResult.invoiceStatus,
+            },
+        })
+        if (reopenError) throw new Error(`Stripe voided the invoice, but Betelgeze could not reopen the deal: ${reopenError.message}`)
+        relationshipRevalidatePaths(slug, relationshipId)
+        return { ok: true }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "The invoice could not be voided."
+        if (message.startsWith("Stripe voided the invoice")) return { ok: false, error: message }
+        if (message.endsWith("is not connected for this workspace.")) return { ok: false, error: message }
+        return { ok: false, error: "The invoice could not be voided in Stripe. Review the connection and invoice status, then try again." }
+    }
 }
 
 export async function proceedRelationshipCurrentWork(slug: string, relationshipId: string, workItemId: string) {
@@ -196,7 +351,20 @@ export async function proceedRelationshipCurrentWork(slug: string, relationshipI
         return { ok: true as const }
     } catch (error) {
         const message = error instanceof Error ? error.message : "Could not proceed with this work item"
-        const safeMessage = message.startsWith("Add a billing") || message.endsWith("is not connected for this workspace.") || message === "Work item not found" || message === "Work item does not belong to this relationship" || message === "This work item is not assigned to you" || message === "This stage advances automatically when the external step completes" || message === "Choose a fulfilment manager before completing onboarding review" || message === "Complete every required review work item before moving to fulfilment"
+        const invoiceValidationMessage = workflowAction === "send_invoice" && [
+            "Add a billing",
+            "Add a usable client WhatsApp",
+            "Verify and enable",
+            "Every selected service",
+            "Publish the mandatory",
+            "Choose a current Active service revision",
+            "Publish every onboarding module",
+            "Onboarding welcome and completion",
+            "The onboarding invoice migration is incomplete",
+            "INVOICE_",
+            "ONBOARDING_",
+        ].some((prefix) => message.startsWith(prefix))
+        const safeMessage = invoiceValidationMessage || message.endsWith("is not connected for this workspace.") || message === "Work item not found" || message === "Work item does not belong to this relationship" || message === "This work item is not assigned to you" || message === "This stage advances automatically when the external step completes" || message === "Choose a fulfilment manager before completing onboarding review" || message === "Complete every required review work item before moving to fulfilment"
             ? message
             : workflowAction === "send_invoice"
                 ? "Could not send the invoice. Check the Stripe connection and commercial details, then try again."
@@ -215,6 +383,8 @@ export async function startRelationshipOnboarding(slug: string, relationshipId: 
         .maybeSingle()
 
     if (!relationship) redirect(workspaceHref(slug, "relationships?error=missing-relationship"))
+    const isTestRelationship = Boolean(relationship.source_metadata && typeof relationship.source_metadata === "object" && relationship.source_metadata.is_test === true)
+    if (!isTestRelationship) redirect(`${relationshipHubHref(slug, relationshipId)}?error=payment-required`)
     await createOnboardingClient({
         workspaceId: workspace.id,
         workspaceSlug: workspace.slug,
@@ -229,7 +399,7 @@ export async function startRelationshipOnboarding(slug: string, relationshipId: 
         createOnboardingWork: false,
         activitySource: "Relationship onboarding start",
         createdBy: user.id,
-        isTest: relationship.source_metadata && typeof relationship.source_metadata === "object" && relationship.source_metadata.is_test === true,
+        isTest: isTestRelationship,
     })
 
     relationshipRevalidatePaths(slug, relationshipId)

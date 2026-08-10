@@ -3,6 +3,16 @@ import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 import { SERVICES, getModuleKeysForServices } from "@/lib/onboarding/services"
 import { FormResponse, OnboardingFormDefinition, StoredUpload } from "@/lib/onboarding/forms"
+import type { OnboardingHelpSettings, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
+import { legacyPublishedOnboardingConfiguration, loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
+import { getOnboardingRuntimeMode } from "@/lib/onboarding/runtime-mode"
+import {
+    composeOnboardingSession,
+    formDefinitionFromSnapshot,
+    loadNormalizedSessionSnapshot,
+    type ComposedOnboardingSession,
+    type SessionSnapshotStep,
+} from "@/lib/onboarding/session-snapshot"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { assetHref, onboardingDetailHref, relationshipHubHref, workItemHref } from "@/lib/relationships"
 import { completeWorkflowParents, createOnboardingReviewWork, ensureRelationshipStage } from "@/lib/relationship-workflow"
@@ -12,6 +22,9 @@ import {
     classifyUploadAsset,
     FINAL_ONBOARDING_STEP,
     getOnboardingStepsForModules,
+    onboardingSnapshotStepNativeKey,
+    onboardingSnapshotSubmissionNativeKey,
+    onboardingSnapshotUploadNativeKey,
     onboardingStepNativeKey,
     onboardingSubmissionNativeKey,
     onboardingUploadNativeKey,
@@ -34,12 +47,36 @@ export type CanonicalOnboardingSession = {
     completed_at: string | null
     created_at: string
     updated_at: string
+    source_sale_id?: string | null
+    configuration_revision_id?: string | null
+    welcome_revision_id?: string | null
+    completion_revision_id?: string | null
+    snapshot_schema_version?: number | null
+    composition_hash?: string | null
+    composition_snapshot?: Record<string, unknown> | null
+    token_version?: number | null
+    token_revoked_at?: string | null
 }
 
 export type SessionStep = CanonicalSessionStep & {
+    sessionStepId?: string | null
+    sessionModuleId?: string | null
+    sourceStepId?: string | null
+    legacyStepKey?: string | null
+    form?: OnboardingFormDefinition | null
+    videoPath?: string | null
     workItemId?: string | null
     status?: "todo" | "doing" | "waiting" | "blocked" | "done" | "canceled"
     updatedAt?: string | null
+}
+
+export type OnboardingSessionNotice = {
+    id: string
+    sessionModuleId: string
+    explanation: string
+    requiresCompletion: boolean
+    firstSeenAt: string | null
+    moduleCompletedAt: string | null
 }
 
 export type PublicOnboardingSession = {
@@ -53,9 +90,14 @@ export type PublicOnboardingSession = {
         business_name: string | null
     }
     moduleKeys: string[]
+    moduleTitles: string[]
     steps: SessionStep[]
     completableSteps: SessionStep[]
     completedKeys: Set<string>
+    theme: OnboardingThemeDefinition
+    help: OnboardingHelpSettings
+    usesSnapshot: boolean
+    notices: OnboardingSessionNotice[]
 }
 
 type CanonicalStepWorkItem = {
@@ -66,6 +108,8 @@ type CanonicalStepWorkItem = {
 }
 
 type QueryError = { message?: string; code?: string } | null | undefined
+
+export const ONBOARDING_SESSION_UPDATED_MESSAGE = "Your onboarding session was updated. Reload this page to continue."
 
 function isMissingCanonicalOnboarding(error: QueryError) {
     const message = error?.message?.toLowerCase() ?? ""
@@ -82,6 +126,88 @@ function isMissingCanonicalOnboarding(error: QueryError) {
     )
 }
 
+function isMissingOnboardingMutationRpc(error: QueryError, functionName: string) {
+    const message = error?.message?.toLowerCase() ?? ""
+    return error?.code === "42883" || error?.code === "PGRST202" || (
+        message.includes(functionName.toLowerCase()) && (
+            message.includes("schema cache") || message.includes("does not exist") || message.includes("could not find")
+        )
+    )
+}
+
+function publicOnboardingMutationMessage(error: QueryError, fallback: string) {
+    const message = error?.message?.trim()
+    return message && (error?.code === "P0001" || error?.code === "22023") && message.length <= 300
+        ? message
+        : fallback
+}
+
+const LEGACY_SESSION_COLUMNS = "id, workspace_id, relationship_id, session_token, status, is_test, project_timeframe_days, legacy_client_id, created_by, archived_at, completed_at, created_at, updated_at"
+const SNAPSHOT_SESSION_COLUMNS = `${LEGACY_SESSION_COLUMNS}, source_sale_id, configuration_revision_id, welcome_revision_id, completion_revision_id, snapshot_schema_version, composition_hash, composition_snapshot, token_version, token_revoked_at`
+
+async function loadSessionByToken(token: string) {
+    const snapshotResult = await supabaseAdmin
+        .from("relationship_onboarding_sessions")
+        .select(SNAPSHOT_SESSION_COLUMNS)
+        .eq("session_token", token)
+        .in("status", ["active", "completed"])
+        .maybeSingle()
+    if (!snapshotResult.error) {
+        const session = snapshotResult.data as CanonicalOnboardingSession | null
+        return session?.token_revoked_at ? null : session
+    }
+    if (!isMissingCanonicalOnboarding(snapshotResult.error)) return null
+    const legacyResult = await supabaseAdmin
+        .from("relationship_onboarding_sessions")
+        .select(LEGACY_SESSION_COLUMNS)
+        .eq("session_token", token)
+        .in("status", ["active", "completed"])
+        .maybeSingle()
+    return legacyResult.error ? null : legacyResult.data as CanonicalOnboardingSession | null
+}
+
+function snapshotStepToSessionStep(step: SessionSnapshotStep): SessionStep {
+    return {
+        key: step.id,
+        sessionStepId: step.id,
+        sessionModuleId: step.sessionModuleId,
+        sourceStepId: step.sourceStepId,
+        legacyStepKey: step.legacyStepKey,
+        title: step.title,
+        description: step.description,
+        moduleTitle: step.moduleTitle,
+        estimatedTime: step.estimatedTime,
+        why: step.why,
+        kind: step.kind === "completion" ? "final" : step.kind === "welcome" ? "video" : step.kind,
+        formKey: step.legacyFormKey ?? (step.kind === "form" ? step.id : undefined),
+        form: formDefinitionFromSnapshot(step),
+        videoUrl: step.videoUrl,
+        videoPath: step.videoPath,
+    }
+}
+
+function stepIdentifier(step: Pick<SessionStep, "key" | "sessionStepId">) {
+    return step.sessionStepId ?? step.key
+}
+
+function stepNativeKey(sessionId: string, step: Pick<SessionStep, "key" | "sessionStepId">) {
+    return step.sessionStepId
+        ? onboardingSnapshotStepNativeKey(sessionId, step.sessionStepId)
+        : onboardingStepNativeKey(sessionId, step.key)
+}
+
+function submissionNativeKey(sessionId: string, step: Pick<SessionStep, "key" | "sessionStepId">) {
+    return step.sessionStepId
+        ? onboardingSnapshotSubmissionNativeKey(sessionId, step.sessionStepId)
+        : onboardingSubmissionNativeKey(sessionId, step.key)
+}
+
+function uploadNativeKey(sessionId: string, step: Pick<SessionStep, "key" | "sessionStepId">, storagePath: string) {
+    return step.sessionStepId
+        ? onboardingSnapshotUploadNativeKey(sessionId, step.sessionStepId, storagePath)
+        : onboardingUploadNativeKey(sessionId, step.key, storagePath)
+}
+
 function extractUploadsFromResponse(response: FormResponse) {
     const uploads: Array<StoredUpload & { fieldName: string }> = []
     for (const [fieldName, value] of Object.entries(response)) {
@@ -93,6 +219,34 @@ function extractUploadsFromResponse(response: FormResponse) {
         }
     }
     return uploads
+}
+
+function validateFormResponse(form: OnboardingFormDefinition, response: FormResponse) {
+    const allowedFields = new Set(form.fields.map((field) => field.name))
+    if (Object.keys(response).some((key) => !allowedFields.has(key))) {
+        throw new Error("This form changed while you were completing it. Reload and try again.")
+    }
+    for (const field of form.fields) {
+        const value = response[field.name]
+        if (field.type === "file") {
+            const uploads = Array.isArray(value) ? value : []
+            if (field.required && uploads.length === 0) throw new Error(`${field.label} is required.`)
+            if (!field.multiple && uploads.length > 1) throw new Error(`${field.label} accepts one file.`)
+            if (uploads.some((upload) => !upload || typeof upload !== "object" || typeof upload.path !== "string" || typeof upload.name !== "string")) {
+                throw new Error(`${field.label} contains an invalid upload.`)
+            }
+            continue
+        }
+        const textValue = typeof value === "string" ? value.trim() : ""
+        if (field.required && !textValue) throw new Error(`${field.label} is required.`)
+        if (!textValue) continue
+        try {
+            if (field.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(textValue)) throw new Error()
+            if (field.type === "url") new URL(textValue)
+        } catch {
+            throw new Error(`${field.label} is not valid.`)
+        }
+    }
 }
 
 async function reportOnboardingFailure(input: {
@@ -123,14 +277,8 @@ async function getWorkspaceSlugHeader() {
 
 export async function getCanonicalSessionByToken(token: string): Promise<PublicOnboardingSession | null> {
     const workspaceSlug = await getWorkspaceSlugHeader()
-    const { data: session, error } = await supabaseAdmin
-        .from("relationship_onboarding_sessions")
-        .select("id, workspace_id, relationship_id, session_token, status, is_test, project_timeframe_days, legacy_client_id, created_by, archived_at, completed_at, created_at, updated_at")
-        .eq("session_token", token)
-        .in("status", ["active", "completed"])
-        .maybeSingle()
-
-    if (isMissingCanonicalOnboarding(error) || error || !session) return null
+    const session = await loadSessionByToken(token)
+    if (!session) return null
 
     const workspaceQuery = supabaseAdmin
         .from("workspaces")
@@ -138,7 +286,7 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
         .eq("id", session.workspace_id)
         .eq("status", "active")
 
-    const [{ data: workspace }, { data: relationship }, { data: modules }, { data: workItems }] = await Promise.all([
+    const [{ data: workspace }, { data: relationship }, { data: modules }, { data: workItems }, publishedConfiguration, normalizedSnapshot, noticeResult] = await Promise.all([
         workspaceSlug ? workspaceQuery.eq("slug", workspaceSlug).maybeSingle() : workspaceQuery.maybeSingle(),
         supabaseAdmin
             .from("relationships")
@@ -158,18 +306,33 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
             .eq("workspace_id", session.workspace_id)
             .eq("native_kind", "onboarding_step")
             .like("native_key", `${session.id}:%`),
+        loadPublishedOnboardingConfiguration(session.workspace_id),
+        loadNormalizedSessionSnapshot(session),
+        session.snapshot_schema_version
+            ? supabaseAdmin
+                .from("onboarding_session_notices")
+                .select("id, session_module_id, explanation, requires_completion, first_seen_at, module_completed_at")
+                .eq("workspace_id", session.workspace_id)
+                .eq("session_id", session.id)
+                .order("created_at", { ascending: false })
+            : Promise.resolve({ data: [], error: null }),
     ])
 
     if (!workspace || !relationship) return null
 
     const moduleKeys = (modules ?? []).map((row) => row.module_key).filter((key): key is string => Boolean(key))
-    const canonicalSteps = getOnboardingStepsForModules(moduleKeys)
+    const canonicalSteps: SessionStep[] = normalizedSnapshot
+        ? normalizedSnapshot.actionableSteps.map(snapshotStepToSessionStep)
+        : getOnboardingStepsForModules(moduleKeys)
+    const completionStep: SessionStep = normalizedSnapshot?.completionStep
+        ? snapshotStepToSessionStep(normalizedSnapshot.completionStep)
+        : FINAL_ONBOARDING_STEP
     let canonicalWorkItems = workItems ?? []
 
     if (session.status === "active") {
         try {
             const repaired = await reconcileCanonicalStepWindow({
-                session: session as CanonicalOnboardingSession,
+                session,
                 workspaceSlug: workspace.slug,
                 steps: canonicalSteps,
                 workItems: canonicalWorkItems,
@@ -200,46 +363,80 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
     const workItemByStepKey = new Map<string, { id: string; status: SessionStep["status"]; updated_at: string | null }>()
     for (const item of canonicalWorkItems) {
         const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata as Record<string, unknown> : {}
-        const stepKey = typeof metadata.step_key === "string" ? metadata.step_key : null
+        const stepKey = typeof metadata.session_step_id === "string"
+            ? metadata.session_step_id
+            : typeof metadata.step_key === "string" ? metadata.step_key : null
         if (stepKey) workItemByStepKey.set(stepKey, { id: item.id, status: item.status as SessionStep["status"], updated_at: item.updated_at ?? null })
     }
 
     const completableSteps = canonicalSteps.map((step) => {
-        const item = workItemByStepKey.get(step.key)
+        const item = workItemByStepKey.get(stepIdentifier(step))
         return { ...step, workItemId: item?.id ?? null, status: item?.status ?? "todo", updatedAt: item?.updated_at ?? null }
     })
     const completedKeys = new Set(completableSteps.filter((step) => step.status === "done").map((step) => step.key))
 
     return {
-        session: session as CanonicalOnboardingSession,
+        session,
         workspace,
         relationship,
         moduleKeys,
+        moduleTitles: normalizedSnapshot
+            ? normalizedSnapshot.modules.map((snapshotModule) => snapshotModule.title)
+            : moduleKeys.flatMap((key) => {
+                const moduleDefinition = publishedConfiguration.modules.find((candidate) => candidate.code === key)
+                return moduleDefinition ? [moduleDefinition.name] : []
+            }),
         completableSteps,
         completedKeys,
-        steps: [...completableSteps, FINAL_ONBOARDING_STEP],
+        steps: [...completableSteps, completionStep],
+        theme: publishedConfiguration.theme,
+        help: publishedConfiguration.help,
+        usesSnapshot: Boolean(normalizedSnapshot),
+        notices: noticeResult.error ? [] : (noticeResult.data ?? []).map((notice) => ({
+            id: String(notice.id),
+            sessionModuleId: String(notice.session_module_id),
+            explanation: String(notice.explanation ?? "This module was updated. Please review it again."),
+            requiresCompletion: Boolean(notice.requires_completion),
+            firstSeenAt: typeof notice.first_seen_at === "string" ? notice.first_seen_at : null,
+            moduleCompletedAt: typeof notice.module_completed_at === "string" ? notice.module_completed_at : null,
+        })),
     }
 }
 
-export async function getFormResponseAsset(sessionId: string, stepKey: string): Promise<FormResponse | undefined> {
+export async function getFormResponseAsset(sessionId: string, step: Pick<SessionStep, "key" | "sessionStepId">): Promise<FormResponse | undefined> {
     const { data } = await supabaseAdmin
         .from("assets")
         .select("metadata")
         .eq("native_kind", "onboarding_form_submission")
-        .eq("native_key", onboardingSubmissionNativeKey(sessionId, stepKey))
+        .eq("native_key", submissionNativeKey(sessionId, step))
         .maybeSingle()
     const metadata = data?.metadata && typeof data.metadata === "object" ? data.metadata as Record<string, unknown> : {}
     const response = metadata.response
-    return response && typeof response === "object" ? response as FormResponse : undefined
+    if (!response || typeof response !== "object" || Array.isArray(response)) return undefined
+    if (!step.sessionStepId) return response as FormResponse
+    const { data: fields, error } = await supabaseAdmin
+        .from("relationship_onboarding_session_fields")
+        .select("id, legacy_field_name")
+        .eq("session_step_id", step.sessionStepId)
+    if (error || !fields?.length) return response as FormResponse
+    const remapped = { ...(response as FormResponse) }
+    for (const field of fields) {
+        const stableId = String(field.id)
+        const legacyName = typeof field.legacy_field_name === "string" ? field.legacy_field_name : null
+        if (stableId in remapped || !legacyName || !(legacyName in remapped)) continue
+        remapped[stableId] = remapped[legacyName]
+        if (legacyName !== stableId) delete remapped[legacyName]
+    }
+    return remapped
 }
 
-async function findStepWorkItem(workspaceId: string, sessionId: string, stepKey: string) {
+async function findStepWorkItem(workspaceId: string, sessionId: string, step: Pick<SessionStep, "key" | "sessionStepId">) {
     const { data } = await supabaseAdmin
         .from("work_items")
         .select("id, status, actual_start_at, parent_work_item_id")
         .eq("workspace_id", workspaceId)
         .eq("native_kind", "onboarding_step")
-        .eq("native_key", onboardingStepNativeKey(sessionId, stepKey))
+        .eq("native_key", stepNativeKey(sessionId, step))
         .maybeSingle()
     return data
 }
@@ -248,12 +445,12 @@ async function createCanonicalStepWorkItem(input: {
     session: Pick<CanonicalOnboardingSession, "id" | "workspace_id" | "relationship_id">
     workspaceSlug: string
     parentWorkItemId: string
-    step: CanonicalSessionStep
+    step: SessionStep
     index: number
     predecessorId?: string | null
     startAt?: string | null
 }) {
-    const existing = await findStepWorkItem(input.session.workspace_id, input.session.id, input.step.key)
+    const existing = await findStepWorkItem(input.session.workspace_id, input.session.id, input.step)
     let workItemId = existing?.id
 
     if (!workItemId) {
@@ -268,7 +465,7 @@ async function createCanonicalStepWorkItem(input: {
                 priority: 3,
                 is_key_task: true,
                 native_kind: "onboarding_step",
-                native_key: onboardingStepNativeKey(input.session.id, input.step.key),
+                native_key: stepNativeKey(input.session.id, input.step),
                 native_href: onboardingDetailHref(input.workspaceSlug, input.session.relationship_id),
                 parent_work_item_id: input.parentWorkItemId,
                 workflow_role: "task",
@@ -282,7 +479,10 @@ async function createCanonicalStepWorkItem(input: {
                 metadata: {
                     session_id: input.session.id,
                     relationship_id: input.session.relationship_id,
+                    session_step_id: input.step.sessionStepId ?? null,
+                    source_step_id: input.step.sourceStepId ?? null,
                     step_key: input.step.key,
+                    legacy_step_key: input.step.legacyStepKey ?? input.step.key,
                     module_title: input.step.moduleTitle,
                     kind: input.step.kind,
                     form_key: input.step.formKey ?? null,
@@ -295,7 +495,7 @@ async function createCanonicalStepWorkItem(input: {
         if (error?.code === "23505") {
             // A duplicate submit may have won the insert race. Continue through
             // the relationship/dependency repair below using that item instead.
-            workItemId = (await findStepWorkItem(input.session.workspace_id, input.session.id, input.step.key))?.id
+            workItemId = (await findStepWorkItem(input.session.workspace_id, input.session.id, input.step))?.id
         } else if (error || !item) {
             await reportOnboardingFailure({
                 workspaceId: input.session.workspace_id,
@@ -353,13 +553,15 @@ type CanonicalStepWindowItem = {
 
 function canonicalStepKey(item: Pick<CanonicalStepWindowItem, "metadata">) {
     const metadata = item.metadata && typeof item.metadata === "object" ? item.metadata as Record<string, unknown> : {}
-    return typeof metadata.step_key === "string" ? metadata.step_key : null
+    return typeof metadata.session_step_id === "string"
+        ? metadata.session_step_id
+        : typeof metadata.step_key === "string" ? metadata.step_key : null
 }
 
 async function reconcileCanonicalStepWindow(input: {
     session: CanonicalOnboardingSession
     workspaceSlug: string
-    steps: CanonicalSessionStep[]
+    steps: SessionStep[]
     workItems: CanonicalStepWindowItem[]
 }) {
     const itemsByStepKey = new Map<string, CanonicalStepWindowItem>()
@@ -367,12 +569,12 @@ async function reconcileCanonicalStepWindow(input: {
         const stepKey = canonicalStepKey(item)
         if (stepKey) itemsByStepKey.set(stepKey, item)
     }
-    const currentIndex = input.steps.findIndex((step) => itemsByStepKey.get(step.key)?.status !== "done")
+    const currentIndex = input.steps.findIndex((step) => itemsByStepKey.get(stepIdentifier(step))?.status !== "done")
     if (currentIndex < 0) return false
 
     const currentStep = input.steps[currentIndex]
-    const previousItem = currentIndex > 0 ? itemsByStepKey.get(input.steps[currentIndex - 1].key) ?? null : null
-    const currentItem = itemsByStepKey.get(currentStep.key) ?? null
+    const previousItem = currentIndex > 0 ? itemsByStepKey.get(stepIdentifier(input.steps[currentIndex - 1])) ?? null : null
+    const currentItem = itemsByStepKey.get(stepIdentifier(currentStep)) ?? null
     const parentWorkItemId = currentItem?.parent_work_item_id
         ?? previousItem?.parent_work_item_id
         ?? (await ensureRelationshipStage({
@@ -406,7 +608,7 @@ async function reconcileCanonicalStepWindow(input: {
 
     const nextStep = input.steps[currentIndex + 1]
     if (nextStep) {
-        const nextItem = itemsByStepKey.get(nextStep.key)
+        const nextItem = itemsByStepKey.get(stepIdentifier(nextStep))
         if (!nextItem) {
             await createCanonicalStepWorkItem({
                 session: input.session,
@@ -440,19 +642,19 @@ async function linkAsset(assetId: string, workspaceId: string, relationshipId: s
 
 async function saveSubmissionAsset({
     session,
-    stepKey,
+    step,
     form,
     response,
     workItemId,
 }: {
     session: CanonicalOnboardingSession
-    stepKey: string
+    step: SessionStep
     form: OnboardingFormDefinition
     response: FormResponse
     workItemId: string
 }) {
     const now = new Date().toISOString()
-    const nativeKey = onboardingSubmissionNativeKey(session.id, stepKey)
+    const nativeKey = submissionNativeKey(session.id, step)
     const { data: asset, error } = await supabaseAdmin
         .from("assets")
         .upsert({
@@ -466,7 +668,10 @@ async function saveSubmissionAsset({
             metadata: {
                 session_id: session.id,
                 relationship_id: session.relationship_id,
-                step_key: stepKey,
+                session_step_id: step.sessionStepId ?? null,
+                source_step_id: step.sourceStepId ?? null,
+                step_key: step.key,
+                legacy_step_key: step.legacyStepKey ?? step.key,
                 form_key: form.key,
                 response,
             },
@@ -480,33 +685,35 @@ async function saveSubmissionAsset({
 
 async function saveUploadAssets({
     session,
-    stepKey,
+    step,
     response,
     workItemId,
 }: {
     session: CanonicalOnboardingSession
-    stepKey: string
+    step: SessionStep
     response: FormResponse
     workItemId: string
 }) {
     const uploads = extractUploadsFromResponse(response)
-    const activeNativeKeys = new Set(uploads.map((upload) => onboardingUploadNativeKey(session.id, stepKey, upload.path)))
+    const activeNativeKeys = new Set(uploads.map((upload) => uploadNativeKey(session.id, step, upload.path)))
 
     const { data: existingAssets } = await supabaseAdmin
         .from("assets")
         .select("id, native_key")
         .eq("workspace_id", session.workspace_id)
         .eq("native_kind", "onboarding_upload")
-        .like("native_key", `${session.id}:${stepKey}:upload:%`)
+        .like("native_key", step.sessionStepId
+            ? `${session.id}:step:${step.sessionStepId}:upload:%`
+            : `${session.id}:${step.key}:upload:%`)
 
     for (const upload of uploads) {
-        const nativeKey = onboardingUploadNativeKey(session.id, stepKey, upload.path)
+        const nativeKey = uploadNativeKey(session.id, step, upload.path)
         const { data: asset, error } = await supabaseAdmin
             .from("assets")
             .upsert({
                 workspace_id: session.workspace_id,
                 title: upload.name,
-                description: `Uploaded during ${stepKey.replace(/-/g, " ")} onboarding.`,
+                description: `Uploaded during ${step.title} onboarding.`,
                 asset_kind: classifyUploadAsset(upload),
                 source_kind: "onboarding_submission",
                 storage_path: upload.path,
@@ -517,7 +724,10 @@ async function saveUploadAssets({
                 metadata: {
                     session_id: session.id,
                     relationship_id: session.relationship_id,
-                    step_key: stepKey,
+                    session_step_id: step.sessionStepId ?? null,
+                    source_step_id: step.sourceStepId ?? null,
+                    step_key: step.key,
+                    legacy_step_key: step.legacyStepKey ?? step.key,
                     field_name: upload.fieldName,
                     provider: upload.provider ?? "r2",
                 },
@@ -550,121 +760,399 @@ async function maybeCompleteOnboarding(session: CanonicalOnboardingSession, work
     const allDone = Boolean(items?.length) && items!.every((item) => item.status === "done")
     if (!allDone) return
 
-    const now = new Date().toISOString()
-    const { error: completionError } = await supabaseAdmin
-        .from("relationship_onboarding_sessions")
-        .update({ status: "completed", completed_at: now })
-        .eq("id", session.id)
-    if (completionError) {
-        await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_session", error: completionError, diagnostics: { session_id: session.id } })
-        throw new Error("Could not complete onboarding session")
+    let completedWithRpc = false
+    const completionIdempotencyKey = `onboarding.session.completed:${session.id}`
+    const { error: completionRpcError } = await supabaseAdmin.rpc("complete_relationship_onboarding_session", {
+        p_workspace_id: session.workspace_id,
+        p_session_id: session.id,
+        p_session_token: session.session_token,
+        p_correlation_id: session.source_sale_id ?? session.id,
+        p_idempotency_key: completionIdempotencyKey,
+    })
+    if (!completionRpcError) {
+        completedWithRpc = true
+    } else if (isMissingOnboardingMutationRpc(completionRpcError, "complete_relationship_onboarding_session")) {
+        const now = new Date().toISOString()
+        const { error: completionError } = await supabaseAdmin
+            .from("relationship_onboarding_sessions")
+            .update({ status: "completed", completed_at: now })
+            .eq("id", session.id)
+        if (completionError) {
+            await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_session", error: completionError, diagnostics: { session_id: session.id } })
+            throw new Error("Could not complete onboarding session")
+        }
+    } else {
+        await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_session", error: completionRpcError, diagnostics: { session_id: session.id } })
+        throw new Error(publicOnboardingMutationMessage(completionRpcError, "Could not complete onboarding session"))
     }
-    // Complete the open onboarding lifecycle stage before materialising the
-    // review stage. Review already depends on onboarding, so this gives it the
-    // final step's exact completion timestamp rather than its old ghost-creation
-    // time when ensureRelationshipStage activates it.
-    try {
-        const finalItem = items?.at(-1)
-        if (finalItem) await completeWorkflowParents({ workspaceId: session.workspace_id, relationshipId: session.relationship_id, workItemId: finalItem.id })
-        await createOnboardingReviewWork({
+    if (!completedWithRpc) {
+        // Rolling-migration fallback: the new RPC finalises the lifecycle and
+        // review work in the same transaction as the completed session.
+        try {
+            const finalItem = items?.at(-1)
+            if (finalItem) await completeWorkflowParents({ workspaceId: session.workspace_id, relationshipId: session.relationship_id, workItemId: finalItem.id })
+            await createOnboardingReviewWork({
+                workspaceId: session.workspace_id,
+                workspaceSlug,
+                relationshipId: session.relationship_id,
+                sessionId: session.id,
+            })
+        } catch (error) {
+            await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_workflow", error, diagnostics: { session_id: session.id } })
+            throw error
+        }
+        await recordAdminActivity({
             workspaceId: session.workspace_id,
-            workspaceSlug,
-            relationshipId: session.relationship_id,
-            sessionId: session.id,
+            category: "onboarding",
+            eventKey: "onboarding.session.completed",
+            summary: "Client completed onboarding",
+            entityType: "onboarding_session",
+            entityId: session.id,
+            sourceHref: onboardingDetailHref(workspaceSlug, session.relationship_id),
+            actorKind: "client",
+            correlationId: session.source_sale_id ?? session.id,
+            idempotencyKey: completionIdempotencyKey,
+            metadata: { relationship_id: session.relationship_id, session_id: session.id },
         })
-    } catch (error) {
-        await reportOnboardingFailure({ workspaceId: session.workspace_id, workspaceSlug, relationshipId: session.relationship_id, operation: "complete_workflow", error, diagnostics: { session_id: session.id } })
-        throw error
     }
-    await recordAdminActivity({ workspaceId: session.workspace_id, category: "onboarding", eventKey: "onboarding.session.completed", summary: "Client completed onboarding", entityType: "onboarding_session", entityId: session.id, sourceHref: onboardingDetailHref(workspaceSlug, session.relationship_id), metadata: { relationship_id: session.relationship_id } })
     revalidatePath(`/${workspaceSlug}/work`)
 }
 
-export async function completeCanonicalStep(token: string, stepKey: string) {
+export async function completeCanonicalStep(
+    token: string,
+    stepKey: string,
+    submission?: { form: OnboardingFormDefinition; response: FormResponse },
+) {
     const resolved = await getCanonicalSessionByToken(token)
     if (!resolved) throw new Error("Invalid onboarding session")
-    const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, stepKey)
-    if (!workItem) throw new Error("Unknown onboarding step")
     const stepIndex = resolved.completableSteps.findIndex((step) => step.key === stepKey)
-    if (stepIndex < 0 || !workItem.parent_work_item_id) throw new Error("Invalid onboarding step")
-    const now = new Date().toISOString()
-    const { data: predecessorEdges } = await supabaseAdmin
-        .from("work_item_dependencies")
-        .select("depends_on_work_item_id")
-        .eq("workspace_id", resolved.session.workspace_id)
-        .eq("work_item_id", workItem.id)
-    const predecessorIds = (predecessorEdges ?? []).map((edge) => edge.depends_on_work_item_id)
-    const { data: predecessors } = predecessorIds.length
-        ? await supabaseAdmin.from("work_items").select("actual_completed_at").eq("workspace_id", resolved.session.workspace_id).in("id", predecessorIds)
-        : { data: [] as Array<{ actual_completed_at: string | null }> }
-    const predecessorFinishedAt = (predecessors ?? []).map((item) => item.actual_completed_at).filter((value): value is string => Boolean(value)).sort().at(-1)
-    const { error } = await supabaseAdmin
-        .from("work_items")
-        .update({
-            status: "done",
-            actual_start_at: workItem.actual_start_at ?? predecessorFinishedAt ?? now,
-            actual_start_has_time: true,
-            actual_completed_at: now,
-            actual_completed_has_time: true,
-            updated_at: now,
+    const step = resolved.completableSteps[stepIndex]
+    if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+    if (!step) throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding step")
+    if (resolved.completedKeys.has(step.key)) throw new Error("Submitted steps are locked")
+    const firstIncompleteIndex = resolved.completableSteps.findIndex((candidate) => !resolved.completedKeys.has(candidate.key))
+    if (stepIndex !== firstIncompleteIndex) throw new Error("Complete the earlier onboarding step first.")
+    const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)
+    if (!workItem?.parent_work_item_id) throw new Error("Invalid onboarding step")
+    let now = new Date().toISOString()
+    let completedWithRpc = false
+    const stepCompletionIdempotencyKey = `onboarding.step.completed:${resolved.session.id}:${stepIdentifier(step)}`
+    if (step.sessionStepId) {
+        const uploads = submission
+            ? extractUploadsFromResponse(submission.response).map((upload) => ({
+                field_name: upload.fieldName,
+                name: upload.name,
+                path: upload.path,
+                size: upload.size,
+                type: upload.type,
+                provider: upload.provider ?? "r2",
+                asset_kind: classifyUploadAsset(upload),
+            }))
+            : []
+        const { data: completionData, error: completionRpcError } = await supabaseAdmin.rpc("complete_onboarding_session_step", {
+            p_workspace_id: resolved.session.workspace_id,
+            p_session_id: resolved.session.id,
+            p_session_step_id: step.sessionStepId,
+            p_work_item_id: workItem.id,
+            p_session_token: token,
+            p_correlation_id: resolved.session.source_sale_id ?? resolved.session.id,
+            p_idempotency_key: stepCompletionIdempotencyKey,
+            p_form_response: submission?.response ?? null,
+            p_form_title: submission?.form.title ?? null,
+            p_form_key: submission?.form.key ?? null,
+            p_uploads: uploads,
         })
-        .eq("id", workItem.id)
-        .eq("workspace_id", resolved.session.workspace_id)
-    if (error) {
-        await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "complete_step", error, diagnostics: { session_id: resolved.session.id, step_key: stepKey, work_item_id: workItem.id } })
-        throw new Error("Could not save progress")
-    }
-    await recordAdminActivity({ workspaceId: resolved.session.workspace_id, category: "onboarding", eventKey: "onboarding.step.completed", summary: `Client completed onboarding step: ${resolved.completableSteps[stepIndex]?.title ?? stepKey}`, entityType: "work_item", entityId: workItem.id, sourceHref: onboardingDetailHref(resolved.workspace.slug, resolved.session.relationship_id), metadata: { relationship_id: resolved.session.relationship_id, session_id: resolved.session.id, step_key: stepKey } })
-    const nextStep = resolved.completableSteps[stepIndex + 1]
-    let nextWorkItem: CanonicalStepWorkItem | null = null
-    if (nextStep) {
-        nextWorkItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, nextStep.key)
-        if (!nextWorkItem) {
-            const nextId = await createCanonicalStepWorkItem({
-                session: resolved.session,
-                workspaceSlug: resolved.workspace.slug,
-                parentWorkItemId: workItem.parent_work_item_id,
-                step: nextStep,
-                index: stepIndex + 1,
-                predecessorId: workItem.id,
-                startAt: now,
-            })
-            nextWorkItem = { id: nextId, status: "todo", actual_start_at: now, parent_work_item_id: workItem.parent_work_item_id }
-    } else {
-            const { error: startError } = await supabaseAdmin.from("work_items").update({ actual_start_at: now, actual_start_has_time: true })
-                .eq("workspace_id", resolved.session.workspace_id).eq("id", nextWorkItem.id).is("actual_start_at", null)
-            if (startError) {
-                await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "start_next_step", error: startError, diagnostics: { session_id: resolved.session.id, step_key: nextStep.key, work_item_id: nextWorkItem.id } })
-                throw new Error("Could not start the next onboarding step")
-            }
+        if (!completionRpcError) {
+            completedWithRpc = true
+            const completedAt = completionData && typeof completionData === "object" && "completed_at" in completionData
+                ? (completionData as { completed_at?: unknown }).completed_at
+                : null
+            if (typeof completedAt === "string") now = completedAt
+        } else if (!isMissingOnboardingMutationRpc(completionRpcError, "complete_onboarding_session_step")) {
+            await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "complete_step", error: completionRpcError, diagnostics: { session_id: resolved.session.id, session_step_id: step.sessionStepId, work_item_id: workItem.id } })
+            throw new Error(publicOnboardingMutationMessage(completionRpcError, "Could not save progress"))
         }
     }
-    const upcomingStep = resolved.completableSteps[stepIndex + 2]
-    if (upcomingStep && nextWorkItem) {
-        const existingUpcoming = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, upcomingStep.key)
-        if (!existingUpcoming) {
-            await createCanonicalStepWorkItem({
+    if (!completedWithRpc) {
+        if (submission) {
+            await saveSubmissionAsset({
                 session: resolved.session,
-                workspaceSlug: resolved.workspace.slug,
-                parentWorkItemId: workItem.parent_work_item_id,
-                step: upcomingStep,
-                index: stepIndex + 2,
-                predecessorId: nextWorkItem.id,
+                step,
+                form: submission.form,
+                response: submission.response,
+                workItemId: workItem.id,
             })
+            await saveUploadAssets({
+                session: resolved.session,
+                step,
+                response: submission.response,
+                workItemId: workItem.id,
+            })
+            if (step.sessionStepId) {
+                await supabaseAdmin.from("onboarding_step_drafts").delete()
+                    .eq("workspace_id", resolved.session.workspace_id)
+                    .eq("session_step_id", step.sessionStepId)
+            }
+        }
+        const { data: predecessorEdges } = await supabaseAdmin
+            .from("work_item_dependencies")
+            .select("depends_on_work_item_id")
+            .eq("workspace_id", resolved.session.workspace_id)
+            .eq("work_item_id", workItem.id)
+        const predecessorIds = (predecessorEdges ?? []).map((edge) => edge.depends_on_work_item_id)
+        const { data: predecessors } = predecessorIds.length
+            ? await supabaseAdmin.from("work_items").select("actual_completed_at").eq("workspace_id", resolved.session.workspace_id).in("id", predecessorIds)
+            : { data: [] as Array<{ actual_completed_at: string | null }> }
+        const predecessorFinishedAt = (predecessors ?? []).map((item) => item.actual_completed_at).filter((value): value is string => Boolean(value)).sort().at(-1)
+        const { error } = await supabaseAdmin
+            .from("work_items")
+            .update({
+                status: "done",
+                actual_start_at: workItem.actual_start_at ?? predecessorFinishedAt ?? now,
+                actual_start_has_time: true,
+                actual_completed_at: now,
+                actual_completed_has_time: true,
+                updated_at: now,
+            })
+            .eq("id", workItem.id)
+            .eq("workspace_id", resolved.session.workspace_id)
+        if (error) {
+            await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "complete_step", error, diagnostics: { session_id: resolved.session.id, step_key: stepKey, work_item_id: workItem.id } })
+            throw new Error("Could not save progress")
+        }
+        if (step.sessionModuleId) {
+            const moduleSteps = resolved.completableSteps.filter((candidate) => candidate.sessionModuleId === step.sessionModuleId)
+            const moduleIsComplete = moduleSteps.length > 0 && moduleSteps.every((candidate) => candidate.key === step.key || resolved.completedKeys.has(candidate.key))
+            if (moduleIsComplete) {
+                await supabaseAdmin
+                    .from("onboarding_session_notices")
+                    .update({ module_completed_at: now })
+                    .eq("workspace_id", resolved.session.workspace_id)
+                    .eq("session_id", resolved.session.id)
+                    .eq("session_module_id", step.sessionModuleId)
+                    .is("module_completed_at", null)
+            }
+        }
+        await recordAdminActivity({
+            workspaceId: resolved.session.workspace_id,
+            category: "onboarding",
+            eventKey: "onboarding.step.completed",
+            summary: `Client completed onboarding step: ${resolved.completableSteps[stepIndex]?.title ?? stepKey}`,
+            entityType: "work_item",
+            entityId: workItem.id,
+            sourceHref: onboardingDetailHref(resolved.workspace.slug, resolved.session.relationship_id),
+            actorKind: "client",
+            correlationId: resolved.session.source_sale_id ?? resolved.session.id,
+            idempotencyKey: stepCompletionIdempotencyKey,
+            metadata: {
+                relationship_id: resolved.session.relationship_id,
+                session_id: resolved.session.id,
+                session_step_id: step.sessionStepId ?? null,
+                step_key: step.legacyStepKey ?? step.key,
+            },
+        })
+    }
+    if (!completedWithRpc) {
+        const nextStep = resolved.completableSteps[stepIndex + 1]
+        let nextWorkItem: CanonicalStepWorkItem | null = null
+        if (nextStep) {
+            nextWorkItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, nextStep)
+            if (!nextWorkItem) {
+                const nextId = await createCanonicalStepWorkItem({
+                    session: resolved.session,
+                    workspaceSlug: resolved.workspace.slug,
+                    parentWorkItemId: workItem.parent_work_item_id,
+                    step: nextStep,
+                    index: stepIndex + 1,
+                    predecessorId: workItem.id,
+                    startAt: now,
+                })
+                nextWorkItem = { id: nextId, status: "todo", actual_start_at: now, parent_work_item_id: workItem.parent_work_item_id }
+            } else {
+            const { error: startError } = await supabaseAdmin.from("work_items").update({ actual_start_at: now, actual_start_has_time: true })
+                .eq("workspace_id", resolved.session.workspace_id).eq("id", nextWorkItem.id).is("actual_start_at", null)
+                if (startError) {
+                    await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "start_next_step", error: startError, diagnostics: { session_id: resolved.session.id, step_key: nextStep.key, work_item_id: nextWorkItem.id } })
+                    throw new Error("Could not start the next onboarding step")
+                }
+            }
+        }
+        const upcomingStep = resolved.completableSteps[stepIndex + 2]
+        if (upcomingStep && nextWorkItem) {
+            const existingUpcoming = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, upcomingStep)
+            if (!existingUpcoming) {
+                await createCanonicalStepWorkItem({
+                    session: resolved.session,
+                    workspaceSlug: resolved.workspace.slug,
+                    parentWorkItemId: workItem.parent_work_item_id,
+                    step: upcomingStep,
+                    index: stepIndex + 2,
+                    predecessorId: nextWorkItem.id,
+                })
+            }
         }
     }
     await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
     revalidateOnboarding(resolved.workspace.slug, resolved.session.relationship_id, token)
 }
 
-export async function submitCanonicalFormStep(token: string, stepKey: string, form: OnboardingFormDefinition, response: FormResponse) {
+export async function submitCanonicalFormStep(token: string, stepKey: string, response: FormResponse) {
     const resolved = await getCanonicalSessionByToken(token)
     if (!resolved) throw new Error("Invalid onboarding session")
-    const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, stepKey)
-    if (!workItem) throw new Error("Unknown onboarding step")
-    await saveSubmissionAsset({ session: resolved.session, stepKey, form, response, workItemId: workItem.id })
-    await saveUploadAssets({ session: resolved.session, stepKey, response, workItemId: workItem.id })
-    await completeCanonicalStep(token, stepKey)
+    if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+    const step = resolved.completableSteps.find((candidate) => candidate.key === stepKey)
+    if (!step || step.kind !== "form") throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding form")
+    if (resolved.completedKeys.has(step.key)) throw new Error("Submitted steps are locked")
+    const form = step.form
+        ?? (step.formKey ? (await import("@/lib/onboarding/forms")).getOnboardingForm(step.formKey) : null)
+    if (!form) throw new Error("Unknown onboarding form")
+    validateFormResponse(form, response)
+    const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)
+    if (!workItem) throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding step")
+    await completeCanonicalStep(token, stepKey, { form, response })
+}
+
+function draftResponseForForm(form: OnboardingFormDefinition, response: FormResponse) {
+    const draft: FormResponse = {}
+    for (const field of form.fields) {
+        const value = response[field.name]
+        if (field.type === "file") {
+            if (Array.isArray(value)) draft[field.name] = value.filter((item) => item && typeof item === "object" && typeof item.path === "string")
+        } else if (typeof value === "string") {
+            draft[field.name] = value.slice(0, 100_000)
+        }
+    }
+    return draft
+}
+
+export async function getCanonicalStepDraft(token: string, stepKey: string): Promise<{ response: FormResponse; lockVersion: number } | null> {
+    const resolved = await getCanonicalSessionByToken(token)
+    if (!resolved) return null
+    const step = resolved.completableSteps.find((candidate) => candidate.key === stepKey)
+    if (!step?.sessionStepId || step.kind !== "form" || resolved.completedKeys.has(step.key)) return null
+    const { data, error } = await supabaseAdmin
+        .from("onboarding_step_drafts")
+        .select("response, lock_version")
+        .eq("workspace_id", resolved.session.workspace_id)
+        .eq("session_id", resolved.session.id)
+        .eq("session_step_id", step.sessionStepId)
+        .maybeSingle()
+    if (isMissingCanonicalOnboarding(error) || error || !data) return null
+    return {
+        response: data.response && typeof data.response === "object" ? data.response as FormResponse : {},
+        lockVersion: Number(data.lock_version) || 1,
+    }
+}
+
+export async function saveCanonicalStepDraft(token: string, stepKey: string, response: FormResponse) {
+    const resolved = await getCanonicalSessionByToken(token)
+    if (!resolved) throw new Error("Invalid onboarding session")
+    if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+    const stepIndex = resolved.completableSteps.findIndex((candidate) => candidate.key === stepKey)
+    const step = resolved.completableSteps[stepIndex]
+    if (!step && resolved.usesSnapshot) throw new Error(ONBOARDING_SESSION_UPDATED_MESSAGE)
+    if (!step?.sessionStepId || step.kind !== "form" || !step.form) return { saved: false as const, lockVersion: 0 }
+    if (resolved.completedKeys.has(step.key)) throw new Error("Submitted steps are locked")
+    const firstIncompleteIndex = resolved.completableSteps.findIndex((candidate) => !resolved.completedKeys.has(candidate.key))
+    if (stepIndex !== firstIncompleteIndex) throw new Error("Complete the earlier onboarding step first.")
+    const { data: current, error: currentError } = await supabaseAdmin
+        .from("onboarding_step_drafts")
+        .select("lock_version")
+        .eq("workspace_id", resolved.session.workspace_id)
+        .eq("session_step_id", step.sessionStepId)
+        .maybeSingle()
+    if (isMissingCanonicalOnboarding(currentError)) return { saved: false as const, lockVersion: 0 }
+    if (currentError) throw new Error("Could not save this draft")
+    const lockVersion = (Number(current?.lock_version) || 0) + 1
+    const { error } = await supabaseAdmin.from("onboarding_step_drafts").upsert({
+        workspace_id: resolved.session.workspace_id,
+        session_id: resolved.session.id,
+        session_step_id: step.sessionStepId,
+        response: draftResponseForForm(step.form, response),
+        lock_version: lockVersion,
+    }, { onConflict: "session_step_id" })
+    if (isMissingCanonicalOnboarding(error)) return { saved: false as const, lockVersion: 0 }
+    if (error) throw new Error("Could not save this draft")
+    return { saved: true as const, lockVersion }
+}
+
+export async function requestCanonicalStepEdit(token: string, stepKey: string) {
+    const resolved = await getCanonicalSessionByToken(token)
+    if (!resolved) throw new Error("Invalid onboarding session")
+    const step = resolved.completableSteps.find((candidate) => candidate.key === stepKey)
+    if (!step && resolved.usesSnapshot) throw new Error(ONBOARDING_SESSION_UPDATED_MESSAGE)
+    if (!step?.sessionStepId || !resolved.completedKeys.has(step.key)) throw new Error("Only submitted steps can have an edit request")
+    const editRequestIdempotencyKey = `onboarding.edit_request.recorded:${resolved.session.id}:${step.sessionStepId}`
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc("record_onboarding_edit_request", {
+        p_workspace_id: resolved.session.workspace_id,
+        p_session_id: resolved.session.id,
+        p_session_step_id: step.sessionStepId,
+        p_session_token: token,
+        p_correlation_id: resolved.session.source_sale_id ?? resolved.session.id,
+        p_idempotency_key: editRequestIdempotencyKey,
+    })
+    if (!rpcError) {
+        const alreadyRequested = Boolean(
+            rpcData && typeof rpcData === "object" && "already_requested" in rpcData
+                ? (rpcData as { already_requested?: unknown }).already_requested
+                : false
+        )
+        return { requested: true as const, alreadyRequested }
+    }
+    if (!isMissingOnboardingMutationRpc(rpcError, "record_onboarding_edit_request")) {
+        await reportOnboardingFailure({ workspaceId: resolved.session.workspace_id, workspaceSlug: resolved.workspace.slug, relationshipId: resolved.session.relationship_id, operation: "record_edit_request", error: rpcError, diagnostics: { session_id: resolved.session.id, session_step_id: step.sessionStepId } })
+        throw new Error(publicOnboardingMutationMessage(rpcError, "Could not record your request"))
+    }
+    const { data: existing, error: existingError } = await supabaseAdmin
+        .from("onboarding_edit_requests")
+        .select("id")
+        .eq("workspace_id", resolved.session.workspace_id)
+        .eq("session_step_id", step.sessionStepId)
+        .eq("status", "pending")
+        .maybeSingle()
+    if (isMissingCanonicalOnboarding(existingError)) throw new Error("Edit requests are not available for this session")
+    if (existingError) throw new Error("Could not record your request")
+    if (existing) return { requested: true as const, alreadyRequested: true as const }
+    const { data: request, error } = await supabaseAdmin.from("onboarding_edit_requests").insert({
+        workspace_id: resolved.session.workspace_id,
+        relationship_id: resolved.session.relationship_id,
+        session_id: resolved.session.id,
+        session_step_id: step.sessionStepId,
+        status: "pending",
+    }).select("id").single()
+    if (error || !request) throw new Error("Could not record your request")
+    await recordAdminActivity({
+        workspaceId: resolved.session.workspace_id,
+        category: "onboarding",
+        eventKey: "onboarding.edit_request.recorded",
+        summary: `Client requested an edit to onboarding step: ${step.title}`,
+        entityType: "onboarding_edit_request",
+        entityId: request.id,
+        sourceHref: onboardingDetailHref(resolved.workspace.slug, resolved.session.relationship_id),
+        actorKind: "client",
+        correlationId: resolved.session.source_sale_id ?? resolved.session.id,
+        idempotencyKey: editRequestIdempotencyKey,
+        metadata: { relationship_id: resolved.session.relationship_id, session_id: resolved.session.id, session_step_id: step.sessionStepId },
+    })
+    return { requested: true as const, alreadyRequested: false as const }
+}
+
+export async function markCanonicalSessionNoticeSeen(token: string, noticeId: string) {
+    const resolved = await getCanonicalSessionByToken(token)
+    if (!resolved) throw new Error("Invalid onboarding session")
+    const notice = resolved.notices.find((candidate) => candidate.id === noticeId)
+    if (!notice) return { seen: false as const }
+    if (!notice.firstSeenAt) {
+        const { error } = await supabaseAdmin
+            .from("onboarding_session_notices")
+            .update({ first_seen_at: new Date().toISOString() })
+            .eq("workspace_id", resolved.session.workspace_id)
+            .eq("session_id", resolved.session.id)
+            .eq("id", noticeId)
+            .is("first_seen_at", null)
+        if (error && !isMissingCanonicalOnboarding(error)) throw new Error("Could not record this update notice")
+    }
+    return { seen: true as const }
 }
 
 export async function getPublicOnboardingPath(token: string) {
@@ -680,6 +1168,109 @@ export function revalidateOnboarding(workspaceSlug: string, relationshipId: stri
     revalidatePath(relationshipHubHref(workspaceSlug, relationshipId))
 }
 
+function isUuid(value: string | null | undefined) {
+    return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))
+}
+
+function canMaterializeComposition(composition: ComposedOnboardingSession) {
+    return isUuid(composition.configurationRevisionId)
+        && isUuid(composition.welcomeRevisionId)
+        && isUuid(composition.completionRevisionId)
+        && composition.modules.every((module) =>
+            isUuid(module.moduleId)
+            && isUuid(module.moduleRevisionId)
+            && (!module.sourceServiceRevisionId || isUuid(module.sourceServiceRevisionId))
+            && module.steps.every((step) => isUuid(step.sourceStepId) && step.fields.every((field) => isUuid(field.sourceFieldId)))
+        )
+}
+
+async function materializeNormalizedSnapshot(input: {
+    session: Pick<CanonicalOnboardingSession, "id" | "workspace_id">
+    composition: ComposedOnboardingSession
+}) {
+    const moduleIdBySourceId = new Map<string, string>()
+    if (input.composition.modules.length) {
+        const { data: moduleRows, error } = await supabaseAdmin
+            .from("relationship_onboarding_session_modules")
+            .insert(input.composition.modules.map((module) => ({
+                workspace_id: input.session.workspace_id,
+                session_id: input.session.id,
+                module_id: module.moduleId,
+                module_revision_id: module.moduleRevisionId,
+                source_kind: module.sourceKind,
+                source_service_revision_id: module.sourceServiceRevisionId,
+                sort_order: module.sortOrder,
+                title: module.title,
+                description: module.description,
+                is_test: module.isTest,
+            })))
+            .select("id, module_id")
+        if (error) throw new Error(error.message)
+        for (const row of moduleRows ?? []) moduleIdBySourceId.set(String(row.module_id), String(row.id))
+    }
+
+    const orderedSteps: Array<{
+        step: ComposedOnboardingSession["bookends"][number] | ComposedOnboardingSession["modules"][number]["steps"][number]
+        moduleId: string | null
+        kind: "form" | "video" | "welcome" | "completion"
+        sortOrder: number
+    }> = []
+    const welcome = input.composition.bookends.find((step) => step.bookendKind === "welcome")
+    if (welcome) orderedSteps.push({ step: welcome, moduleId: null, kind: "welcome", sortOrder: 0 })
+    let stepPosition = 1
+    for (const snapshotModule of input.composition.modules) {
+        for (const step of snapshotModule.steps) {
+            orderedSteps.push({ step, moduleId: snapshotModule.moduleId, kind: step.kind, sortOrder: stepPosition * 10 })
+            stepPosition += 1
+        }
+    }
+    const completion = input.composition.bookends.find((step) => step.bookendKind === "completion")
+    if (completion) orderedSteps.push({ step: completion, moduleId: null, kind: "completion", sortOrder: stepPosition * 10 })
+
+    const { data: stepRows, error: stepError } = await supabaseAdmin
+        .from("relationship_onboarding_session_steps")
+        .insert(orderedSteps.map(({ step, moduleId, kind, sortOrder }) => ({
+            workspace_id: input.session.workspace_id,
+            session_id: input.session.id,
+            session_module_id: moduleId ? moduleIdBySourceId.get(moduleId) : null,
+            source_step_id: step.sourceStepId,
+            module_revision_id: step.moduleRevisionId,
+            bookend_revision_id: step.bookendRevisionId,
+            kind,
+            title: step.title,
+            description: step.description,
+            estimated_time: step.estimatedTime,
+            why_we_ask: step.why,
+            video_url: step.videoUrl || null,
+            video_storage_path: step.videoPath,
+            sort_order: sortOrder,
+            legacy_step_key: step.legacyStepKey,
+            legacy_form_key: step.legacyFormKey,
+        })))
+        .select("id, sort_order")
+    if (stepError) throw new Error(stepError.message)
+    const stepIdBySortOrder = new Map((stepRows ?? []).map((row) => [Number(row.sort_order), String(row.id)]))
+    const fieldRows = orderedSteps.flatMap(({ step, sortOrder }) => step.fields.map((field) => ({
+        workspace_id: input.session.workspace_id,
+        session_id: input.session.id,
+        session_step_id: stepIdBySortOrder.get(sortOrder),
+        source_field_id: field.sourceFieldId,
+        type: field.type,
+        label: field.label,
+        required: field.required,
+        help_text: field.helpText,
+        placeholder: field.placeholder,
+        file_accept: field.accept,
+        multiple: field.multiple,
+        sort_order: field.sortOrder,
+        legacy_field_name: field.legacyFieldName,
+    })))
+    if (fieldRows.length) {
+        const { error } = await supabaseAdmin.from("relationship_onboarding_session_fields").insert(fieldRows)
+        if (error) throw new Error(error.message)
+    }
+}
+
 type CreateRelationshipOnboardingInput = {
     workspaceId: string
     workspaceSlug: string
@@ -689,6 +1280,8 @@ type CreateRelationshipOnboardingInput = {
     projectTimeframeDays?: number | null
     isTest?: boolean
     createdBy?: string | null
+    sourceSaleId?: string | null
+    compositionSource?: "versioned" | "legacy"
 }
 
 export async function createRelationshipOnboardingSession({
@@ -700,10 +1293,57 @@ export async function createRelationshipOnboardingSession({
     projectTimeframeDays,
     isTest = false,
     createdBy,
+    sourceSaleId,
+    compositionSource,
 }: CreateRelationshipOnboardingInput) {
     const now = new Date().toISOString()
-    const selectedServices = serviceKeys.filter((serviceKey) => serviceKey in SERVICES)
-    const selectedModules = [...new Set(moduleKeys?.length ? moduleKeys : getModuleKeysForServices(selectedServices))]
+    if (sourceSaleId) {
+        const { data: existing, error: existingError } = await supabaseAdmin
+            .from("relationship_onboarding_sessions")
+            .select("id, relationship_id, session_token")
+            .eq("workspace_id", workspaceId)
+            .eq("source_sale_id", sourceSaleId)
+            .maybeSingle()
+        if (!existingError && existing) {
+            return {
+                id: existing.id,
+                relationshipId: existing.relationship_id,
+                sessionToken: existing.session_token,
+                onboardingUrl: `/onboarding/session/${existing.session_token}`,
+                created: false,
+            }
+        }
+        if (existingError && !isMissingCanonicalOnboarding(existingError)) throw new Error("Could not resume paid onboarding")
+    }
+
+    const useLegacyComposition = compositionSource
+        ? compositionSource === "legacy"
+        : getOnboardingRuntimeMode() !== "versioned"
+    const publishedConfiguration = useLegacyComposition
+        ? legacyPublishedOnboardingConfiguration()
+        : await loadPublishedOnboardingConfiguration(workspaceId)
+    const selectedServiceDefinitions = serviceKeys.flatMap((serviceKey) => {
+        const service = publishedConfiguration.services.find((candidate) => candidate.code === serviceKey && candidate.state === "active")
+        return service ? [service] : []
+    })
+    const selectedServices = selectedServiceDefinitions.length
+        ? selectedServiceDefinitions.map((service) => service.code)
+        : serviceKeys.filter((serviceKey) => serviceKey in SERVICES)
+    const composition = composeOnboardingSession({
+        purchasedServices: selectedServiceDefinitions,
+        modules: publishedConfiguration.modules,
+        mandatory: publishedConfiguration.mandatory,
+        welcome: publishedConfiguration.welcome,
+        completion: publishedConfiguration.completion,
+    })
+    const normalizedComposition = publishedConfiguration.schemaReady && canMaterializeComposition(composition)
+        ? composition
+        : null
+    const selectedModules = [...new Set(moduleKeys !== undefined
+        ? moduleKeys
+        : normalizedComposition
+            ? normalizedComposition.modules.map((module) => publishedConfiguration.modules.find((candidate) => candidate.id === module.moduleId)?.code).filter((key): key is string => Boolean(key))
+            : getModuleKeysForServices(selectedServices))]
     const { data: oldSessions } = await supabaseAdmin
         .from("relationship_onboarding_sessions")
         .select("id")
@@ -730,22 +1370,60 @@ export async function createRelationshipOnboardingSession({
     }
 
     const sessionToken = randomBytes(32).toString("hex")
-    const { data: session, error } = await supabaseAdmin
+    const sessionInsert = {
+        workspace_id: workspaceId,
+        relationship_id: relationshipId,
+        session_token: sessionToken,
+        status: "active",
+        is_test: isTest,
+        project_timeframe_days: projectTimeframeDays ?? null,
+        created_by: createdBy ?? null,
+        source_sale_id: sourceSaleId ?? null,
+        ...(normalizedComposition ? {
+            configuration_revision_id: normalizedComposition.configurationRevisionId,
+            welcome_revision_id: normalizedComposition.welcomeRevisionId,
+            completion_revision_id: normalizedComposition.completionRevisionId,
+            snapshot_schema_version: 1,
+            composition_hash: normalizedComposition.compositionHash,
+            composition_snapshot: normalizedComposition.audit,
+        } : {}),
+    }
+    let { data: session, error } = await supabaseAdmin
         .from("relationship_onboarding_sessions")
-        .insert({
-            workspace_id: workspaceId,
-            relationship_id: relationshipId,
-            session_token: sessionToken,
-            status: "active",
-            is_test: isTest,
-            project_timeframe_days: projectTimeframeDays ?? null,
-            created_by: createdBy ?? null,
-        })
+        .insert(sessionInsert)
         .select("id, session_token")
         .single()
+    if (error && isMissingCanonicalOnboarding(error)) {
+        const legacyInsert = await supabaseAdmin
+            .from("relationship_onboarding_sessions")
+            .insert({
+                workspace_id: workspaceId,
+                relationship_id: relationshipId,
+                session_token: sessionToken,
+                status: "active",
+                is_test: isTest,
+                project_timeframe_days: projectTimeframeDays ?? null,
+                created_by: createdBy ?? null,
+            })
+            .select("id, session_token")
+            .single()
+        session = legacyInsert.data
+        error = legacyInsert.error
+    }
     if (error || !session) {
         await reportOnboardingFailure({ workspaceId, workspaceSlug, relationshipId, operation: "create_session", error: error?.message ?? "No onboarding session was returned" })
         throw new Error("create-session-failed")
+    }
+
+    if (normalizedComposition) {
+        try {
+            await materializeNormalizedSnapshot({
+                session: { id: session.id, workspace_id: workspaceId },
+                composition: normalizedComposition,
+            })
+        } catch (snapshotError) {
+            await reportOnboardingFailure({ workspaceId, workspaceSlug, relationshipId, operation: "materialize_session_snapshot", error: snapshotError, diagnostics: { session_id: session.id } })
+        }
     }
 
     await Promise.all([
@@ -771,7 +1449,12 @@ export async function createRelationshipOnboardingSession({
             : Promise.resolve(),
     ])
 
-    const steps = getOnboardingStepsForModules(selectedModules)
+    const normalizedSnapshot = normalizedComposition
+        ? await loadNormalizedSessionSnapshot({ id: session.id, workspace_id: workspaceId, snapshot_schema_version: 1 })
+        : null
+    const steps: SessionStep[] = normalizedSnapshot
+        ? normalizedSnapshot.actionableSteps.map(snapshotStepToSessionStep)
+        : getOnboardingStepsForModules(selectedModules)
     const onboardingStageId = await ensureRelationshipStage({
         workspaceId,
         relationshipId,
@@ -800,13 +1483,64 @@ export async function createRelationshipOnboardingSession({
         .eq("workspace_id", workspaceId)
         .eq("id", relationshipId)
 
-    await recordAdminActivity({ workspaceId, category: "onboarding", eventKey: "onboarding.session.started", summary: "Client onboarding session started", entityType: "onboarding_session", entityId: session.id, sourceHref: onboardingDetailHref(workspaceSlug, relationshipId), actorUserId: createdBy ?? null, metadata: { relationship_id: relationshipId, modules: selectedModules, services: selectedServices, is_test: isTest } })
+    const sessionCorrelationId = sourceSaleId ?? session.id
+    await recordAdminActivity({
+        workspaceId,
+        category: "onboarding",
+        eventKey: "onboarding.session.composed",
+        summary: "Onboarding session composition resolved",
+        entityType: "onboarding_session",
+        entityId: session.id,
+        sourceHref: onboardingDetailHref(workspaceSlug, relationshipId),
+        actorUserId: createdBy ?? null,
+        actorKind: createdBy ? "staff" : "automation",
+        correlationId: sessionCorrelationId,
+        idempotencyKey: `onboarding.session.composed:${session.id}`,
+        metadata: normalizedComposition ? {
+            relationship_id: relationshipId,
+            session_id: session.id,
+            configuration_revision_id: normalizedComposition.configurationRevisionId,
+            welcome_revision_id: normalizedComposition.welcomeRevisionId,
+            completion_revision_id: normalizedComposition.completionRevisionId,
+            service_revision_ids: normalizedComposition.serviceRevisionIds,
+            module_revision_ids: normalizedComposition.modules.map((module) => module.moduleRevisionId),
+            service_count: normalizedComposition.serviceRevisionIds.length,
+            module_count: normalizedComposition.modules.length,
+            step_count: normalizedComposition.audit.stepCount,
+            field_count: normalizedComposition.audit.fieldCount,
+            composition_hash: normalizedComposition.compositionHash,
+            snapshot_schema_version: 1,
+        } : {
+            relationship_id: relationshipId,
+            session_id: session.id,
+            service_count: selectedServices.length,
+            module_count: selectedModules.length,
+            step_count: steps.length,
+            snapshot_schema_version: 0,
+            migration_fallback: "legacy_hard_coded",
+        },
+    })
+    await recordAdminActivity({
+        workspaceId,
+        category: "onboarding",
+        eventKey: "onboarding.session.started",
+        summary: "Client onboarding session started",
+        entityType: "onboarding_session",
+        entityId: session.id,
+        sourceHref: onboardingDetailHref(workspaceSlug, relationshipId),
+        actorUserId: createdBy ?? null,
+        actorKind: createdBy ? "staff" : "automation",
+        correlationId: sessionCorrelationId,
+        idempotencyKey: `onboarding.session.started:${session.id}`,
+        metadata: { relationship_id: relationshipId, modules: selectedModules, services: selectedServices, is_test: isTest },
+    })
 
     return {
         id: session.id,
         relationshipId,
         sessionToken: session.session_token,
         onboardingUrl: `/onboarding/session/${session.session_token}`,
+        created: true,
     }
 }
 

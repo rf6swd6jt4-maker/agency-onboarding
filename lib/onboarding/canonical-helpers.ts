@@ -2,6 +2,9 @@ import { MODULES } from "./modules"
 import type { StepKind } from "./modules"
 export {
     classifyUploadAsset,
+    onboardingSnapshotStepNativeKey,
+    onboardingSnapshotSubmissionNativeKey,
+    onboardingSnapshotUploadNativeKey,
     onboardingStepNativeKey,
     onboardingSubmissionNativeKey,
     onboardingUploadNativeKey,
