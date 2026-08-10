@@ -156,6 +156,8 @@ where status = 'draft';
 create unique index if not exists onboarding_module_revisions_version_unique
 on public.onboarding_module_revisions(module_id, revision_number)
 where revision_number is not null;
+create unique index if not exists onboarding_module_revisions_workspace_id_id_unique
+on public.onboarding_module_revisions(workspace_id, id);
 create index if not exists onboarding_module_revisions_workspace_idx
 on public.onboarding_module_revisions(workspace_id, module_id, status, revision_number desc);
 

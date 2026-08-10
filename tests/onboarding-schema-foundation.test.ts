@@ -32,6 +32,7 @@ test("custom onboarding schema uses immutable revisions and normalized stable sn
     assert.match(foundation, /\[REDACTED TOKEN\]/)
     assert.match(foundation, /stripe_events_pkey primary key \(workspace_id, id\)/)
     assert.match(foundation, /client_sales_workspace_stripe_invoice_unique/)
+    assert.match(foundation, /onboarding_module_revisions_workspace_id_id_unique[\s\S]+on public\.onboarding_module_revisions\(workspace_id, id\)/)
 })
 
 test("authenticated onboarding access is read-only and stable revision identities cannot be rewritten", async () => {
