@@ -1747,13 +1747,11 @@ begin
             if jsonb_typeof(v_upload) <> 'object'
                or nullif(v_upload->>'path', '') is null
                or nullif(v_upload->>'name', '') is null
-               or coalesce(v_upload->>'size', '') !~ '^[0-9]+$'
-               or case
-                    when coalesce(v_upload->>'size', '') ~ '^[0-9]+$'
-                    then (v_upload->>'size')::bigint <= 0
-                      or (v_upload->>'size')::bigint > 524288000
-                    else false
-                  end
+               or coalesce(v_upload->>'size', '') !~ '^[0-9]+$' then
+                raise exception using errcode = '22023', message = 'An onboarding upload descriptor is invalid or exceeds 500 MB';
+            end if;
+            if (v_upload->>'size')::bigint <= 0
+               or (v_upload->>'size')::bigint > 524288000
                or position(
                     p_workspace_id::text || '/onboarding/' ||
                     v_session.relationship_id::text || '/' ||

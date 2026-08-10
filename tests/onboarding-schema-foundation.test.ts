@@ -118,6 +118,8 @@ test("session mutations lock tenant records and insert definitive Activity trans
     assert.match(operations, /p_uploads jsonb default '\[\]'::jsonb/)
     assert.match(operations, /v_session\.relationship_id::text \|\| '\/' \|\|[\s\S]*p_session_id::text \|\| '\/'/)
     assert.match(operations, /\(v_upload->>'size'\)::bigint <= 0/)
+    assert.match(operations, /coalesce\(v_upload->>'size', ''\) !~ '\^\[0-9\]\+\$' then[\s\S]+end if;[\s\S]+if \(v_upload->>'size'\)::bigint <= 0/)
+    assert.doesNotMatch(operations, /or case\s+when coalesce\(v_upload->>'size'/)
     assert.match(operations, /v_upload_native_key = any\(v_active_upload_keys\)/)
     const stepRpc = operations.slice(
         operations.indexOf("create or replace function public.complete_onboarding_session_step"),
