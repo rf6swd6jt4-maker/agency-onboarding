@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import * as Y from "yjs"
-import { persistVisualBuilderUpdate } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
+import { visibleBuilderPresence, type BuilderPresence } from "@/lib/onboarding/builder-presence"
+import { persistBuilderUpdate, refreshBuilderUpdates } from "@/lib/onboarding/builder-sync-client"
 import type { OnboardingBuilderData, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 
@@ -15,16 +16,8 @@ export type VisualBuilderDocument = {
     linkedChangeSets: Array<{ id: string; definitionIds: string[]; createdVersion?: number }>
 }
 
-export type BuilderPresence = {
-    userId: string
-    name: string
-    avatarSrc: string | null
-    color: string
-    selection: string | null
-    cursor: { x: number; y: number } | null
-}
-
-export type BuilderSyncState = "syncing" | "synced" | "reconnecting" | "offline" | "error" | "publishing"
+export type BuilderSyncState = "syncing" | "synced" | "offline" | "error" | "publishing"
+export type BuilderRealtimeState = "connecting" | "connected" | "reconnecting" | "unavailable"
 
 const collaboratorColours = ["#67E8F9", "#A7F3D0", "#FDE68A", "#F9A8D4", "#C4B5FD", "#FDBA74"]
 const KEYED_ARRAY_KIND = "betelgeze-keyed-array"
@@ -262,16 +255,20 @@ export function useCollaborativeOnboardingDocument({
     const channelRef = useRef<ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]> | null>(null)
     const clientIdRef = useRef(crypto.randomUUID())
     const updateCounterRef = useRef(0)
+    const lastSequenceRef = useRef(Math.max(collaboration.snapshotSequence, ...collaboration.updates.map((update) => update.sequence), 0))
     const pendingUpdatesRef = useRef<Uint8Array[]>([])
     const pendingDefinitionIdsRef = useRef(new Set<string>())
     const retryUpdateRef = useRef<{ update: Uint8Array; definitionIds: string[]; updateId: string } | null>(null)
     const flushingRef = useRef<Promise<number> | null>(null)
+    const refreshingRef = useRef<Promise<boolean> | null>(null)
     const persistTimerRef = useRef<number | null>(null)
     const localOriginRef = useRef({ actor: collaboration.currentUser?.id ?? "anonymous" })
     const localPresenceRef = useRef<BuilderPresence | null>(null)
     const presenceTimerRef = useRef<number | null>(null)
     const [document, setDocument] = useState(initial)
-    const [syncState, setSyncState] = useState<BuilderSyncState>("reconnecting")
+    const [syncState, setSyncState] = useState<BuilderSyncState>("synced")
+    const [realtimeState, setRealtimeState] = useState<BuilderRealtimeState>("connecting")
+    const [realtimeError, setRealtimeError] = useState<string | null>(null)
     const [serverVersion, setServerVersion] = useState(collaboration.version)
     const serverVersionRef = useRef(collaboration.version)
     const [presence, setPresence] = useState<BuilderPresence[]>([])
@@ -288,7 +285,11 @@ export function useCollaborativeOnboardingDocument({
         }
         if (!retry) pendingDefinitionIdsRef.current.clear()
         setSyncState("syncing")
-        const outcome = await persistVisualBuilderUpdate(workspaceSlug, batch.updateId, uint8ToBase64(batch.update), batch.definitionIds)
+        const outcome = await persistBuilderUpdate(window.fetch, workspaceSlug, {
+            updateId: batch.updateId,
+            updateBase64: uint8ToBase64(batch.update),
+            definitionIds: batch.definitionIds,
+        })
         if (!outcome.ok) {
             retryUpdateRef.current = batch
             setSyncState(navigator.onLine ? "error" : "offline")
@@ -298,11 +299,14 @@ export function useCollaborativeOnboardingDocument({
         const version = Number(outcome.data?.version ?? 0)
         serverVersionRef.current = Math.max(serverVersionRef.current, version)
         setServerVersion((current) => Math.max(current, version))
-        try {
-            await channelRef.current?.send({ type: "broadcast", event: "document-update", payload: { update: uint8ToBase64(batch.update), version, sender: clientIdRef.current } })
-        } catch {
-            // Durable storage is authoritative. A transient broadcast failure
-            // must not turn an acknowledged update back into an unsaved edit.
+        const broadcastStatus = await channelRef.current?.send({
+            type: "broadcast",
+            event: "document-update",
+            payload: { update: uint8ToBase64(batch.update), sequence: outcome.data?.sequence, version, sender: clientIdRef.current },
+        }).catch(() => "error")
+        if (broadcastStatus !== "ok") {
+            setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
+            setRealtimeError("Live collaboration lost connection. Editing is paused while it reconnects.")
         }
         setSyncState("synced")
         return serverVersionRef.current
@@ -321,6 +325,28 @@ export function useCollaborativeOnboardingDocument({
         flushingRef.current = pending
         return pending
     }, [persistNextBatch])
+
+    const refreshFromServer = useCallback(async () => {
+        if (refreshingRef.current) return refreshingRef.current
+        const refresh = (async () => {
+            const outcome = await refreshBuilderUpdates(window.fetch, workspaceSlug, lastSequenceRef.current)
+            if (!outcome.ok || !docRef.current) return false
+            if (outcome.data?.snapshotBase64) {
+                Y.applyUpdate(docRef.current, base64ToUint8(outcome.data.snapshotBase64), "remote")
+                lastSequenceRef.current = Math.max(lastSequenceRef.current, outcome.data.snapshotSequence)
+            }
+            for (const update of outcome.data?.updates ?? []) {
+                Y.applyUpdate(docRef.current, base64ToUint8(update.updateBase64), "remote")
+                lastSequenceRef.current = Math.max(lastSequenceRef.current, update.sequence)
+            }
+            const version = Number(outcome.data?.version ?? serverVersionRef.current)
+            serverVersionRef.current = Math.max(serverVersionRef.current, version)
+            setServerVersion(serverVersionRef.current)
+            return true
+        })().finally(() => { refreshingRef.current = null })
+        refreshingRef.current = refresh
+        return refresh
+    }, [workspaceSlug])
 
     useEffect(() => {
         const ydoc = new Y.Doc()
@@ -342,7 +368,7 @@ export function useCollaborativeOnboardingDocument({
             if (origin === "remote" || origin === "bootstrap") return
             pendingUpdatesRef.current.push(update)
             if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
-            persistTimerRef.current = window.setTimeout(() => void flush(), 280)
+            persistTimerRef.current = window.setTimeout(() => void flush(), 800)
         }
         ydoc.on("update", handleUpdate)
         if (initialWasEmpty) ydoc.transact(() => writeDocument(root, initialRef.current), "initialise")
@@ -361,39 +387,89 @@ export function useCollaborativeOnboardingDocument({
 
         const supabase = createSupabaseBrowserClient()
         const user = collaboration.currentUser
-        const channel = supabase.channel(`onboarding-builder:${workspaceSlug}`, {
-            config: { private: true, broadcast: { self: false, ack: true }, presence: { key: user?.id ?? clientIdRef.current } },
-        })
-        channelRef.current = channel
-        channel
-            .on("broadcast", { event: "document-update" }, ({ payload }) => {
-                if (!payload?.update || payload.sender === clientIdRef.current) return
-                Y.applyUpdate(ydoc, base64ToUint8(String(payload.update)), "remote")
-                const version = Number(payload.version) || serverVersionRef.current
-                serverVersionRef.current = Math.max(serverVersionRef.current, version)
-                setServerVersion(serverVersionRef.current)
+        let channel: ReturnType<typeof supabase.channel> | null = null
+        let disposed = false
+
+        async function connectRealtime() {
+            setRealtimeState("connecting")
+            setRealtimeError(null)
+            const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+            const accessToken = sessionData.session?.access_token
+            if (disposed) return
+            if (sessionError || !accessToken || !user) {
+                setRealtimeState("unavailable")
+                setRealtimeError("Live collaboration could not authenticate. Editing is paused.")
+                return
+            }
+            try {
+                await supabase.realtime.setAuth(accessToken)
+            } catch {
+                if (!disposed) {
+                    setRealtimeState("unavailable")
+                    setRealtimeError("Live collaboration could not authenticate. Editing is paused.")
+                }
+                return
+            }
+            if (disposed) return
+            channel = supabase.channel(`onboarding-builder:${workspaceSlug}`, {
+                config: { private: true, broadcast: { self: false, ack: true }, presence: { key: clientIdRef.current } },
             })
-            .on("broadcast", { event: "release-lock" }, ({ payload }) => {
-                setSyncState(payload?.locked ? "publishing" : navigator.onLine ? "synced" : "offline")
-            })
-            .on("presence", { event: "sync" }, () => {
-                const state = channel.presenceState<BuilderPresence>()
-                setPresence(Object.values(state).flat().filter((item) => item.userId !== user?.id))
-            })
-            .subscribe(async (status) => {
-                if (status === "SUBSCRIBED") {
-                    setSyncState(navigator.onLine ? "synced" : "offline")
-                    if (user) {
-                        localPresenceRef.current = { userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null }
-                        await channel.track(localPresenceRef.current)
+            channelRef.current = channel
+            channel
+                .on("broadcast", { event: "document-update" }, ({ payload }) => {
+                    if (!payload?.update || payload.sender === clientIdRef.current) return
+                    Y.applyUpdate(ydoc, base64ToUint8(String(payload.update)), "remote")
+                    const version = Number(payload.version) || serverVersionRef.current
+                    serverVersionRef.current = Math.max(serverVersionRef.current, version)
+                    setServerVersion(serverVersionRef.current)
+                    void refreshFromServer()
+                })
+                .on("broadcast", { event: "release-lock" }, ({ payload }) => {
+                    setSyncState(payload?.locked ? "publishing" : navigator.onLine ? "synced" : "offline")
+                })
+                .on("presence", { event: "sync" }, () => {
+                    if (!channel) return
+                    setPresence(visibleBuilderPresence(channel.presenceState<BuilderPresence>(), clientIdRef.current))
+                })
+                .subscribe(async (status, error) => {
+                    if (disposed || !channel) return
+                    if (status === "SUBSCRIBED") {
+                        localPresenceRef.current = { clientId: clientIdRef.current, userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null }
+                        const [trackStatus, refreshed] = await Promise.all([
+                            channel.track(localPresenceRef.current),
+                            refreshFromServer(),
+                        ])
+                        if (disposed) return
+                        if (trackStatus === "ok" && refreshed) {
+                            setRealtimeState("connected")
+                            setRealtimeError(null)
+                        } else {
+                            setRealtimeState("unavailable")
+                            setRealtimeError(trackStatus !== "ok" ? "Live presence could not connect. Editing is paused." : "Collaborative changes could not be refreshed. Editing is paused.")
+                        }
+                        if (initialWasEmpty) void flush()
+                    } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                        setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
+                        setRealtimeError(error?.message ?? "Live collaboration disconnected. Editing is paused while it reconnects.")
                     }
-                    if (initialWasEmpty) void flush()
-                } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setSyncState(navigator.onLine ? "reconnecting" : "offline")
-            })
+                })
+        }
+        void connectRealtime()
+        const refreshTimer = window.setInterval(() => {
+            if (!navigator.onLine) return
+            void refreshFromServer()
+        }, 4_000)
         const updateOnlineState = () => {
-            if (!navigator.onLine) { setSyncState("offline"); return }
-            setSyncState("reconnecting")
+            if (!navigator.onLine) {
+                setSyncState("offline")
+                setRealtimeState("unavailable")
+                setRealtimeError("Offline — editing and live collaboration are paused.")
+                return
+            }
+            setSyncState("syncing")
+            setRealtimeState("reconnecting")
             void flush().then(() => setSyncState("synced"))
+            void refreshFromServer()
         }
         window.addEventListener("online", updateOnlineState)
         window.addEventListener("offline", updateOnlineState)
@@ -403,47 +479,60 @@ export function useCollaborativeOnboardingDocument({
         }
         window.addEventListener("beforeunload", beforeUnload)
         return () => {
+            disposed = true
             if (persistTimerRef.current) window.clearTimeout(persistTimerRef.current)
             if (presenceTimerRef.current) window.clearTimeout(presenceTimerRef.current)
+            window.clearInterval(refreshTimer)
             void flush()
             window.removeEventListener("online", updateOnlineState)
             window.removeEventListener("offline", updateOnlineState)
             window.removeEventListener("beforeunload", beforeUnload)
-            void supabase.removeChannel(channel)
+            if (channel) void supabase.removeChannel(channel)
+            channelRef.current = null
             undoManager.destroy()
             undoManagerRef.current = null
             ydoc.destroy()
         }
-    }, [collaboration, flush, workspaceSlug])
+    }, [collaboration, flush, refreshFromServer, workspaceSlug])
 
     const updateDocument = useCallback((recipe: (current: VisualBuilderDocument) => VisualBuilderDocument) => {
-        if (!rootRef.current || !docRef.current || !navigator.onLine || !["synced", "syncing"].includes(syncState)) return
+        if (!rootRef.current || !docRef.current || !navigator.onLine || realtimeState !== "connected" || !["synced", "syncing"].includes(syncState)) return
         const current = readDocument(rootRef.current, initialRef.current)
         let next = recipe(current)
         if (JSON.stringify(current.theme) !== JSON.stringify(next.theme)) next = { ...next, theme: { ...next.theme, updatedAt: new Date().toISOString() } }
         changedDefinitions(current, next).forEach((id) => pendingDefinitionIdsRef.current.add(id))
         docRef.current.transact(() => writeDocument(rootRef.current!, next), localOriginRef.current)
-    }, [syncState])
+    }, [realtimeState, syncState])
 
     const updatePresence = useCallback((update: Partial<Pick<BuilderPresence, "selection" | "cursor">>) => {
         const user = collaboration.currentUser
-        if (!user) return
-        localPresenceRef.current = { userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null, ...localPresenceRef.current, ...update }
+        if (!user || realtimeState !== "connected") return
+        localPresenceRef.current = { clientId: clientIdRef.current, userId: user.id, name: user.name, avatarSrc: user.avatarSrc, color: colourForUser(user.id), selection: null, cursor: null, ...localPresenceRef.current, ...update }
         if (presenceTimerRef.current) return
         presenceTimerRef.current = window.setTimeout(() => {
             presenceTimerRef.current = null
-            if (localPresenceRef.current) void channelRef.current?.track(localPresenceRef.current)
+            if (!localPresenceRef.current || !channelRef.current) return
+            void channelRef.current.track(localPresenceRef.current).then((status) => {
+                if (status === "ok") return
+                setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
+                setRealtimeError("Live presence disconnected. Editing is paused while it reconnects.")
+            }).catch(() => {
+                setRealtimeState(navigator.onLine ? "reconnecting" : "unavailable")
+                setRealtimeError("Live presence disconnected. Editing is paused while it reconnects.")
+            })
         }, 70)
-    }, [collaboration.currentUser])
+    }, [collaboration.currentUser, realtimeState])
 
     return {
         document,
         updateDocument,
         syncState,
         setSyncState,
+        realtimeState,
+        realtimeError,
         serverVersion,
         presence,
-        editable: ["synced", "syncing"].includes(syncState),
+        editable: realtimeState === "connected" && ["synced", "syncing"].includes(syncState),
         updatePresence,
         setReleaseLock: async (locked: boolean) => {
             setSyncState(locked ? "publishing" : navigator.onLine ? "synced" : "offline")

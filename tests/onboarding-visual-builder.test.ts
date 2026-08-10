@@ -4,6 +4,8 @@ import test from "node:test"
 import {
     createOnboardingStepV2,
 } from "../lib/onboarding/block-definition.ts"
+import { normalizedBuilderCursor, visibleBuilderPresence, type BuilderPresence } from "../lib/onboarding/builder-presence.ts"
+import { persistBuilderUpdate, refreshBuilderUpdates } from "../lib/onboarding/builder-sync-client.ts"
 
 const builderPage = readFileSync("app/[workspaceSlug]/onboarding-builder/page.tsx", "utf8")
 const builderUi = readFileSync("components/onboarding-builder/OnboardingBuilderWorkspace.tsx", "utf8")
@@ -19,6 +21,8 @@ const workspaceShell = readFileSync("components/workspace/WorkspaceTopBarClient.
 const onboardingSettings = readFileSync("components/settings/OnboardingSettings.tsx", "utf8")
 const brandingSettings = readFileSync("components/settings/AgencyBrandingEditor.tsx", "utf8")
 const migration = readFileSync("supabase/migrations/20260810110000_visual_onboarding_builder_v2.sql", "utf8")
+const realtimeFixMigration = readFileSync("supabase/migrations/20260810223000_fix_onboarding_builder_realtime.sql", "utf8")
+const updateRoute = readFileSync("app/api/workspaces/[workspaceSlug]/onboarding-builder/updates/route.ts", "utf8")
 
 test("version-two steps use a protected Header and compatible mixed blocks", () => {
     const ordinary = createOnboardingStepV2()
@@ -76,10 +80,15 @@ test("collaborative drafts use private Realtime, Yjs merging, presence, author u
     assert.match(collaboration, /retryUpdateRef/)
     assert.match(collaboration, /batch\.updateId/)
     assert.match(collaboration, /private: true/)
+    assert.match(collaboration, /supabase\.auth\.getSession\(\)/)
+    assert.match(collaboration, /supabase\.realtime\.setAuth\(accessToken\)/)
     assert.match(collaboration, /event: "document-update"/)
     assert.match(collaboration, /channel\.track/)
+    assert.match(collaboration, /trackStatus === "ok" && refreshed/)
+    assert.match(collaboration, /realtimeState === "connected"/)
+    assert.match(collaboration, /refreshFromServer/)
     assert.match(collaboration, /Offline — editing paused|offline/)
-    assert.match(collaboration, /editable: \["synced", "syncing"\]/)
+    assert.match(collaboration, /editable: realtimeState === "connected"/)
     assert.match(migration, /onboarding_builder_updates/)
     assert.match(migration, /append_onboarding_builder_update/)
     assert.match(migration, /on conflict \(workspace_id, update_id\) do nothing/)
@@ -88,6 +97,38 @@ test("collaborative drafts use private Realtime, Yjs merging, presence, author u
     assert.match(migration, /realtime\.topic\(\) like 'onboarding-builder:%'/)
     assert.match(migration, /public\.is_workspace_member\(workspace_id, array\['owner','admin'\]\)/)
     assert.doesNotMatch(migration, /public\.is_workspace_role/)
+    assert.match(realtimeFixMigration, /can_access_onboarding_builder_realtime/)
+    assert.match(realtimeFixMigration, /security definer/)
+    assert.match(realtimeFixMigration, /drop policy if exists/)
+})
+
+test("Builder autosave uses a quiet route request and collaborative catch-up", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    const fetcher = (async (input: URL | RequestInfo, init?: RequestInit) => {
+        requests.push({ url: String(input), init })
+        if (init?.method === "POST") return Response.json({ ok: true, data: { sequence: 7, version: 3 } })
+        return Response.json({ ok: true, data: { version: 3, snapshotBase64: null, snapshotSequence: 0, updates: [] } })
+    }) as typeof fetch
+
+    const saved = await persistBuilderUpdate(fetcher, "scaylup", { updateId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:1", updateBase64: "AQ==", definitionIds: ["module:one"] })
+    const refreshed = await refreshBuilderUpdates(fetcher, "scaylup", 7)
+
+    assert.equal(saved.ok, true)
+    assert.equal(refreshed.ok, true)
+    assert.equal(requests[0].url, "/api/workspaces/scaylup/onboarding-builder/updates")
+    assert.equal(requests[0].init?.method, "POST")
+    assert.equal(new Headers(requests[0].init?.headers).has("Next-Action"), false)
+    assert.equal(requests[1].url, "/api/workspaces/scaylup/onboarding-builder/updates?after=7")
+    assert.match(updateRoute, /loadVisualBuilderUpdates/)
+    assert.match(updateRoute, /Cache-Control.*no-store/)
+})
+
+test("presence keeps distinct browser sessions and normalizes cursor coordinates", () => {
+    const presence = (clientId: string, userId: string): BuilderPresence => ({ clientId, userId, name: userId, avatarSrc: null, color: "#fff", selection: null, cursor: null })
+    const visible = visibleBuilderPresence({ first: [presence("client-a", "user-1")], second: [presence("client-b", "user-1")], third: [presence("client-c", "user-2")] }, "client-a")
+    assert.deepEqual(visible.map((item) => item.clientId), ["client-b", "client-c"])
+    assert.deepEqual(normalizedBuilderCursor(500, 250, 1_000, 500), { xRatio: 0.5, yRatio: 0.5 })
+    assert.deepEqual(normalizedBuilderCursor(2_000, -5, 1_000, 500), { xRatio: 1, yRatio: 0 })
 })
 
 test("one release transaction publishes definitions, style, migrations, notices, and Activity", () => {
