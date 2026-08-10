@@ -19,7 +19,6 @@ import { createButtonBlock, createFormBlock, createVideoBlock } from "@/lib/onbo
 import { onboardingBlockLayoutClasses } from "@/lib/onboarding/block-layout"
 import type { OnboardingHelpSettings, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { getFileAcceptValue } from "@/lib/onboarding/forms"
-import { visualStepTitle } from "@/lib/onboarding/block-validation"
 
 type DefinitionTarget = { kind: "module"; definition: OnboardingModuleDefinitionV2 } | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 }
 
@@ -85,13 +84,13 @@ export function VisualBuilderCanvas({
     groupKey,
     target,
     step,
-    steps,
+    roadmapSteps,
     moduleTitles,
     theme,
     help,
     selectedBlockId,
     selectBlock,
-    selectStep,
+    selectRoadmapStep,
     updateStep,
     updateDraftRevisionId,
     viewport,
@@ -104,13 +103,13 @@ export function VisualBuilderCanvas({
     groupKey: string
     target: DefinitionTarget
     step: OnboardingStepV2
-    steps: OnboardingStepV2[]
+    roadmapSteps: { key: string; title: string; complete: boolean; current: boolean; href: null }[]
     moduleTitles: string[]
     theme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
     selectedBlockId: string | null
     selectBlock: (id: string | null) => void
-    selectStep: (id: string) => void
+    selectRoadmapStep: (key: string) => void
     updateStep: (step: OnboardingStepV2) => void
     updateDraftRevisionId: (revisionId: string) => void
     viewport: "desktop" | "mobile"
@@ -162,7 +161,6 @@ export function VisualBuilderCanvas({
         finally { setUploadingId(null) }
     }
 
-    const roadmap = steps.map((item) => ({ key: item.id, title: visualStepTitle(item), complete: false, current: item.id === step.id, href: null }))
     const header = step.blocks[0] as HeaderBlock
     const collaboratorColoursFor = (blockId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}`).map((presence) => presence.color)
 
@@ -173,7 +171,7 @@ export function VisualBuilderCanvas({
             : `mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`
         return <div className={frameClassName}>
             <OnboardingThemeProvider theme={theme} className="h-full">
-                <OnboardingLayout embedded={!fullScreen} forceMobile={viewport === "mobile"} roadmapSteps={roadmap} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Preview · nothing is saved" onRoadmapSelect={selectStep}>
+                <OnboardingLayout embedded={!fullScreen} forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Preview · nothing is saved" onRoadmapSelect={selectRoadmapStep}>
                     <OnboardingSessionRenderer
                         step={{ key: step.id, kind: "video", title: header.title, description: header.description, moduleTitle: target.kind === "module" ? target.definition.name : target.definition.kind, estimatedTime: header.estimatedTime, why: "", blocks: step.blocks, navigation: step.navigation }}
                         moduleTitles={moduleTitles}
@@ -192,7 +190,7 @@ export function VisualBuilderCanvas({
 
     return <div className={`mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`}>
         <OnboardingThemeProvider theme={theme} className="h-full">
-            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmap} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
+            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectRoadmapStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
                 <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface)] p-6 shadow-sm ${viewport === "mobile" ? "" : "sm:p-8"}`} onClick={() => selectBlock(null)}>
                     <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">{target.kind === "module" ? target.definition.name : target.definition.kind}</p>
                     <AuthorFrame block={header} selected={selectedBlockId === header.id} collaboratorColours={collaboratorColoursFor(header.id)} select={() => selectBlock(header.id)} onDragStart={() => undefined} onDrop={() => undefined}>

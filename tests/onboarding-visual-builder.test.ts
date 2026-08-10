@@ -101,6 +101,22 @@ test("structural authoring supports library drag, cross-definition moves, duplic
     assert.match(visualCanvas, /application\/x-betelgeze-block/)
 })
 
+test("the Builder outline nests fields, owns structure actions, and filters the shared roadmap", () => {
+    assert.match(builderUi, /data-builder-outline-tree/)
+    assert.match(builderUi, /type: "field"/)
+    assert.match(builderUi, /Fields must stay inside their form/)
+    assert.match(builderUi, /duplicateField/)
+    assert.match(builderUi, /event\.shiftKey/)
+    assert.match(builderUi, /window\.confirm/)
+    assert.match(builderUi, /Delete .*This change can be undone/)
+    assert.match(builderUi, /EyeIcon/)
+    assert.match(builderUi, /visibleModuleIds/)
+    assert.match(builderUi, /roadmapSteps/)
+    assert.match(visualCanvas, /selectRoadmapStep/)
+    assert.doesNotMatch(builderUi, /id="builder-move-target"/)
+    assert.doesNotMatch(builderUi, />Library<\/button>/)
+})
+
 test("collaborative drafts use private Realtime, Yjs merging, presence, author undo, and fail-closed offline editing", () => {
     assert.match(collaboration, /from "yjs"/)
     assert.match(collaboration, /new Y\.UndoManager/)
