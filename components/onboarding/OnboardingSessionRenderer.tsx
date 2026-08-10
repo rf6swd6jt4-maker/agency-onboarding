@@ -36,6 +36,7 @@ export type OnboardingSessionRenderModel = {
     action?: React.ReactNode
     satisfiedBlockIds?: string[]
     backHref?: string | null
+    forceMobile?: boolean
 }
 
 function embeddedVideoUrl(value: string) {
@@ -75,6 +76,7 @@ export function OnboardingSessionRenderer({
     action,
     satisfiedBlockIds = [],
     backHref = null,
+    forceMobile = false,
 }: OnboardingSessionRenderModel) {
     const isFinalStep = step.kind === "final"
     const videoEmbedUrl = step.videoUrl ? embeddedVideoUrl(step.videoUrl) : null
@@ -82,7 +84,7 @@ export function OnboardingSessionRenderer({
 
     if (visualHeader?.kind === "header" && step.blocks?.length) {
         return (
-            <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm sm:p-8">
+            <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
                 <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">{step.moduleTitle}</p>
                 <div className={onboardingBlockLayoutClasses(visualHeader.layout)}>
                     <h1 className="text-3xl font-semibold tracking-tight text-[var(--onboarding-text,#0F172A)]">{visualHeader.title}</h1>
@@ -117,7 +119,7 @@ export function OnboardingSessionRenderer({
     }
 
     return (
-        <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm sm:p-8">
+        <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
             <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">
                 {step.moduleTitle}
             </p>

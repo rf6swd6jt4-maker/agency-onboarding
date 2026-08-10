@@ -172,6 +172,15 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const [pending, startTransition] = useTransition()
 
     useEffect(() => {
+        if (!preview) return
+        const exitPreview = (event: KeyboardEvent) => {
+            if (event.key === "Escape") setPreview(false)
+        }
+        window.addEventListener("keydown", exitPreview)
+        return () => window.removeEventListener("keydown", exitPreview)
+    }, [preview])
+
+    useEffect(() => {
         const timer = window.setTimeout(() => {
             try {
                 const stored = JSON.parse(window.localStorage.getItem(servicePreferenceKey) ?? "[]") as string[]
@@ -439,6 +448,11 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         await navigator.clipboard.writeText(url)
         setNotice("Frozen 24-hour preview link copied.")
     }
+
+    if (preview) return <div data-builder-fullscreen-preview className="relative flex h-dvh w-full items-stretch justify-center overflow-hidden bg-black">
+        <button type="button" onClick={() => setPreview(false)} className="fixed right-4 top-4 z-[100] rounded-full border border-white/20 bg-black/70 px-4 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/70">Exit preview</button>
+        {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition as OnboardingModuleDefinitionV2 } : { kind: "bookend", definition: currentGroup.definition as OnboardingBookendDefinitionV2 }} step={currentStep} steps={currentGroup.definition.steps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={null} selectBlock={() => undefined} selectStep={(stepId) => setSelection({ ...selection, stepId, blockId: null })} updateStep={() => undefined} updateDraftRevisionId={() => undefined} viewport={viewport} readOnly fullScreen /> : <div className="flex h-full items-center justify-center text-sm text-white/60">Choose or create a module to preview.</div>}
+    </div>
 
     return <div onPointerMove={(event) => collaboration.updateActivity({ cursor: normalizedBuilderCursor(event.clientX, event.clientY, window.innerWidth, window.innerHeight) })} onPointerLeave={() => collaboration.updateActivity({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-neutral-800 bg-black px-3 sm:px-4">

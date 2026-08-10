@@ -9,11 +9,12 @@ type MobileStepBarProps = {
         href?: string | null
     }[]
     embedded?: boolean
+    forceVisible?: boolean
     footerText?: string
     onSelect?: (stepKey: string) => void
 }
 
-export function MobileStepBar({ steps, embedded = false, footerText = "Progress saved automatically", onSelect }: MobileStepBarProps) {
+export function MobileStepBar({ steps, embedded = false, forceVisible = false, footerText = "Progress saved automatically", onSelect }: MobileStepBarProps) {
     const currentIndex = steps.findIndex((step) => step.current)
     const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0
 
@@ -33,7 +34,7 @@ export function MobileStepBar({ steps, embedded = false, footerText = "Progress 
     const showRightLine = startIndex + visibleSteps.length < steps.length
 
     return (
-        <div className={`${embedded ? "absolute" : "fixed"} inset-x-0 bottom-0 z-30 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 shadow-[0_-8px_30px_rgba(15,23,42,0.12)] lg:hidden`}>
+        <div className={`${embedded ? "absolute" : "fixed"} inset-x-0 bottom-0 z-30 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 shadow-[0_-8px_30px_rgba(15,23,42,0.12)] ${forceVisible ? "" : "lg:hidden"}`}>
             <div className="mx-auto max-w-md">
                 <div className="mb-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">

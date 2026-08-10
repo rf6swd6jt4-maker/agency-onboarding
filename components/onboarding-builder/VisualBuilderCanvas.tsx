@@ -96,6 +96,7 @@ export function VisualBuilderCanvas({
     updateDraftRevisionId,
     viewport,
     readOnly = false,
+    fullScreen = false,
     collaboratorSelections = [],
 }: {
     workspaceSlug: string
@@ -114,6 +115,7 @@ export function VisualBuilderCanvas({
     updateDraftRevisionId: (revisionId: string) => void
     viewport: "desktop" | "mobile"
     readOnly?: boolean
+    fullScreen?: boolean
     collaboratorSelections?: Array<{ selection: string | null; color: string }>
 }) {
     const [uploadingId, setUploadingId] = useState<string | null>(null)
@@ -166,9 +168,12 @@ export function VisualBuilderCanvas({
 
     if (readOnly) {
         const hasForm = step.blocks.some((block) => block.kind === "form")
-        return <div className={`mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`}>
+        const frameClassName = fullScreen
+            ? `relative mx-auto h-dvh w-full overflow-hidden ${viewport === "mobile" ? "max-w-[430px]" : "max-w-none"}`
+            : `mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`
+        return <div className={frameClassName}>
             <OnboardingThemeProvider theme={theme} className="h-full">
-                <OnboardingLayout embedded roadmapSteps={roadmap} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Preview · nothing is saved" onRoadmapSelect={selectStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Preview</span>}>
+                <OnboardingLayout embedded={!fullScreen} forceMobile={viewport === "mobile"} roadmapSteps={roadmap} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Preview · nothing is saved" onRoadmapSelect={selectStep}>
                     <OnboardingSessionRenderer
                         step={{ key: step.id, kind: "video", title: header.title, description: header.description, moduleTitle: target.kind === "module" ? target.definition.name : target.definition.kind, estimatedTime: header.estimatedTime, why: "", blocks: step.blocks, navigation: step.navigation }}
                         moduleTitles={moduleTitles}
@@ -176,6 +181,7 @@ export function VisualBuilderCanvas({
                         preview
                         previewNextHref="#"
                         backHref="#"
+                        forceMobile={viewport === "mobile"}
                         onPreviewSubmit={() => undefined}
                         action={!hasForm ? <button type="button" className="block w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 text-center font-medium text-white">{step.navigation.continueLabel}</button> : null}
                     />
@@ -186,8 +192,8 @@ export function VisualBuilderCanvas({
 
     return <div className={`mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`}>
         <OnboardingThemeProvider theme={theme} className="h-full">
-            <OnboardingLayout embedded roadmapSteps={roadmap} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
-                <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-surface)] p-6 shadow-sm sm:p-8" onClick={() => selectBlock(null)}>
+            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmap} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
+                <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface)] p-6 shadow-sm ${viewport === "mobile" ? "" : "sm:p-8"}`} onClick={() => selectBlock(null)}>
                     <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">{target.kind === "module" ? target.definition.name : target.definition.kind}</p>
                     <AuthorFrame block={header} selected={selectedBlockId === header.id} collaboratorColours={collaboratorColoursFor(header.id)} select={() => selectBlock(header.id)} onDragStart={() => undefined} onDrop={() => undefined}>
                         <InlineText value={header.title} update={(title) => replaceBlock({ ...header, title })} className="text-3xl font-semibold tracking-tight text-[var(--onboarding-text)]" placeholder="Untitled step" />
