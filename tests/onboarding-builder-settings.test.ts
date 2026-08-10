@@ -19,6 +19,8 @@ const servicesUi = readFileSync("components/settings/ServiceCatalogue.tsx", "utf
 const onboardingUi = readFileSync("components/settings/OnboardingSettings.tsx", "utf8")
 const brandingUi = readFileSync("components/settings/AgencyBrandingEditor.tsx", "utf8")
 const builderUi = readFileSync("components/onboarding-builder/OnboardingBuilderWorkspace.tsx", "utf8")
+const workspaceShell = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
+const workspaceBridge = readFileSync("components/workspace/WorkspaceTabBridge.tsx", "utf8")
 const sharedRenderer = readFileSync("components/onboarding/OnboardingSessionRenderer.tsx", "utf8")
 const configurationLoader = readFileSync("lib/onboarding/configuration.ts", "utf8")
 const configurationActions = readFileSync("lib/onboarding/configuration-actions.ts", "utf8")
@@ -190,6 +192,15 @@ test("Builder keeps private server access and renders the visual workspace", () 
     assert.match(builderUi, /rotateVisualOnboardingPreview/)
     assert.match(configurationLoader, /relationship_onboarding_session_modules/)
     assert.match(configurationLoader, /visualModules/)
+})
+
+test("Builder opens outside the workspace shell and leaves a lightweight tab placeholder", () => {
+    assert.match(builderPage, /Onboarding Builder open in another tab/)
+    assert.match(builderPage, /<WorkspaceTabBridge/)
+    assert.ok(builderPage.indexOf("if (tabId)") < builderPage.indexOf("loadOnboardingBuilderData(workspace.id"))
+    assert.match(workspaceShell, /window\.open\(href, "_blank", "noopener,noreferrer"\)\s+navigateActiveTab\(href\)/)
+    assert.match(workspaceBridge, /isWorkspaceOnboardingBuilderUrl\(nextUrl/)
+    assert.match(workspaceBridge, /window\.location\.assign\(workspaceTabFrameUrl\(nextUrl, tabId/)
 })
 
 test("all configuration Server Actions re-authorize admins and use transactional RPCs", () => {

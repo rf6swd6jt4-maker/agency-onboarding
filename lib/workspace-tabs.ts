@@ -66,6 +66,12 @@ export function workspaceTabFrameUrl(value: string, tabId: string, origin: strin
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
 }
 
+export function isWorkspaceOnboardingBuilderUrl(value: string, workspaceSlug: string, origin: string) {
+    const parsed = new URL(value, origin)
+    return parsed.origin === new URL(origin).origin
+        && parsed.pathname === `/${workspaceSlug}/onboarding-builder`
+}
+
 export function workspaceTabFrameMatchesUrl(actualValue: string, desiredValue: string, tabId: string, origin: string) {
     const actual = new URL(actualValue, origin)
     const desired = new URL(workspaceTabFrameUrl(desiredValue, tabId, origin), origin)

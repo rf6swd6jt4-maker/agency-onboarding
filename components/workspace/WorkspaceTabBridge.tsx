@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import {
+    isWorkspaceOnboardingBuilderUrl,
     isReopenClosedTabShortcut,
     normalizeWorkspaceUrl,
     WORKSPACE_TAB_FRAME_PARAM,
@@ -101,10 +102,19 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             const target = event.target
             if (!(target instanceof Element)) return
             const anchor = target.closest("a[href]") as HTMLAnchorElement | null
-            if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return
+            if (!anchor || anchor.hasAttribute("download")) return
             const destination = new URL(anchor.href, window.location.href)
             if (destination.origin !== window.location.origin || destination.searchParams.has(WORKSPACE_TAB_FRAME_PARAM)) return
             const nextUrl = `${destination.pathname}${destination.search}${destination.hash}`
+            if (isWorkspaceOnboardingBuilderUrl(nextUrl, workspaceSlug, window.location.origin)) {
+                event.preventDefault()
+                window.open(nextUrl, "_blank", "noopener,noreferrer")
+                window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
+                reportNavigationStart(nextUrl)
+                window.location.assign(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
+                return
+            }
+            if (anchor.target === "_blank") return
             const currentUrl = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`, workspaceSlug, window.location.origin)
             if (normalizeWorkspaceUrl(nextUrl, workspaceSlug, window.location.origin) === currentUrl) return
             event.preventDefault()

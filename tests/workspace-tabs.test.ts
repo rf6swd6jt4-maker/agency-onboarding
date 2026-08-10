@@ -3,6 +3,7 @@ import test from "node:test"
 import {
     appendWorkspaceTabHistory,
     isReopenClosedTabShortcut,
+    isWorkspaceOnboardingBuilderUrl,
     normalizeWorkspaceTabCustomTitle,
     normalizeWorkspaceUrl,
     orderWorkspaceTabsByStableIds,
@@ -38,6 +39,14 @@ test("adds a tab identity while preserving filters and hash navigation", () => {
         workspaceTabFrameUrl("/scaylup/settings?section=sources#owner-phone", "tab-2", origin),
         `/scaylup/settings?section=sources&${WORKSPACE_TAB_FRAME_PARAM}=tab-2#owner-phone`
     )
+})
+
+test("recognizes only the current workspace's standalone onboarding Builder", () => {
+    assert.equal(isWorkspaceOnboardingBuilderUrl("/scaylup/onboarding-builder", "scaylup", origin), true)
+    assert.equal(isWorkspaceOnboardingBuilderUrl("/scaylup/onboarding-builder?module=module-1", "scaylup", origin), true)
+    assert.equal(isWorkspaceOnboardingBuilderUrl("/another/onboarding-builder", "scaylup", origin), false)
+    assert.equal(isWorkspaceOnboardingBuilderUrl("/scaylup/onboarding-builder/nested", "scaylup", origin), false)
+    assert.equal(isWorkspaceOnboardingBuilderUrl("https://example.com/scaylup/onboarding-builder", "scaylup", origin), false)
 })
 
 test("only treats a frame as synchronized when route, query, hash, and tab identity match", () => {

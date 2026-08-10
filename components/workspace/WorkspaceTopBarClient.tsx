@@ -16,6 +16,7 @@ import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPri
 import type { WorkspaceRole } from "@/lib/workspaces"
 import {
     appendWorkspaceTabHistory,
+    isWorkspaceOnboardingBuilderUrl,
     isReopenClosedTabShortcut,
     normalizeWorkspaceTabCustomTitle,
     normalizeWorkspaceUrl as normalizeWorkspaceRoute,
@@ -1195,13 +1196,13 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     }
 
     function isStandaloneBuilderHref(href: string) {
-        const pathname = href.split(/[?#]/, 1)[0]
-        return pathname === `/${workspace.slug}/onboarding-builder`
+        return isWorkspaceOnboardingBuilderUrl(href, workspace.slug, window.location.origin)
     }
 
     function navigateWorkspaceDestination(href: string) {
         if (isStandaloneBuilderHref(href)) {
             window.open(href, "_blank", "noopener,noreferrer")
+            navigateActiveTab(href)
             return
         }
         navigateActiveTab(href)
