@@ -77,6 +77,18 @@ test("Builder mobile simulation forces the client layout and Preview fills the v
     assert.match(builderUi, /readOnly fullScreen/)
 })
 
+test("Builder chrome keeps mobile status, rail resizing, and header icons aligned", () => {
+    assert.match(mobileStepBar, /data-mobile-preview-footer/)
+    assert.match(mobileStepBar, /border-t border-black\/10 px-6 py-3 text-center text-sm font-medium/)
+    assert.match(builderUi, /xl:grid-cols-\[3rem_minmax\(0,1fr\)_18rem\]/)
+    assert.match(builderUi, /xl:grid-cols-\[3rem_minmax\(0,1fr\)_3rem\]/)
+    assert.match(builderUi, /data-builder-left-rail-header/)
+    assert.match(builderUi, /M9 5v14/)
+    assert.match(builderUi, /M15 5v14/)
+    assert.match(builderUi, /data-builder-viewport-toggle/)
+    assert.match(builderUi, /inline-flex h-8 w-8 items-center justify-center rounded-md leading-none/)
+})
+
 test("structural authoring supports library drag, cross-definition moves, duplication, and phone restrictions", () => {
     assert.match(builderUi, /application\/x-betelgeze-builder-item/)
     assert.match(builderUi, /type: "library"/)

@@ -34,8 +34,8 @@ export function MobileStepBar({ steps, embedded = false, forceVisible = false, f
     const showRightLine = startIndex + visibleSteps.length < steps.length
 
     return (
-        <div className={`${embedded ? "absolute" : "fixed"} inset-x-0 bottom-0 z-30 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 shadow-[0_-8px_30px_rgba(15,23,42,0.12)] ${forceVisible ? "" : "lg:hidden"}`}>
-            <div className="mx-auto max-w-md">
+        <div className={`${embedded ? "absolute" : "fixed"} inset-x-0 bottom-0 z-30 bg-[var(--onboarding-surface,#FFFFFF)] shadow-[0_-8px_30px_rgba(15,23,42,0.12)] ${forceVisible ? "" : "lg:hidden"}`}>
+            <div className="mx-auto max-w-md px-4 py-3">
                 <div className="mb-3 flex items-center justify-between gap-3">
                     <div className="min-w-0">
                         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--onboarding-muted,#475569)]">
@@ -51,10 +51,6 @@ export function MobileStepBar({ steps, embedded = false, forceVisible = false, f
                         {stepNumber} of {steps.length}
                     </p>
                 </div>
-
-                <p className="mb-3 text-center text-xs font-medium text-[var(--onboarding-muted,#475569)]">
-                    {footerText}
-                </p>
 
                 <div className="grid grid-cols-[0.5fr_36px_1fr_36px_1fr_36px_1fr_36px_0.25fr] items-center">
                     <div
@@ -114,6 +110,9 @@ export function MobileStepBar({ steps, embedded = false, forceVisible = false, f
                         }`}
                     />
                 </div>
+            </div>
+            <div data-mobile-preview-footer className="border-t border-black/10 px-6 py-3 text-center text-sm font-medium text-[var(--onboarding-muted,#475569)]">
+                {footerText}
             </div>
         </div>
     )
