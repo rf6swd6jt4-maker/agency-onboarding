@@ -38,6 +38,10 @@ type RightTab = "inspect" | "styles"
 type OnboardingField = Extract<OnboardingBlock, { kind: "form" }>["fields"][number]
 const HELP_BLOCK_ID = "builder:client-help"
 
+function duplicateModifier(event: { metaKey: boolean; ctrlKey: boolean }) {
+    return event.metaKey || event.ctrlKey
+}
+
 function definitionId(groupKey: string) {
     return groupKey.startsWith("module:") ? groupKey.slice(7) : groupKey
 }
@@ -188,8 +192,9 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
 
     function startDrag(event: DragEvent<HTMLElement>, payload: Record<string, unknown>, key: string, label: string) {
         event.stopPropagation()
-        event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ ...payload, copy: event.shiftKey }))
-        event.dataTransfer.effectAllowed = event.shiftKey ? "copy" : "move"
+        const copy = duplicateModifier(event)
+        event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ ...payload, copy }))
+        event.dataTransfer.effectAllowed = copy ? "copy" : "move"
         const chip = document.createElement("div")
         chip.textContent = label
         chip.dataset.builderDragLabel = "true"
@@ -197,7 +202,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
         document.body.appendChild(chip)
         event.dataTransfer.setDragImage(chip, 12, 14)
         window.setTimeout(() => chip.remove(), 0)
-        setDragging({ key, copy: event.shiftKey })
+        setDragging({ key, copy })
     }
 
     function selectedRow(active: boolean) {
@@ -223,7 +228,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                         const stepKey = `${group.key}:${step.id}`
                         const stepCollapsed = collapsedSteps.has(stepKey)
                         return <div key={step.id} className="ml-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDrop(event, { groupKey: group.key, stepId: step.id, stepIndex })}>
-                            <div title={shown ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === stepKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(stepSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "step", groupKey: group.key, stepId: step.id }, stepKey, visualStepTitle(step))} onDragEnd={() => setDragging(null)}>
+                            <div title={shown ? "Drag to move; hold Command on Mac or Control on Windows while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === stepKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(stepSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "step", groupKey: group.key, stepId: step.id }, stepKey, visualStepTitle(step))} onDragEnd={() => setDragging(null)}>
                                 <button type="button" aria-label={`${stepCollapsed ? "Expand" : "Collapse"} ${visualStepTitle(step)}`} aria-expanded={!stepCollapsed} onClick={(event) => { event.stopPropagation(); toggleCollapsed(setCollapsedSteps, stepKey) }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronIcon collapsed={stepCollapsed} /></button>
                                 <OutlineItemIcon kind="step" />
                                 <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectStep(group.key, step.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left"><span className="mr-1 text-neutral-600">{stepIndex + 1}.</span>{visualStepTitle(step)}</button>
@@ -235,7 +240,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                                     const blockLabel = blockName(block)
                                     const blockDragKey = `${stepKey}:${block.id}`
                                     return <div key={block.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, blockIndex }) }}>
-                                        <div title={shown && block.kind !== "header" ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === blockDragKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(blockSelected)}`} draggable={editable && shown && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id }, blockDragKey, blockLabel)} onDragEnd={() => setDragging(null)}>
+                                        <div title={shown && block.kind !== "header" ? "Drag to move; hold Command on Mac or Control on Windows while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === blockDragKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(blockSelected)}`} draggable={editable && shown && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id }, blockDragKey, blockLabel)} onDragEnd={() => setDragging(null)}>
                                             <span className="h-7 w-7 shrink-0" />
                                             <OutlineItemIcon kind={block.kind} />
                                             <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectBlock(group.key, step.id, block.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left capitalize">{blockLabel}</button>
@@ -245,7 +250,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                                             {block.fields.map((field, fieldIndex) => {
                                                 const fieldSelected = selection.groupKey === group.key && selection.stepId === step.id && selection.blockId === block.id && selection.fieldId === field.id
                                                 const fieldDragKey = `${blockDragKey}:${field.id}`
-                                                return <div key={field.id} title={shown ? "Drag to reorder within this form; hold Shift while dragging to duplicate" : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldIndex }) }} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === fieldDragKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(fieldSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "field", groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldId: field.id }, fieldDragKey, field.label || `Field ${fieldIndex + 1}`)} onDragEnd={() => setDragging(null)}>
+                                                return <div key={field.id} title={shown ? "Drag to reorder within this form; hold Command on Mac or Control on Windows while dragging to duplicate" : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldIndex }) }} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === fieldDragKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(fieldSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "field", groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldId: field.id }, fieldDragKey, field.label || `Field ${fieldIndex + 1}`)} onDragEnd={() => setDragging(null)}>
                                                     <span className="h-7 w-7 shrink-0" />
                                                     <OutlineItemIcon kind="field" />
                                                     <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectField(group.key, step.id, block.id, field.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left">{field.label || `Field ${fieldIndex + 1}`}</button>
@@ -922,7 +927,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     <div data-builder-left-rail-header className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2"><RailToggleButton side="left" label="Collapse left rail" onClick={() => rememberRail("left", false)} /><button type="button" onClick={() => setLeftTab("outline")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "outline" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Outline</button><button type="button" onClick={() => setLeftTab("blocks")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "blocks" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Blocks</button></div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
                         {leftTab === "outline" ? <>
-                            <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Shift-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
+                            <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Cmd/Ctrl-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
                             <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onSelectHelp={() => { setSelection({ ...selection, blockId: HELP_BLOCK_ID, fieldId: null }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
                         </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
                     </div>

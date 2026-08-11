@@ -111,7 +111,7 @@ test("Builder chrome keeps mobile status, rail resizing, and header icons aligne
 test("structural authoring supports library drag, cross-definition moves, duplication, and phone restrictions", () => {
     assert.match(builderUi, /application\/x-betelgeze-builder-item/)
     assert.match(builderUi, /type: "library"/)
-    assert.match(builderUi, /event\.shiftKey/)
+    assert.match(builderUi, /event\.metaKey \|\| event\.ctrlKey/)
     assert.match(builderUi, /linkedChangeSets/)
     assert.match(builderUi, /A step containing a Form cannot be moved into a bookend/)
     assert.match(builderUi, /Each bookend must retain at least one step/)
@@ -120,7 +120,7 @@ test("structural authoring supports library drag, cross-definition moves, duplic
     assert.match(visualCanvas, /application\/x-betelgeze-block/)
 })
 
-test("outline drag distinguishes moving from numbered Shift duplication", () => {
+test("outline drag distinguishes moving from numbered platform-modifier duplication", () => {
     assert.match(builderUi, /dataTransfer\.setDragImage/)
     assert.match(builderUi, /builderDragLabel/)
     assert.match(builderUi, /dragging\?\.key === stepKey && !dragging\.copy \? "opacity-0"/)
@@ -150,7 +150,7 @@ test("the Builder outline nests fields, owns structure actions, and filters the 
     assert.match(builderUi, /type: "field"/)
     assert.match(builderUi, /Fields must stay inside their form/)
     assert.match(builderUi, /duplicateField/)
-    assert.match(builderUi, /event\.shiftKey/)
+    assert.match(builderUi, /event\.metaKey \|\| event\.ctrlKey/)
     assert.match(builderUi, /window\.confirm/)
     assert.match(builderUi, /Delete .*This change can be undone/)
     assert.match(builderUi, /EyeIcon/)
