@@ -16,7 +16,8 @@ import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configura
 import { buildRelationshipDealServiceOptions } from "@/lib/onboarding/service-display"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { currentRelationshipWork, ensureCurrentRelationshipStage } from "@/lib/relationship-workflow"
-import { saveRelationshipCommercialDetails, voidAndReopenRelationshipInvoice } from "../actions"
+import { archiveRelationship, saveRelationshipCommercialDetails, voidAndReopenRelationshipInvoice } from "../actions"
+import { ArchiveRelationshipForm } from "./ArchiveRelationshipForm"
 import { RelationshipGantt } from "./RelationshipGantt"
 import { VoidInvoiceButton } from "./VoidInvoiceButton"
 
@@ -150,6 +151,24 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                             {isOnboarding && <Link href={onboardingDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open onboarding detail</Link>}
                             {isFulfilment && <Link href={fulfilmentDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open fulfilment detail</Link>}
                         </section>
+
+                        {(role === "owner" || role === "admin") ? (
+                            <section className="mt-8 border-t border-red-950/70 pt-5">
+                                <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
+                                <div className="mt-3 flex flex-col gap-4 rounded-lg border border-red-950/80 bg-red-950/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="max-w-2xl">
+                                        <p className="text-sm font-medium text-neutral-200">Archive this relationship</p>
+                                        <p className="mt-1 text-xs leading-5 text-neutral-500">
+                                            Removes it from active relationship lists and WhatsApp confirmation matching while preserving its invoices, messages and other history.
+                                        </p>
+                                    </div>
+                                    <ArchiveRelationshipForm
+                                        action={archiveRelationship.bind(null, workspace.slug, relationship.id)}
+                                        relationshipName={relationship.business_name ?? relationship.primary_person_name}
+                                    />
+                                </div>
+                            </section>
+                        ) : null}
 
                     </div>
 

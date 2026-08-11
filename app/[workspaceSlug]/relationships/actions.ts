@@ -324,6 +324,25 @@ export async function voidAndReopenRelationshipInvoice(slug: string, relationshi
     }
 }
 
+export async function archiveRelationship(slug: string, relationshipId: string) {
+    const { workspace, user } = await requireWorkspace(slug, "admin")
+    const { data, error } = await supabaseAdmin.rpc("archive_workspace_relationship", {
+        p_workspace_id: workspace.id,
+        p_relationship_id: relationshipId,
+        p_actor_user_id: user.id,
+    })
+
+    if (error) {
+        const missingMigration = error.code === "42883" || error.code === "PGRST202" || error.message.toLowerCase().includes("schema cache")
+        if (missingMigration) throw new Error("Apply the relationship archive migration before archiving relationships")
+        throw new Error(error.message || "Could not archive relationship")
+    }
+    if (!data) throw new Error("Relationship not found")
+
+    relationshipRevalidatePaths(slug, relationshipId)
+    redirect(workspaceHref(slug, "relationships"))
+}
+
 export async function proceedRelationshipCurrentWork(slug: string, relationshipId: string, workItemId: string) {
     let workflowAction: string | null = null
     try {

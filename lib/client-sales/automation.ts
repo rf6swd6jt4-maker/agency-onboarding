@@ -639,8 +639,8 @@ async function findPendingConfirmedSale(fromAddress: string) {
         .in("client_phone", equivalentAddresses)
         .in("status", statuses)
         .order("created_at", { ascending: false })
-        .limit(1)
-    if (!snapshotResult.error) return (snapshotResult.data?.[0] as ClientSale | undefined) ?? null
+        .limit(50)
+    if (!snapshotResult.error) return firstUnarchivedRelationshipSale(snapshotResult.data ?? [])
     if (!isMissingOnboardingRuntimeColumn(snapshotResult.error)) throw new Error(snapshotResult.error.message)
 
     const { data: legacySales, error } = await supabaseAdmin
@@ -649,9 +649,28 @@ async function findPendingConfirmedSale(fromAddress: string) {
         .in("client_phone", equivalentAddresses)
         .in("status", statuses)
         .order("created_at", { ascending: false })
-        .limit(1)
+        .limit(50)
     if (error) throw new Error(error.message)
-    return (legacySales?.[0] as ClientSale | undefined) ?? null
+    return firstUnarchivedRelationshipSale(legacySales ?? [])
+}
+
+async function firstUnarchivedRelationshipSale(candidates: Array<Record<string, unknown>>) {
+    const relationshipIds = [...new Set(candidates.flatMap((candidate) => (
+        typeof candidate.relationship_id === "string" ? [candidate.relationship_id] : []
+    )))]
+    if (!relationshipIds.length) return (candidates[0] as ClientSale | undefined) ?? null
+
+    const { data: relationships, error } = await supabaseAdmin
+        .from("relationships")
+        .select("id, status")
+        .in("id", relationshipIds)
+    if (error) throw new Error(error.message)
+    const statusById = new Map((relationships ?? []).map((relationship) => [relationship.id, relationship.status]))
+
+    return (candidates.find((candidate) => (
+        typeof candidate.relationship_id !== "string"
+        || statusById.get(candidate.relationship_id) !== "archived"
+    )) as ClientSale | undefined) ?? null
 }
 
 async function enqueueOnboardingLinkDelivery(input: {
