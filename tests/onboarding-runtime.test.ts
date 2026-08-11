@@ -12,6 +12,7 @@ const canonical = readFileSync("lib/onboarding/canonical.ts", "utf8")
 const saleAutomation = readFileSync("lib/client-sales/automation.ts", "utf8")
 const relationshipWorkflow = readFileSync("lib/relationship-workflow.ts", "utf8")
 const relationshipActions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
+const archiveRelationshipForm = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/ArchiveRelationshipForm.tsx", "utf8")
 const stripeWebhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8")
 const publicPage = readFileSync("app/onboarding/session/[token]/page.tsx", "utf8")
 const previewPage = readFileSync("app/onboarding/preview/[token]/page.tsx", "utf8")
@@ -241,6 +242,9 @@ test("relationship archive releases WhatsApp confirmation matching while preserv
     assert.match(relationshipArchiveFix, /'onboarding',[\s\S]+relationship\.archived/u)
     assert.doesNotMatch(relationshipArchiveFix, /'relationships'/u)
     assert.match(relationshipActions, /reportPlatformFailure/u)
+    assert.match(archiveRelationshipForm, /WORKSPACE_TAB_FRAME_PARAM/u)
+    assert.match(archiveRelationshipForm, /data-global-loading="false"/u)
+    assert.match(relationshipActions, /workspaceTabFrameUrl\(relationshipsHref, tabId/u)
 })
 
 test("outbox retry route fails closed and never returns queue payloads", () => {

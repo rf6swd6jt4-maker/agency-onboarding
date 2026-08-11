@@ -7,6 +7,7 @@ import { prepareVisualBuilderVideoUpload, publishVisualOnboardingRelease, rotate
 import { Avatar } from "@/components/account/Avatar"
 import { VisualBuilderCanvas } from "@/components/onboarding-builder/VisualBuilderCanvas"
 import { useCollaborativeOnboardingDocument, type VisualBuilderDocument } from "@/components/onboarding-builder/useCollaborativeOnboardingDocument"
+import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import {
     createButtonBlock,
@@ -534,6 +535,12 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     }, [preview])
 
     useEffect(() => {
+        if (!notice) return
+        const timeout = window.setTimeout(() => setNotice(null), 8400)
+        return () => window.clearTimeout(timeout)
+    }, [notice])
+
+    useEffect(() => {
         const timer = window.setTimeout(() => {
             try {
                 setLeftOpen(railPreference(`${builderPreferenceKey}:left`, true))
@@ -991,7 +998,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             </div>
         </header>
 
-        {notice || error ? <div className={`shrink-0 border-b px-4 py-2 text-center text-xs ${error ? "border-red-900 bg-red-950 text-red-200" : "border-emerald-900 bg-emerald-950 text-emerald-200"}`}>{error ?? notice}</div> : null}
+        {error ? <div className="shrink-0 border-b border-red-900 bg-red-950 px-4 py-2 text-center text-xs text-red-200">{error}</div> : null}
         {!data.schemaReady ? <div className="border-b border-yellow-800 bg-yellow-950 px-4 py-2 text-center text-xs text-yellow-100">The visual Builder schema must be deployed before edits can be published.</div> : null}
 
         <div className={`grid min-h-0 flex-1 ${preview ? "grid-cols-1" : builderGridColumns}`}>
@@ -1028,6 +1035,8 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             </aside> : null}
         </div>
         {!preview ? collaboration.presence.filter((person) => person.cursor).map((person) => <div key={`cursor:${person.clientId}`} className="pointer-events-none fixed z-[80] flex items-center gap-1" style={{ left: `${person.cursor!.xRatio * 100}vw`, top: `${person.cursor!.yRatio * 100}vh`, color: person.color }}><span className="h-3 w-3 -translate-x-0.5 -translate-y-0.5 rotate-45 border-l-2 border-t-2" /><span className="rounded px-1 py-0.5 text-[10px] font-semibold text-black" style={{ backgroundColor: person.color }}>{person.name}</span></div>) : null}
+
+        {notice ? <WorkspaceSuccessNotice label={notice} /> : null}
 
         {publishOpen ? <div role="dialog" aria-modal="true" aria-labelledby="publish-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"><section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 p-5 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><h2 id="publish-title" className="text-lg font-semibold">Review onboarding release</h2><p className="mt-1 text-sm text-neutral-500">One transaction publishes every item below or rolls everything back.</p></div><button type="button" onClick={() => setPublishOpen(false)} className="text-neutral-500">✕</button></div><div className="mt-5 space-y-2">{publishScope.modules.map((module) => <div key={module.id} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} steps · visual module draft</p></div>)}{publishScope.bookends.map((bookend) => <div key={bookend.kind} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium capitalize">{bookend.kind}</p><p className="mt-1 text-xs text-neutral-600">{bookend.steps.length} steps · {bookend.kind === "welcome" ? "future sessions only" : "future and active-incomplete sessions"}</p></div>)}{publishScope.theme ? <div className="rounded-xl border border-yellow-800 bg-yellow-950/40 p-3"><p className="text-sm font-medium text-yellow-100">Global Style</p><p className="mt-1 text-xs leading-5 text-yellow-200/70">Publishing colours immediately updates active and completed onboarding sessions and later client portal surfaces.</p></div> : null}</div><fieldset className="mt-5 space-y-2"><legend className="text-sm font-medium">Client scope</legend><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={!applyToActive} onChange={() => setApplyToActive(false)} />Future sessions only</label><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={applyToActive} onChange={() => setApplyToActive(true)} />Future + all affected active sessions</label></fieldset>{applyToActive ? <label className="mt-4 block text-sm text-neutral-400">Client explanation<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} className="mt-2 w-full rounded-xl border border-neutral-700 bg-black p-3 text-white" /></label> : null}{error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}<div className="mt-5 flex flex-wrap justify-between gap-2"><button type="button" onClick={() => void createPreviewLink()} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm">Copy frozen preview link</button><div className="flex gap-2"><button type="button" onClick={() => setPublishOpen(false)} className="h-10 rounded-lg border border-neutral-700 px-4 text-sm">Cancel</button><button type="button" disabled={pending || !publishCount} onClick={() => startTransition(publishChanges)} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-30">{pending ? "Publishing…" : "Publish release"}</button></div></div></section></div> : null}
     </div>

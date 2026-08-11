@@ -10,6 +10,7 @@ import { LoadingOverlay } from "@/components/LoadingOverlay"
 import { shortId } from "@/lib/ui/relative-time"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
+import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
@@ -119,10 +120,6 @@ function ArrowLeftIcon() {
 
 function ArrowRightIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="m9 6 6 6-6 6" /></svg>
-}
-
-function CheckIcon() {
-    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-[2.5]"><path d="m5 12 4.5 4.5L19 7" /></svg>
 }
 
 function ReloadIcon() {
@@ -1768,15 +1765,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         {activeRouteLoading && <LoadingOverlay />}
 
-        {creationNotice && (
-            <div className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-[60] sm:left-1/2 sm:right-auto sm:w-[min(34rem,calc(100vw-2rem))] sm:-translate-x-1/2">
-                <div role="status" aria-live="polite" className="pointer-events-auto flex min-h-12 items-center gap-3 rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm text-white shadow-2xl shadow-black/50 motion-reduce:animate-none" style={{ animation: "betelgeze-creation-notice 8.4s cubic-bezier(0.22, 1, 0.36, 1) both" }}>
-                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white text-white"><CheckIcon /></span>
-                    <span className="min-w-0 flex-1 font-medium">{creationNotice.label}</span>
-                    <button type="button" onClick={viewCreatedRecord} className="shrink-0 text-sm font-medium text-white underline underline-offset-4 hover:text-neutral-300">View</button>
-                </div>
-            </div>
-        )}
+        {creationNotice ? <WorkspaceSuccessNotice label={creationNotice.label} actionLabel="View" onAction={viewCreatedRecord} /> : null}
 
         {sidebarOpen && <button type="button" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} className="fixed inset-x-0 bottom-0 top-14 z-[45] cursor-default md:hidden" />}
 

@@ -19,6 +19,7 @@ import { requireWorkspace } from "@/lib/workspaces"
 import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, sendRelationshipInvoice } from "@/lib/relationship-workflow"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { voidStripeInvoice } from "@/lib/stripe/api"
+import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
 
 const creatablePhases = new Set<RelationshipPhase>([
     "lead",
@@ -365,7 +366,9 @@ export async function archiveRelationship(
     if (!data) return { error: "This relationship no longer exists." }
 
     relationshipRevalidatePaths(slug, relationshipId)
-    redirect(workspaceHref(slug, "relationships"))
+    const relationshipsHref = workspaceHref(slug, "relationships")
+    const tabId = formString(_formData, WORKSPACE_TAB_FRAME_PARAM)
+    redirect(tabId ? workspaceTabFrameUrl(relationshipsHref, tabId, "http://localhost") : relationshipsHref)
 }
 
 export async function proceedRelationshipCurrentWork(slug: string, relationshipId: string, workItemId: string) {
