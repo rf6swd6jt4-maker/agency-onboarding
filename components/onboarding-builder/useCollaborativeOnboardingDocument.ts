@@ -240,6 +240,16 @@ function readDocument(root: Y.Map<unknown>, fallback: VisualBuilderDocument): Vi
     }
 }
 
+function restoreInitialDocument(initial: VisualBuilderDocument, collaboration: OnboardingBuilderData["collaboration"]) {
+    const ydoc = new Y.Doc()
+    const root = ydoc.getMap("builder")
+    if (collaboration.snapshotBase64) Y.applyUpdate(ydoc, base64ToUint8(collaboration.snapshotBase64), "bootstrap")
+    for (const update of collaboration.updates) Y.applyUpdate(ydoc, base64ToUint8(update.updateBase64), "bootstrap")
+    const restored = readDocument(root, initial)
+    ydoc.destroy()
+    return restored
+}
+
 function changedDefinitions(before: VisualBuilderDocument, after: VisualBuilderDocument) {
     const changed = new Set<string>()
     const beforeModules = new Map(before.modules.map((module) => [module.id, JSON.stringify(module)]))
@@ -279,7 +289,8 @@ export function useCollaborativeOnboardingDocument({
     const activityTimerRef = useRef<number | null>(null)
     const activityExpiryTimersRef = useRef(new Map<string, number>())
     const presenceRetryTimerRef = useRef<number | null>(null)
-    const [document, setDocument] = useState(initial)
+    const [initialDocument] = useState(() => restoreInitialDocument(initial, collaboration))
+    const [document, setDocument] = useState(initialDocument)
     const [syncState, setSyncState] = useState<BuilderSyncState>("synced")
     const [realtimeState, setRealtimeState] = useState<BuilderRealtimeState>("connecting")
     const [realtimeError, setRealtimeError] = useState<string | null>(null)
@@ -630,6 +641,7 @@ export function useCollaborativeOnboardingDocument({
 
     return {
         document,
+        initialDocument,
         updateDocument,
         syncState,
         setSyncState,

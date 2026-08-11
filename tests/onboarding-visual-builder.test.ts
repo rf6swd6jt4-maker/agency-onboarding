@@ -366,6 +366,12 @@ test("one release transaction publishes definitions, style, migrations, notices,
     assert.match(migration, /record_workspace_admin_activity/)
     assert.match(migration, /The Builder changed while this release was being reviewed/)
     assert.match(migration, /Completion cannot be published while an active client has already started it/)
+    assert.match(builderUi, /setPublishedBaseline\(releaseFingerprint\(collaboration\.document\)\)/)
+    assert.match(builderUi, /setPublishedVersion\(version\)/)
+    assert.match(builderUi, /All onboarding changes are published/)
+    assert.doesNotMatch(builderUi, /setTimeout\(\(\) => window\.location\.reload\(\), 650\)/)
+    assert.match(collaboration, /initialDocument/)
+    assert.match(builderUi, /data\.collaboration\.version === data\.collaboration\.publishedVersion/)
 })
 
 test("runtime requirements persist by stable session block and gate atomic step completion", () => {

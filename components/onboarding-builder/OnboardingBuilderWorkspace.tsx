@@ -16,6 +16,8 @@ import {
     createOnboardingField,
     createOnboardingStepV2,
     createVideoBlock,
+    bookendV2Definition,
+    moduleV2WithLegacyProjection,
     type OnboardingBlock,
     type OnboardingBookendDefinitionV2,
     type OnboardingModuleDefinitionV2,
@@ -37,6 +39,26 @@ type LeftTab = "outline" | "blocks" | "modules"
 type RightTab = "inspect" | "styles"
 type OnboardingField = Extract<OnboardingBlock, { kind: "form" }>["fields"][number]
 const HELP_BLOCK_ID = "builder:client-help"
+
+type ReleaseFingerprint = {
+    modules: Map<string, string>
+    welcome: string
+    completion: string
+    theme: string
+}
+
+function releaseJson(value: unknown) {
+    return JSON.stringify(value, (key, item) => key === "resolvedUrl" ? undefined : item)
+}
+
+function releaseFingerprint(document: VisualBuilderDocument): ReleaseFingerprint {
+    return {
+        modules: new Map(document.modules.map((module) => [module.id, releaseJson(moduleV2WithLegacyProjection(module))])),
+        welcome: releaseJson(bookendV2Definition(document.welcome)),
+        completion: releaseJson(bookendV2Definition(document.completion)),
+        theme: releaseJson({ swatches: document.theme.swatches, assignments: document.theme.assignments }),
+    }
+}
 
 function duplicateModifier(event: { metaKey: boolean; ctrlKey: boolean }) {
     return event.metaKey || event.ctrlKey
@@ -449,6 +471,10 @@ function ModulesPanel({ modules, services, editable, updateModule, removeModule,
 export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data, initialBookend }: { workspaceSlug: string; workspaceName: string; data: OnboardingBuilderData; initialBookend?: "welcome" | "completion" | null }) {
     const initialDocument = useMemo<VisualBuilderDocument>(() => ({ modules: data.visualModules, welcome: data.visualWelcome, completion: data.visualCompletion, theme: data.theme, linkedChangeSets: [] }), [data])
     const collaboration = useCollaborativeOnboardingDocument({ workspaceSlug, initial: initialDocument, collaboration: data.collaboration })
+    const [publishedVersion, setPublishedVersion] = useState(data.collaboration.publishedVersion)
+    const [publishedBaseline, setPublishedBaseline] = useState<ReleaseFingerprint | null>(() => data.collaboration.version === data.collaboration.publishedVersion
+        ? releaseFingerprint(collaboration.initialDocument)
+        : null)
     const saveStatus = collaboration.syncState === "synced"
         ? { label: "Saved", tone: "green" as const }
         : collaboration.syncState === "syncing" || collaboration.syncState === "publishing"
@@ -541,11 +567,12 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const visibleGroups = groups.filter((group) => group.kind === "bookend" || visibleModuleIds.has(group.definition.id))
     const moduleTitles = visibleGroups.filter((group): group is Extract<DefinitionGroup, { kind: "module" }> => group.kind === "module").map((group) => group.title)
     const roadmapSteps = visibleGroups.flatMap((group) => group.definition.steps.map((step) => ({ key: `${group.key}:${step.id}`, title: visualStepTitle(step), complete: false, current: group.key === selection.groupKey && step.id === selection.stepId, href: null })))
-    const baselineModules = new Map(data.visualModules.map((module) => [module.id, JSON.stringify(module)]))
-    const dirtyModuleIds = collaboration.document.modules.filter((module) => JSON.stringify(module) !== baselineModules.get(module.id)).map((module) => module.id)
-    const welcomeDirty = JSON.stringify(collaboration.document.welcome) !== JSON.stringify(data.visualWelcome)
-    const completionDirty = JSON.stringify(collaboration.document.completion) !== JSON.stringify(data.visualCompletion)
-    const themeDirty = JSON.stringify(collaboration.document.theme) !== JSON.stringify(data.theme)
+    const draftFingerprint = releaseFingerprint(collaboration.document)
+    const baselineModules = publishedBaseline?.modules ?? releaseFingerprint(initialDocument).modules
+    const dirtyModuleIds = collaboration.document.modules.filter((module) => draftFingerprint.modules.get(module.id) !== baselineModules.get(module.id)).map((module) => module.id)
+    const welcomeDirty = draftFingerprint.welcome !== (publishedBaseline?.welcome ?? releaseJson(bookendV2Definition(data.visualWelcome)))
+    const completionDirty = draftFingerprint.completion !== (publishedBaseline?.completion ?? releaseJson(bookendV2Definition(data.visualCompletion)))
+    const themeDirty = draftFingerprint.theme !== (publishedBaseline?.theme ?? releaseJson({ swatches: data.theme.swatches, assignments: data.theme.assignments }))
     const helpDirty = helpDraft.text.trim() !== savedHelp.text.trim() || helpDraft.whatsappEnabled !== savedHelp.whatsappEnabled
 
     function rememberRail(side: "left" | "right", open: boolean) {
@@ -892,7 +919,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         while (changed) {
             changed = false
             for (const changeSet of collaboration.document.linkedChangeSets) {
-                if (changeSet.createdVersion !== undefined && changeSet.createdVersion <= data.collaboration.publishedVersion) continue
+                if (changeSet.createdVersion !== undefined && changeSet.createdVersion <= publishedVersion) continue
                 if (!changeSet.definitionIds.some((id) => included.has(id))) continue
                 for (const id of changeSet.definitionIds) if (!included.has(id)) { included.add(id); changed = true }
             }
@@ -926,9 +953,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 explanation,
             })
             if (!outcome.ok) { setError(outcome.error); return }
+            setPublishedBaseline(releaseFingerprint(collaboration.document))
+            setPublishedVersion(version)
             setPublishOpen(false)
             setNotice("Onboarding release published.")
-            window.setTimeout(() => window.location.reload(), 650)
         } finally {
             await collaboration.setReleaseLock(false)
         }
@@ -959,7 +987,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 <span className="text-[11px] text-neutral-500"><Status label={saveStatus.label} tone={saveStatus.tone} /></span>
                 <div className="hidden items-center rounded-lg border border-neutral-800 p-0.5 sm:flex"><button data-builder-viewport-toggle type="button" aria-label="Desktop preview" onClick={() => setViewport("desktop")} className={`inline-flex h-8 w-8 items-center justify-center rounded-md leading-none ${viewport === "desktop" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}><BuilderIcon name="desktop" /></button><button data-builder-viewport-toggle type="button" aria-label="Mobile preview" onClick={() => setViewport("mobile")} className={`inline-flex h-8 w-8 items-center justify-center rounded-md leading-none ${viewport === "mobile" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}><BuilderIcon name="mobile" /></button></div>
                 <button type="button" onClick={() => setPreview((value) => !value)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-neutral-700 px-3 text-xs font-medium leading-none text-neutral-200"><BuilderIcon name="preview" />{preview ? "Edit" : "Preview"}</button>
-                <button type="button" disabled={!publishCount || !collaboration.editable} onClick={() => setPublishOpen(true)} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-white px-3 text-xs font-semibold leading-none text-black disabled:opacity-30"><BuilderIcon name="publish" />Publish{publishCount ? ` ${publishCount}` : ""}</button>
+                <button type="button" disabled={!publishCount || !collaboration.editable} onClick={() => setPublishOpen(true)} title={publishCount ? `${publishCount} unpublished ${publishCount === 1 ? "item" : "items"}` : publishedVersion > 0 ? "All onboarding changes are published" : "No onboarding changes to publish"} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-white px-3 text-xs font-semibold leading-none text-black disabled:opacity-30"><BuilderIcon name="publish" />{publishCount ? `Publish ${publishCount}` : publishedVersion > 0 ? "Published" : "Publish"}</button>
             </div>
         </header>
 
