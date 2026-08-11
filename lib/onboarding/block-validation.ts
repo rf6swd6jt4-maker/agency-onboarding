@@ -92,11 +92,23 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             return { id: blockId, name: name(block, "Estimated time"), kind: "estimate", estimatedTime: text(block.estimatedTime, 80), layout: layout(block) }
         }
         if (block.kind === "form") {
-            if (options.bookend) throw new Error("Welcome and Completion steps cannot contain forms.")
             formCount += 1
             if (formCount > 1) throw new Error("A step can contain only one Form block.")
             const fields = Array.isArray(block.fields) ? block.fields : []
             return { id: blockId, name: name(block, "Form"), kind: "form", whyWeAsk: text(block.whyWeAsk, 2_000), fields: fields.map((field) => normalizeField(field, options.fieldIds)), layout: layout(block) }
+        }
+        if (block.kind === "checklist") {
+            const items = Array.isArray(block.items) ? block.items.map((item) => text(item, 500)).filter(Boolean).slice(0, 30) : []
+            return {
+                id: blockId,
+                name: name(block, "Checklist"),
+                kind: "checklist",
+                title: text(block.title, 160) || "Checklist",
+                source: block.source === "modules" ? "modules" : "custom",
+                items,
+                footer: text(block.footer, 2_000),
+                layout: layout(block),
+            }
         }
         if (block.kind === "video") {
             if (block.legacyEmbedUrl) throw new Error("Replace embedded videos with a workspace upload before publishing.")

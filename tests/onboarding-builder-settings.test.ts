@@ -236,13 +236,14 @@ test("private search includes dynamic services and modules without weakening the
 test("Settings and Builder authoring controls are not forced into canonical List", () => {
     for (const source of [servicesUi, onboardingUi, brandingUi, builderUi]) assert.doesNotMatch(source, /components\/list\/List/)
     assert.match(servicesUi, /SquarePill tone="yellow">Test/)
-    assert.match(onboardingUi, /SquarePill tone="yellow">Test/)
+    assert.match(onboardingUi, /Open Onboarding Builder/)
 })
 
-test("an explicit empty mandatory draft stays empty and only a changed saved draft can publish", () => {
-    assert.match(onboardingUi, /configuration\.draftRevisionId \? configuration\.draftModuleIds : configuration\.publishedModuleIds/)
-    assert.match(onboardingUi, /savedDraftDiffersFromPublished/)
-    assert.match(onboardingUi, /dirty \|\| !savedDraftDiffersFromPublished/)
+test("module configuration has moved out of Settings and into the Builder", () => {
+    assert.doesNotMatch(onboardingUi, /MandatoryModules/)
+    assert.doesNotMatch(onboardingUi, /Session bookends/)
+    assert.match(builderUi, /setLeftTab\("modules"\)/)
+    assert.match(builderUi, /Linked services/)
 })
 
 test("service authoring explains priority, exposes an accessible mobile sheet, and permits reviewed Retired reactivation", () => {

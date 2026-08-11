@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { saveOnboardingService, setOnboardingServiceState } from "@/app/[workspaceSlug]/settings/service-actions"
-import { SortableAuthoringList } from "@/components/onboarding-builder/SortableAuthoringList"
 import { Assignee, RoundPill, SquarePill, Status, type StatusTone } from "@/components/ui"
 import type { OnboardingAssigneeOption, OnboardingModuleSummary, OnboardingServiceDefinition, OnboardingServiceState } from "@/lib/onboarding/configuration-types"
 
@@ -33,10 +32,9 @@ function blankService(): OnboardingServiceDefinition {
     }
 }
 
-function ServiceEditor({ workspaceSlug, service, modules, assignees, schemaReady, onClose }: {
+function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose }: {
     workspaceSlug: string
     service: OnboardingServiceDefinition
-    modules: OnboardingModuleSummary[]
     assignees: OnboardingAssigneeOption[]
     schemaReady: boolean
     onClose: () => void
@@ -49,8 +47,6 @@ function ServiceEditor({ workspaceSlug, service, modules, assignees, schemaReady
     const [mobileDialog, setMobileDialog] = useState(false)
     const editorRef = useRef<HTMLElement>(null)
     const closeRef = useRef<HTMLButtonElement>(null)
-    const assignedIds = new Set(draft.modules.map((module) => module.moduleId))
-    const availableModules = modules.filter((module) => module.status === "published" && !assignedIds.has(module.id))
     const parsedPriceCents = Math.max(0, Math.round((Number(price) || 0) * 100))
     const effectiveDraft = { ...draft, defaultPriceCents: parsedPriceCents }
     const dirty = JSON.stringify(effectiveDraft) !== JSON.stringify(service)
@@ -121,12 +117,6 @@ function ServiceEditor({ workspaceSlug, service, modules, assignees, schemaReady
                 <label className="block text-sm text-neutral-300">Display priority<input value={draft.displayPriority} onChange={(event) => setDraft({ ...draft, displayPriority: Math.max(0, Math.round(Number(event.target.value) || 0)) })} type="number" min="0" aria-describedby="service-priority-help" className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /><span id="service-priority-help" className="mt-1 block text-xs leading-5 text-neutral-600">Higher numbers compose earlier in onboarding.</span></label>
             </div>
             <label className="flex min-h-11 items-center gap-3 rounded-lg border border-neutral-800 bg-black px-3 text-sm text-neutral-300"><input type="checkbox" checked={draft.isTest} onChange={(event) => setDraft({ ...draft, isTest: event.target.checked })} className="h-4 w-4 accent-white" />Mark this service as Test</label>
-            <section>
-                <div className="flex items-end justify-between gap-3"><div><h4 className="font-medium">Onboarding modules</h4><p className="mt-1 text-xs leading-5 text-neutral-500">Drag to set the order used after mandatory modules.</p></div>{availableModules.length ? <select aria-label="Add module" defaultValue="" onChange={(event) => { const moduleDefinition = modules.find((item) => item.id === event.target.value); if (moduleDefinition) setDraft({ ...draft, modules: [...draft.modules, { moduleId: moduleDefinition.id, moduleCode: moduleDefinition.code, moduleName: moduleDefinition.name, sortOrder: draft.modules.length }] }); event.currentTarget.value = "" }} className="h-10 rounded-lg border border-neutral-700 bg-black px-2 text-sm text-white"><option value="" disabled>Add module…</option>{availableModules.map((moduleDefinition) => <option key={moduleDefinition.id} value={moduleDefinition.id}>{moduleDefinition.name}</option>)}</select> : null}</div>
-                <div className="mt-3">
-                    {draft.modules.length ? <SortableAuthoringList items={draft.modules.map((item, index) => ({ ...item, id: item.moduleId, sortOrder: index }))} onChange={(items) => setDraft({ ...draft, modules: items.map((item, index) => ({ moduleId: item.moduleId, moduleCode: item.moduleCode, moduleName: item.moduleName, sortOrder: index })) })} ariaLabel="Service onboarding module order" renderItem={(module, _index, handle) => <div className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-black px-2 py-1.5">{handle}<span className="min-w-0 flex-1 truncate text-sm text-neutral-200">{module.moduleName}</span><button type="button" onClick={() => setDraft({ ...draft, modules: draft.modules.filter((item) => item.moduleId !== module.moduleId) })} className="h-9 px-2 text-xs text-neutral-500 hover:text-red-300">Remove</button></div>} /> : <p className="rounded-lg border border-dashed border-neutral-800 px-3 py-5 text-center text-sm text-neutral-600">No onboarding modules assigned.</p>}
-                </div>
-            </section>
             {error ? <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{error}</p> : null}
             {service.archiveBlockers.length ? <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-100"><p className="font-medium">Archive unavailable</p><ul className="mt-1 list-disc pl-5 text-xs leading-5">{service.archiveBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div> : null}
         </div>
@@ -139,7 +129,7 @@ function ServiceEditor({ workspaceSlug, service, modules, assignees, schemaReady
     </aside>
 }
 
-export function ServiceCatalogue({ workspaceSlug, services, modules, assignees, schemaReady, initialServiceId }: {
+export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaReady, initialServiceId }: {
     workspaceSlug: string
     services: OnboardingServiceDefinition[]
     modules: OnboardingModuleSummary[]
@@ -167,6 +157,6 @@ export function ServiceCatalogue({ workspaceSlug, services, modules, assignees, 
                 {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first catalogue service and assign its onboarding modules.</p></div> : null}
             </div>
         </section>
-        {selected ? <ServiceEditor key={selected.id || "new"} workspaceSlug={workspaceSlug} service={selected} modules={modules} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} /> : null}
+        {selected ? <ServiceEditor key={selected.id || "new"} workspaceSlug={workspaceSlug} service={selected} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} /> : null}
     </div>
 }

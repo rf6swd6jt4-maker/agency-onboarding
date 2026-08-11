@@ -26,6 +26,7 @@ const brandingSettings = readFileSync("components/settings/AgencyBrandingEditor.
 const configuration = readFileSync("lib/onboarding/configuration.ts", "utf8")
 const migration = readFileSync("supabase/migrations/20260810110000_visual_onboarding_builder_v2.sql", "utf8")
 const realtimeFixMigration = readFileSync("supabase/migrations/20260810223000_fix_onboarding_builder_realtime.sql", "utf8")
+const moduleMigration = readFileSync("supabase/migrations/20260811010000_migrate_onboarding_bookends_to_modules.sql", "utf8")
 const updateRoute = readFileSync("app/api/workspaces/[workspaceSlug]/onboarding-builder/updates/route.ts", "utf8")
 
 test("version-two steps use a protected Header and compatible mixed blocks", () => {
@@ -34,9 +35,26 @@ test("version-two steps use a protected Header and compatible mixed blocks", () 
     assert.deepEqual(ordinary.blocks.map((block) => block.kind), ["header", "estimate", "form"])
     assert.deepEqual(bookend.blocks.map((block) => block.kind), ["header", "estimate"])
     assert.match(blockValidation, /Every step needs exactly one Header block/)
-    assert.match(blockValidation, /Welcome and Completion steps cannot contain forms/)
+    assert.doesNotMatch(blockValidation, /Welcome and Completion steps cannot contain forms/)
     assert.match(blockValidation, /A step can contain only one Form block/)
     assert.match(blockValidation, /Every step needs exactly one Estimated time block/)
+})
+
+test("bookends migrate into ordinary mandatory modules with editable checklist blocks", () => {
+    assert.match(moduleMigration, /system-welcome/)
+    assert.match(moduleMigration, /system-completion/)
+    assert.match(moduleMigration, /'mandatory', true/)
+    assert.match(moduleMigration, /'placement', case when p_kind = 'welcome' then 'start' else 'end'/)
+    assert.match(moduleMigration, /'kind', 'checklist'/)
+    assert.match(builderUi, /setLeftTab\("modules"\)/)
+    assert.match(builderUi, /Onboarding module names/)
+    assert.match(runtimeBlocks, /block\.kind === "checklist"/)
+})
+
+test("collaborative snapshots are upgraded before they replace the server definition", () => {
+    assert.match(collaboration, /upgradeModuleToV2\(value as OnboardingModuleDefinitionV2\)/)
+    assert.match(collaboration, /upgradeBookendToV2/)
+    assert.match(collaboration, /fallback\.modules\.filter/)
 })
 
 test("publish validation rejects unsafe V2 definitions", () => {
@@ -108,12 +126,12 @@ test("Builder chrome keeps mobile status, rail resizing, and header icons aligne
     assert.match(builderUi, /inline-flex h-8 w-8 items-center justify-center rounded-md leading-none/)
 })
 
-test("structural authoring supports library drag, cross-definition moves, duplication, and phone restrictions", () => {
+test("structural authoring supports library drag, flexible cross-module moves, duplication, and phone restrictions", () => {
     assert.match(builderUi, /application\/x-betelgeze-builder-item/)
     assert.match(builderUi, /type: "library"/)
     assert.match(builderUi, /event\.metaKey \|\| event\.ctrlKey/)
     assert.match(builderUi, /linkedChangeSets/)
-    assert.match(builderUi, /A step containing a Form cannot be moved into a bookend/)
+    assert.doesNotMatch(builderUi, /A step containing a Form cannot be moved into a bookend/)
     assert.match(builderUi, /Each bookend must retain at least one step/)
     assert.match(builderUi, /hidden md:flex/)
     assert.match(visualCanvas, /hidden w-fit md:block/)

@@ -114,6 +114,7 @@ export function OnboardingSessionRenderer({
                     continueLabel={step.navigation?.continueLabel || "Complete and continue"}
                     backLabel={step.navigation?.backLabel || "Back"}
                     backHref={backHref}
+                    moduleTitles={moduleTitles}
                 />
             </div>
         )

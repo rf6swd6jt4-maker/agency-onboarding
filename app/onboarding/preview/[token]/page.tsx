@@ -82,10 +82,11 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
         .maybeSingle()
     if (visualPreview && isVisualPreviewSnapshot(visualPreview.snapshot)) {
         const snapshot = visualPreview.snapshot
+        const migrated = snapshot.modules.some((module) => module.code === "system-welcome") && snapshot.modules.some((module) => module.code === "system-completion")
         const flatSteps: PreviewStep[] = [
-            ...snapshot.welcome.steps.map((step) => ({ groupTitle: "Welcome", step })),
+            ...(migrated ? [] : snapshot.welcome.steps.map((step) => ({ groupTitle: "Welcome", step }))),
             ...snapshot.modules.flatMap((module) => module.steps.map((step) => ({ groupTitle: module.name, step }))),
-            ...snapshot.completion.steps.map((step) => ({ groupTitle: "Completion", step })),
+            ...(migrated ? [] : snapshot.completion.steps.map((step) => ({ groupTitle: "Completion", step }))),
         ]
         if (!flatSteps.length) return <InvalidPreview />
         const requestedIndex = flatSteps.findIndex((item) => item.step.id === requestedStepId)
@@ -108,7 +109,7 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
                 <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={snapshot.workspaceName} help={snapshot.help} headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Frozen preview · nothing is saved</span>}>
                     <OnboardingSessionRenderer
                         step={renderStep}
-                        moduleTitles={snapshot.modules.map((module) => module.name)}
+                        moduleTitles={snapshot.modules.filter((module) => module.code !== "system-welcome" && module.code !== "system-completion").map((module) => module.name)}
                         showModuleSummary
                         token={token}
                         preview

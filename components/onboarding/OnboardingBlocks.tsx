@@ -29,6 +29,7 @@ export function OnboardingBlocks({
     continueLabel,
     backLabel,
     backHref,
+    moduleTitles,
 }: {
     blocks: RuntimeBlock[]
     token: string
@@ -44,6 +45,7 @@ export function OnboardingBlocks({
     continueLabel: string
     backLabel: string
     backHref?: string | null
+    moduleTitles?: string[]
 }) {
     const [satisfied, setSatisfied] = useState(() => new Set(initiallySatisfied))
     const [requirementError, setRequirementError] = useState<string | null>(null)
@@ -112,6 +114,16 @@ export function OnboardingBlocks({
                 return <BlockFrame key={block.id} block={block}>
                     {source ? <div className="aspect-video overflow-hidden rounded-2xl bg-black"><video src={source} controls preload="metadata" onEnded={() => void satisfy(block, "video_finished")} className="h-full w-full bg-black" /></div> : <div className="rounded-2xl border border-dashed border-black/20 bg-[var(--onboarding-page)] p-8 text-sm text-[var(--onboarding-muted)]">This video is unavailable.</div>}
                     {block.requirement === "finish" && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">{satisfied.has(requirementId) ? "✓ Finished" : "Watch to the end to continue."}</p> : null}
+                </BlockFrame>
+            }
+            if (block.kind === "checklist") {
+                const items = block.source === "modules" ? (moduleTitles ?? []) : block.items
+                return <BlockFrame key={block.id} block={block}>
+                    <div className="rounded-2xl bg-[var(--onboarding-page)] p-5">
+                        <p className="font-semibold text-[var(--onboarding-text)]">{block.title}</p>
+                        <ul className="mt-4 space-y-2 text-sm leading-6 text-[var(--onboarding-text)]">{items.length ? items.map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span aria-hidden="true" className="font-semibold text-[var(--onboarding-primary)]">✓</span><span>{item}</span></li>) : <li className="text-[var(--onboarding-muted)]">No onboarding modules assigned yet.</li>}</ul>
+                        {block.footer ? <p className="mt-4 text-sm leading-6 text-[var(--onboarding-muted)]">{block.footer}</p> : null}
+                    </div>
                 </BlockFrame>
             }
             const requirementId = block.sessionBlockId ?? block.id

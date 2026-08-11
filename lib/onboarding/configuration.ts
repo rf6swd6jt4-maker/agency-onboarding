@@ -238,6 +238,9 @@ function mapModule(row: UnknownRow, revision?: UnknownRow): OnboardingModuleDefi
         lastEditedAt: text(source.updated_at, source.created_at, row.updated_at) ?? null,
         lastEditedBy: text(source.updated_by, source.created_by, row.updated_by) ?? null,
         schemaVersion: Number(definition.schemaVersion) === 2 ? 2 : 1,
+        mandatory: bool(definition.mandatory),
+        placement: ["start", "service", "end"].includes(text(definition.placement) ?? "") ? text(definition.placement) as OnboardingModuleDefinition["placement"] : undefined,
+        serviceIds: array(definition.serviceIds).map(String),
     }
 }
 
@@ -723,10 +726,19 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
         text(row.id) ?? "",
         record(selectRevision(row, raw.revisions, true)?.definition),
     ]))
-    const visualModules = await Promise.all(editableModules.map((moduleDefinition) => hydrateVisualModule(
+    const hydratedVisualModules = await Promise.all(editableModules.map((moduleDefinition) => hydrateVisualModule(
         moduleDefinition,
         rawRevisionByModuleId.get(moduleDefinition.id) ?? {},
     )))
+    const visualModules = hydratedVisualModules.map((moduleDefinition) => {
+        const mandatory = moduleDefinition.mandatory || mandatoryIds.has(moduleDefinition.id) || ["system-welcome", "system-completion"].includes(moduleDefinition.code)
+        return {
+            ...moduleDefinition,
+            mandatory,
+            placement: moduleDefinition.placement ?? (moduleDefinition.code === "system-completion" ? "end" : mandatory ? "start" : "service"),
+            serviceIds: moduleDefinition.serviceIds?.length ? moduleDefinition.serviceIds : services.filter((service) => service.modules.some((assignment) => assignment.moduleId === moduleDefinition.id)).map((service) => service.id),
+        }
+    })
     const selectedWelcomeRow = [...raw.configurations]
         .filter((row) => text(row.configuration_type) === "welcome")
         .sort((left, right) => integer(right.revision_number) - integer(left.revision_number))
@@ -791,17 +803,28 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
 
 export async function loadPublishedOnboardingConfiguration(workspaceId: string): Promise<PublishedOnboardingConfiguration> {
     const raw = await rawConfiguration(workspaceId)
-    const modules = raw.modules.length
+    const baseModules = raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false))).filter((moduleDefinition) => moduleDefinition.status === "published")
         : fallbackModules()
-    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, modules) : fallbackServices(modules)
+    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : fallbackServices(baseModules)
+    const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
+    const mandatoryIds = new Set(mandatory.publishedModuleIds)
+    const modules = baseModules.map((moduleDefinition) => {
+        const isMandatory = moduleDefinition.mandatory || mandatoryIds.has(moduleDefinition.id) || ["system-welcome", "system-completion"].includes(moduleDefinition.code)
+        return {
+            ...moduleDefinition,
+            mandatory: isMandatory,
+            placement: moduleDefinition.placement ?? (moduleDefinition.code === "system-completion" ? "end" : isMandatory ? "start" : "service"),
+            serviceIds: moduleDefinition.serviceIds?.length ? moduleDefinition.serviceIds : services.filter((service) => service.modules.some((assignment) => assignment.moduleId === moduleDefinition.id)).map((service) => service.id),
+        }
+    })
     const whatsappHint = record(raw.whatsapp?.config_hint)
     const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
     return {
         schemaReady: raw.schemaReady,
         modules,
         services,
-        mandatory: mapMandatory(raw.configurations, raw.configurationAssignments),
+        mandatory,
         welcome: mapBookend(raw.configurations, "welcome", false),
         completion: mapBookend(raw.configurations, "completion", false),
         theme: mapTheme(raw.themes[0], raw.swatches),

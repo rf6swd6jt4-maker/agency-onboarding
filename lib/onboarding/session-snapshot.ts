@@ -186,17 +186,31 @@ function hashComposition(value: SessionCompositionSnapshot) {
 export function composeOnboardingSession(input: ComposeInput): ComposedOnboardingSession {
     const moduleById = new Map(input.modules.map((moduleDefinition) => [moduleDefinition.id, moduleDefinition]))
     const moduleByCode = new Map(input.modules.map((moduleDefinition) => [moduleDefinition.code, moduleDefinition]))
-    const orderedServices = orderOnboardingServices(input.purchasedServices)
-    const mandatoryIds = input.mandatory.publishedModuleIds.length
-        ? input.mandatory.publishedModuleIds
+    const orderedServices = orderOnboardingServices(input.purchasedServices).map((service) => ({
+        ...service,
+        modules: [
+            ...service.modules,
+            ...input.modules.filter((module) => module.serviceIds?.includes(service.id) && !service.modules.some((assignment) => assignment.moduleId === module.id)).map((module, index) => ({ moduleId: module.id, moduleCode: module.code, moduleName: module.name, sortOrder: service.modules.length + index })),
+        ],
+    }))
+    const definitionMandatoryIds = input.modules.filter((module) => module.mandatory).map((module) => module.id)
+    const mandatoryIds = definitionMandatoryIds.length
+        ? definitionMandatoryIds
+        : input.mandatory.publishedModuleIds.length
+            ? input.mandatory.publishedModuleIds
         : input.modules.some((moduleDefinition) => moduleDefinition.code === "general-info" && moduleDefinition.id.startsWith("legacy:"))
             ? [moduleByCode.get("general-info")!.id]
             : []
-    const orderedSources = resolveOrderedModuleSources({
+    const resolvedSources = resolveOrderedModuleSources({
         services: orderedServices,
         modules: input.modules,
         mandatoryModuleIds: mandatoryIds,
     })
+    const orderedSources = [
+        ...resolvedSources.filter((source) => moduleById.get(source.moduleId)?.placement !== "end" && (moduleById.get(source.moduleId)?.mandatory || source.sourceKind === "mandatory")),
+        ...resolvedSources.filter((source) => !moduleById.get(source.moduleId)?.mandatory && source.sourceKind === "service"),
+        ...resolvedSources.filter((source) => moduleById.get(source.moduleId)?.placement === "end"),
+    ].filter((source, index, all) => all.findIndex((candidate) => candidate.moduleId === source.moduleId) === index)
     const modules = orderedSources.map((source, moduleIndex) => {
         const moduleDefinition = moduleById.get(source.moduleId)!
         return {
@@ -210,12 +224,13 @@ export function composeOnboardingSession(input: ComposeInput): ComposedOnboardin
         isTest: moduleDefinition.isTest,
         steps: moduleDefinition.steps.map((step, stepIndex) => composedStep(step, moduleDefinition, stepIndex * 10)),
     }})
+    const hasMigratedBookends = input.modules.some((module) => module.code === "system-welcome") && input.modules.some((module) => module.code === "system-completion")
     const welcome = composedBookend(input.welcome, "welcome", 0)
     const completion = composedBookend(input.completion, "completion", (modules.reduce((count, module) => count + module.steps.length, 0) + 1) * 10)
     const schemaVersion = input.modules.some((module) => module.schemaVersion === 2)
         || input.welcome.schemaVersion === 2
         || input.completion.schemaVersion === 2 ? 2 : 1
-    const bookendStepCount = (input.welcome.visualSteps?.length ?? 1) + (input.completion.visualSteps?.length ?? 1)
+    const bookendStepCount = hasMigratedBookends ? 0 : (input.welcome.visualSteps?.length ?? 1) + (input.completion.visualSteps?.length ?? 1)
     const audit: SessionCompositionSnapshot = {
         schemaVersion,
         configurationRevisionId: input.configurationRevisionId ?? input.mandatory.publishedRevisionId,
@@ -238,7 +253,7 @@ export function composeOnboardingSession(input: ComposeInput): ComposedOnboardin
         completionRevisionId: audit.completionRevisionId,
         serviceRevisionIds: audit.serviceRevisionIds,
         modules,
-        bookends: [welcome, completion],
+        bookends: hasMigratedBookends ? [] : [welcome, completion],
         audit,
         compositionHash: hashComposition(audit),
     }

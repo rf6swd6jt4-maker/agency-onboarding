@@ -425,7 +425,10 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
         relationship,
         moduleKeys,
         moduleTitles: normalizedSnapshot
-            ? normalizedSnapshot.modules.map((snapshotModule) => snapshotModule.title)
+            ? normalizedSnapshot.modules.filter((snapshotModule) => {
+                const definition = publishedConfiguration.modules.find((module) => module.id === snapshotModule.moduleId)
+                return definition?.code !== "system-welcome" && definition?.code !== "system-completion"
+            }).map((snapshotModule) => snapshotModule.title)
             : moduleKeys.flatMap((key) => {
                 const moduleDefinition = publishedConfiguration.modules.find((candidate) => candidate.code === key)
                 return moduleDefinition ? [moduleDefinition.name] : []

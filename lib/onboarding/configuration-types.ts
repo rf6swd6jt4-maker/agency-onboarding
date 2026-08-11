@@ -47,6 +47,9 @@ export type OnboardingModuleDefinition = {
     lastEditedAt: string | null
     lastEditedBy: string | null
     schemaVersion?: 1 | 2
+    mandatory?: boolean
+    placement?: "start" | "service" | "end"
+    serviceIds?: string[]
 }
 
 export type OnboardingModuleSummary = Omit<OnboardingModuleDefinition, "steps"> & {

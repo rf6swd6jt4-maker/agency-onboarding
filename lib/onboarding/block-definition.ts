@@ -46,6 +46,14 @@ export type EstimateBlock = BlockBase & {
     estimatedTime: string
 }
 
+export type ChecklistBlock = BlockBase & {
+    kind: "checklist"
+    title: string
+    source: "modules" | "custom"
+    items: string[]
+    footer: string
+}
+
 export type FormBlock = BlockBase & {
     kind: "form"
     whyWeAsk: string
@@ -67,7 +75,7 @@ export type ButtonBlock = BlockBase & {
     appearance: "primary" | "secondary"
 }
 
-export type OnboardingBlock = HeaderBlock | EstimateBlock | FormBlock | VideoBlock | ButtonBlock
+export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock
 
 export type OnboardingStepV2 = {
     id: string
@@ -120,6 +128,19 @@ export function createEstimateBlock(estimatedTime = "2–3 minutes", id = stable
         kind: "estimate",
         estimatedTime,
         layout: { ...DEFAULT_BLOCK_LAYOUT, spacingBefore: "compact", spacingAfter: "compact" },
+    }
+}
+
+export function createChecklistBlock(input: Partial<ChecklistBlock> = {}): ChecklistBlock {
+    return {
+        id: input.id ?? stableUuid(),
+        name: input.name ?? "Checklist",
+        kind: "checklist",
+        title: input.title ?? "What happens next?",
+        source: input.source === "modules" ? "modules" : "custom",
+        items: input.items ?? ["Our team reviews your information.", "Your project moves into fulfilment.", "We’ll contact you if anything else is needed."],
+        footer: input.footer ?? "",
+        layout: input.layout ?? { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
     }
 }
 
@@ -185,6 +206,24 @@ export function ensureEstimateBlock(step: OnboardingStepV2): OnboardingStepV2 {
     }
 }
 
+
+function ensureBookendChecklist(step: OnboardingStepV2, kind: "welcome" | "completion"): OnboardingStepV2 {
+    if (step.blocks.some((block) => block.kind === "checklist")) return step
+    const header = stepHeader(step)
+    if (kind === "welcome" && !header.showComposedModuleSummary) return step
+    const checklist = kind === "welcome"
+        ? createChecklistBlock({ title: "Your onboarding includes:", source: "modules", items: [], footer: "" })
+        : createChecklistBlock({
+            title: "What happens next?",
+            items: ["Our team reviews your information.", "Your project moves into fulfilment.", "We’ll contact you if anything else is needed."],
+            footer: "You can close this page now. There is nothing else you need to do at this stage.",
+        })
+    return {
+        ...step,
+        blocks: [...step.blocks, checklist].map((block) => block.kind === "header" ? { ...block, showComposedModuleSummary: false } : block),
+    }
+}
+
 export function mirrorEstimatedTime(step: OnboardingStepV2): OnboardingStepV2 {
     const estimatedTime = stepEstimate(step)?.estimatedTime ?? ""
     return {
@@ -226,7 +265,7 @@ export function upgradeModuleToV2(module: OnboardingModuleDefinition | Onboardin
 }
 
 export function upgradeBookendToV2(bookend: OnboardingBookendDefinition | OnboardingBookendDefinitionV2): OnboardingBookendDefinitionV2 {
-    if (isOnboardingBookendV2(bookend)) return { ...bookend, steps: bookend.steps.map(ensureEstimateBlock) }
+    if (isOnboardingBookendV2(bookend)) return { ...bookend, steps: bookend.steps.map((step) => ensureBookendChecklist(ensureEstimateBlock(step), bookend.kind)) }
     const id = stableUuid()
     const blocks: OnboardingBlock[] = [createHeaderBlock({
         title: bookend.title,
@@ -244,7 +283,7 @@ export function upgradeBookendToV2(bookend: OnboardingBookendDefinition | Onboar
             layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
         })
     }
-    return {
+    const upgraded = {
         id: bookend.id,
         revisionId: bookend.revisionId,
         kind: bookend.kind,
@@ -255,6 +294,7 @@ export function upgradeBookendToV2(bookend: OnboardingBookendDefinition | Onboar
         schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
         steps: [{ id, key: stableKey(id, "step"), blocks, navigation: { backLabel: "Back", continueLabel: bookend.kind === "welcome" ? "Start onboarding" : "Continue" } }],
     }
+    return { ...upgraded, steps: upgraded.steps.map((step) => ensureBookendChecklist(step, bookend.kind)) }
 }
 
 /**
@@ -267,6 +307,9 @@ export function moduleV2WithLegacyProjection(module: OnboardingModuleDefinitionV
         name: module.name,
         description: module.description,
         isTest: module.isTest,
+        mandatory: Boolean(module.mandatory),
+        placement: module.placement ?? (module.mandatory ? "start" : "service"),
+        serviceIds: module.serviceIds ?? [],
         schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
         steps: module.steps.map((sourceStep) => {
             const step = mirrorEstimatedTime(sourceStep)

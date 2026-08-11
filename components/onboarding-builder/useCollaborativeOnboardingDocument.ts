@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Y from "yjs"
-import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
+import { upgradeBookendToV2, upgradeModuleToV2, type OnboardingBookendDefinitionV2, type OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
 import { visibleBuilderPresence, type BuilderPresence } from "@/lib/onboarding/builder-presence"
 import { persistBuilderUpdate, refreshBuilderUpdates } from "@/lib/onboarding/builder-sync-client"
 import type { OnboardingBuilderData, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
@@ -223,12 +223,14 @@ function readDocument(root: Y.Map<unknown>, fallback: VisualBuilderDocument): Vi
     const order = (plain(root.get("moduleOrder")) as string[] | undefined) ?? fallback.modules.map((module) => module.id)
     const modules = order.flatMap((id) => {
         const value = plain(root.get(`module:${id}`))
-        return value && typeof value === "object" ? [value as OnboardingModuleDefinitionV2] : []
+        return value && typeof value === "object" ? [upgradeModuleToV2(value as OnboardingModuleDefinitionV2)] : []
     })
+    const restoredIds = new Set(modules.map((module) => module.id))
+    const restoredModules = [...modules, ...fallback.modules.filter((module) => !restoredIds.has(module.id)).map(upgradeModuleToV2)]
     return {
-        modules: modules.length ? modules : fallback.modules,
-        welcome: (plain(root.get("welcome")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.welcome,
-        completion: (plain(root.get("completion")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.completion,
+        modules: restoredModules.length ? restoredModules : fallback.modules.map(upgradeModuleToV2),
+        welcome: upgradeBookendToV2((plain(root.get("welcome")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.welcome),
+        completion: upgradeBookendToV2((plain(root.get("completion")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.completion),
         theme: (plain(root.get("theme")) as OnboardingThemeDefinition | undefined) ?? fallback.theme,
         linkedChangeSets: (plain(root.get("linkedChangeSets")) as VisualBuilderDocument["linkedChangeSets"] | undefined) ?? [],
     }

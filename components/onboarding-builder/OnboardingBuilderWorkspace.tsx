@@ -10,6 +10,7 @@ import { useCollaborativeOnboardingDocument, type VisualBuilderDocument } from "
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import {
     createButtonBlock,
+    createChecklistBlock,
     createEstimateBlock,
     createFormBlock,
     createOnboardingField,
@@ -33,7 +34,7 @@ type DefinitionGroup =
     | { key: string; kind: "bookend"; title: string; definition: OnboardingBookendDefinitionV2 }
 
 type Selection = { groupKey: string; stepId: string; blockId: string | null; fieldId?: string | null }
-type LeftTab = "outline" | "blocks"
+type LeftTab = "outline" | "blocks" | "modules"
 type RightTab = "inspect" | "styles"
 type OnboardingField = Extract<OnboardingBlock, { kind: "form" }>["fields"][number]
 const HELP_BLOCK_ID = "builder:client-help"
@@ -47,7 +48,7 @@ function definitionId(groupKey: string) {
 }
 
 function blockName(block: OnboardingBlock) {
-    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : "Button")
+    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "checklist" ? "Checklist" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : "Button")
 }
 
 function nextDuplicateName(sourceName: string, siblingNames: string[]) {
@@ -137,13 +138,14 @@ function ChevronIcon({ collapsed }: { collapsed: boolean }) {
     return <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-3.5 w-3.5 fill-none stroke-current stroke-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
 }
 
-function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "form" | "video" | "button" | "field" | "help" }) {
+function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "checklist" | "form" | "video" | "button" | "field" | "help" }) {
     const tone = {
         bookend: "bg-indigo-500/15 text-indigo-300",
         module: "bg-blue-500/15 text-blue-300",
         step: "bg-teal-500/15 text-teal-300",
         header: "bg-sky-500/15 text-sky-300",
         estimate: "bg-lime-500/15 text-lime-300",
+        checklist: "bg-emerald-500/15 text-emerald-300",
         form: "bg-cyan-500/15 text-cyan-300",
         video: "bg-violet-500/15 text-violet-300",
         button: "bg-amber-500/15 text-amber-300",
@@ -156,6 +158,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         step: <><rect x="4" y="3" width="12" height="14" rx="2" /><path d="M7 7h6M7 10h6M7 13h4" /></>,
         header: <path d="M5 5h10M10 5v10M7 15h6" />,
         estimate: <><circle cx="10" cy="10" r="6" /><path d="M10 6v4l3 2" /></>,
+        checklist: <><path d="m3 5 1.5 1.5L7 4M9 5h8M3 10l1.5 1.5L7 9M9 10h8M3 15l1.5 1.5L7 14M9 15h8" /></>,
         form: <><path d="M7 5h9M7 10h9M7 15h9" /><circle cx="4" cy="5" r=".6" /><circle cx="4" cy="10" r=".6" /><circle cx="4" cy="15" r=".6" /></>,
         video: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="m8 8 5 2-5 2Z" /></>,
         button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
@@ -318,12 +321,19 @@ function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, 
     if (block.kind === "header") return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Description<textarea value={block.description} disabled={!editable} onChange={(event) => updateBlock({ ...block, description: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
-        {currentGroup.key === "bookend:welcome" && currentGroup.definition.steps[0]?.id === step.id ? <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(block.showComposedModuleSummary)} disabled={!editable} onChange={(event) => updateBlock({ ...block, showComposedModuleSummary: event.target.checked })} />Show composed module list</label> : null}
         <p className="text-xs text-neutral-600">The Header block is required and always stays first.</p>
     </div>
     if (block.kind === "estimate") return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Estimated time<input value={block.estimatedTime} disabled={!editable} onChange={(event) => updateBlock({ ...block, estimatedTime: event.target.value })} placeholder="2–3 minutes" className={inspectorInputClass} /></label>
         <p className="text-xs text-neutral-600">The Estimated time block is required, but can be reordered and styled independently.</p>
+    </div>
+    if (block.kind === "checklist") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Items<select value={block.source} disabled={!editable} onChange={(event) => updateBlock({ ...block, source: event.target.value as "modules" | "custom" })} className={inspectorInputClass}><option value="custom">Custom checklist</option><option value="modules">Onboarding module names</option></select></label>
+        {block.source === "custom" ? <div className="space-y-2">{block.items.map((item, index) => <div key={index} className="flex gap-2"><input aria-label={`Checklist item ${index + 1}`} value={item} disabled={!editable} onChange={(event) => updateBlock({ ...block, items: block.items.map((current, itemIndex) => itemIndex === index ? event.target.value : current) })} className={inspectorInputClass.replace("mt-1 ", "")} /><button type="button" aria-label={`Remove checklist item ${index + 1}`} disabled={!editable} onClick={() => updateBlock({ ...block, items: block.items.filter((_, itemIndex) => itemIndex !== index) })} className="h-9 px-2 text-neutral-500 hover:text-white">✕</button></div>)}<button type="button" disabled={!editable} onClick={() => updateBlock({ ...block, items: [...block.items, "New item"] })} className="h-9 w-full rounded-lg border border-neutral-700 text-xs disabled:opacity-30">Add item</button></div> : <p className="text-xs leading-5 text-neutral-600">This list automatically uses the modules included in the client’s onboarding.</p>}
+        <label className="block text-xs text-neutral-500">Footer<textarea value={block.footer} disabled={!editable} onChange={(event) => updateBlock({ ...block, footer: event.target.value })} rows={3} className={inspectorTextareaClass} /></label>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete checklist</button>
     </div>
     if (block.kind === "form") return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
@@ -375,8 +385,9 @@ function StylesPanel({ block, field, theme, updateBlock, updateThemeSwatch, addT
 
 function composedModuleIds(document: VisualBuilderDocument, data: OnboardingBuilderData, selectedServiceIds: string[]) {
     const modules = new Map(document.modules.map((module) => [module.id, module]))
-    const selectedServices = orderOnboardingServices(data.services.filter((service) => selectedServiceIds.includes(service.id) && service.state === "active"))
-    const sources = resolveOrderedModuleSources({ services: selectedServices, modules: document.modules, mandatoryModuleIds: data.mandatory.draftModuleIds.length ? data.mandatory.draftModuleIds : data.mandatory.publishedModuleIds })
+    const selectedServices = orderOnboardingServices(data.services.filter((service) => selectedServiceIds.includes(service.id) && service.state === "active")).map((service) => ({ ...service, modules: [...service.modules, ...document.modules.filter((module) => module.serviceIds?.includes(service.id) && !service.modules.some((assignment) => assignment.moduleId === module.id)).map((module, index) => ({ moduleId: module.id, moduleCode: module.code, moduleName: module.name, sortOrder: service.modules.length + index }))] }))
+    const metadataMandatory = document.modules.filter((module) => module.mandatory).map((module) => module.id)
+    const sources = resolveOrderedModuleSources({ services: selectedServices, modules: document.modules, mandatoryModuleIds: metadataMandatory.length ? metadataMandatory : data.mandatory.draftModuleIds.length ? data.mandatory.draftModuleIds : data.mandatory.publishedModuleIds })
     return sources.filter((source) => modules.has(source.moduleId)).map((source) => source.moduleId)
 }
 
@@ -389,11 +400,11 @@ function composeGroups(document: VisualBuilderDocument, data: OnboardingBuilderD
         if (leftOrder !== undefined || rightOrder !== undefined) return (leftOrder ?? Number.MAX_SAFE_INTEGER) - (rightOrder ?? Number.MAX_SAFE_INTEGER)
         return left.name.localeCompare(right.name)
     })
-    return [
-        { key: "bookend:welcome", kind: "bookend" as const, title: "Welcome", definition: document.welcome },
-        ...modules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module })),
-        { key: "bookend:completion", kind: "bookend" as const, title: "Completion", definition: document.completion },
-    ]
+    const migrated = modules.some((module) => module.code === "system-welcome") && modules.some((module) => module.code === "system-completion")
+    const orderedModules = [...modules].sort((left, right) => (left.placement === "start" ? 0 : left.placement === "end" ? 2 : 1) - (right.placement === "start" ? 0 : right.placement === "end" ? 2 : 1))
+    return migrated
+        ? orderedModules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module }))
+        : [{ key: "bookend:welcome", kind: "bookend" as const, title: "Welcome", definition: document.welcome }, ...orderedModules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module })), { key: "bookend:completion", kind: "bookend" as const, title: "Completion", definition: document.completion }]
 }
 
 function documentDefinition(document: VisualBuilderDocument, groupKey: string) {
@@ -418,6 +429,23 @@ function selectedStep(groups: DefinitionGroup[], selection: Selection) {
 function railPreference(key: string, fallback: boolean) {
     if (typeof window === "undefined") return fallback
     return window.localStorage.getItem(key) !== "collapsed"
+}
+
+function ModulesPanel({ modules, services, editable, updateModule, createModule }: {
+    modules: OnboardingModuleDefinitionV2[]
+    services: OnboardingBuilderData["services"]
+    editable: boolean
+    updateModule: (module: OnboardingModuleDefinitionV2) => void
+    createModule: () => void
+}) {
+    return <div className="space-y-3">
+        <div className="flex items-center justify-between px-1"><p className="text-[11px] leading-4 text-neutral-500">Mandatory modules can sit at either end. Other modules appear only for linked services.</p><button type="button" disabled={!editable} onClick={createModule} className="shrink-0 text-[11px] text-neutral-200 underline underline-offset-4 disabled:opacity-30">Add module</button></div>
+        {modules.map((module) => <section key={module.id} className="space-y-3 rounded-xl border border-neutral-800 bg-black/40 p-3">
+            <label className="block text-[11px] text-neutral-500">Module name<input value={module.name} disabled={!editable} onChange={(event) => updateModule({ ...module, name: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white" /></label>
+            <label className="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(module.mandatory)} disabled={!editable || module.code === "system-welcome" || module.code === "system-completion"} onChange={(event) => updateModule({ ...module, mandatory: event.target.checked, placement: event.target.checked ? "start" : "service", serviceIds: event.target.checked ? [] : module.serviceIds })} />Mandatory</label>
+            {module.mandatory ? <label className="block text-[11px] text-neutral-500">Position<select value={module.placement === "end" ? "end" : "start"} disabled={!editable} onChange={(event) => updateModule({ ...module, placement: event.target.value as "start" | "end" })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="start">Start of onboarding</option><option value="end">End of onboarding</option></select></label> : <fieldset disabled={!editable} className="space-y-2"><legend className="text-[11px] text-neutral-500">Linked services</legend>{services.filter((service) => service.state === "active").map((service) => <label key={service.id} className="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={module.serviceIds?.includes(service.id) ?? false} onChange={(event) => updateModule({ ...module, placement: "service", serviceIds: event.target.checked ? [...(module.serviceIds ?? []), service.id] : (module.serviceIds ?? []).filter((id) => id !== service.id) })} />{service.name}</label>)}</fieldset>}
+        </section>)}
+    </div>
 }
 
 export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data, initialBookend }: { workspaceSlug: string; workspaceName: string; data: OnboardingBuilderData; initialBookend?: "welcome" | "completion" | null }) {
@@ -451,6 +479,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const groups = useMemo(() => composeGroups(collaboration.document, data, selectedServiceIds), [collaboration.document, data, selectedServiceIds])
     const [visibleModuleIds, setVisibleModuleIds] = useState<Set<string>>(() => new Set([
         ...(data.mandatory.draftModuleIds.length ? data.mandatory.draftModuleIds : data.mandatory.publishedModuleIds),
+        ...data.visualModules.filter((module) => module.mandatory).map((module) => module.id),
         ...(data.selectedModule ? [data.selectedModule.id] : []),
     ]))
     const firstGroup = groups[0]
@@ -577,10 +606,6 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             const target = documentDefinition(document, targetGroupKey)
             const sourceStep = source?.steps.find((step) => step.id === stepId)
             if (!source || !target || !sourceStep) return document
-            if (targetGroupKey.startsWith("bookend:") && sourceStep.blocks.some((block) => block.kind === "form")) {
-                setError("A step containing a Form cannot be moved into a bookend.")
-                return document
-            }
             if (!copy && source.steps.length === 1) {
                 setError(sourceGroupKey.startsWith("bookend:") ? "Each bookend must retain at least one step." : "Each module must retain at least one step.")
                 return document
@@ -615,7 +640,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             const sourceBlock = sourceStep?.blocks.find((block) => block.id === blockId)
             if (!source || !target || !sourceStep || !targetStep || !sourceBlock || sourceBlock.kind === "header") return document
             const movingWithinSameStep = !copy && sourceGroupKey === targetGroupKey && sourceStepId === targetStepId
-            if (sourceBlock.kind === "form" && (targetGroupKey.startsWith("bookend:") || targetStep.blocks.some((block) => block.kind === "form" && !(movingWithinSameStep && block.id === sourceBlock.id)))) {
+            if (sourceBlock.kind === "form" && targetStep.blocks.some((block) => block.kind === "form" && !(movingWithinSameStep && block.id === sourceBlock.id))) {
                 setError("That target step cannot accept another Form block.")
                 return document
             }
@@ -674,7 +699,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         if (!raw) return
         event.preventDefault()
         try {
-            const payload = JSON.parse(raw) as { type: "step" | "block" | "field" | "library"; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "form" | "video" | "button"; copy?: boolean }
+            const payload = JSON.parse(raw) as { type: "step" | "block" | "field" | "library"; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "checklist" | "form" | "video" | "button"; copy?: boolean }
             if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy))
             else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && target.stepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, target.groupKey, target.stepId, target.blockIndex ?? Number.MAX_SAFE_INTEGER, Boolean(payload.copy))
             else if (payload.type === "field" && payload.groupKey && payload.stepId && payload.formBlockId && payload.fieldId && target.formBlockId && target.fieldIndex !== undefined) {
@@ -684,13 +709,13 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 }
                 moveField(target.groupKey, target.stepId!, target.formBlockId, payload.fieldId, target.fieldIndex, Boolean(payload.copy))
             } else if (payload.type === "library" && payload.kind && target.stepId) {
-                const block = payload.kind === "estimate" ? createEstimateBlock() : payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : createButtonBlock()
+                const block = payload.kind === "estimate" ? createEstimateBlock() : payload.kind === "checklist" ? createChecklistBlock() : payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : createButtonBlock()
                 let inserted = false
                 collaboration.updateDocument((document) => {
                     const targetDefinition = documentDefinition(document, target.groupKey)
                     const targetStep = targetDefinition?.steps.find((step) => step.id === target.stepId)
                     if (!targetDefinition || !targetStep) return document
-                    if (payload.kind === "form" && (target.groupKey.startsWith("bookend:") || targetStep.blocks.some((candidate) => candidate.kind === "form"))) {
+                    if (payload.kind === "form" && targetStep.blocks.some((candidate) => candidate.kind === "form")) {
                         setError("That target step cannot accept a Form block.")
                         return document
                     }
@@ -763,11 +788,11 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         setSelection({ groupKey: currentGroup.key, stepId: step.id, blockId: step.blocks[0].id })
     }
 
-    function addBlock(kind: "estimate" | "form" | "video" | "button") {
+    function addBlock(kind: "estimate" | "checklist" | "form" | "video" | "button") {
         if (!currentStep || !currentGroup) return
-        if (kind === "form" && (currentGroup.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form"))) return
+        if (kind === "form" && currentStep.blocks.some((block) => block.kind === "form")) return
         if (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) return
-        const block = kind === "estimate" ? createEstimateBlock() : kind === "form" ? createFormBlock() : kind === "video" ? createVideoBlock() : createButtonBlock()
+        const block = kind === "estimate" ? createEstimateBlock() : kind === "checklist" ? createChecklistBlock() : kind === "form" ? createFormBlock() : kind === "video" ? createVideoBlock() : createButtonBlock()
         updateCurrentStep({ ...currentStep, blocks: [...currentStep.blocks, block] })
         setSelection({ ...selection, blockId: block.id })
     }
@@ -924,12 +949,20 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         <div className={`grid min-h-0 flex-1 ${preview ? "grid-cols-1" : builderGridColumns}`}>
             {!preview ? <aside className={`min-h-0 border-r border-neutral-800 bg-neutral-950 ${leftOpen ? "hidden md:flex md:flex-col" : "hidden md:flex md:items-start md:justify-center md:pt-3"}`}>
                 {leftOpen ? <>
-                    <div data-builder-left-rail-header className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2"><RailToggleButton side="left" label="Collapse left rail" onClick={() => rememberRail("left", false)} /><button type="button" onClick={() => setLeftTab("outline")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "outline" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Outline</button><button type="button" onClick={() => setLeftTab("blocks")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "blocks" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Blocks</button></div>
+                    <div data-builder-left-rail-header className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2">
+                        <RailToggleButton side="left" label="Collapse left rail" onClick={() => rememberRail("left", false)} />
+                        <button type="button" onClick={() => setLeftTab("outline")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "outline" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Outline</button>
+                        <button type="button" onClick={() => setLeftTab("blocks")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "blocks" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Blocks</button>
+                        <button type="button" onClick={() => setLeftTab("modules")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "modules" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Modules</button>
+                    </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                        {leftTab === "modules" ? <ModulesPanel modules={collaboration.document.modules} services={data.services} editable={collaboration.editable} createModule={createModule} updateModule={(module) => collaboration.updateDocument((document) => ({ ...document, modules: document.modules.map((candidate) => candidate.id === module.id ? module : candidate) }))} /> : null}
+                        <div className={leftTab === "modules" ? "hidden" : "contents"}>
                         {leftTab === "outline" ? <>
                             <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Cmd/Ctrl-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
                             <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onSelectHelp={() => { setSelection({ ...selection, blockId: HELP_BLOCK_ID, fieldId: null }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
-                        </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
+                        </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "checklist", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) || (kind === "form" && currentStep.blocks.some((block) => block.kind === "form"))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "checklist" ? "✓" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
+                        </div>
                     </div>
                     <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div>
                 </> : <RailToggleButton side="left" label="Expand left rail" onClick={() => rememberRail("left", true)} />}
