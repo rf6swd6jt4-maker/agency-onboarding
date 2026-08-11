@@ -242,6 +242,7 @@ export function isOnboardingModuleV2(input: OnboardingModuleDefinition | Onboard
 
 export function isOnboardingBookendV2(input: OnboardingBookendDefinition | OnboardingBookendDefinitionV2): input is OnboardingBookendDefinitionV2 {
     return Number((input as { schemaVersion?: number }).schemaVersion) === ONBOARDING_BLOCK_SCHEMA_VERSION
+        && Array.isArray((input as { steps?: unknown }).steps)
 }
 
 function legacyStepToV2(step: ConfiguredOnboardingStep): OnboardingStepV2 {
@@ -266,6 +267,13 @@ export function upgradeModuleToV2(module: OnboardingModuleDefinition | Onboardin
 
 export function upgradeBookendToV2(bookend: OnboardingBookendDefinition | OnboardingBookendDefinitionV2): OnboardingBookendDefinitionV2 {
     if (isOnboardingBookendV2(bookend)) return { ...bookend, steps: bookend.steps.map((step) => ensureBookendChecklist(ensureEstimateBlock(step), bookend.kind)) }
+    if (bookend.schemaVersion === ONBOARDING_BLOCK_SCHEMA_VERSION && Array.isArray(bookend.visualSteps)) {
+        return {
+            ...bookend,
+            schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
+            steps: bookend.visualSteps.map((step) => ensureBookendChecklist(ensureEstimateBlock(step), bookend.kind)),
+        }
+    }
     const id = stableUuid()
     const blocks: OnboardingBlock[] = [createHeaderBlock({
         title: bookend.title,

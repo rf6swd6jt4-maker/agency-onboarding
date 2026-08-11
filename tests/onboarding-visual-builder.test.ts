@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import {
     createOnboardingStepV2,
+    isOnboardingBookendV2,
+    upgradeBookendToV2,
 } from "../lib/onboarding/block-definition.ts"
 import { isStableOnboardingId } from "../lib/onboarding/stable-id.ts"
 import { normalizedBuilderCursor, visibleBuilderPresence, type BuilderPresence } from "../lib/onboarding/builder-presence.ts"
@@ -20,6 +22,7 @@ const onboardingLayout = readFileSync("components/onboarding/OnboardingLayout.ts
 const mobileStepBar = readFileSync("components/onboarding/MobileStepBar.tsx", "utf8")
 const runtimeBlocks = readFileSync("components/onboarding/OnboardingBlocks.tsx", "utf8")
 const runtimePage = readFileSync("app/onboarding/session/[token]/page.tsx", "utf8")
+const sessionSnapshot = readFileSync("lib/onboarding/session-snapshot.ts", "utf8")
 const previewPage = readFileSync("app/onboarding/preview/[token]/page.tsx", "utf8")
 const workspaceShell = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
 const onboardingSettings = readFileSync("components/settings/OnboardingSettings.tsx", "utf8")
@@ -51,6 +54,29 @@ test("bookends migrate into ordinary mandatory modules with editable checklist b
     assert.match(builderUi, /setLeftTab\("modules"\)/)
     assert.match(builderUi, /Onboarding module names/)
     assert.match(runtimeBlocks, /block\.kind === "checklist"/)
+})
+
+test("a published V2 bookend mapped through the compatibility shape reopens safely", () => {
+    const visualStep = createOnboardingStepV2({ bookend: true })
+    const mappedBookend = {
+        id: "11111111-1111-1111-1111-111111111111",
+        revisionId: "22222222-2222-2222-2222-222222222222",
+        kind: "welcome" as const,
+        title: "Welcome",
+        body: "Welcome body",
+        videoUrl: "",
+        videoPath: null,
+        version: 2,
+        status: "published" as const,
+        lastEditedAt: null,
+        lastEditedBy: null,
+        schemaVersion: 2 as const,
+        visualSteps: [visualStep],
+    }
+    assert.equal(isOnboardingBookendV2(mappedBookend), false)
+    const upgraded = upgradeBookendToV2(mappedBookend)
+    assert.equal(upgraded.steps[0].id, visualStep.id)
+    assert.deepEqual(upgraded.steps[0].blocks.map((block) => block.kind), visualStep.blocks.map((block) => block.kind))
 })
 
 test("collaborative snapshots are upgraded before they replace the server definition", () => {
@@ -352,6 +378,7 @@ test("runtime requirements persist by stable session block and gate atomic step 
     assert.match(runtimeBlocks, /disabled=\{unsatisfied\.length > 0\}/)
     assert.match(runtimePage, /satisfiedBlockIds/)
     assert.match(runtimePage, /Boolean\(currentStep\.blocks\?\.length\)/)
+    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button"\]/)
 })
 
 test("frozen visual previews and Settings style share the release pipeline without live draft leakage", () => {
