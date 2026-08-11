@@ -28,6 +28,8 @@ type OnboardingLayoutProps = {
     forceMobile?: boolean
     footerText?: string
     onRoadmapSelect?: (stepKey: string) => void
+    helpSelected?: boolean
+    onHelpSelect?: () => void
 }
 
 export function OnboardingLayout({
@@ -41,7 +43,10 @@ export function OnboardingLayout({
     forceMobile = false,
     footerText = "Progress saved automatically",
     onRoadmapSelect,
+    helpSelected = false,
+    onHelpSelect,
 }: OnboardingLayoutProps) {
+    const helpCard = <div data-builder-help-block={onHelpSelect ? "true" : undefined} onClick={onHelpSelect} className={`rounded-2xl outline-offset-4 transition ${onHelpSelect ? "cursor-pointer hover:outline hover:outline-1 hover:outline-black/15" : ""} ${helpSelected ? "outline-2 outline-[var(--onboarding-accent,#F0B429)]" : ""}`}><NeedHelpCard help={help} /></div>
     return (
         <main className={forceMobile
             ? embedded
@@ -83,12 +88,12 @@ export function OnboardingLayout({
                     {children}
 
                     <div className={forceMobile ? "mt-6" : `mt-6 ${embedded ? "xl:hidden" : "lg:hidden"}`}>
-                        <NeedHelpCard help={help} />
+                        {helpCard}
                     </div>
                 </section>
 
                 <aside className={forceMobile ? "hidden" : `${embedded ? "hidden xl:block" : "hidden lg:block"} min-h-0 overflow-hidden`}>
-                    <NeedHelpCard help={help} />
+                    {helpCard}
                 </aside>
             </div>
 

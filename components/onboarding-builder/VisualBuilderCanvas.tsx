@@ -98,6 +98,8 @@ export function VisualBuilderCanvas({
     selectedFieldId,
     selectBlock,
     selectField,
+    helpSelected,
+    selectHelp,
     selectRoadmapStep,
     updateStep,
     updateDraftRevisionId,
@@ -119,6 +121,8 @@ export function VisualBuilderCanvas({
     selectedFieldId: string | null
     selectBlock: (id: string | null) => void
     selectField: (blockId: string, fieldId: string) => void
+    helpSelected: boolean
+    selectHelp: () => void
     selectRoadmapStep: (key: string) => void
     updateStep: (step: OnboardingStepV2) => void
     updateDraftRevisionId: (revisionId: string) => void
@@ -203,7 +207,7 @@ export function VisualBuilderCanvas({
 
     return <div className={`mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`}>
         <OnboardingThemeProvider theme={theme} className="h-full">
-            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectRoadmapStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
+            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} helpSelected={helpSelected} onHelpSelect={selectHelp} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectRoadmapStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
                 <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface)] p-6 shadow-sm ${viewport === "mobile" ? "" : "sm:p-8"}`} onClick={() => selectBlock(null)}>
                     <AuthorFrame block={header} selected={selectedBlockId === header.id} collaboratorColours={collaboratorColoursFor(header.id)} select={() => selectBlock(header.id)} onDragStart={() => undefined} onDrop={() => undefined}>
                         <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">{target.kind === "module" ? target.definition.name : target.definition.kind}</p>

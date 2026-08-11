@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react"
 import { createOnboardingModule } from "@/app/[workspaceSlug]/onboarding-builder/actions"
+import { saveOnboardingHelpSettings } from "@/app/[workspaceSlug]/settings/onboarding-actions"
 import { prepareVisualBuilderVideoUpload, publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import { Avatar } from "@/components/account/Avatar"
 import { VisualBuilderCanvas } from "@/components/onboarding-builder/VisualBuilderCanvas"
@@ -22,7 +23,7 @@ import {
 } from "@/lib/onboarding/block-definition"
 import { visualStepTitle } from "@/lib/onboarding/block-validation"
 import { normalizedBuilderCursor } from "@/lib/onboarding/builder-presence"
-import type { OnboardingBuilderData, OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
+import type { OnboardingBuilderData, OnboardingHelpSettings, OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
 import { ONBOARDING_THEME_SLOTS } from "@/lib/onboarding/configuration-types"
 import { ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
 import { orderOnboardingServices, resolveOrderedModuleSources } from "@/lib/onboarding/session-composition-order"
@@ -35,17 +36,34 @@ type Selection = { groupKey: string; stepId: string; blockId: string | null; fie
 type LeftTab = "outline" | "blocks"
 type RightTab = "inspect" | "styles"
 type OnboardingField = Extract<OnboardingBlock, { kind: "form" }>["fields"][number]
+const HELP_BLOCK_ID = "builder:client-help"
 
 function definitionId(groupKey: string) {
     return groupKey.startsWith("module:") ? groupKey.slice(7) : groupKey
 }
 
-function duplicateBlock(block: OnboardingBlock): OnboardingBlock {
+function blockName(block: OnboardingBlock) {
+    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : "Button")
+}
+
+function nextDuplicateName(sourceName: string, siblingNames: string[]) {
+    const base = sourceName.replace(/ \(\d+\)$/, "")
+    let highest = 0
+    for (const siblingName of siblingNames) {
+        if (siblingName === base) continue
+        const match = siblingName.match(new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(\\d+\\)$`))
+        if (match) highest = Math.max(highest, Number(match[1]))
+    }
+    return `${base} (${highest + 1})`
+}
+
+function duplicateBlock(block: OnboardingBlock, name = block.name): OnboardingBlock {
     const id = crypto.randomUUID()
-    if (block.kind !== "form") return { ...block, id }
+    if (block.kind !== "form") return { ...block, id, name }
     return {
         ...block,
         id,
+        name,
         fields: block.fields.map((field) => {
             const fieldId = crypto.randomUUID()
             return { ...field, id: fieldId, key: `field-${fieldId.replaceAll("-", "").slice(-12)}` }
@@ -58,13 +76,13 @@ function duplicateField(field: ReturnType<typeof createOnboardingField>) {
     return { ...field, id, key: `field-${id.replaceAll("-", "").slice(-12)}` }
 }
 
-function duplicateStep(step: OnboardingStepV2) {
+function duplicateStep(step: OnboardingStepV2, title: string) {
     const id = crypto.randomUUID()
     return {
         ...step,
         id,
         key: `step-${id.replaceAll("-", "").slice(-12)}`,
-        blocks: step.blocks.map(duplicateBlock),
+        blocks: step.blocks.map((block) => block.kind === "header" ? { ...duplicateBlock(block), title } : duplicateBlock(block)),
     }
 }
 
@@ -115,7 +133,7 @@ function ChevronIcon({ collapsed }: { collapsed: boolean }) {
     return <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-3.5 w-3.5 fill-none stroke-current stroke-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
 }
 
-function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "form" | "video" | "button" | "field" }) {
+function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "form" | "video" | "button" | "field" | "help" }) {
     const tone = {
         bookend: "bg-indigo-500/15 text-indigo-300",
         module: "bg-blue-500/15 text-blue-300",
@@ -126,6 +144,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         video: "bg-violet-500/15 text-violet-300",
         button: "bg-amber-500/15 text-amber-300",
         field: "bg-emerald-500/15 text-emerald-300",
+        help: "bg-indigo-500/15 text-indigo-300",
     }[kind]
     const glyph = {
         bookend: <path d="M5 3v14M5 4h9l-2 3 2 3H5" />,
@@ -137,11 +156,12 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         video: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="m8 8 5 2-5 2Z" /></>,
         button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
         field: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="M6 10h5" /></>,
+        help: <><circle cx="10" cy="10" r="7" /><path d="M8 8a2 2 0 1 1 3 1.7c-.8.4-1 1-1 1.8M10 14h.01" /></>,
     }[kind]
     return <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${tone}`}><svg viewBox="0 0 20 20" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current stroke-[1.6] [stroke-linecap:round] [stroke-linejoin:round]">{glyph}</svg></span>
 }
 
-function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectStep, onSelectBlock, onSelectField, onToggleModule, onDeleteSelection, onDrop }: {
+function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectStep, onSelectBlock, onSelectField, onSelectHelp, onToggleModule, onDeleteSelection, onDrop }: {
     groups: DefinitionGroup[]
     visibleModuleIds: Set<string>
     selection: Selection
@@ -149,12 +169,14 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
     onSelectStep: (groupKey: string, stepId: string) => void
     onSelectBlock: (groupKey: string, stepId: string, blockId: string) => void
     onSelectField: (groupKey: string, stepId: string, blockId: string, fieldId: string) => void
+    onSelectHelp: () => void
     onToggleModule: (moduleId: string) => void
     onDeleteSelection: () => void
     onDrop: (event: DragEvent<HTMLElement>, target: OutlineDropTarget) => void
 }) {
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
     const [collapsedSteps, setCollapsedSteps] = useState<Set<string>>(() => new Set(groups.flatMap((group) => group.definition.steps.map((step) => `${group.key}:${step.id}`))))
+    const [dragging, setDragging] = useState<{ key: string; copy: boolean } | null>(null)
 
     function toggleCollapsed(setter: typeof setCollapsedGroups, key: string) {
         setter((current) => {
@@ -164,10 +186,18 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
         })
     }
 
-    function startDrag(event: DragEvent<HTMLElement>, payload: Record<string, unknown>) {
+    function startDrag(event: DragEvent<HTMLElement>, payload: Record<string, unknown>, key: string, label: string) {
         event.stopPropagation()
         event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ ...payload, copy: event.shiftKey }))
         event.dataTransfer.effectAllowed = event.shiftKey ? "copy" : "move"
+        const chip = document.createElement("div")
+        chip.textContent = label
+        chip.dataset.builderDragLabel = "true"
+        Object.assign(chip.style, { position: "fixed", left: "-10000px", top: "-10000px", padding: "7px 10px", borderRadius: "8px", background: "#262626", color: "white", font: "12px system-ui", boxShadow: "0 8px 24px rgba(0,0,0,.35)" })
+        document.body.appendChild(chip)
+        event.dataTransfer.setDragImage(chip, 12, 14)
+        window.setTimeout(() => chip.remove(), 0)
+        setDragging({ key, copy: event.shiftKey })
     }
 
     function selectedRow(active: boolean) {
@@ -193,7 +223,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                         const stepKey = `${group.key}:${step.id}`
                         const stepCollapsed = collapsedSteps.has(stepKey)
                         return <div key={step.id} className="ml-4" onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDrop(event, { groupKey: group.key, stepId: step.id, stepIndex })}>
-                            <div title={shown ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(stepSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "step", groupKey: group.key, stepId: step.id })}>
+                            <div title={shown ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === stepKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(stepSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "step", groupKey: group.key, stepId: step.id }, stepKey, visualStepTitle(step))} onDragEnd={() => setDragging(null)}>
                                 <button type="button" aria-label={`${stepCollapsed ? "Expand" : "Collapse"} ${visualStepTitle(step)}`} aria-expanded={!stepCollapsed} onClick={(event) => { event.stopPropagation(); toggleCollapsed(setCollapsedSteps, stepKey) }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronIcon collapsed={stepCollapsed} /></button>
                                 <OutlineItemIcon kind="step" />
                                 <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectStep(group.key, step.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left"><span className="mr-1 text-neutral-600">{stepIndex + 1}.</span>{visualStepTitle(step)}</button>
@@ -202,9 +232,10 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                             {!stepCollapsed ? <div className="ml-5">
                                 {step.blocks.map((block, blockIndex) => {
                                     const blockSelected = selection.groupKey === group.key && selection.stepId === step.id && selection.blockId === block.id && !selection.fieldId
-                                    const blockLabel = block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.label || "Button"
+                                    const blockLabel = blockName(block)
+                                    const blockDragKey = `${stepKey}:${block.id}`
                                     return <div key={block.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, blockIndex }) }}>
-                                        <div title={shown && block.kind !== "header" ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(blockSelected)}`} draggable={editable && shown && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id })}>
+                                        <div title={shown && block.kind !== "header" ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === blockDragKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(blockSelected)}`} draggable={editable && shown && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id }, blockDragKey, blockLabel)} onDragEnd={() => setDragging(null)}>
                                             <span className="h-7 w-7 shrink-0" />
                                             <OutlineItemIcon kind={block.kind} />
                                             <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectBlock(group.key, step.id, block.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left capitalize">{blockLabel}</button>
@@ -213,7 +244,8 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                                         {block.kind === "form" ? <div className="ml-5">
                                             {block.fields.map((field, fieldIndex) => {
                                                 const fieldSelected = selection.groupKey === group.key && selection.stepId === step.id && selection.blockId === block.id && selection.fieldId === field.id
-                                                return <div key={field.id} title={shown ? "Drag to reorder within this form; hold Shift while dragging to duplicate" : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldIndex }) }} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(fieldSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "field", groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldId: field.id })}>
+                                                const fieldDragKey = `${blockDragKey}:${field.id}`
+                                                return <div key={field.id} title={shown ? "Drag to reorder within this form; hold Shift while dragging to duplicate" : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldIndex }) }} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${dragging?.key === fieldDragKey && !dragging.copy ? "opacity-0" : ""} ${selectedRow(fieldSelected)}`} draggable={editable && shown} onDragStart={(event) => startDrag(event, { type: "field", groupKey: group.key, stepId: step.id, formBlockId: block.id, fieldId: field.id }, fieldDragKey, field.label || `Field ${fieldIndex + 1}`)} onDragEnd={() => setDragging(null)}>
                                                     <span className="h-7 w-7 shrink-0" />
                                                     <OutlineItemIcon kind="field" />
                                                     <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectField(group.key, step.id, block.id, field.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left">{field.label || `Field ${fieldIndex + 1}`}</button>
@@ -229,25 +261,40 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                 </div> : null}
             </section>
         })}
+        <section className={`overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20 ${selection.blockId === HELP_BLOCK_ID ? "bg-neutral-800" : ""}`}>
+            <button type="button" onClick={onSelectHelp} className="flex h-9 w-full items-center gap-2 px-2 text-left text-xs text-neutral-300"><span className="h-7 w-7 shrink-0" /><OutlineItemIcon kind="help" /><span className="min-w-0 flex-1 truncate font-semibold">Client help</span><RoundPill>Fixed</RoundPill></button>
+        </section>
     </div>
 }
 
 const inspectorInputClass = "mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"
 const inspectorTextareaClass = "mt-1 w-full rounded-lg border border-neutral-700 bg-black p-2 text-sm text-white"
 
-function InspectorPanel({ currentGroup, step, block, field, editable, updateStep, updateBlock, updateField, addField, uploadVideo, deleteSelection }: {
+function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, helpDirty, helpPending, editable, updateStep, updateBlock, updateField, updateHelp, saveHelp, addField, uploadVideo, deleteSelection }: {
     currentGroup: DefinitionGroup | undefined
     step: OnboardingStepV2 | undefined
     block: OnboardingBlock | null
     field: OnboardingField | null
+    help: OnboardingHelpSettings
+    helpSelected: boolean
+    helpDirty: boolean
+    helpPending: boolean
     editable: boolean
     updateStep: (step: OnboardingStepV2) => void
     updateBlock: (block: OnboardingBlock) => void
     updateField: (values: Partial<OnboardingField>) => void
+    updateHelp: (values: Partial<OnboardingHelpSettings>) => void
+    saveHelp: () => void
     addField: () => void
     uploadVideo: (file: File) => void
     deleteSelection: () => void
 }) {
+    if (helpSelected) return <div data-builder-help-inspector className="space-y-4">
+        <label className="block text-xs text-neutral-500">Help text<textarea value={help.text} disabled={!editable} onChange={(event) => updateHelp({ text: event.target.value })} rows={5} maxLength={2_000} className={inspectorTextareaClass} /></label>
+        <label className="block text-xs text-neutral-500">Communication method<select value={help.whatsappEnabled ? "whatsapp" : "none"} disabled={!editable} onChange={(event) => updateHelp({ whatsappEnabled: event.target.value === "whatsapp" })} className={inspectorInputClass}><option value="none">No contact action</option><option value="whatsapp" disabled={!help.whatsappVerified}>WhatsApp{help.whatsappVerified && help.whatsappNumber ? ` · ${help.whatsappNumber}` : " · unavailable"}</option></select></label>
+        <p className="text-xs leading-5 text-neutral-600">Additional methods will appear here when their Communications connections are available. Client help is fixed and cannot be moved or removed.</p>
+        <button type="button" disabled={!editable || !helpDirty || helpPending} onClick={saveHelp} className="h-9 w-full rounded-lg bg-white text-xs font-semibold text-black disabled:opacity-30">{helpPending ? "Saving…" : "Save live help"}</button>
+    </div>
     if (!step || !currentGroup) return <p className="text-xs leading-5 text-neutral-500">Select a step, element, or field to inspect it.</p>
     if (field) return <div data-builder-field-inspector className="space-y-4">
         <label className="block text-xs text-neutral-500">Label<input value={field.label} disabled={!editable} onChange={(event) => updateField({ label: event.target.value })} className={inspectorInputClass} /></label>
@@ -274,16 +321,19 @@ function InspectorPanel({ currentGroup, step, block, field, editable, updateStep
         <p className="text-xs text-neutral-600">The Estimated time block is required, but can be reordered and styled independently.</p>
     </div>
     if (block.kind === "form") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Why we ask<textarea value={block.whyWeAsk} disabled={!editable} onChange={(event) => updateBlock({ ...block, whyWeAsk: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
         <button type="button" disabled={!editable} onClick={addField} className="h-9 w-full rounded-lg border border-neutral-700 text-xs disabled:opacity-30">Add field</button>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete form</button>
     </div>
     if (block.kind === "video") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Video<span className="mt-1 flex min-h-9 items-center justify-between gap-2 rounded-lg border border-neutral-700 bg-black px-2 text-xs text-neutral-300"><span className="min-w-0 truncate">{block.upload?.name ?? "No video uploaded"}</span><span className="shrink-0 font-medium text-white">{block.upload ? "Replace" : "Upload"}</span></span><input type="file" accept="video/*" disabled={!editable} onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadVideo(file); event.currentTarget.value = "" }} className="sr-only" /></label>
         <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.requirement === "finish"} disabled={!editable} onChange={(event) => updateBlock({ ...block, requirement: event.target.checked ? "finish" : "none" })} />Client must finish this video</label>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete video</button>
     </div>
     return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Button text<input value={block.label} disabled={!editable} onChange={(event) => updateBlock({ ...block, label: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Destination URL<input value={block.url} disabled={!editable} onChange={(event) => updateBlock({ ...block, url: event.target.value })} placeholder="https://…" className={inspectorInputClass} /></label>
         <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.required} disabled={!editable} onChange={(event) => updateBlock({ ...block, required: event.target.checked })} />Client must open this link</label>
@@ -414,6 +464,9 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const [notice, setNotice] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [pending, startTransition] = useTransition()
+    const [helpPending, startHelpTransition] = useTransition()
+    const [helpDraft, setHelpDraft] = useState(data.help)
+    const [savedHelp, setSavedHelp] = useState(data.help)
 
     useEffect(() => {
         if (!preview) return
@@ -457,6 +510,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const resolved = selectedStep(groups, selection)
     const currentGroup = resolved.group
     const currentStep = resolved.step
+    const helpSelected = selection.blockId === HELP_BLOCK_ID
     const selectedBlock = currentStep?.blocks.find((block) => block.id === selection.blockId) ?? null
     const selectedField = selectedBlock?.kind === "form" ? selectedBlock.fields.find((field) => field.id === selection.fieldId) ?? null : null
     const visibleGroups = groups.filter((group) => group.kind === "bookend" || visibleModuleIds.has(group.definition.id))
@@ -467,10 +521,21 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const welcomeDirty = JSON.stringify(collaboration.document.welcome) !== JSON.stringify(data.visualWelcome)
     const completionDirty = JSON.stringify(collaboration.document.completion) !== JSON.stringify(data.visualCompletion)
     const themeDirty = JSON.stringify(collaboration.document.theme) !== JSON.stringify(data.theme)
+    const helpDirty = helpDraft.text.trim() !== savedHelp.text.trim() || helpDraft.whatsappEnabled !== savedHelp.whatsappEnabled
 
     function rememberRail(side: "left" | "right", open: boolean) {
         window.localStorage.setItem(`${servicePreferenceKey}:${side}`, open ? "open" : "collapsed")
         if (side === "left") setLeftOpen(open); else setRightOpen(open)
+    }
+
+    function saveHelp() {
+        startHelpTransition(async () => {
+            setError(null)
+            const outcome = await saveOnboardingHelpSettings(workspaceSlug, helpDraft.text, helpDraft.whatsappEnabled)
+            if (!outcome.ok) { setError(outcome.error); return }
+            setSavedHelp(helpDraft)
+            setNotice("Client help saved live.")
+        })
     }
 
     function updateDefinition(groupKey: string, update: (definition: DefinitionGroup["definition"]) => DefinitionGroup["definition"]) {
@@ -515,7 +580,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 setError(sourceGroupKey.startsWith("bookend:") ? "Each bookend must retain at least one step." : "Each module must retain at least one step.")
                 return document
             }
-            moved.step = copy ? duplicateStep(sourceStep) : sourceStep
+            moved.step = copy ? duplicateStep(sourceStep, nextDuplicateName(visualStepTitle(sourceStep), target.steps.map(visualStepTitle))) : sourceStep
             if (sourceGroupKey === targetGroupKey) {
                 const steps = [...source.steps]
                 const sourceIndex = steps.findIndex((step) => step.id === stepId)
@@ -553,7 +618,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 setError("A step can contain only one Estimated time block.")
                 return document
             }
-            moved.block = copy ? duplicateBlock(sourceBlock) : sourceBlock
+            moved.block = copy ? duplicateBlock(sourceBlock, nextDuplicateName(blockName(sourceBlock), targetStep.blocks.map(blockName))) : sourceBlock
             if (sourceGroupKey === targetGroupKey && sourceStepId === targetStepId) {
                 const blocks = [...sourceStep.blocks]
                 const sourceIndex = blocks.findIndex((block) => block.id === blockId)
@@ -587,7 +652,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     if (sourceIndex < 0) return block
                     const fields = [...block.fields]
                     const source = fields[sourceIndex]
-                    const moved = copy ? duplicateField(source) : source
+                    const moved = copy ? { ...duplicateField(source), label: nextDuplicateName(source.label || "Untitled field", fields.map((field) => field.label)) } : source
                     movedFieldId = moved.id
                     if (!copy) fields.splice(sourceIndex, 1)
                     const adjustedIndex = !copy && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
@@ -605,14 +670,14 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         event.preventDefault()
         try {
             const payload = JSON.parse(raw) as { type: "step" | "block" | "field" | "library"; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "form" | "video" | "button"; copy?: boolean }
-            if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy || event.shiftKey))
-            else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && target.stepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, target.groupKey, target.stepId, target.blockIndex ?? Number.MAX_SAFE_INTEGER, Boolean(payload.copy || event.shiftKey))
+            if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy))
+            else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && target.stepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, target.groupKey, target.stepId, target.blockIndex ?? Number.MAX_SAFE_INTEGER, Boolean(payload.copy))
             else if (payload.type === "field" && payload.groupKey && payload.stepId && payload.formBlockId && payload.fieldId && target.formBlockId && target.fieldIndex !== undefined) {
                 if (payload.groupKey !== target.groupKey || payload.stepId !== target.stepId || payload.formBlockId !== target.formBlockId) {
                     setError("Fields must stay inside their form.")
                     return
                 }
-                moveField(target.groupKey, target.stepId!, target.formBlockId, payload.fieldId, target.fieldIndex, Boolean(payload.copy || event.shiftKey))
+                moveField(target.groupKey, target.stepId!, target.formBlockId, payload.fieldId, target.fieldIndex, Boolean(payload.copy))
             } else if (payload.type === "library" && payload.kind && target.stepId) {
                 const block = payload.kind === "estimate" ? createEstimateBlock() : payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : createButtonBlock()
                 let inserted = false
@@ -815,7 +880,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     }
 
     async function createPreviewLink() {
-        const snapshot = { schemaVersion: 2, workspaceName, serviceIds: selectedServiceIds, modules: visibleGroups.filter((group): group is Extract<DefinitionGroup, { kind: "module" }> => group.kind === "module").map((group) => group.definition), welcome: collaboration.document.welcome, completion: collaboration.document.completion, theme: collaboration.document.theme, help: data.help }
+        const snapshot = { schemaVersion: 2, workspaceName, serviceIds: selectedServiceIds, modules: visibleGroups.filter((group): group is Extract<DefinitionGroup, { kind: "module" }> => group.kind === "module").map((group) => group.definition), welcome: collaboration.document.welcome, completion: collaboration.document.completion, theme: collaboration.document.theme, help: helpDraft }
         const outcome = await rotateVisualOnboardingPreview(workspaceSlug, snapshot)
         if (!outcome.ok) { setError(outcome.error); return }
         const url = `${window.location.origin}/onboarding/preview/${outcome.data.token}`
@@ -825,7 +890,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     if (preview) return <div data-builder-fullscreen-preview className="relative flex h-dvh w-full items-stretch justify-center overflow-hidden bg-black">
         <button type="button" onClick={() => setPreview(false)} className="fixed right-4 top-4 z-[100] rounded-full border border-white/20 bg-black/70 px-4 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/70">Exit preview</button>
-        {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={null} selectedFieldId={null} selectBlock={() => undefined} selectField={() => undefined} selectRoadmapStep={selectRoadmapStep} updateStep={() => undefined} updateDraftRevisionId={() => undefined} viewport={viewport} readOnly fullScreen /> : <div className="flex h-full items-center justify-center text-sm text-white/60">Choose or create a module to preview.</div>}
+        {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={helpDraft} selectedBlockId={null} selectedFieldId={null} selectBlock={() => undefined} selectField={() => undefined} selectHelp={() => undefined} helpSelected={false} selectRoadmapStep={selectRoadmapStep} updateStep={() => undefined} updateDraftRevisionId={() => undefined} viewport={viewport} readOnly fullScreen /> : <div className="flex h-full items-center justify-center text-sm text-white/60">Choose or create a module to preview.</div>}
     </div>
 
     return <div onPointerMove={(event) => collaboration.updateActivity({ cursor: normalizedBuilderCursor(event.clientX, event.clientY, window.innerWidth, window.innerHeight) })} onPointerLeave={() => collaboration.updateActivity({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
@@ -858,7 +923,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
                         {leftTab === "outline" ? <>
                             <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Shift-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
-                            <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
+                            <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onSelectHelp={() => { setSelection({ ...selection, blockId: HELP_BLOCK_ID, fieldId: null }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
                         </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
                     </div>
                     <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div>
@@ -866,13 +931,13 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             </aside> : null}
 
             <main className="min-h-0 overflow-auto bg-neutral-900/50 p-3 sm:p-5">
-                {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={selection.blockId} selectedFieldId={selection.fieldId ?? null} selectBlock={(blockId) => { setSelection({ ...selection, blockId, fieldId: null }); setRightTab("inspect") }} selectField={(blockId, fieldId) => { setSelection({ ...selection, blockId, fieldId }); setRightTab("inspect") }} selectRoadmapStep={selectRoadmapStep} updateStep={updateCurrentStep} updateDraftRevisionId={updateCurrentRevisionId} viewport={viewport} collaboratorSelections={collaboration.presence} /> : <div className="flex h-full items-center justify-center text-sm text-neutral-500">Show a module or choose a bookend to start building.</div>}
+                {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={helpDraft} selectedBlockId={selection.blockId} selectedFieldId={selection.fieldId ?? null} selectBlock={(blockId) => { setSelection({ ...selection, blockId, fieldId: null }); setRightTab("inspect") }} selectField={(blockId, fieldId) => { setSelection({ ...selection, blockId, fieldId }); setRightTab("inspect") }} selectHelp={() => { setSelection({ ...selection, blockId: HELP_BLOCK_ID, fieldId: null }); setRightTab("inspect") }} helpSelected={helpSelected} selectRoadmapStep={selectRoadmapStep} updateStep={updateCurrentStep} updateDraftRevisionId={updateCurrentRevisionId} viewport={viewport} collaboratorSelections={collaboration.presence} /> : <div className="flex h-full items-center justify-center text-sm text-neutral-500">Show a module or choose a bookend to start building.</div>}
             </main>
 
             {!preview ? <aside className={`min-h-0 border-l border-neutral-800 bg-neutral-950 ${rightOpen ? "hidden xl:flex xl:flex-col" : "hidden xl:flex xl:items-start xl:justify-center xl:pt-3"}`}>
                 {rightOpen ? <>
                     <div data-builder-right-rail-header className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2"><button type="button" onClick={() => setRightTab("inspect")} className={`h-8 rounded-md px-2 text-xs ${rightTab === "inspect" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Inspect</button><button type="button" onClick={() => setRightTab("styles")} className={`h-8 rounded-md px-2 text-xs ${rightTab === "styles" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Styles</button><span className="ml-auto"><RailToggleButton side="right" label="Collapse right rail" onClick={() => rememberRail("right", false)} /></span></div>
-                    <div className="min-h-0 flex-1 overflow-y-auto p-3">{rightTab === "inspect" ? <InspectorPanel currentGroup={currentGroup} step={currentStep} block={selectedBlock} field={selectedField} editable={collaboration.editable} updateStep={updateCurrentStep} updateBlock={updateBlock} updateField={updateSelectedField} addField={addFieldToSelectedForm} uploadVideo={(file) => void uploadSelectedVideo(file)} deleteSelection={confirmDeleteSelection} /> : <StylesPanel block={selectedBlock} field={selectedField} theme={collaboration.document.theme} updateBlock={updateBlock} updateThemeSwatch={updateThemeSwatch} addThemeSwatch={addThemeSwatch} updateAssignment={(slot, swatchId) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: swatchId } } }))} />}</div>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-3">{rightTab === "inspect" ? <InspectorPanel currentGroup={currentGroup} step={currentStep} block={selectedBlock} field={selectedField} help={helpDraft} helpSelected={helpSelected} helpDirty={helpDirty} helpPending={helpPending} editable={collaboration.editable} updateStep={updateCurrentStep} updateBlock={updateBlock} updateField={updateSelectedField} updateHelp={(values) => setHelpDraft((current) => ({ ...current, ...values }))} saveHelp={saveHelp} addField={addFieldToSelectedForm} uploadVideo={(file) => void uploadSelectedVideo(file)} deleteSelection={confirmDeleteSelection} /> : <StylesPanel block={selectedBlock} field={selectedField} theme={collaboration.document.theme} updateBlock={updateBlock} updateThemeSwatch={updateThemeSwatch} addThemeSwatch={addThemeSwatch} updateAssignment={(slot, swatchId) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: swatchId } } }))} />}</div>
                 </> : <RailToggleButton side="right" label="Expand right rail" onClick={() => rememberRail("right", true)} />}
             </aside> : null}
         </div>

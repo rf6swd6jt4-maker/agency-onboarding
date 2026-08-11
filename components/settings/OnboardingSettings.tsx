@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { publishMandatoryModuleConfiguration, saveMandatoryModuleDraft, saveOnboardingHelpSettings } from "@/app/[workspaceSlug]/settings/onboarding-actions"
+import { publishMandatoryModuleConfiguration, saveMandatoryModuleDraft } from "@/app/[workspaceSlug]/settings/onboarding-actions"
 import { SortableAuthoringList } from "@/components/onboarding-builder/SortableAuthoringList"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import type { MandatoryModuleConfiguration, OnboardingBookendDefinition, OnboardingHelpSettings, OnboardingModuleSummary } from "@/lib/onboarding/configuration-types"
@@ -46,22 +46,6 @@ function MandatoryModules({ workspaceSlug, modules, configuration, help, schemaR
     </section>
 }
 
-function HelpSettings({ workspaceSlug, help, schemaReady }: { workspaceSlug: string; help: OnboardingHelpSettings; schemaReady: boolean }) {
-    const router = useRouter()
-    const [value, setValue] = useState(help.text)
-    const [whatsappEnabled, setWhatsappEnabled] = useState(help.whatsappEnabled)
-    const [error, setError] = useState<string | null>(null)
-    const [pending, startTransition] = useTransition()
-    return <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
-        <h3 className="font-semibold">Client help</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Shown beside onboarding steps. Saving publishes this help independently without publishing pending mandatory-module changes. The WhatsApp action appears only while the real workspace connection remains verified.</p>
-        <label className="mt-4 block text-sm text-neutral-300">Help text<textarea value={value} onChange={(event) => setValue(event.target.value)} rows={3} maxLength={2_000} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>
-        <div className="mt-3 flex items-center gap-2"><Status label={help.whatsappVerified ? "WhatsApp verified" : "WhatsApp unavailable"} tone={help.whatsappVerified ? "green" : "red"} />{help.whatsappVerified && help.whatsappNumber ? <span className="text-xs text-neutral-600">{help.whatsappNumber}</span> : null}</div>
-        <label className="mt-3 flex min-h-11 items-center gap-3 rounded-lg border border-neutral-800 bg-black px-3 text-sm text-neutral-300"><input type="checkbox" checked={whatsappEnabled} disabled={!help.whatsappVerified} onChange={(event) => setWhatsappEnabled(event.target.checked)} className="h-4 w-4 accent-white disabled:opacity-40" /><span>Show the verified WhatsApp help action</span></label>
-        {error ? <p role="alert" className="mt-3 text-sm text-red-300">{error}</p> : null}
-        <div className="mt-4 flex justify-end"><button type="button" disabled={pending || !schemaReady || (value.trim() === help.text.trim() && whatsappEnabled === help.whatsappEnabled)} onClick={() => { setError(null); startTransition(async () => { const outcome = await saveOnboardingHelpSettings(workspaceSlug, value, whatsappEnabled); if (!outcome.ok) setError(outcome.error); else router.refresh() }) }} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">{pending ? "Publishing…" : "Save live help settings"}</button></div>
-    </section>
-}
-
 export function OnboardingSettings({ workspaceSlug, modules, mandatory, welcome, completion, help, schemaReady }: {
     workspaceSlug: string
     modules: OnboardingModuleSummary[]
@@ -77,6 +61,5 @@ export function OnboardingSettings({ workspaceSlug, modules, mandatory, welcome,
         <MandatoryModules workspaceSlug={workspaceSlug} modules={modules} configuration={mandatory} help={help} schemaReady={schemaReady} />
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5"><h3 className="font-semibold">Session bookends</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Welcome and Completion remain fixed at either end of a session, while their internal steps are built visually like modules.</p><div className="mt-4 grid gap-3 xl:grid-cols-2"><BookendCard workspaceSlug={workspaceSlug} bookend={welcome} /><BookendCard workspaceSlug={workspaceSlug} bookend={completion} /></div></section>
         <section className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900"><div className="flex items-start justify-between gap-4 border-b border-neutral-800 p-4 sm:p-5"><div><h3 className="font-semibold">Module status and usage</h3><p className="mt-1 text-sm leading-6 text-neutral-500">A compact operational view of publication and active service usage. Content editing stays in Builder.</p></div><Link href={`/${workspaceSlug}/onboarding-builder`} target="_blank" rel="noopener noreferrer" className="shrink-0 text-sm text-neutral-300 underline underline-offset-4">Open Builder</Link></div><div className="divide-y divide-neutral-800">{modules.map((module) => <Link key={module.id} href={`/${workspaceSlug}/onboarding-builder?module=${encodeURIComponent(module.id)}`} target="_blank" rel="noopener noreferrer" className="block bg-black/30 px-4 py-3 transition hover:bg-neutral-800/70 sm:px-5"><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium text-white">{module.name}</span>{module.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}{module.mandatory ? <RoundPill tone="violet">Mandatory</RoundPill> : null}<Status label={module.status === "published" ? `Published v${module.version}` : module.status === "archived" ? "Archived" : "Draft"} tone={module.status === "published" ? "green" : module.status === "draft" ? "yellow" : "grey"} className="ml-auto shrink-0" /></span><span className="mt-2 flex min-w-0 items-center gap-2 text-xs text-neutral-500"><span className="shrink-0">{module.stepCount} step{module.stepCount === 1 ? "" : "s"} · {module.fieldCount} field{module.fieldCount === 1 ? "" : "s"}</span><span className="min-w-0 flex-1 truncate">{module.usedBy.length ? `Used by: ${module.usedBy.map((service) => service.name).join(", ")}` : "Not used by an active service"}</span></span></Link>)}{!modules.length ? <p className="p-5 text-sm text-neutral-500">No modules have been published yet.</p> : null}</div></section>
-        <HelpSettings workspaceSlug={workspaceSlug} help={help} schemaReady={schemaReady} />
     </div>
 }

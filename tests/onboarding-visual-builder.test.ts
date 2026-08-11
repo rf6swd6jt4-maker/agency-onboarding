@@ -9,6 +9,7 @@ import { persistBuilderUpdate, refreshBuilderUpdates } from "../lib/onboarding/b
 
 const builderPage = readFileSync("app/[workspaceSlug]/onboarding-builder/page.tsx", "utf8")
 const builderUi = readFileSync("components/onboarding-builder/OnboardingBuilderWorkspace.tsx", "utf8")
+const desktopBuilderGate = readFileSync("components/onboarding-builder/DesktopBuilderGate.tsx", "utf8")
 const blockValidation = readFileSync("lib/onboarding/block-validation.ts", "utf8")
 const blockLayout = readFileSync("lib/onboarding/block-layout.ts", "utf8")
 const collaboration = readFileSync("components/onboarding-builder/useCollaborativeOnboardingDocument.ts", "utf8")
@@ -117,6 +118,31 @@ test("structural authoring supports library drag, cross-definition moves, duplic
     assert.match(builderUi, /hidden md:flex/)
     assert.match(visualCanvas, /hidden w-fit md:block/)
     assert.match(visualCanvas, /application\/x-betelgeze-block/)
+})
+
+test("outline drag distinguishes moving from numbered Shift duplication", () => {
+    assert.match(builderUi, /dataTransfer\.setDragImage/)
+    assert.match(builderUi, /builderDragLabel/)
+    assert.match(builderUi, /dragging\?\.key === stepKey && !dragging\.copy \? "opacity-0"/)
+    assert.match(builderUi, /nextDuplicateName\(visualStepTitle\(sourceStep\)/)
+    assert.match(builderUi, /nextDuplicateName\(blockName\(sourceBlock\)/)
+    assert.match(builderUi, /nextDuplicateName\(source\.label/)
+})
+
+test("Builder is desktop-only while client mobile previews remain available", () => {
+    assert.match(desktopBuilderGate, /matchMedia\("\(min-width: 768px\)"\)/)
+    assert.match(desktopBuilderGate, /Onboarding Builder requires desktop/)
+    assert.match(desktopBuilderGate, /Back to Betelgeze/)
+    assert.match(visualCanvas, /forceMobile=\{viewport === "mobile"\}/)
+})
+
+test("client help is a fixed Builder item with live communication settings", () => {
+    assert.match(builderUi, /HELP_BLOCK_ID/)
+    assert.match(builderUi, /data-builder-help-inspector/)
+    assert.match(builderUi, /Communication method/)
+    assert.match(builderUi, /saveOnboardingHelpSettings/)
+    assert.match(onboardingLayout, /data-builder-help-block/)
+    assert.doesNotMatch(onboardingSettings, /function HelpSettings/)
 })
 
 test("the Builder outline nests fields, owns structure actions, and filters the shared roadmap", () => {

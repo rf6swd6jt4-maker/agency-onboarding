@@ -38,6 +38,10 @@ function layout(block: OnboardingBlock) {
     }
 }
 
+function name(block: OnboardingBlock, fallback: string) {
+    return text(block.name, 120) || fallback
+}
+
 function normalizeField(field: ConfiguredOnboardingField, seen: Set<string>) {
     const id = uuid(field.id, "Every form field needs a stable ID.")
     if (seen.has(id)) throw new Error("Field IDs must be unique within a definition.")
@@ -73,6 +77,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             if (!title) throw new Error("Every step needs a title.")
             return {
                 id: blockId,
+                name: name(block, "Header block"),
                 kind: "header",
                 title,
                 description: text(block.description, 4_000),
@@ -84,14 +89,14 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
         if (block.kind === "estimate") {
             estimateCount += 1
             if (estimateCount > 1) throw new Error("A step can contain only one Estimated time block.")
-            return { id: blockId, kind: "estimate", estimatedTime: text(block.estimatedTime, 80), layout: layout(block) }
+            return { id: blockId, name: name(block, "Estimated time"), kind: "estimate", estimatedTime: text(block.estimatedTime, 80), layout: layout(block) }
         }
         if (block.kind === "form") {
             if (options.bookend) throw new Error("Welcome and Completion steps cannot contain forms.")
             formCount += 1
             if (formCount > 1) throw new Error("A step can contain only one Form block.")
             const fields = Array.isArray(block.fields) ? block.fields : []
-            return { id: blockId, kind: "form", whyWeAsk: text(block.whyWeAsk, 2_000), fields: fields.map((field) => normalizeField(field, options.fieldIds)), layout: layout(block) }
+            return { id: blockId, name: name(block, "Form"), kind: "form", whyWeAsk: text(block.whyWeAsk, 2_000), fields: fields.map((field) => normalizeField(field, options.fieldIds)), layout: layout(block) }
         }
         if (block.kind === "video") {
             if (block.legacyEmbedUrl) throw new Error("Replace embedded videos with a workspace upload before publishing.")
@@ -99,6 +104,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             if (!block.upload.type.startsWith("video/")) throw new Error("Builder video blocks require a video upload.")
             return {
                 id: blockId,
+                name: name(block, "Video"),
                 kind: "video",
                 upload: {
                     name: text(block.upload.name, 255),
@@ -117,7 +123,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
         try { url = new URL(rawUrl) } catch { throw new Error("Every Button needs a valid URL.") }
         if (url.protocol !== "https:") throw new Error("Button destinations must use HTTPS.")
         if (!label) throw new Error("Every Button needs a label.")
-        return { id: blockId, kind: "button", label, url: url.toString(), required: Boolean(block.required), appearance: block.appearance === "secondary" ? "secondary" : "primary", layout: layout(block) }
+        return { id: blockId, name: name(block, "Button"), kind: "button", label, url: url.toString(), required: Boolean(block.required), appearance: block.appearance === "secondary" ? "secondary" : "primary", layout: layout(block) }
     })
     if (headerCount !== 1) throw new Error("Every step needs exactly one Header block.")
     if (estimateCount !== 1) throw new Error("Every step needs exactly one Estimated time block.")

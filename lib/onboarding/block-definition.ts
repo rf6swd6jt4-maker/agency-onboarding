@@ -28,6 +28,7 @@ export type WorkspaceVideoDescriptor = {
 
 type BlockBase = {
     id: string
+    name?: string
     layout: OnboardingBlockLayout
 }
 
@@ -102,6 +103,7 @@ function stableKey(id: string, prefix: string) {
 export function createHeaderBlock(input: Partial<HeaderBlock> = {}): HeaderBlock {
     return {
         id: input.id ?? stableUuid(),
+        name: input.name ?? "Header block",
         kind: "header",
         title: input.title ?? "Untitled step",
         description: input.description ?? "",
@@ -114,6 +116,7 @@ export function createHeaderBlock(input: Partial<HeaderBlock> = {}): HeaderBlock
 export function createEstimateBlock(estimatedTime = "2–3 minutes", id = stableUuid()): EstimateBlock {
     return {
         id,
+        name: "Estimated time",
         kind: "estimate",
         estimatedTime,
         layout: { ...DEFAULT_BLOCK_LAYOUT, spacingBefore: "compact", spacingAfter: "compact" },
@@ -123,6 +126,7 @@ export function createEstimateBlock(estimatedTime = "2–3 minutes", id = stable
 export function createFormBlock(fields?: ConfiguredOnboardingField[]): FormBlock {
     return {
         id: stableUuid(),
+        name: "Form",
         kind: "form",
         whyWeAsk: "",
         fields: fields ?? [createOnboardingField()],
@@ -131,11 +135,11 @@ export function createFormBlock(fields?: ConfiguredOnboardingField[]): FormBlock
 }
 
 export function createVideoBlock(): VideoBlock {
-    return { id: stableUuid(), kind: "video", upload: null, requirement: "none", layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" } }
+    return { id: stableUuid(), name: "Video", kind: "video", upload: null, requirement: "none", layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" } }
 }
 
 export function createButtonBlock(): ButtonBlock {
-    return { id: stableUuid(), kind: "button", label: "Open link", url: "", required: false, appearance: "primary", layout: DEFAULT_BLOCK_LAYOUT }
+    return { id: stableUuid(), name: "Button", kind: "button", label: "Open link", url: "", required: false, appearance: "primary", layout: DEFAULT_BLOCK_LAYOUT }
 }
 
 export function createOnboardingField(): ConfiguredOnboardingField {
