@@ -534,7 +534,7 @@ export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expect
             : null
 
     if (!saleId && !invoiceId) {
-        return { ok: false, error: "Invoice has no sale ID or invoice ID" }
+        return { ok: true, skipped: true, reason: "not_betelgeze_invoice" as const }
     }
 
     let sale: ClientSale | undefined
@@ -544,7 +544,15 @@ export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expect
         return { ok: false, error: error instanceof Error ? error.message : "Could not load sale" }
     }
 
-    if (!sale) return { ok: false, error: "Sale not found for invoice" }
+    if (!sale) {
+        // A shared Stripe account can receive payments for invoices created
+        // outside Betelgeze. Only a Betelgeze sale reference should turn a
+        // missing sale into an automation failure; an unrelated invoice is a
+        // successful no-op.
+        return saleId
+            ? { ok: false, error: "Betelgeze invoice references an unknown sale" }
+            : { ok: true, skipped: true, reason: "not_betelgeze_invoice" as const }
+    }
 
     // Stripe commonly delivers invoice.paid and invoice.payment_succeeded at
     // nearly the same time. Claim the pre-payment state atomically so the

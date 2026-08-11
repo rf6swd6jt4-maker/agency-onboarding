@@ -116,6 +116,28 @@ export async function POST(request: NextRequest) {
                 { status: 500 }
             )
         }
+        if ("reason" in result && result.reason === "not_betelgeze_invoice") {
+            await recordAdminActivity({
+                workspaceId,
+                category: "billing",
+                eventKey: "stripe.invoice.paid_ignored",
+                summary: "Non-Betelgeze Stripe invoice payment ignored",
+                entityType: "stripe_invoice",
+                entityId: typeof (invoice as { id?: unknown }).id === "string"
+                    ? (invoice as { id: string }).id
+                    : event.id,
+                actorKind: "automation",
+                correlationId: event.id,
+                idempotencyKey: `stripe.invoice.paid_ignored:${event.id}`,
+                outcome: "skipped",
+                metadata: {
+                    stripe_event_id: event.id,
+                    duplicate_event: duplicateEvent,
+                    reason: result.reason,
+                },
+            })
+            return Response.json({ ok: true, ignored: true, duplicate: duplicateEvent })
+        }
         await recordAdminActivity({
             workspaceId,
             category: "billing",

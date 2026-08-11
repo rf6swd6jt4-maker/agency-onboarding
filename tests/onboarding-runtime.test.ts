@@ -113,6 +113,14 @@ test("duplicate paid Stripe events resume automation and record the eventual out
     assert.match(stripeWebhook, /idempotencyKey:\s*`stripe\.invoice\.paid_processed:/u)
 })
 
+test("paid Stripe events ignore invoices that were not created by Betelgeze", () => {
+    const paidHandler = saleAutomation.slice(saleAutomation.indexOf("export async function handlePaidStripeInvoice"))
+    assert.match(paidHandler, /return saleId[\s\S]{0,180}Betelgeze invoice references an unknown sale[\s\S]{0,180}reason: "not_betelgeze_invoice"/u)
+    assert.match(stripeWebhook, /result\.reason === "not_betelgeze_invoice"/u)
+    assert.match(stripeWebhook, /eventKey: "stripe\.invoice\.paid_ignored"/u)
+    assert.match(stripeWebhook, /return Response\.json\(\{ ok: true, ignored: true/u)
+})
+
 test("Stripe invoice automation remains inside the verified workspace", () => {
     assert.match(stripeWebhook, /handlePaidStripeInvoice\(invoice, workspaceId\)/u)
     assert.match(stripeWebhook, /\.eq\("stripe_invoice_id", invoiceId\)[\s\S]{0,120}\.eq\("workspace_id", workspaceId\)/u)
