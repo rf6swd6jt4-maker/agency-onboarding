@@ -57,6 +57,7 @@ export function resolveDealOnboardingComposition(
             mandatory: configuration.mandatory,
             welcome: configuration.welcome,
             completion: configuration.completion,
+            bookendsMigrated: configuration.bookendsMigrated,
         }),
     }
 }

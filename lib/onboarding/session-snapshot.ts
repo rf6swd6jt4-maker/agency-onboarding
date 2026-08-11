@@ -104,6 +104,7 @@ type ComposeInput = {
     welcome: OnboardingBookendDefinition
     completion: OnboardingBookendDefinition
     configurationRevisionId?: string | null
+    bookendsMigrated?: boolean
 }
 
 function composedField(field: ConfiguredOnboardingField, sortOrder: number): Omit<SessionSnapshotField, "id"> {
@@ -224,7 +225,7 @@ export function composeOnboardingSession(input: ComposeInput): ComposedOnboardin
         isTest: moduleDefinition.isTest,
         steps: moduleDefinition.steps.map((step, stepIndex) => composedStep(step, moduleDefinition, stepIndex * 10)),
     }})
-    const hasMigratedBookends = input.modules.some((module) => module.code === "system-welcome") && input.modules.some((module) => module.code === "system-completion")
+    const hasMigratedBookends = input.bookendsMigrated ?? (input.modules.some((module) => module.code === "system-welcome") && input.modules.some((module) => module.code === "system-completion"))
     const welcome = composedBookend(input.welcome, "welcome", 0)
     const completion = composedBookend(input.completion, "completion", (modules.reduce((count, module) => count + module.steps.length, 0) + 1) * 10)
     const schemaVersion = input.modules.some((module) => module.schemaVersion === 2)

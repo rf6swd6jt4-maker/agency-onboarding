@@ -110,6 +110,22 @@ export async function deleteOnboardingModuleDraft(slug: string, moduleId: string
     }
 }
 
+export async function removeOnboardingModule(slug: string, moduleId: string): Promise<ConfigurationActionResult<{ module_id: string; removed: boolean; mode: "deleted" | "archived" }>> {
+    try {
+        const { workspace, user } = await requireWorkspace(slug, "admin")
+        if (configurationSchemaUnavailable(moduleId)) return { ok: false, error: "Legacy modules cannot be removed until the catalogue migration is complete." }
+        const outcome = await configurationRpc<{ module_id: string; removed: boolean; mode: "deleted" | "archived" }>("remove_onboarding_module", {
+            p_workspace_id: workspace.id,
+            p_actor_user_id: user.id,
+            p_module_id: moduleId,
+        })
+        if (outcome.ok) revalidateOnboardingConfiguration(slug)
+        return outcome
+    } catch (error) {
+        return unexpectedConfigurationError(error)
+    }
+}
+
 export async function publishOnboardingModule(slug: string, moduleId: string, input: OnboardingModuleDefinition, applyToActive: boolean, explanation: string): Promise<ConfigurationActionResult<PublishedModuleResult>> {
     try {
         const { workspace, user } = await requireWorkspace(slug, "admin")

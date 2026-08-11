@@ -66,6 +66,9 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     let headerCount = 0
     let estimateCount = 0
     let formCount = 0
+    let checklistCount = 0
+    let videoCount = 0
+    let buttonCount = 0
     const blocks = step.blocks.map((block, index): OnboardingBlock => {
         const blockId = uuid(block.id, "Every onboarding block needs a stable ID.")
         if (options.blockIds.has(blockId)) throw new Error("Block IDs must be unique within a definition.")
@@ -98,6 +101,8 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             return { id: blockId, name: name(block, "Form"), kind: "form", whyWeAsk: text(block.whyWeAsk, 2_000), fields: fields.map((field) => normalizeField(field, options.fieldIds)), layout: layout(block) }
         }
         if (block.kind === "checklist") {
+            checklistCount += 1
+            if (checklistCount > 1) throw new Error("A step can contain only one Checklist block.")
             const items = Array.isArray(block.items) ? block.items.map((item) => text(item, 500)).filter(Boolean).slice(0, 30) : []
             return {
                 id: blockId,
@@ -111,6 +116,8 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             }
         }
         if (block.kind === "video") {
+            videoCount += 1
+            if (videoCount > 1) throw new Error("A step can contain only one Video block.")
             if (block.legacyEmbedUrl) throw new Error("Replace embedded videos with a workspace upload before publishing.")
             if (!block.upload?.path) throw new Error("Upload every video before publishing.")
             if (!block.upload.type.startsWith("video/")) throw new Error("Builder video blocks require a video upload.")
@@ -129,6 +136,8 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
                 layout: layout(block),
             }
         }
+        buttonCount += 1
+        if (buttonCount > 1) throw new Error("A step can contain only one Button block.")
         const label = text(block.label, 120)
         const rawUrl = text(block.url, 2_000)
         let url: URL

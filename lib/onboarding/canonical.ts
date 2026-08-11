@@ -1399,6 +1399,7 @@ export async function createRelationshipOnboardingSession({
         mandatory: publishedConfiguration.mandatory,
         welcome: publishedConfiguration.welcome,
         completion: publishedConfiguration.completion,
+        bookendsMigrated: publishedConfiguration.bookendsMigrated,
     })
     const normalizedComposition = publishedConfiguration.schemaReady && canMaterializeComposition(composition)
         ? composition

@@ -207,6 +207,7 @@ export type OnboardingModulePublishImpact = {
 
 export type PublishedOnboardingConfiguration = {
     schemaReady: boolean
+    bookendsMigrated: boolean
     modules: OnboardingModuleDefinition[]
     services: OnboardingServiceDefinition[]
     mandatory: MandatoryModuleConfiguration

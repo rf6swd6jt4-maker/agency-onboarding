@@ -74,7 +74,7 @@ test("the visual Builder is standalone, responsive, collapsible, and composition
     assert.match(workspaceShell, /panel\.standalone/)
     assert.match(workspaceShell, /window\.open\(href, "_blank", "noopener,noreferrer"\)/)
     assert.match(onboardingSettings, /target="_blank"/)
-    assert.match(builderUi, /resolveOrderedModuleSources/)
+    assert.match(builderUi, /function composeGroups\(document: VisualBuilderDocument\)/)
     assert.match(builderUi, /betelgeze:onboarding-builder:/)
     assert.match(builderUi, /Collapse left rail/)
     assert.match(builderUi, /Collapse right rail/)
@@ -134,8 +134,9 @@ test("structural authoring supports library drag, flexible cross-module moves, d
     assert.doesNotMatch(builderUi, /A step containing a Form cannot be moved into a bookend/)
     assert.match(builderUi, /Each bookend must retain at least one step/)
     assert.match(builderUi, /hidden md:flex/)
-    assert.match(visualCanvas, /hidden w-fit md:block/)
+    assert.doesNotMatch(visualCanvas, /aria-label="Add a block"|aria-label="Insert a block here"/)
     assert.match(visualCanvas, /application\/x-betelgeze-block/)
+    assert.match(builderUi, /draggable=\{collaboration\.editable\} disabled=\{!collaboration\.editable\}/)
 })
 
 test("outline drag distinguishes moving from numbered platform-modifier duplication", () => {

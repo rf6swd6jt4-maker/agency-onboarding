@@ -163,6 +163,7 @@ export function legacyPublishedOnboardingConfiguration(): PublishedOnboardingCon
     const modules = fallbackModules()
     return {
         schemaReady: false,
+        bookendsMigrated: false,
         modules,
         services: fallbackServices(modules),
         mandatory: mapMandatory([], []),
@@ -384,7 +385,8 @@ function newestTheme(...themes: Array<OnboardingThemeDefinition | null>) {
 }
 
 async function queryRawConfiguration(workspaceId: string) {
-    const [moduleResult, revisionResult, serviceResult, serviceRevisionResult, assignmentResult, configurationResult, configurationAssignmentResult, swatchResult, themeResult, integrationResult, relationshipServiceResult, saleItemResult, saleResult, relationshipResult, workItemResult, sessionModuleResult, activeSessionResult] = await Promise.all([
+    const [workspaceResult, moduleResult, revisionResult, serviceResult, serviceRevisionResult, assignmentResult, configurationResult, configurationAssignmentResult, swatchResult, themeResult, integrationResult, relationshipServiceResult, saleItemResult, saleResult, relationshipResult, workItemResult, sessionModuleResult, activeSessionResult] = await Promise.all([
+        supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).single(),
         supabaseAdmin.from("onboarding_modules").select("*").eq("workspace_id", workspaceId),
         supabaseAdmin.from("onboarding_module_revisions").select("*").eq("workspace_id", workspaceId),
         supabaseAdmin.from("onboarding_services").select("*").eq("workspace_id", workspaceId),
@@ -405,6 +407,7 @@ async function queryRawConfiguration(workspaceId: string) {
     ])
     const schemaResults = [moduleResult, revisionResult, serviceResult, serviceRevisionResult, assignmentResult, configurationResult, configurationAssignmentResult, swatchResult, themeResult]
     return {
+        workspaceSlug: text(workspaceResult.data?.slug),
         schemaReady: schemaResults.every((result) => !result.error),
         modules: (moduleResult.data ?? []) as UnknownRow[],
         revisions: (revisionResult.data ?? []) as UnknownRow[],
@@ -429,7 +432,7 @@ async function queryRawConfiguration(workspaceId: string) {
 
 async function rawConfiguration(workspaceId: string) {
     const raw = await queryRawConfiguration(workspaceId)
-    if (!raw.schemaReady || (raw.modules.length > 0 && raw.services.length > 0)) return raw
+    if (!raw.schemaReady || raw.workspaceSlug !== "scaylup" || (raw.modules.length > 0 && raw.services.length > 0)) return raw
 
     const seedModules = fallbackModules()
     const seedServices = fallbackServices(seedModules)
@@ -597,10 +600,11 @@ export async function loadOnboardingSettingsPageData(workspaceId: string): Promi
         supabaseAdmin.from("onboarding_builder_documents").select("snapshot_base64").eq("workspace_id", workspaceId).maybeSingle(),
         supabaseAdmin.from("onboarding_builder_updates").select("update_base64").eq("workspace_id", workspaceId).order("sequence").limit(2_000),
     ])
+    const useLegacyFallback = !raw.schemaReady || raw.workspaceSlug === "scaylup"
     const publishedModules = raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false)))
-        : fallbackModules()
-    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, publishedModules, serviceArchiveBlockers(raw)) : fallbackServices(publishedModules)
+        : useLegacyFallback ? fallbackModules() : []
+    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, publishedModules, serviceArchiveBlockers(raw)) : useLegacyFallback ? fallbackServices(publishedModules) : []
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const usage = new Map<string, Array<{ id: string; name: string }>>()
     for (const service of services) {
@@ -674,9 +678,10 @@ async function hydrateVisualBookend(
 
 export async function loadOnboardingBuilderData(workspaceId: string, selectedModuleId?: string | null, currentUserId?: string | null): Promise<OnboardingBuilderData> {
     const raw = await rawConfiguration(workspaceId)
+    const useLegacyFallback = !raw.schemaReady || raw.workspaceSlug === "scaylup"
     const rawEditableModules = raw.modules.length
-        ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, true)))
-        : fallbackModules()
+        ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, true))).filter((moduleDefinition) => moduleDefinition.status !== "archived")
+        : useLegacyFallback ? fallbackModules() : []
     const editableModules = await Promise.all(rawEditableModules.map(async (moduleDefinition) => ({
         ...moduleDefinition,
         steps: await Promise.all(moduleDefinition.steps.map(async (step) => ({
@@ -684,7 +689,7 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
             resolvedVideoUrl: step.videoPath ? await createPrivateUploadSignedUrl(step.videoPath) : step.videoUrl,
         }))),
     })))
-    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, editableModules) : fallbackServices(editableModules)
+    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, editableModules) : useLegacyFallback ? fallbackServices(editableModules) : []
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const mandatoryIds = new Set([...mandatory.draftModuleIds, ...mandatory.publishedModuleIds])
     const usage = new Map<string, Array<{ id: string; name: string }>>()
@@ -803,10 +808,11 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
 
 export async function loadPublishedOnboardingConfiguration(workspaceId: string): Promise<PublishedOnboardingConfiguration> {
     const raw = await rawConfiguration(workspaceId)
+    const useLegacyFallback = !raw.schemaReady || raw.workspaceSlug === "scaylup"
     const baseModules = raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false))).filter((moduleDefinition) => moduleDefinition.status === "published")
-        : fallbackModules()
-    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : fallbackServices(baseModules)
+        : useLegacyFallback ? fallbackModules() : []
+    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : useLegacyFallback ? fallbackServices(baseModules) : []
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const mandatoryIds = new Set(mandatory.publishedModuleIds)
     const modules = baseModules.map((moduleDefinition) => {
@@ -822,6 +828,7 @@ export async function loadPublishedOnboardingConfiguration(workspaceId: string):
     const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
     return {
         schemaReady: raw.schemaReady,
+        bookendsMigrated: raw.schemaReady,
         modules,
         services,
         mandatory,

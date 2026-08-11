@@ -216,8 +216,10 @@ test("all configuration Server Actions re-authorize admins and use transactional
     assert.match(visualActions, /publish_visual_onboarding_release/)
 })
 
-test("schema-ready empty workspaces seed legacy definitions before becoming editable", () => {
+test("only the Scaylup workspace may retain the legacy onboarding seed", () => {
     assert.match(configurationLoader, /ensure_workspace_onboarding_seeded/)
+    assert.match(configurationLoader, /raw\.workspaceSlug !== "scaylup"/)
+    assert.match(configurationLoader, /useLegacyFallback = !raw\.schemaReady \|\| raw\.workspaceSlug === "scaylup"/)
     assert.match(configurationLoader, /p_mandatory_module_codes: \["general-info"\]/)
     assert.match(configurationLoader, /return queryRawConfiguration\(workspaceId\)/)
     assert.match(configurationLoader, /definition\.isTest/)
