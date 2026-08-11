@@ -837,7 +837,7 @@ export async function loadPublishedOnboardingConfiguration(workspaceId: string):
     const baseModules = orderedModuleDefinitions(raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false))).filter((moduleDefinition) => moduleDefinition.status === "published")
         : useLegacyFallback ? fallbackModules() : [])
-    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : useLegacyFallback ? fallbackServices(baseModules) : []
+    const storedServices = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : useLegacyFallback ? fallbackServices(baseModules) : []
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const mandatoryIds = new Set(mandatory.publishedModuleIds)
     const modules = baseModules.map((moduleDefinition) => {
@@ -846,9 +846,19 @@ export async function loadPublishedOnboardingConfiguration(workspaceId: string):
             ...moduleDefinition,
             mandatory: isMandatory,
             placement: moduleDefinition.placement ?? (moduleDefinition.code === "system-completion" ? "end" : isMandatory ? "start" : "service"),
-            serviceIds: moduleDefinition.serviceIds?.length ? moduleDefinition.serviceIds : services.filter((service) => service.modules.some((assignment) => assignment.moduleId === moduleDefinition.id)).map((service) => service.id),
+            serviceIds: moduleDefinition.serviceIds?.length ? moduleDefinition.serviceIds : storedServices.filter((service) => service.modules.some((assignment) => assignment.moduleId === moduleDefinition.id)).map((service) => service.id),
         }
     })
+    // The Builder module definition is now the authoring source of truth for
+    // service links. Rebuild the service-side projection from those immutable
+    // published definitions so preview, invoice preflight, and runtime compose
+    // the same module set even when an older assignment row still exists.
+    const services = storedServices.map((service) => ({
+        ...service,
+        modules: modules.flatMap((moduleDefinition) => moduleDefinition.serviceIds?.includes(service.id)
+            ? [{ moduleId: moduleDefinition.id, moduleCode: moduleDefinition.code, moduleName: moduleDefinition.name, sortOrder: moduleDefinition.sortOrder ?? 0 }]
+            : []),
+    }))
     const whatsappHint = record(raw.whatsapp?.config_hint)
     const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
     return {

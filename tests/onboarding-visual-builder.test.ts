@@ -101,6 +101,13 @@ test("module ordering is shared by Outline, Modules, persistence, and runtime co
     assert.match(collaboration, /restoredModules\.every\(\(module\) => typeof module\.sortOrder === "number"\)/)
 })
 
+test("published service composition is rebuilt from Builder-owned module links", () => {
+    const publishedLoader = configuration.slice(configuration.indexOf("export async function loadPublishedOnboardingConfiguration"))
+    assert.match(publishedLoader, /const storedServices/u)
+    assert.match(publishedLoader, /moduleDefinition\.serviceIds\?\.includes\(service\.id\)/u)
+    assert.match(publishedLoader, /preview, invoice preflight, and runtime compose/u)
+})
+
 test("Header and estimated time are independently inspectable blocks", () => {
     assert.match(builderUi, /Header block/)
     assert.match(builderUi, /block\.kind === "estimate"/)

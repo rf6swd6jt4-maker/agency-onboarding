@@ -153,6 +153,17 @@ function publicOnboardingMutationMessage(error: QueryError, fallback: string) {
 const LEGACY_SESSION_COLUMNS = "id, workspace_id, relationship_id, session_token, status, is_test, project_timeframe_days, legacy_client_id, created_by, archived_at, completed_at, created_at, updated_at"
 const SNAPSHOT_SESSION_COLUMNS = `${LEGACY_SESSION_COLUMNS}, source_sale_id, configuration_revision_id, welcome_revision_id, completion_revision_id, snapshot_schema_version, composition_hash, composition_snapshot, token_version, token_revoked_at`
 
+async function paidSessionHasPublicConsent(session: CanonicalOnboardingSession) {
+    if (!session.source_sale_id) return true
+    const { data, error } = await supabaseAdmin
+        .from("client_sales")
+        .select("consent_confirmed_at")
+        .eq("workspace_id", session.workspace_id)
+        .eq("id", session.source_sale_id)
+        .maybeSingle()
+    return !error && Boolean(data?.consent_confirmed_at)
+}
+
 async function loadSessionByToken(token: string) {
     const snapshotResult = await supabaseAdmin
         .from("relationship_onboarding_sessions")
@@ -162,7 +173,8 @@ async function loadSessionByToken(token: string) {
         .maybeSingle()
     if (!snapshotResult.error) {
         const session = snapshotResult.data as CanonicalOnboardingSession | null
-        return session?.token_revoked_at ? null : session
+        if (!session || session.token_revoked_at) return null
+        return await paidSessionHasPublicConsent(session) ? session : null
     }
     if (!isMissingCanonicalOnboarding(snapshotResult.error)) return null
     const legacyResult = await supabaseAdmin

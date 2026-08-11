@@ -25,6 +25,7 @@ const builderActions = readFileSync("app/[workspaceSlug]/onboarding-builder/acti
 const publicActions = readFileSync("app/onboarding/session/[token]/actions.ts", "utf8")
 const onboardingForm = readFileSync("components/onboarding/OnboardingForm.tsx", "utf8")
 const onboardingOperations = readFileSync("supabase/migrations/20260810101000_custom_onboarding_operations.sql", "utf8")
+const builderInvoiceSessions = readFileSync("supabase/migrations/20260811113000_align_invoice_sessions_with_builder.sql", "utf8")
 const environmentExample = readFileSync(".env.example", "utf8")
 const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
@@ -41,6 +42,22 @@ test("invoice send freezes versioned configuration before the idempotent Stripe 
     assert.match(relationshipWorkflow, /rpc\("freeze_client_sale_configuration"/u)
     assert.ok(relationshipWorkflow.indexOf('rpc("freeze_client_sale_configuration"') < relationshipWorkflow.indexOf("createAndSendStripeInvoice({"))
     assert.match(relationshipActions, /Void and replace the sent invoice before changing services or negotiated prices/u)
+})
+
+test("invoice snapshots and paid sessions use the published Builder module composition", () => {
+    assert.match(builderInvoiceSessions, /create or replace function public\.freeze_client_sale_configuration/u)
+    assert.match(builderInvoiceSessions, /definition->'sortOrder'/u)
+    assert.match(builderInvoiceSessions, /definition->'serviceIds'/u)
+    assert.match(builderInvoiceSessions, /definition->>'mandatory'/u)
+    assert.match(builderInvoiceSessions, /'header', 'estimate', 'form', 'video', 'button', 'checklist'/u)
+    assert.match(builderInvoiceSessions, /'composition_source', 'published_builder_modules'/u)
+    assert.match(builderInvoiceSessions, /create or replace function public\.create_paid_onboarding_session/u)
+    assert.match(builderInvoiceSessions, /item_kind = 'module'/u)
+    assert.doesNotMatch(builderInvoiceSessions, /SALE_BOOKENDS_REQUIRED/u)
+    assert.match(builderInvoiceSessions, /'source', 'published_builder_modules'/u)
+    assert.match(canonical, /paidSessionHasPublicConsent/u)
+    assert.match(canonical, /select\("consent_confirmed_at"\)/u)
+    assert.match(canonical, /return await paidSessionHasPublicConsent\(session\) \? session : null/u)
 })
 
 test("invoice preflight requires a verified connection without requiring the optional help action", () => {
