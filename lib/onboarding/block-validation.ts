@@ -66,7 +66,7 @@ function normalizeField(field: ConfiguredOnboardingField, seen: Set<string>, loc
     } satisfies ConfiguredOnboardingField
 }
 
-function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firstWelcomeStep: boolean; blockIds: Set<string>; fieldIds: Set<string>; definitionName: string; stepIndex: number }) {
+function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firstWelcomeStep: boolean; blockIds: Set<string>; fieldIds: Set<string>; definitionName: string; stepIndex: number; allowPendingVideo: boolean }) {
     const rawHeader = Array.isArray(step.blocks) ? step.blocks.find((block) => block.kind === "header") : null
     const stepName = rawHeader?.kind === "header" ? text(rawHeader.title, 160) || `Step ${options.stepIndex + 1}` : `Step ${options.stepIndex + 1}`
     const location = `“${options.definitionName}” → “${stepName}”`
@@ -128,20 +128,21 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
         if (block.kind === "video") {
             videoCount += 1
             if (videoCount > 1) throw new Error("A step can contain only one Video block.")
-            if (block.legacyEmbedUrl) throw new Error("Replace embedded videos with a workspace upload before publishing.")
-            if (!block.upload?.path) throw new Error("Upload every video before publishing.")
-            if (!block.upload.type.startsWith("video/")) throw new Error("Builder video blocks require a video upload.")
+            if (!options.allowPendingVideo && block.legacyEmbedUrl) throw new Error(`${location} still uses an embedded video. Open its Video block, upload the video file, then publish again.`)
+            if (!options.allowPendingVideo && !block.upload?.path) throw new Error(`${location} contains a Video block without a file. Open that Video block, choose Upload, and select a video before publishing.`)
+            if (block.upload && !block.upload.type.startsWith("video/")) throw new Error(`${location} has a non-video file in its Video block. Replace it with a video file, then publish again.`)
             return {
                 id: blockId,
                 name: name(block, "Video"),
                 kind: "video",
-                upload: {
+                upload: block.upload ? {
                     name: text(block.upload.name, 255),
                     path: text(block.upload.path, 2_000),
                     size: Number(block.upload.size) || 0,
                     type: text(block.upload.type, 160),
                     provider: "r2",
-                },
+                } : null,
+                legacyEmbedUrl: options.allowPendingVideo ? text(block.legacyEmbedUrl, 2_000) || null : null,
                 requirement: block.requirement === "finish" ? "finish" : "none",
                 layout: layout(block),
             }
@@ -169,7 +170,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     } satisfies OnboardingStepV2)
 }
 
-export function normalizeVisualModule(module: OnboardingModuleDefinitionV2) {
+export function normalizeVisualModule(module: OnboardingModuleDefinitionV2, options: { allowPendingVideo?: boolean } = {}) {
     try {
         const name = text(module.name, 120)
         if (!name) throw new Error("Give this module a name before publishing.")
@@ -184,7 +185,7 @@ export function normalizeVisualModule(module: OnboardingModuleDefinitionV2) {
             isTest: Boolean(module.isTest),
             schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
             steps: module.steps.map((step, stepIndex) => {
-                const result = normalizeStep(step, { bookend: false, firstWelcomeStep: false, blockIds, fieldIds, definitionName: name, stepIndex })
+                const result = normalizeStep(step, { bookend: false, firstWelcomeStep: false, blockIds, fieldIds, definitionName: name, stepIndex, allowPendingVideo: Boolean(options.allowPendingVideo) })
                 if (stepIds.has(result.id)) throw new Error(`“${name}” contains two steps with the same internal ID. Duplicate or recreate one of those steps, then publish again.`)
                 stepIds.add(result.id)
                 return result
@@ -196,7 +197,7 @@ export function normalizeVisualModule(module: OnboardingModuleDefinitionV2) {
     }
 }
 
-export function normalizeVisualBookend(bookend: OnboardingBookendDefinitionV2) {
+export function normalizeVisualBookend(bookend: OnboardingBookendDefinitionV2, options: { allowPendingVideo?: boolean } = {}) {
     try {
         if (!bookend.steps.length) throw new Error(`${bookend.kind === "welcome" ? "Welcome" : "Completion"} must contain at least one step.`)
         const stepIds = new Set<string>()
@@ -207,7 +208,7 @@ export function normalizeVisualBookend(bookend: OnboardingBookendDefinitionV2) {
             schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
             steps: bookend.steps.map((step, index) => {
                 const definitionName = bookend.kind === "welcome" ? "Welcome" : "Completion"
-                const result = normalizeStep(step, { bookend: true, firstWelcomeStep: bookend.kind === "welcome" && index === 0, blockIds, fieldIds, definitionName, stepIndex: index })
+                const result = normalizeStep(step, { bookend: true, firstWelcomeStep: bookend.kind === "welcome" && index === 0, blockIds, fieldIds, definitionName, stepIndex: index, allowPendingVideo: Boolean(options.allowPendingVideo) })
                 if (stepIds.has(result.id)) throw new Error(`“${definitionName}” contains two steps with the same internal ID. Duplicate or recreate one of those steps, then publish again.`)
                 stepIds.add(result.id)
                 return result

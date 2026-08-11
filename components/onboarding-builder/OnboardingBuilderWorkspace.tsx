@@ -841,13 +841,16 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         setError(null)
         try {
             const target = currentGroup.kind === "module" ? { kind: "module" as const, definition: currentGroup.definition } : { kind: "bookend" as const, definition: currentGroup.definition }
-            const prepared = await prepareVisualBuilderVideoUpload(workspaceSlug, target, { name: file.name, size: file.size, type: file.type })
+            const preparation = await prepareVisualBuilderVideoUpload(workspaceSlug, target, { name: file.name, size: file.size, type: file.type })
+            if (!preparation.ok) throw new Error(preparation.error)
+            if (!preparation.data) throw new Error("Betelgeze prepared the upload without returning its storage details. Try again.")
+            const prepared = preparation.data
             const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file })
-            if (!response.ok) throw new Error(`Upload failed with status ${response.status}.`)
+            if (!response.ok) throw new Error(`Video storage rejected the upload (HTTP ${response.status}). Try again; if it continues, check the R2 CORS configuration.`)
             updateCurrentRevisionId(prepared.draftRevisionId)
             updateBlock({ ...selectedBlock, legacyEmbedUrl: null, upload: { ...prepared.storedVideo, resolvedUrl: prepared.previewUrl } } satisfies VideoBlock)
         } catch (uploadError) {
-            setError(uploadError instanceof Error ? uploadError.message : "Video upload failed.")
+            setError(uploadError instanceof TypeError && uploadError.message === "Failed to fetch" ? "The browser could not reach video storage. Check the R2 CORS configuration, then try again." : uploadError instanceof Error ? uploadError.message : "Video upload failed.")
         }
     }
 

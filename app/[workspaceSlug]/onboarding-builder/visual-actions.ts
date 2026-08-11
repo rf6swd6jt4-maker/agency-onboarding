@@ -6,6 +6,7 @@ import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2 } from
 import { normalizeThemeDraft, normalizeVisualBookend, normalizeVisualModule } from "@/lib/onboarding/block-validation"
 import type { ConfigurationActionResult, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { recordAdminActivity } from "@/lib/admin/activity"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { configurationRpc, unexpectedConfigurationError } from "@/lib/onboarding/configuration-actions"
 import { processWorkspaceOnboardingOutbox } from "@/lib/onboarding/outbox"
 import { createSignedBuilderMediaUpload } from "@/lib/onboarding/uploads"
@@ -54,10 +55,10 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
 }): Promise<ConfigurationActionResult<{ release_id: string; results: unknown[] }>> {
     try {
         const { workspace, user } = await requireWorkspace(slug, "admin")
-        const normalizedModules = input.modules.map(normalizeVisualModule)
+        const normalizedModules = input.modules.map((module) => normalizeVisualModule(module))
         const moduleError = normalizedModules.find((result) => !result.ok)
         if (moduleError && !moduleError.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: moduleError.error })
-        const normalizedBookends = input.bookends.map(normalizeVisualBookend)
+        const normalizedBookends = input.bookends.map((bookend) => normalizeVisualBookend(bookend))
         const bookendError = normalizedBookends.find((result) => !result.ok)
         if (bookendError && !bookendError.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: bookendError.error })
 
@@ -108,38 +109,63 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
 export async function prepareVisualBuilderVideoUpload(slug: string, target: (
     { kind: "module"; definition: OnboardingModuleDefinitionV2 }
     | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 }
-), file: { name: string; size: number; type: string }) {
+), file: { name: string; size: number; type: string }): Promise<ConfigurationActionResult<{
+    uploadUrl: string
+    previewUrl: string
+    storedVideo: { name: string; path: string; size: number; type: string; provider: "r2" }
+    draftRevisionId: string
+}>> {
     const { workspace, user } = await requireWorkspace(slug, "admin")
-    let entityId: string
-    let draftRevisionId: string
-    if (target.kind === "module") {
-        const normalized = normalizeVisualModule(target.definition)
-        if (!normalized.ok) throw new Error(normalized.error)
-        const saved = await configurationRpc<{ draft_revision_id: string }>("save_onboarding_module_draft", {
-            p_workspace_id: workspace.id,
-            p_actor_user_id: user.id,
-            p_module_id: normalized.definition.id,
-            p_definition: normalized.persistedDefinition,
-        })
-        if (!saved.ok) throw new Error(saved.error)
-        if (!saved.data?.draft_revision_id) throw new Error("The module draft could not be prepared for upload.")
-        entityId = normalized.definition.id
-        draftRevisionId = saved.data.draft_revision_id
-    } else {
-        const normalized = normalizeVisualBookend(target.definition)
-        if (!normalized.ok) throw new Error(normalized.error)
-        const saved = await configurationRpc<{ bookend_revision_id: string }>("save_onboarding_bookend_draft", {
-            p_workspace_id: workspace.id,
-            p_actor_user_id: user.id,
-            p_kind: normalized.definition.kind,
-            p_definition: normalized.persistedDefinition,
-        })
-        if (!saved.ok) throw new Error(saved.error)
-        if (!saved.data?.bookend_revision_id) throw new Error("The bookend draft could not be prepared for upload.")
-        entityId = `bookend-${normalized.definition.kind}`
-        draftRevisionId = saved.data.bookend_revision_id
+    try {
+        let entityId: string
+        let draftRevisionId: string
+        if (target.kind === "module") {
+            const normalized = normalizeVisualModule(target.definition, { allowPendingVideo: true })
+            if (!normalized.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: normalized.error })
+            const saved = await configurationRpc<{ draft_revision_id: string }>("save_onboarding_module_draft", {
+                p_workspace_id: workspace.id,
+                p_actor_user_id: user.id,
+                p_module_id: normalized.definition.id,
+                p_definition: normalized.persistedDefinition,
+            })
+            if (!saved.ok) return saved
+            if (!saved.data?.draft_revision_id) return { ok: false, error: "Betelgeze could not prepare this module draft for upload. The failure was recorded for an administrator." }
+            entityId = normalized.definition.id
+            draftRevisionId = saved.data.draft_revision_id
+        } else {
+            const normalized = normalizeVisualBookend(target.definition, { allowPendingVideo: true })
+            if (!normalized.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: normalized.error })
+            const saved = await configurationRpc<{ bookend_revision_id: string }>("save_onboarding_bookend_draft", {
+                p_workspace_id: workspace.id,
+                p_actor_user_id: user.id,
+                p_kind: normalized.definition.kind,
+                p_definition: normalized.persistedDefinition,
+            })
+            if (!saved.ok) return saved
+            if (!saved.data?.bookend_revision_id) return { ok: false, error: "Betelgeze could not prepare this page draft for upload. The failure was recorded for an administrator." }
+            entityId = `bookend-${normalized.definition.kind}`
+            draftRevisionId = saved.data.bookend_revision_id
+        }
+        return { ok: true, data: { ...(await createSignedBuilderMediaUpload(workspace.id, entityId, draftRevisionId, file)), draftRevisionId } }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "Video upload preparation failed"
+        const expected = message.startsWith("Builder video uploads") || message.includes("500MB upload limit")
+        if (!expected) {
+            await reportPlatformFailure({
+                workspaceId: workspace.id,
+                category: "onboarding",
+                source: "onboarding_builder",
+                operation: "prepare_video_upload",
+                fingerprint: platformFailureFingerprint(["onboarding-builder", "video-upload", error instanceof Error ? error.name : "unknown"]),
+                severity: "warning",
+                summary: "The Builder could not prepare a video upload",
+                diagnostics: { error_type: error instanceof Error ? error.name : typeof error },
+                sourceHref: `/${slug}/onboarding-builder`,
+                actorUserId: user.id,
+            })
+        }
+        return { ok: false, error: expected ? message : "Betelgeze could not prepare the video upload. The failure was added to Admin Activity for investigation." }
     }
-    return { ...(await createSignedBuilderMediaUpload(workspace.id, entityId, draftRevisionId, file)), draftRevisionId }
 }
 
 export async function rotateVisualOnboardingPreview(slug: string, snapshot: Record<string, unknown>) {

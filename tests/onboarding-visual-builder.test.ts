@@ -28,6 +28,7 @@ const configuration = readFileSync("lib/onboarding/configuration.ts", "utf8")
 const migration = readFileSync("supabase/migrations/20260810110000_visual_onboarding_builder_v2.sql", "utf8")
 const realtimeFixMigration = readFileSync("supabase/migrations/20260810223000_fix_onboarding_builder_realtime.sql", "utf8")
 const moduleMigration = readFileSync("supabase/migrations/20260811010000_migrate_onboarding_bookends_to_modules.sql", "utf8")
+const videoUploadFixMigration = readFileSync("supabase/migrations/20260811234500_fix_builder_video_uploads.sql", "utf8")
 const updateRoute = readFileSync("app/api/workspaces/[workspaceSlug]/onboarding-builder/updates/route.ts", "utf8")
 
 test("version-two steps use a protected Header and compatible mixed blocks", () => {
@@ -59,7 +60,7 @@ test("collaborative snapshots are upgraded before they replace the server defini
 })
 
 test("publish validation rejects unsafe V2 definitions", () => {
-    assert.match(blockValidation, /Replace embedded videos with a workspace upload before publishing/)
+    assert.match(blockValidation, /still uses an embedded video\. Open its Video block, upload the video file, then publish again/)
     assert.match(blockValidation, /The Header must remain the first block in every step/)
     assert.match(blockValidation, /duplicated.*block ID/u)
     assert.match(blockValidation, /two fields with the same internal ID/u)
@@ -73,6 +74,16 @@ test("publish validation accepts deterministic legacy UUID-shaped IDs", () => {
     assert.equal(isStableOnboardingId("not-a-stable-id"), false)
     assert.match(blockValidation, /damaged internal step data/u)
     assert.match(visualActions, /onboarding\.release\.rejected/u)
+})
+
+test("video upload preparation permits the empty Video block that it is about to fill", () => {
+    assert.match(blockValidation, /allowPendingVideo/u)
+    assert.match(visualActions, /normalizeVisualModule\(target\.definition, \{ allowPendingVideo: true \}\)/u)
+    assert.match(visualActions, /return \{ ok: true, data:/u)
+    assert.match(builderUi, /if \(!preparation\.ok\) throw new Error\(preparation\.error\)/u)
+    assert.match(visualCanvas, /if \(!preparation\.ok\) throw new Error\(preparation\.error\)/u)
+    assert.match(videoUploadFixMigration, /'header', 'estimate', 'form', 'checklist', 'video', 'button'/u)
+    assert.match(videoUploadFixMigration, /Upload every video before publishing/u)
 })
 
 test("the visual Builder is standalone, responsive, collapsible, and composition-driven", () => {
