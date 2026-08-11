@@ -636,7 +636,7 @@ async function hydrateVisualModule(
     rawDefinition: UnknownRow,
 ): Promise<OnboardingModuleDefinitionV2> {
     const visual = Number(rawDefinition.schemaVersion) === 2
-        ? { ...base, schemaVersion: 2 as const, steps: array(rawDefinition.steps) } as OnboardingModuleDefinitionV2
+        ? upgradeModuleToV2({ ...base, schemaVersion: 2 as const, steps: array(rawDefinition.steps) } as OnboardingModuleDefinitionV2)
         : upgradeModuleToV2(base)
     return {
         ...visual,
@@ -655,7 +655,7 @@ async function hydrateVisualBookend(
     rawDefinition: UnknownRow,
 ): Promise<OnboardingBookendDefinitionV2> {
     const visual = Number(rawDefinition.schemaVersion) === 2
-        ? { ...upgradeBookendToV2(base), schemaVersion: 2 as const, steps: array(rawDefinition.steps) } as OnboardingBookendDefinitionV2
+        ? upgradeBookendToV2({ ...upgradeBookendToV2(base), schemaVersion: 2 as const, steps: array(rawDefinition.steps) } as OnboardingBookendDefinitionV2)
         : upgradeBookendToV2(base)
     return {
         ...visual,

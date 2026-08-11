@@ -53,13 +53,14 @@ async function resolveBlocks(blocks: OnboardingBlock[]) {
 async function visualRenderStep(item: PreviewStep): Promise<OnboardingRenderStep> {
     const blocks = await resolveBlocks(item.step.blocks)
     const header = blocks.find((block) => block.kind === "header")
+    const estimate = blocks.find((block) => block.kind === "estimate")
     return {
         key: item.step.id,
         kind: "video",
         title: header?.kind === "header" ? header.title : "Untitled step",
         description: header?.kind === "header" ? header.description : "",
         moduleTitle: item.groupTitle,
-        estimatedTime: header?.kind === "header" ? header.estimatedTime : "",
+        estimatedTime: estimate?.kind === "estimate" ? estimate.estimatedTime : header?.kind === "header" ? header.estimatedTime : "",
         why: "",
         blocks,
         navigation: item.step.navigation,

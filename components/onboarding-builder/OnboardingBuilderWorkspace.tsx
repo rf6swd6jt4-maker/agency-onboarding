@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react"
 import { createOnboardingModule } from "@/app/[workspaceSlug]/onboarding-builder/actions"
-import { publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
+import { prepareVisualBuilderVideoUpload, publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import { Avatar } from "@/components/account/Avatar"
 import { VisualBuilderCanvas } from "@/components/onboarding-builder/VisualBuilderCanvas"
 import { useCollaborativeOnboardingDocument, type VisualBuilderDocument } from "@/components/onboarding-builder/useCollaborativeOnboardingDocument"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import {
     createButtonBlock,
+    createEstimateBlock,
     createFormBlock,
     createOnboardingField,
     createOnboardingStepV2,
@@ -17,6 +18,7 @@ import {
     type OnboardingBookendDefinitionV2,
     type OnboardingModuleDefinitionV2,
     type OnboardingStepV2,
+    type VideoBlock,
 } from "@/lib/onboarding/block-definition"
 import { visualStepTitle } from "@/lib/onboarding/block-validation"
 import { normalizedBuilderCursor } from "@/lib/onboarding/builder-presence"
@@ -113,12 +115,13 @@ function ChevronIcon({ collapsed }: { collapsed: boolean }) {
     return <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-3.5 w-3.5 fill-none stroke-current stroke-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
 }
 
-function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "form" | "video" | "button" | "field" }) {
+function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "form" | "video" | "button" | "field" }) {
     const tone = {
         bookend: "bg-indigo-500/15 text-indigo-300",
         module: "bg-blue-500/15 text-blue-300",
         step: "bg-teal-500/15 text-teal-300",
         header: "bg-sky-500/15 text-sky-300",
+        estimate: "bg-lime-500/15 text-lime-300",
         form: "bg-cyan-500/15 text-cyan-300",
         video: "bg-violet-500/15 text-violet-300",
         button: "bg-amber-500/15 text-amber-300",
@@ -129,6 +132,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         module: <><rect x="3" y="4" width="14" height="4" rx="1" /><rect x="3" y="12" width="14" height="4" rx="1" /></>,
         step: <><rect x="4" y="3" width="12" height="14" rx="2" /><path d="M7 7h6M7 10h6M7 13h4" /></>,
         header: <path d="M5 5h10M10 5v10M7 15h6" />,
+        estimate: <><circle cx="10" cy="10" r="6" /><path d="M10 6v4l3 2" /></>,
         form: <><path d="M7 5h9M7 10h9M7 15h9" /><circle cx="4" cy="5" r=".6" /><circle cx="4" cy="10" r=".6" /><circle cx="4" cy="15" r=".6" /></>,
         video: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="m8 8 5 2-5 2Z" /></>,
         button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
@@ -150,7 +154,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
     onDrop: (event: DragEvent<HTMLElement>, target: OutlineDropTarget) => void
 }) {
     const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
-    const [collapsedSteps, setCollapsedSteps] = useState<Set<string>>(() => new Set())
+    const [collapsedSteps, setCollapsedSteps] = useState<Set<string>>(() => new Set(groups.flatMap((group) => group.definition.steps.map((step) => `${group.key}:${step.id}`))))
 
     function toggleCollapsed(setter: typeof setCollapsedGroups, key: string) {
         setter((current) => {
@@ -198,13 +202,13 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                             {!stepCollapsed ? <div className="ml-5">
                                 {step.blocks.map((block, blockIndex) => {
                                     const blockSelected = selection.groupKey === group.key && selection.stepId === step.id && selection.blockId === block.id && !selection.fieldId
-                                    const blockLabel = block.kind === "header" ? "Header" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.label || "Button"
+                                    const blockLabel = block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.label || "Button"
                                     return <div key={block.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: step.id, blockIndex }) }}>
                                         <div title={shown && block.kind !== "header" ? "Drag to move; hold Shift while dragging to duplicate" : undefined} className={`group/row flex min-h-8 items-center gap-1 rounded-md text-xs ${selectedRow(blockSelected)}`} draggable={editable && shown && block.kind !== "header"} onDragStart={(event) => startDrag(event, { type: "block", groupKey: group.key, stepId: step.id, blockId: block.id })}>
                                             <span className="h-7 w-7 shrink-0" />
                                             <OutlineItemIcon kind={block.kind} />
                                             <button type="button" aria-disabled={!shown} onClick={() => { if (shown) onSelectBlock(group.key, step.id, block.id) }} className="min-w-0 flex-1 truncate py-2 pr-2 text-left capitalize">{blockLabel}</button>
-                                            {blockSelected && shown && block.kind !== "header" ? <button type="button" aria-label={`Delete ${blockLabel}`} disabled={!editable} onClick={(event) => { event.stopPropagation(); onDeleteSelection() }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-700 hover:text-white disabled:opacity-30"><TrashIcon /></button> : <span className="h-7 w-7 shrink-0" />}
+                                            {blockSelected && shown && block.kind !== "header" && block.kind !== "estimate" ? <button type="button" aria-label={`Delete ${blockLabel}`} disabled={!editable} onClick={(event) => { event.stopPropagation(); onDeleteSelection() }} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-700 hover:text-white disabled:opacity-30"><TrashIcon /></button> : <span className="h-7 w-7 shrink-0" />}
                                         </div>
                                         {block.kind === "form" ? <div className="ml-5">
                                             {block.fields.map((field, fieldIndex) => {
@@ -231,7 +235,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
 const inspectorInputClass = "mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"
 const inspectorTextareaClass = "mt-1 w-full rounded-lg border border-neutral-700 bg-black p-2 text-sm text-white"
 
-function InspectorPanel({ currentGroup, step, block, field, editable, updateStep, updateBlock, updateField, addField, deleteSelection }: {
+function InspectorPanel({ currentGroup, step, block, field, editable, updateStep, updateBlock, updateField, addField, uploadVideo, deleteSelection }: {
     currentGroup: DefinitionGroup | undefined
     step: OnboardingStepV2 | undefined
     block: OnboardingBlock | null
@@ -241,6 +245,7 @@ function InspectorPanel({ currentGroup, step, block, field, editable, updateStep
     updateBlock: (block: OnboardingBlock) => void
     updateField: (values: Partial<OnboardingField>) => void
     addField: () => void
+    uploadVideo: (file: File) => void
     deleteSelection: () => void
 }) {
     if (!step || !currentGroup) return <p className="text-xs leading-5 text-neutral-500">Select a step, element, or field to inspect it.</p>
@@ -254,15 +259,19 @@ function InspectorPanel({ currentGroup, step, block, field, editable, updateStep
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete field</button>
     </div>
     if (!block) return <div data-builder-step-inspector className="space-y-4">
-        <p className="text-xs leading-5 text-neutral-500">Step content stays editable directly on the canvas.</p>
         <label className="block text-xs text-neutral-500">Back button label<input value={step.navigation.backLabel} disabled={!editable} onChange={(event) => updateStep({ ...step, navigation: { ...step.navigation, backLabel: event.target.value } })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Continue button label<input value={step.navigation.continueLabel} disabled={!editable} onChange={(event) => updateStep({ ...step, navigation: { ...step.navigation, continueLabel: event.target.value } })} className={inspectorInputClass} /></label>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete step</button>
     </div>
     if (block.kind === "header") return <div className="space-y-4">
-        <p className="text-xs leading-5 text-neutral-500">Heading, description, and estimated time stay editable directly on the canvas.</p>
+        <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Description<textarea value={block.description} disabled={!editable} onChange={(event) => updateBlock({ ...block, description: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
         {currentGroup.key === "bookend:welcome" && currentGroup.definition.steps[0]?.id === step.id ? <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(block.showComposedModuleSummary)} disabled={!editable} onChange={(event) => updateBlock({ ...block, showComposedModuleSummary: event.target.checked })} />Show composed module list</label> : null}
-        <p className="text-xs text-neutral-600">The Header is required and always stays first.</p>
+        <p className="text-xs text-neutral-600">The Header block is required and always stays first.</p>
+    </div>
+    if (block.kind === "estimate") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Estimated time<input value={block.estimatedTime} disabled={!editable} onChange={(event) => updateBlock({ ...block, estimatedTime: event.target.value })} placeholder="2–3 minutes" className={inspectorInputClass} /></label>
+        <p className="text-xs text-neutral-600">The Estimated time block is required, but can be reordered and styled independently.</p>
     </div>
     if (block.kind === "form") return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Why we ask<textarea value={block.whyWeAsk} disabled={!editable} onChange={(event) => updateBlock({ ...block, whyWeAsk: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
@@ -270,12 +279,12 @@ function InspectorPanel({ currentGroup, step, block, field, editable, updateStep
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete form</button>
     </div>
     if (block.kind === "video") return <div className="space-y-4">
-        <p className="text-xs leading-5 text-neutral-500">Upload or replace the video directly on the canvas.</p>
+        <label className="block text-xs text-neutral-500">Video<span className="mt-1 flex min-h-9 items-center justify-between gap-2 rounded-lg border border-neutral-700 bg-black px-2 text-xs text-neutral-300"><span className="min-w-0 truncate">{block.upload?.name ?? "No video uploaded"}</span><span className="shrink-0 font-medium text-white">{block.upload ? "Replace" : "Upload"}</span></span><input type="file" accept="video/*" disabled={!editable} onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadVideo(file); event.currentTarget.value = "" }} className="sr-only" /></label>
         <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.requirement === "finish"} disabled={!editable} onChange={(event) => updateBlock({ ...block, requirement: event.target.checked ? "finish" : "none" })} />Client must finish this video</label>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete video</button>
     </div>
     return <div className="space-y-4">
-        <p className="text-xs leading-5 text-neutral-500">Button text stays editable directly on the canvas.</p>
+        <label className="block text-xs text-neutral-500">Button text<input value={block.label} disabled={!editable} onChange={(event) => updateBlock({ ...block, label: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Destination URL<input value={block.url} disabled={!editable} onChange={(event) => updateBlock({ ...block, url: event.target.value })} placeholder="https://…" className={inspectorInputClass} /></label>
         <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.required} disabled={!editable} onChange={(event) => updateBlock({ ...block, required: event.target.checked })} />Client must open this link</label>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete button</button>
@@ -386,7 +395,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>(() => activeServices.slice(0, 1).map((service) => service.id))
     const groups = useMemo(() => composeGroups(collaboration.document, data, selectedServiceIds), [collaboration.document, data, selectedServiceIds])
     const [visibleModuleIds, setVisibleModuleIds] = useState<Set<string>>(() => new Set([
-        ...composedModuleIds(initialDocument, data, activeServices.slice(0, 1).map((service) => service.id)),
+        ...(data.mandatory.draftModuleIds.length ? data.mandatory.draftModuleIds : data.mandatory.publishedModuleIds),
         ...(data.selectedModule ? [data.selectedModule.id] : []),
     ]))
     const firstGroup = groups[0]
@@ -422,7 +431,6 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 const valid = stored.filter((id) => activeServices.some((service) => service.id === id))
                 if (valid.length) {
                     setSelectedServiceIds(valid)
-                    setVisibleModuleIds(new Set([...composedModuleIds(initialDocument, data, valid), ...(data.selectedModule ? [data.selectedModule.id] : [])]))
                 }
                 setLeftOpen(railPreference(`${servicePreferenceKey}:left`, true))
                 setRightOpen(railPreference(`${servicePreferenceKey}:right`, true))
@@ -541,6 +549,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 setError("That target step cannot accept another Form block.")
                 return document
             }
+            if (sourceBlock.kind === "estimate" && (copy || targetStep.blocks.some((block) => block.kind === "estimate" && !(movingWithinSameStep && block.id === sourceBlock.id)))) {
+                setError("A step can contain only one Estimated time block.")
+                return document
+            }
             moved.block = copy ? duplicateBlock(sourceBlock) : sourceBlock
             if (sourceGroupKey === targetGroupKey && sourceStepId === targetStepId) {
                 const blocks = [...sourceStep.blocks]
@@ -592,7 +604,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         if (!raw) return
         event.preventDefault()
         try {
-            const payload = JSON.parse(raw) as { type: "step" | "block" | "field" | "library"; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "form" | "video" | "button"; copy?: boolean }
+            const payload = JSON.parse(raw) as { type: "step" | "block" | "field" | "library"; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "form" | "video" | "button"; copy?: boolean }
             if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy || event.shiftKey))
             else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && target.stepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, target.groupKey, target.stepId, target.blockIndex ?? Number.MAX_SAFE_INTEGER, Boolean(payload.copy || event.shiftKey))
             else if (payload.type === "field" && payload.groupKey && payload.stepId && payload.formBlockId && payload.fieldId && target.formBlockId && target.fieldIndex !== undefined) {
@@ -602,7 +614,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 }
                 moveField(target.groupKey, target.stepId!, target.formBlockId, payload.fieldId, target.fieldIndex, Boolean(payload.copy || event.shiftKey))
             } else if (payload.type === "library" && payload.kind && target.stepId) {
-                const block = payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : createButtonBlock()
+                const block = payload.kind === "estimate" ? createEstimateBlock() : payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : createButtonBlock()
                 let inserted = false
                 collaboration.updateDocument((document) => {
                     const targetDefinition = documentDefinition(document, target.groupKey)
@@ -610,6 +622,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     if (!targetDefinition || !targetStep) return document
                     if (payload.kind === "form" && (target.groupKey.startsWith("bookend:") || targetStep.blocks.some((candidate) => candidate.kind === "form"))) {
                         setError("That target step cannot accept a Form block.")
+                        return document
+                    }
+                    if (payload.kind === "estimate" && targetStep.blocks.some((candidate) => candidate.kind === "estimate")) {
+                        setError("That step already has an Estimated time block.")
                         return document
                     }
                     inserted = true
@@ -655,7 +671,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         if (selectedField && selectedBlock?.kind === "form") {
             updateBlock({ ...selectedBlock, fields: selectedBlock.fields.filter((field) => field.id !== selectedField.id) })
             setSelection({ ...selection, fieldId: null })
-        } else if (selectedBlock && selectedBlock.kind !== "header") {
+        } else if (selectedBlock && selectedBlock.kind !== "header" && selectedBlock.kind !== "estimate") {
             removeBlock()
         } else if (!selectedBlock) {
             removeCurrentStep()
@@ -677,10 +693,11 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         setSelection({ groupKey: currentGroup.key, stepId: step.id, blockId: step.blocks[0].id })
     }
 
-    function addBlock(kind: "form" | "video" | "button") {
+    function addBlock(kind: "estimate" | "form" | "video" | "button") {
         if (!currentStep || !currentGroup) return
         if (kind === "form" && (currentGroup.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form"))) return
-        const block = kind === "form" ? createFormBlock() : kind === "video" ? createVideoBlock() : createButtonBlock()
+        if (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) return
+        const block = kind === "estimate" ? createEstimateBlock() : kind === "form" ? createFormBlock() : kind === "video" ? createVideoBlock() : createButtonBlock()
         updateCurrentStep({ ...currentStep, blocks: [...currentStep.blocks, block] })
         setSelection({ ...selection, blockId: block.id })
     }
@@ -702,8 +719,23 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         setSelection({ ...selection, fieldId: field.id })
     }
 
+    async function uploadSelectedVideo(file: File) {
+        if (!currentGroup || selectedBlock?.kind !== "video") return
+        setError(null)
+        try {
+            const target = currentGroup.kind === "module" ? { kind: "module" as const, definition: currentGroup.definition } : { kind: "bookend" as const, definition: currentGroup.definition }
+            const prepared = await prepareVisualBuilderVideoUpload(workspaceSlug, target, { name: file.name, size: file.size, type: file.type })
+            const response = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file })
+            if (!response.ok) throw new Error(`Upload failed with status ${response.status}.`)
+            updateCurrentRevisionId(prepared.draftRevisionId)
+            updateBlock({ ...selectedBlock, legacyEmbedUrl: null, upload: { ...prepared.storedVideo, resolvedUrl: prepared.previewUrl } } satisfies VideoBlock)
+        } catch (uploadError) {
+            setError(uploadError instanceof Error ? uploadError.message : "Video upload failed.")
+        }
+    }
+
     function removeBlock() {
-        if (!currentStep || !selectedBlock || selectedBlock.kind === "header") return
+        if (!currentStep || !selectedBlock || selectedBlock.kind === "header" || selectedBlock.kind === "estimate") return
         updateCurrentStep({ ...currentStep, blocks: currentStep.blocks.filter((block) => block.id !== selectedBlock.id) })
         setSelection({ ...selection, blockId: null, fieldId: null })
     }
@@ -827,7 +859,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                         {leftTab === "outline" ? <>
                             <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Shift-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
                             <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
-                        </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header</b><small className="text-neutral-600">Required at the top</small></span></button>{(["form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
+                        </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "estimate" && currentStep.blocks.some((block) => block.kind === "estimate")) || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
                     </div>
                     <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div>
                 </> : <RailToggleButton side="left" label="Expand left rail" onClick={() => rememberRail("left", true)} />}
@@ -840,7 +872,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             {!preview ? <aside className={`min-h-0 border-l border-neutral-800 bg-neutral-950 ${rightOpen ? "hidden xl:flex xl:flex-col" : "hidden xl:flex xl:items-start xl:justify-center xl:pt-3"}`}>
                 {rightOpen ? <>
                     <div data-builder-right-rail-header className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2"><button type="button" onClick={() => setRightTab("inspect")} className={`h-8 rounded-md px-2 text-xs ${rightTab === "inspect" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Inspect</button><button type="button" onClick={() => setRightTab("styles")} className={`h-8 rounded-md px-2 text-xs ${rightTab === "styles" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Styles</button><span className="ml-auto"><RailToggleButton side="right" label="Collapse right rail" onClick={() => rememberRail("right", false)} /></span></div>
-                    <div className="min-h-0 flex-1 overflow-y-auto p-3">{rightTab === "inspect" ? <InspectorPanel currentGroup={currentGroup} step={currentStep} block={selectedBlock} field={selectedField} editable={collaboration.editable} updateStep={updateCurrentStep} updateBlock={updateBlock} updateField={updateSelectedField} addField={addFieldToSelectedForm} deleteSelection={confirmDeleteSelection} /> : <StylesPanel block={selectedBlock} field={selectedField} theme={collaboration.document.theme} updateBlock={updateBlock} updateThemeSwatch={updateThemeSwatch} addThemeSwatch={addThemeSwatch} updateAssignment={(slot, swatchId) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: swatchId } } }))} />}</div>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-3">{rightTab === "inspect" ? <InspectorPanel currentGroup={currentGroup} step={currentStep} block={selectedBlock} field={selectedField} editable={collaboration.editable} updateStep={updateCurrentStep} updateBlock={updateBlock} updateField={updateSelectedField} addField={addFieldToSelectedForm} uploadVideo={(file) => void uploadSelectedVideo(file)} deleteSelection={confirmDeleteSelection} /> : <StylesPanel block={selectedBlock} field={selectedField} theme={collaboration.document.theme} updateBlock={updateBlock} updateThemeSwatch={updateThemeSwatch} addThemeSwatch={addThemeSwatch} updateAssignment={(slot, swatchId) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: swatchId } } }))} />}</div>
                 </> : <RailToggleButton side="right" label="Expand right rail" onClick={() => rememberRail("right", true)} />}
             </aside> : null}
         </div>

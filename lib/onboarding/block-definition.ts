@@ -35,8 +35,14 @@ export type HeaderBlock = BlockBase & {
     kind: "header"
     title: string
     description: string
+    /** Kept as a V1 persistence mirror while estimated time is its own block. */
     estimatedTime: string
     showComposedModuleSummary?: boolean
+}
+
+export type EstimateBlock = BlockBase & {
+    kind: "estimate"
+    estimatedTime: string
 }
 
 export type FormBlock = BlockBase & {
@@ -60,7 +66,7 @@ export type ButtonBlock = BlockBase & {
     appearance: "primary" | "secondary"
 }
 
-export type OnboardingBlock = HeaderBlock | FormBlock | VideoBlock | ButtonBlock
+export type OnboardingBlock = HeaderBlock | EstimateBlock | FormBlock | VideoBlock | ButtonBlock
 
 export type OnboardingStepV2 = {
     id: string
@@ -105,6 +111,15 @@ export function createHeaderBlock(input: Partial<HeaderBlock> = {}): HeaderBlock
     }
 }
 
+export function createEstimateBlock(estimatedTime = "2–3 minutes", id = stableUuid()): EstimateBlock {
+    return {
+        id,
+        kind: "estimate",
+        estimatedTime,
+        layout: { ...DEFAULT_BLOCK_LAYOUT, spacingBefore: "compact", spacingAfter: "compact" },
+    }
+}
+
 export function createFormBlock(fields?: ConfiguredOnboardingField[]): FormBlock {
     return {
         id: stableUuid(),
@@ -135,6 +150,7 @@ export function createOnboardingStepV2(options: { bookend?: boolean; title?: str
         key: stableKey(id, "step"),
         blocks: [
             createHeaderBlock({ title: options.title, showComposedModuleSummary: options.showComposedModuleSummary }),
+            createEstimateBlock(),
             ...(options.bookend ? [] : [createFormBlock()]),
         ],
         navigation: { backLabel: "Back", continueLabel: options.bookend ? "Continue" : "Complete and continue" },
@@ -143,6 +159,34 @@ export function createOnboardingStepV2(options: { bookend?: boolean; title?: str
 
 export function stepHeader(step: OnboardingStepV2) {
     return step.blocks.find((block): block is HeaderBlock => block.kind === "header") ?? createHeaderBlock()
+}
+
+export function stepEstimate(step: OnboardingStepV2) {
+    return step.blocks.find((block): block is EstimateBlock => block.kind === "estimate") ?? null
+}
+
+function estimateBlockId(stepId: string) {
+    const hex = stepId.replaceAll("-", "").padEnd(32, "0").slice(0, 32)
+    const prefix = ((Number.parseInt(hex.slice(0, 8), 16) ^ 0x45535449) >>> 0).toString(16).padStart(8, "0")
+    return `${prefix}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+export function ensureEstimateBlock(step: OnboardingStepV2): OnboardingStepV2 {
+    if (stepEstimate(step)) return step
+    const header = stepHeader(step)
+    const [first, ...rest] = step.blocks
+    return {
+        ...step,
+        blocks: [first, createEstimateBlock(header.estimatedTime, estimateBlockId(step.id)), ...rest],
+    }
+}
+
+export function mirrorEstimatedTime(step: OnboardingStepV2): OnboardingStepV2 {
+    const estimatedTime = stepEstimate(step)?.estimatedTime ?? ""
+    return {
+        ...step,
+        blocks: step.blocks.map((block) => block.kind === "header" ? { ...block, estimatedTime } : block),
+    }
 }
 
 export function stepForm(step: OnboardingStepV2) {
@@ -169,23 +213,23 @@ function legacyStepToV2(step: ConfiguredOnboardingStep): OnboardingStepV2 {
             legacyEmbedUrl: step.videoUrl || null,
             layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
         }]
-    return { id: step.id, key: step.key, blocks: [header, ...content], navigation: { backLabel: "Back", continueLabel: "Complete and continue" } }
+    return { id: step.id, key: step.key, blocks: [header, createEstimateBlock(step.estimatedTime, estimateBlockId(step.id)), ...content], navigation: { backLabel: "Back", continueLabel: "Complete and continue" } }
 }
 
 export function upgradeModuleToV2(module: OnboardingModuleDefinition | OnboardingModuleDefinitionV2): OnboardingModuleDefinitionV2 {
-    if (isOnboardingModuleV2(module)) return module
+    if (isOnboardingModuleV2(module)) return { ...module, steps: module.steps.map(ensureEstimateBlock) }
     return { ...module, schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION, steps: module.steps.map(legacyStepToV2) }
 }
 
 export function upgradeBookendToV2(bookend: OnboardingBookendDefinition | OnboardingBookendDefinitionV2): OnboardingBookendDefinitionV2 {
-    if (isOnboardingBookendV2(bookend)) return bookend
+    if (isOnboardingBookendV2(bookend)) return { ...bookend, steps: bookend.steps.map(ensureEstimateBlock) }
     const id = stableUuid()
     const blocks: OnboardingBlock[] = [createHeaderBlock({
         title: bookend.title,
         description: bookend.body,
         estimatedTime: bookend.kind === "welcome" ? "2 minutes" : "A few moments",
         showComposedModuleSummary: bookend.kind === "welcome",
-    })]
+    }), createEstimateBlock(bookend.kind === "welcome" ? "2 minutes" : "A few moments", estimateBlockId(id))]
     if (bookend.videoPath || bookend.videoUrl) {
         blocks.push({
             id: stableUuid(),
@@ -220,8 +264,10 @@ export function moduleV2WithLegacyProjection(module: OnboardingModuleDefinitionV
         description: module.description,
         isTest: module.isTest,
         schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
-        steps: module.steps.map((step) => {
+        steps: module.steps.map((sourceStep) => {
+            const step = mirrorEstimatedTime(sourceStep)
             const header = stepHeader(step)
+            const estimate = stepEstimate(step)
             const form = stepForm(step)
             const video = step.blocks.find((block): block is VideoBlock => block.kind === "video")
             return {
@@ -230,7 +276,7 @@ export function moduleV2WithLegacyProjection(module: OnboardingModuleDefinitionV
                 kind: form ? "form" : "video",
                 title: header.title,
                 description: header.description,
-                estimatedTime: header.estimatedTime,
+                estimatedTime: estimate?.estimatedTime ?? header.estimatedTime,
                 why: form?.whyWeAsk ?? "",
                 videoUrl: "",
                 videoPath: video?.upload?.path ?? null,

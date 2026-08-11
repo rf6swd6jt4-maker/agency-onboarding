@@ -81,16 +81,17 @@ export function OnboardingSessionRenderer({
     const isFinalStep = step.kind === "final"
     const videoEmbedUrl = step.videoUrl ? embeddedVideoUrl(step.videoUrl) : null
     const visualHeader = step.blocks?.find((block) => block.kind === "header")
+    const visualEstimate = step.blocks?.find((block) => block.kind === "estimate")
 
     if (visualHeader?.kind === "header" && step.blocks?.length) {
         return (
             <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
-                <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">{step.moduleTitle}</p>
                 <div className={onboardingBlockLayoutClasses(visualHeader.layout)}>
-                    <h1 className="text-3xl font-semibold tracking-tight text-[var(--onboarding-text,#0F172A)]">{visualHeader.title}</h1>
+                    <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">{step.moduleTitle}</p>
+                    <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--onboarding-text,#0F172A)]">{visualHeader.title}</h1>
                     {visualHeader.description ? <p className="mt-4 text-lg leading-7 text-[var(--onboarding-muted,#475569)]">{visualHeader.description}</p> : null}
-                    {visualHeader.estimatedTime ? <div className="mt-5 inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualHeader.estimatedTime}</div> : null}
                 </div>
+                {visualEstimate?.kind === "estimate" && visualEstimate.estimatedTime ? <div className={onboardingBlockLayoutClasses(visualEstimate.layout)}><div className="inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualEstimate.estimatedTime}</div></div> : visualHeader.estimatedTime ? <div className="mt-5 inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualHeader.estimatedTime}</div> : null}
                 {notice}
                 {visualHeader.showComposedModuleSummary && showModuleSummary ? (
                     <div className="mt-8 rounded-2xl bg-[var(--onboarding-page,#F8F7F3)] p-5">

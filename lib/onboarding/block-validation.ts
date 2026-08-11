@@ -3,6 +3,7 @@ import {
     DEFAULT_BLOCK_LAYOUT,
     ONBOARDING_BLOCK_SCHEMA_VERSION,
     bookendV2Definition,
+    mirrorEstimatedTime,
     moduleV2WithLegacyProjection,
     stepHeader,
     type OnboardingBlock,
@@ -59,6 +60,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     const id = uuid(step.id, "Every onboarding step needs a stable ID.")
     if (!Array.isArray(step.blocks) || !step.blocks.length) throw new Error("Every step needs a Header block.")
     let headerCount = 0
+    let estimateCount = 0
     let formCount = 0
     const blocks = step.blocks.map((block, index): OnboardingBlock => {
         const blockId = uuid(block.id, "Every onboarding block needs a stable ID.")
@@ -78,6 +80,11 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
                 showComposedModuleSummary: options.firstWelcomeStep && Boolean(block.showComposedModuleSummary),
                 layout: layout(block),
             }
+        }
+        if (block.kind === "estimate") {
+            estimateCount += 1
+            if (estimateCount > 1) throw new Error("A step can contain only one Estimated time block.")
+            return { id: blockId, kind: "estimate", estimatedTime: text(block.estimatedTime, 80), layout: layout(block) }
         }
         if (block.kind === "form") {
             if (options.bookend) throw new Error("Welcome and Completion steps cannot contain forms.")
@@ -113,7 +120,8 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
         return { id: blockId, kind: "button", label, url: url.toString(), required: Boolean(block.required), appearance: block.appearance === "secondary" ? "secondary" : "primary", layout: layout(block) }
     })
     if (headerCount !== 1) throw new Error("Every step needs exactly one Header block.")
-    return {
+    if (estimateCount !== 1) throw new Error("Every step needs exactly one Estimated time block.")
+    return mirrorEstimatedTime({
         id,
         key: text(step.key, 120) || `step-${id.replaceAll("-", "").slice(-12)}`,
         blocks,
@@ -121,7 +129,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             backLabel: text(step.navigation?.backLabel, 60) || "Back",
             continueLabel: text(step.navigation?.continueLabel, 60) || "Complete and continue",
         },
-    } satisfies OnboardingStepV2
+    } satisfies OnboardingStepV2)
 }
 
 export function normalizeVisualModule(module: OnboardingModuleDefinitionV2) {

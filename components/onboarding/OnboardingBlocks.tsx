@@ -83,7 +83,7 @@ export function OnboardingBlocks({
     }
 
     return <>
-        {blocks.filter((block) => block.kind !== "header").map((block) => {
+        {blocks.filter((block) => block.kind !== "header" && block.kind !== "estimate").map((block) => {
             if (block.kind === "form") {
                 if (!form) return null
                 return <BlockFrame key={block.id} block={block}>

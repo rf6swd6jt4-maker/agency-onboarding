@@ -30,11 +30,12 @@ const updateRoute = readFileSync("app/api/workspaces/[workspaceSlug]/onboarding-
 test("version-two steps use a protected Header and compatible mixed blocks", () => {
     const ordinary = createOnboardingStepV2()
     const bookend = createOnboardingStepV2({ bookend: true })
-    assert.deepEqual(ordinary.blocks.map((block) => block.kind), ["header", "form"])
-    assert.deepEqual(bookend.blocks.map((block) => block.kind), ["header"])
+    assert.deepEqual(ordinary.blocks.map((block) => block.kind), ["header", "estimate", "form"])
+    assert.deepEqual(bookend.blocks.map((block) => block.kind), ["header", "estimate"])
     assert.match(blockValidation, /Every step needs exactly one Header block/)
     assert.match(blockValidation, /Welcome and Completion steps cannot contain forms/)
     assert.match(blockValidation, /A step can contain only one Form block/)
+    assert.match(blockValidation, /Every step needs exactly one Estimated time block/)
 })
 
 test("publish validation rejects unsafe V2 definitions", () => {
@@ -61,6 +62,23 @@ test("the visual Builder is standalone, responsive, collapsible, and composition
     assert.match(visualCanvas, /max-w-\[430px\]/)
     assert.match(builderUi, /Calendar/)
     assert.match(builderUi, /Coming later/)
+})
+
+test("Builder defaults expose bookends and mandatory modules with expanded modules and collapsed steps", () => {
+    assert.match(builderUi, /data\.mandatory\.draftModuleIds\.length \? data\.mandatory\.draftModuleIds : data\.mandatory\.publishedModuleIds/)
+    assert.match(builderUi, /const \[collapsedGroups, setCollapsedGroups\] = useState<Set<string>>\(\(\) => new Set\(\)\)/)
+    assert.match(builderUi, /groups\.flatMap\(\(group\) => group\.definition\.steps\.map/)
+    assert.match(builderUi, /group\.kind === "bookend" \|\| visibleModuleIds\.has/)
+})
+
+test("Header and estimated time are independently inspectable blocks", () => {
+    assert.match(builderUi, /Header block/)
+    assert.match(builderUi, /block\.kind === "estimate"/)
+    assert.match(builderUi, />Heading<input value=\{block\.title\}/)
+    assert.match(builderUi, />Estimated time<input value=\{block\.estimatedTime\}/)
+    assert.doesNotMatch(builderUi, /Step content stays editable directly on the canvas/)
+    assert.match(visualCanvas, /target\.definition\.name/)
+    assert.match(visualCanvas, /Estimated time:/)
 })
 
 test("Builder mobile simulation forces the client layout and Preview fills the viewport", () => {
