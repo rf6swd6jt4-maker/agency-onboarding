@@ -4,6 +4,7 @@ import test from "node:test"
 import {
     createOnboardingStepV2,
 } from "../lib/onboarding/block-definition.ts"
+import { isStableOnboardingId } from "../lib/onboarding/stable-id.ts"
 import { normalizedBuilderCursor, visibleBuilderPresence, type BuilderPresence } from "../lib/onboarding/builder-presence.ts"
 import { persistBuilderUpdate, refreshBuilderUpdates } from "../lib/onboarding/builder-sync-client.ts"
 
@@ -60,11 +61,18 @@ test("collaborative snapshots are upgraded before they replace the server defini
 test("publish validation rejects unsafe V2 definitions", () => {
     assert.match(blockValidation, /Replace embedded videos with a workspace upload before publishing/)
     assert.match(blockValidation, /The Header must remain the first block in every step/)
-    assert.match(blockValidation, /Block IDs must be unique within a definition/)
-    assert.match(blockValidation, /Field IDs must be unique within a definition/)
+    assert.match(blockValidation, /duplicated.*block ID/u)
+    assert.match(blockValidation, /two fields with the same internal ID/u)
     assert.match(blockValidation, /Button destinations must use HTTPS/)
     assert.match(blockLayout, /spacingBeforeClasses/)
     assert.match(blockLayout, /spacingAfterClasses/)
+})
+
+test("publish validation accepts deterministic legacy UUID-shaped IDs", () => {
+    assert.equal(isStableOnboardingId("f427efbe-1e05-b363-677f-4be3974bc2f4"), true)
+    assert.equal(isStableOnboardingId("not-a-stable-id"), false)
+    assert.match(blockValidation, /damaged internal step data/u)
+    assert.match(visualActions, /onboarding\.release\.rejected/u)
 })
 
 test("the visual Builder is standalone, responsive, collapsible, and composition-driven", () => {

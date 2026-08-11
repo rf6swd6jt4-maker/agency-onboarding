@@ -27,6 +27,7 @@ const onboardingForm = readFileSync("components/onboarding/OnboardingForm.tsx", 
 const onboardingOperations = readFileSync("supabase/migrations/20260810101000_custom_onboarding_operations.sql", "utf8")
 const builderInvoiceSessions = readFileSync("supabase/migrations/20260811113000_align_invoice_sessions_with_builder.sql", "utf8")
 const relationshipArchive = readFileSync("supabase/migrations/20260811143000_archive_relationships.sql", "utf8")
+const relationshipArchiveFix = readFileSync("supabase/migrations/20260811150000_fix_relationship_archive_activity.sql", "utf8")
 const environmentExample = readFileSync(".env.example", "utf8")
 const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
@@ -237,6 +238,9 @@ test("relationship archive releases WhatsApp confirmation matching while preserv
     assert.doesNotMatch(relationshipArchive, /update public\.client_sales/u)
     assert.match(saleAutomation, /firstUnarchivedRelationshipSale/u)
     assert.match(saleAutomation, /statusById\.get\(candidate\.relationship_id\) !== "archived"/u)
+    assert.match(relationshipArchiveFix, /'onboarding',[\s\S]+relationship\.archived/u)
+    assert.doesNotMatch(relationshipArchiveFix, /'relationships'/u)
+    assert.match(relationshipActions, /reportPlatformFailure/u)
 })
 
 test("outbox retry route fails closed and never returns queue payloads", () => {

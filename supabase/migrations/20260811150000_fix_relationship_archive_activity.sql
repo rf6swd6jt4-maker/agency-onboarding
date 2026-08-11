@@ -1,3 +1,7 @@
+-- The initial archive RPC used an Admin Activity category that is not part of
+-- the platform's constrained category vocabulary. Recreate it with the
+-- supported onboarding category so the audit insert and archive commit
+-- atomically instead of rolling back together.
 create or replace function public.archive_workspace_relationship(
     p_workspace_id uuid,
     p_relationship_id uuid,

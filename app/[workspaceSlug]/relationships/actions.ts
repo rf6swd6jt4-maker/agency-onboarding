@@ -4,6 +4,7 @@ import { randomUUID } from "crypto"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { createOnboardingClient } from "@/lib/onboarding/client-creation"
+import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import {
     assetHref,
@@ -324,7 +325,16 @@ export async function voidAndReopenRelationshipInvoice(slug: string, relationshi
     }
 }
 
-export async function archiveRelationship(slug: string, relationshipId: string) {
+type ArchiveRelationshipState = { error?: string }
+
+export async function archiveRelationship(
+    slug: string,
+    relationshipId: string,
+    _state: ArchiveRelationshipState,
+    _formData: FormData,
+): Promise<ArchiveRelationshipState> {
+    void _state
+    void _formData
     const { workspace, user } = await requireWorkspace(slug, "admin")
     const { data, error } = await supabaseAdmin.rpc("archive_workspace_relationship", {
         p_workspace_id: workspace.id,
@@ -334,10 +344,25 @@ export async function archiveRelationship(slug: string, relationshipId: string) 
 
     if (error) {
         const missingMigration = error.code === "42883" || error.code === "PGRST202" || error.message.toLowerCase().includes("schema cache")
-        if (missingMigration) throw new Error("Apply the relationship archive migration before archiving relationships")
-        throw new Error(error.message || "Could not archive relationship")
+        await reportPlatformFailure({
+            workspaceId: workspace.id,
+            category: "onboarding",
+            source: "relationship_action",
+            operation: "archive_relationship",
+            fingerprint: platformFailureFingerprint(["relationship", "archive", error.code]),
+            severity: "warning",
+            summary: "A relationship could not be archived",
+            diagnostics: { error_code: error.code },
+            sourceHref: relationshipHubHref(slug, relationshipId),
+            actorUserId: user.id,
+        })
+        return {
+            error: missingMigration
+                ? "The relationship archive database update has not been applied yet. Apply the latest migration, then try again."
+                : "This relationship could not be archived. The failure was added to Admin Activity for investigation.",
+        }
     }
-    if (!data) throw new Error("Relationship not found")
+    if (!data) return { error: "This relationship no longer exists." }
 
     relationshipRevalidatePaths(slug, relationshipId)
     redirect(workspaceHref(slug, "relationships"))

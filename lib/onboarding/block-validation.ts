@@ -12,6 +12,7 @@ import {
     type OnboardingStepV2,
 } from "@/lib/onboarding/block-definition"
 import { normalizeHexColour } from "@/lib/onboarding/theme"
+import { isStableOnboardingId } from "@/lib/onboarding/stable-id"
 
 const fieldTypes = new Set(["text", "email", "tel", "url", "textarea", "file"])
 const fileAcceptTypes = new Set(["image", "video", "document", "any"])
@@ -24,8 +25,12 @@ function text(value: unknown, maximum: number) {
 }
 
 function uuid(value: unknown, message: string) {
-    const id = String(value ?? "")
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new Error(message)
+    const id = String(value ?? "").trim()
+    // PostgreSQL UUID columns accept the full UUID-shaped 128-bit space. Older
+    // Betelgeze seeds used deterministic UUID-shaped IDs without RFC version
+    // bits, so requiring a version/variant here incorrectly rejected safe,
+    // stable definitions that the database can store.
+    if (!isStableOnboardingId(id)) throw new Error(message)
     return id
 }
 
@@ -42,9 +47,10 @@ function name(block: OnboardingBlock, fallback: string) {
     return text(block.name, 120) || fallback
 }
 
-function normalizeField(field: ConfiguredOnboardingField, seen: Set<string>) {
-    const id = uuid(field.id, "Every form field needs a stable ID.")
-    if (seen.has(id)) throw new Error("Field IDs must be unique within a definition.")
+function normalizeField(field: ConfiguredOnboardingField, seen: Set<string>, location: string) {
+    const fieldName = text(field.label, 160) || "Untitled field"
+    const id = uuid(field.id, `${location}, field “${fieldName}” has damaged internal data. Reload the Builder and try publishing again. If it remains, the failure will appear in Admin Activity.`)
+    if (seen.has(id)) throw new Error(`${location} contains two fields with the same internal ID. Duplicate or recreate the affected field, then publish again.`)
     seen.add(id)
     const type = fieldTypes.has(field.type) ? field.type : "text"
     return {
@@ -60,8 +66,11 @@ function normalizeField(field: ConfiguredOnboardingField, seen: Set<string>) {
     } satisfies ConfiguredOnboardingField
 }
 
-function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firstWelcomeStep: boolean; blockIds: Set<string>; fieldIds: Set<string> }) {
-    const id = uuid(step.id, "Every onboarding step needs a stable ID.")
+function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firstWelcomeStep: boolean; blockIds: Set<string>; fieldIds: Set<string>; definitionName: string; stepIndex: number }) {
+    const rawHeader = Array.isArray(step.blocks) ? step.blocks.find((block) => block.kind === "header") : null
+    const stepName = rawHeader?.kind === "header" ? text(rawHeader.title, 160) || `Step ${options.stepIndex + 1}` : `Step ${options.stepIndex + 1}`
+    const location = `“${options.definitionName}” → “${stepName}”`
+    const id = uuid(step.id, `${location} has damaged internal step data. Reload the Builder and try publishing again. If it remains, the failure will appear in Admin Activity.`)
     if (!Array.isArray(step.blocks) || !step.blocks.length) throw new Error("Every step needs a Header block.")
     let headerCount = 0
     let estimateCount = 0
@@ -70,8 +79,9 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     let videoCount = 0
     let buttonCount = 0
     const blocks = step.blocks.map((block, index): OnboardingBlock => {
-        const blockId = uuid(block.id, "Every onboarding block needs a stable ID.")
-        if (options.blockIds.has(blockId)) throw new Error("Block IDs must be unique within a definition.")
+        const blockName = name(block, block.kind === "header" ? "Header block" : block.kind)
+        const blockId = uuid(block.id, `${location}, block “${blockName}” has damaged internal data. Reload the Builder and try publishing again. If it remains, the failure will appear in Admin Activity.`)
+        if (options.blockIds.has(blockId)) throw new Error(`${location} contains a duplicated “${blockName}” block ID. Remove and re-add that block, then publish again.`)
         options.blockIds.add(blockId)
         if (block.kind === "header") {
             headerCount += 1
@@ -98,7 +108,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
             formCount += 1
             if (formCount > 1) throw new Error("A step can contain only one Form block.")
             const fields = Array.isArray(block.fields) ? block.fields : []
-            return { id: blockId, name: name(block, "Form"), kind: "form", whyWeAsk: text(block.whyWeAsk, 2_000), fields: fields.map((field) => normalizeField(field, options.fieldIds)), layout: layout(block) }
+            return { id: blockId, name: name(block, "Form"), kind: "form", whyWeAsk: text(block.whyWeAsk, 2_000), fields: fields.map((field) => normalizeField(field, options.fieldIds, location)), layout: layout(block) }
         }
         if (block.kind === "checklist") {
             checklistCount += 1
@@ -173,9 +183,9 @@ export function normalizeVisualModule(module: OnboardingModuleDefinitionV2) {
             description: text(module.description, 2_000),
             isTest: Boolean(module.isTest),
             schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
-            steps: module.steps.map((step) => {
-                const result = normalizeStep(step, { bookend: false, firstWelcomeStep: false, blockIds, fieldIds })
-                if (stepIds.has(result.id)) throw new Error("Step IDs must be unique within a module.")
+            steps: module.steps.map((step, stepIndex) => {
+                const result = normalizeStep(step, { bookend: false, firstWelcomeStep: false, blockIds, fieldIds, definitionName: name, stepIndex })
+                if (stepIds.has(result.id)) throw new Error(`“${name}” contains two steps with the same internal ID. Duplicate or recreate one of those steps, then publish again.`)
                 stepIds.add(result.id)
                 return result
             }),
@@ -196,8 +206,9 @@ export function normalizeVisualBookend(bookend: OnboardingBookendDefinitionV2) {
             ...bookend,
             schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
             steps: bookend.steps.map((step, index) => {
-                const result = normalizeStep(step, { bookend: true, firstWelcomeStep: bookend.kind === "welcome" && index === 0, blockIds, fieldIds })
-                if (stepIds.has(result.id)) throw new Error("Bookend step IDs must be unique.")
+                const definitionName = bookend.kind === "welcome" ? "Welcome" : "Completion"
+                const result = normalizeStep(step, { bookend: true, firstWelcomeStep: bookend.kind === "welcome" && index === 0, blockIds, fieldIds, definitionName, stepIndex: index })
+                if (stepIds.has(result.id)) throw new Error(`“${definitionName}” contains two steps with the same internal ID. Duplicate or recreate one of those steps, then publish again.`)
                 stepIds.add(result.id)
                 return result
             }),

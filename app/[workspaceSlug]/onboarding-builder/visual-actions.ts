@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
 import { normalizeThemeDraft, normalizeVisualBookend, normalizeVisualModule } from "@/lib/onboarding/block-validation"
 import type { ConfigurationActionResult, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
+import { recordAdminActivity } from "@/lib/admin/activity"
 import { configurationRpc, unexpectedConfigurationError } from "@/lib/onboarding/configuration-actions"
 import { processWorkspaceOnboardingOutbox } from "@/lib/onboarding/outbox"
 import { createSignedBuilderMediaUpload } from "@/lib/onboarding/uploads"
@@ -21,6 +22,28 @@ function pathsBelongToDraft(paths: string[], workspaceId: string, entityId: stri
     return paths.every((path) => path.startsWith(prefix) && !path.includes("\\") && !path.split("/").some((part) => part === "." || part === ".."))
 }
 
+async function rejectVisualRelease(input: {
+    workspaceId: string
+    workspaceSlug: string
+    actorUserId: string
+    error: string
+}) {
+    await recordAdminActivity({
+        workspaceId: input.workspaceId,
+        category: "onboarding",
+        level: "warning",
+        eventKey: "onboarding.release.rejected",
+        summary: "Onboarding release rejected before publishing",
+        sourceHref: `/${input.workspaceSlug}/onboarding-builder`,
+        actorUserId: input.actorUserId,
+        actorKind: "staff",
+        outcome: "rejected",
+        metricClassification: "audit",
+        metadata: { reason: input.error.slice(0, 400) },
+    })
+    return { ok: false as const, error: input.error }
+}
+
 export async function publishVisualOnboardingRelease(slug: string, input: {
     modules: OnboardingModuleDefinitionV2[]
     bookends: OnboardingBookendDefinitionV2[]
@@ -33,28 +56,29 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
         const { workspace, user } = await requireWorkspace(slug, "admin")
         const normalizedModules = input.modules.map(normalizeVisualModule)
         const moduleError = normalizedModules.find((result) => !result.ok)
-        if (moduleError && !moduleError.ok) return { ok: false, error: moduleError.error }
+        if (moduleError && !moduleError.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: moduleError.error })
         const normalizedBookends = input.bookends.map(normalizeVisualBookend)
         const bookendError = normalizedBookends.find((result) => !result.ok)
-        if (bookendError && !bookendError.ok) return { ok: false, error: bookendError.error }
+        if (bookendError && !bookendError.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: bookendError.error })
 
         for (const result of normalizedModules) {
             if (!result.ok) continue
             if (!pathsBelongToDraft(visualVideoPaths(result.definition), workspace.id, result.definition.id, result.definition.revisionId)) {
-                return { ok: false, error: `An uploaded video in ${result.definition.name} does not belong to its current draft.` }
+                return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: `The video in “${result.definition.name}” belongs to an older draft. Open that Video block, upload the video again, then publish.` })
             }
         }
         for (const result of normalizedBookends) {
             if (!result.ok) continue
             const paths = result.definition.steps.flatMap((step) => step.blocks.flatMap((block) => block.kind === "video" && block.upload ? [block.upload.path] : []))
             if (!pathsBelongToDraft(paths, workspace.id, `bookend-${result.definition.kind}`, result.definition.revisionId)) {
-                return { ok: false, error: `An uploaded video in ${result.definition.kind} does not belong to its current draft.` }
+                const definitionName = result.definition.kind === "welcome" ? "Welcome" : "Completion"
+                return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: `The video in “${definitionName}” belongs to an older draft. Open that Video block, upload the video again, then publish.` })
             }
         }
         let normalizedTheme: ReturnType<typeof normalizeThemeDraft> | null = null
         if (input.theme) {
             normalizedTheme = normalizeThemeDraft(input.theme)
-            if (!normalizedTheme.ok) return normalizedTheme
+            if (!normalizedTheme.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: normalizedTheme.error })
         }
 
         const releaseId = randomUUID()
