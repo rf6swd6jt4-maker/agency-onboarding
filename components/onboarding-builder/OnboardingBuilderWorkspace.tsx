@@ -31,6 +31,8 @@ type DefinitionGroup =
 
 type Selection = { groupKey: string; stepId: string; blockId: string | null; fieldId?: string | null }
 type LeftTab = "outline" | "blocks"
+type RightTab = "inspect" | "styles"
+type OnboardingField = Extract<OnboardingBlock, { kind: "form" }>["fields"][number]
 
 function definitionId(groupKey: string) {
     return groupKey.startsWith("module:") ? groupKey.slice(7) : groupKey
@@ -226,6 +228,87 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
     </div>
 }
 
+const inspectorInputClass = "mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"
+const inspectorTextareaClass = "mt-1 w-full rounded-lg border border-neutral-700 bg-black p-2 text-sm text-white"
+
+function InspectorPanel({ currentGroup, step, block, field, editable, updateStep, updateBlock, updateField, addField, deleteSelection }: {
+    currentGroup: DefinitionGroup | undefined
+    step: OnboardingStepV2 | undefined
+    block: OnboardingBlock | null
+    field: OnboardingField | null
+    editable: boolean
+    updateStep: (step: OnboardingStepV2) => void
+    updateBlock: (block: OnboardingBlock) => void
+    updateField: (values: Partial<OnboardingField>) => void
+    addField: () => void
+    deleteSelection: () => void
+}) {
+    if (!step || !currentGroup) return <p className="text-xs leading-5 text-neutral-500">Select a step, element, or field to inspect it.</p>
+    if (field) return <div data-builder-field-inspector className="space-y-4">
+        <label className="block text-xs text-neutral-500">Label<input value={field.label} disabled={!editable} onChange={(event) => updateField({ label: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Help text<textarea value={field.helpText} disabled={!editable} onChange={(event) => updateField({ helpText: event.target.value })} rows={3} className={inspectorTextareaClass} /></label>
+        <label className="block text-xs text-neutral-500">Placeholder<input value={field.placeholder} disabled={!editable} onChange={(event) => updateField({ placeholder: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Field type<select value={field.type} disabled={!editable} onChange={(event) => updateField({ type: event.target.value as OnboardingField["type"], multiple: event.target.value === "file" ? field.multiple : false })} className={inspectorInputClass}><option value="text">Short text</option><option value="email">Email</option><option value="tel">Phone</option><option value="url">URL</option><option value="textarea">Long text</option><option value="file">File</option></select></label>
+        <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={field.required} disabled={!editable} onChange={(event) => updateField({ required: event.target.checked })} />Required</label>
+        {field.type === "file" ? <><label className="block text-xs text-neutral-500">Accepted files<select value={field.accept} disabled={!editable} onChange={(event) => updateField({ accept: event.target.value as OnboardingField["accept"] })} className={inspectorInputClass}><option value="any">Any file</option><option value="image">Images</option><option value="video">Videos</option><option value="document">Documents</option></select></label><label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={field.multiple} disabled={!editable} onChange={(event) => updateField({ multiple: event.target.checked })} />Allow multiple files</label></> : null}
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete field</button>
+    </div>
+    if (!block) return <div data-builder-step-inspector className="space-y-4">
+        <p className="text-xs leading-5 text-neutral-500">Step content stays editable directly on the canvas.</p>
+        <label className="block text-xs text-neutral-500">Back button label<input value={step.navigation.backLabel} disabled={!editable} onChange={(event) => updateStep({ ...step, navigation: { ...step.navigation, backLabel: event.target.value } })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Continue button label<input value={step.navigation.continueLabel} disabled={!editable} onChange={(event) => updateStep({ ...step, navigation: { ...step.navigation, continueLabel: event.target.value } })} className={inspectorInputClass} /></label>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete step</button>
+    </div>
+    if (block.kind === "header") return <div className="space-y-4">
+        <p className="text-xs leading-5 text-neutral-500">Heading, description, and estimated time stay editable directly on the canvas.</p>
+        {currentGroup.key === "bookend:welcome" && currentGroup.definition.steps[0]?.id === step.id ? <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(block.showComposedModuleSummary)} disabled={!editable} onChange={(event) => updateBlock({ ...block, showComposedModuleSummary: event.target.checked })} />Show composed module list</label> : null}
+        <p className="text-xs text-neutral-600">The Header is required and always stays first.</p>
+    </div>
+    if (block.kind === "form") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Why we ask<textarea value={block.whyWeAsk} disabled={!editable} onChange={(event) => updateBlock({ ...block, whyWeAsk: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
+        <button type="button" disabled={!editable} onClick={addField} className="h-9 w-full rounded-lg border border-neutral-700 text-xs disabled:opacity-30">Add field</button>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete form</button>
+    </div>
+    if (block.kind === "video") return <div className="space-y-4">
+        <p className="text-xs leading-5 text-neutral-500">Upload or replace the video directly on the canvas.</p>
+        <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.requirement === "finish"} disabled={!editable} onChange={(event) => updateBlock({ ...block, requirement: event.target.checked ? "finish" : "none" })} />Client must finish this video</label>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete video</button>
+    </div>
+    return <div className="space-y-4">
+        <p className="text-xs leading-5 text-neutral-500">Button text stays editable directly on the canvas.</p>
+        <label className="block text-xs text-neutral-500">Destination URL<input value={block.url} disabled={!editable} onChange={(event) => updateBlock({ ...block, url: event.target.value })} placeholder="https://…" className={inspectorInputClass} /></label>
+        <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.required} disabled={!editable} onChange={(event) => updateBlock({ ...block, required: event.target.checked })} />Client must open this link</label>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete button</button>
+    </div>
+}
+
+function BrandingInspector({ theme, updateThemeSwatch, addThemeSwatch, updateAssignment }: {
+    theme: VisualBuilderDocument["theme"]
+    updateThemeSwatch: (id: string, values: { name?: string; hex?: string; hidden?: boolean }) => void
+    addThemeSwatch: () => void
+    updateAssignment: (slot: OnboardingThemeSlot, swatchId: string) => void
+}) {
+    return <div data-builder-branding-styles className="space-y-4"><p className="text-xs leading-5 text-neutral-500">These six colours are shared with Agency Branding and client portals. Changes remain drafts until Publish.</p><section className="space-y-2 rounded-xl border border-neutral-800 p-2"><div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-neutral-300">Colour palette</h3><button type="button" onClick={addThemeSwatch} className="text-[11px] text-neutral-300 underline underline-offset-4">Add colour</button></div>{theme.swatches.map((swatch) => <div key={swatch.id} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 ${swatch.hidden ? "opacity-50" : ""}`}><input type="color" aria-label={`${swatch.name} colour`} value={swatch.hex} onChange={(event) => updateThemeSwatch(swatch.id, { hex: event.target.value.toUpperCase() })} className="h-8 w-8 rounded border border-neutral-700 bg-transparent p-0" /><input value={swatch.name} onChange={(event) => updateThemeSwatch(swatch.id, { name: event.target.value })} aria-label="Colour name" className="h-8 min-w-0 rounded border border-neutral-700 bg-black px-2 text-xs text-white" /><button type="button" onClick={() => updateThemeSwatch(swatch.id, { hidden: !swatch.hidden })} className="text-[10px] text-neutral-400">{swatch.hidden ? "Restore" : "Hide"}</button></div>)}</section>{ONBOARDING_THEME_SLOTS.map((slot: OnboardingThemeSlot) => <label key={slot} className="block text-xs text-neutral-400">{ONBOARDING_THEME_SLOT_LABELS[slot]}<select value={theme.assignments[slot]} onChange={(event) => updateAssignment(slot, event.target.value)} className={inspectorInputClass}>{theme.swatches.filter((swatch) => !swatch.hidden || swatch.id === theme.assignments[slot]).map((swatch) => <option key={swatch.id} value={swatch.id}>{swatch.name}</option>)}</select></label>)}{onboardingThemeWarnings(theme).map((warning) => <p key={warning} className="rounded-lg border border-yellow-900 bg-yellow-950 p-2 text-[11px] text-yellow-200">{warning}</p>)}</div>
+}
+
+function StylesPanel({ block, field, theme, updateBlock, updateThemeSwatch, addThemeSwatch, updateAssignment }: {
+    block: OnboardingBlock | null
+    field: OnboardingField | null
+    theme: VisualBuilderDocument["theme"]
+    updateBlock: (block: OnboardingBlock) => void
+    updateThemeSwatch: (id: string, values: { name?: string; hex?: string; hidden?: boolean }) => void
+    addThemeSwatch: () => void
+    updateAssignment: (slot: OnboardingThemeSlot, swatchId: string) => void
+}) {
+    if (!block || field) return <BrandingInspector theme={theme} updateThemeSwatch={updateThemeSwatch} addThemeSwatch={addThemeSwatch} updateAssignment={updateAssignment} />
+    return <div data-builder-element-styles className="space-y-4">
+        <div className="grid grid-cols-2 gap-2"><label className="text-xs text-neutral-500">Width<select value={block.layout.width} onChange={(event) => updateBlock({ ...block, layout: { ...block.layout, width: event.target.value as OnboardingBlock["layout"]["width"] } })} className={inspectorInputClass}><option value="narrow">Narrow</option><option value="standard">Standard</option><option value="wide">Wide</option><option value="full">Full</option></select></label><label className="text-xs text-neutral-500">Alignment<select value={block.layout.alignment} onChange={(event) => updateBlock({ ...block, layout: { ...block.layout, alignment: event.target.value as OnboardingBlock["layout"]["alignment"] } })} className={inspectorInputClass}><option value="left">Left</option><option value="center">Centre</option></select></label></div>
+        <label className="block text-xs text-neutral-500">Gap before<select value={block.layout.spacingBefore} onChange={(event) => updateBlock({ ...block, layout: { ...block.layout, spacingBefore: event.target.value as OnboardingBlock["layout"]["spacingBefore"] } })} className={inspectorInputClass}><option value="compact">Compact</option><option value="normal">Normal</option><option value="spacious">Spacious</option></select></label>
+        <label className="block text-xs text-neutral-500">Gap after<select value={block.layout.spacingAfter} onChange={(event) => updateBlock({ ...block, layout: { ...block.layout, spacingAfter: event.target.value as OnboardingBlock["layout"]["spacingAfter"] } })} className={inspectorInputClass}><option value="compact">Compact</option><option value="normal">Normal</option><option value="spacious">Spacious</option></select></label>
+        {block.kind === "button" ? <label className="block text-xs text-neutral-500">Appearance<select value={block.appearance} onChange={(event) => updateBlock({ ...block, appearance: event.target.value as "primary" | "secondary" })} className={inspectorInputClass}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label> : null}
+    </div>
+}
+
 function composedModuleIds(document: VisualBuilderDocument, data: OnboardingBuilderData, selectedServiceIds: string[]) {
     const modules = new Map(document.modules.map((module) => [module.id, module]))
     const selectedServices = orderOnboardingServices(data.services.filter((service) => selectedServiceIds.includes(service.id) && service.state === "active"))
@@ -313,6 +396,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const [leftOpen, setLeftOpen] = useState(true)
     const [rightOpen, setRightOpen] = useState(true)
     const [leftTab, setLeftTab] = useState<LeftTab>("outline")
+    const [rightTab, setRightTab] = useState<RightTab>("inspect")
     const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop")
     const [preview, setPreview] = useState(false)
     const [publishOpen, setPublishOpen] = useState(false)
@@ -359,8 +443,8 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     const updateActivity = collaboration.updateActivity
     useEffect(() => {
-        updateActivity({ selection: selection.groupKey && selection.stepId ? `${selection.groupKey}:${selection.stepId}:${selection.blockId ?? "step"}` : null })
-    }, [selection.blockId, selection.groupKey, selection.stepId, updateActivity])
+        updateActivity({ selection: selection.groupKey && selection.stepId ? `${selection.groupKey}:${selection.stepId}:${selection.blockId ?? "step"}${selection.fieldId ? `:${selection.fieldId}` : ""}` : null })
+    }, [selection.blockId, selection.fieldId, selection.groupKey, selection.stepId, updateActivity])
 
     const resolved = selectedStep(groups, selection)
     const currentGroup = resolved.group
@@ -548,6 +632,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             const step = group.definition.steps.find((candidate) => `${group.key}:${candidate.id}` === key)
             if (step) {
                 setSelection({ groupKey: group.key, stepId: step.id, blockId: null })
+                setRightTab("inspect")
                 return
             }
         }
@@ -603,6 +688,18 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     function updateBlock(block: OnboardingBlock) {
         if (!currentStep) return
         updateCurrentStep({ ...currentStep, blocks: currentStep.blocks.map((item) => item.id === block.id ? block : item) })
+    }
+
+    function updateSelectedField(values: Partial<OnboardingField>) {
+        if (!selectedField || selectedBlock?.kind !== "form") return
+        updateBlock({ ...selectedBlock, fields: selectedBlock.fields.map((field) => field.id === selectedField.id ? { ...field, ...values } : field) })
+    }
+
+    function addFieldToSelectedForm() {
+        if (selectedBlock?.kind !== "form") return
+        const field = createOnboardingField()
+        updateBlock({ ...selectedBlock, fields: [...selectedBlock.fields, field] })
+        setSelection({ ...selection, fieldId: field.id })
     }
 
     function removeBlock() {
@@ -696,7 +793,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     if (preview) return <div data-builder-fullscreen-preview className="relative flex h-dvh w-full items-stretch justify-center overflow-hidden bg-black">
         <button type="button" onClick={() => setPreview(false)} className="fixed right-4 top-4 z-[100] rounded-full border border-white/20 bg-black/70 px-4 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur transition hover:bg-black focus:outline-none focus:ring-2 focus:ring-white/70">Exit preview</button>
-        {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={null} selectBlock={() => undefined} selectRoadmapStep={selectRoadmapStep} updateStep={() => undefined} updateDraftRevisionId={() => undefined} viewport={viewport} readOnly fullScreen /> : <div className="flex h-full items-center justify-center text-sm text-white/60">Choose or create a module to preview.</div>}
+        {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={null} selectedFieldId={null} selectBlock={() => undefined} selectField={() => undefined} selectRoadmapStep={selectRoadmapStep} updateStep={() => undefined} updateDraftRevisionId={() => undefined} viewport={viewport} readOnly fullScreen /> : <div className="flex h-full items-center justify-center text-sm text-white/60">Choose or create a module to preview.</div>}
     </div>
 
     return <div onPointerMove={(event) => collaboration.updateActivity({ cursor: normalizedBuilderCursor(event.clientX, event.clientY, window.innerWidth, window.innerHeight) })} onPointerLeave={() => collaboration.updateActivity({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
@@ -729,7 +826,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
                         {leftTab === "outline" ? <>
                             <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Shift-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
-                            <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => setSelection({ groupKey, stepId, blockId: null })} onSelectBlock={(groupKey, stepId, blockId) => setSelection({ groupKey, stepId, blockId, fieldId: null })} onSelectField={(groupKey, stepId, blockId, fieldId) => setSelection({ groupKey, stepId, blockId, fieldId })} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
+                            <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
                         </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag blocks into a step in the outline or click to append.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header</b><small className="text-neutral-600">Required at the top</small></span></button>{(["form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable || !currentStep || (kind === "form" && (currentGroup?.kind === "bookend" || currentStep.blocks.some((block) => block.kind === "form")))} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
                     </div>
                     <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div>
@@ -737,14 +834,14 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             </aside> : null}
 
             <main className="min-h-0 overflow-auto bg-neutral-900/50 p-3 sm:p-5">
-                {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={selection.blockId} selectBlock={(blockId) => setSelection({ ...selection, blockId, fieldId: null })} selectRoadmapStep={selectRoadmapStep} updateStep={updateCurrentStep} updateDraftRevisionId={updateCurrentRevisionId} viewport={viewport} collaboratorSelections={collaboration.presence} /> : <div className="flex h-full items-center justify-center text-sm text-neutral-500">Show a module or choose a bookend to start building.</div>}
+                {currentGroup && currentStep ? <VisualBuilderCanvas workspaceSlug={workspaceSlug} workspaceName={workspaceName} groupKey={currentGroup.key} target={currentGroup.kind === "module" ? { kind: "module", definition: currentGroup.definition } : { kind: "bookend", definition: currentGroup.definition }} step={currentStep} roadmapSteps={roadmapSteps} moduleTitles={moduleTitles} theme={collaboration.document.theme} help={data.help} selectedBlockId={selection.blockId} selectedFieldId={selection.fieldId ?? null} selectBlock={(blockId) => { setSelection({ ...selection, blockId, fieldId: null }); setRightTab("inspect") }} selectField={(blockId, fieldId) => { setSelection({ ...selection, blockId, fieldId }); setRightTab("inspect") }} selectRoadmapStep={selectRoadmapStep} updateStep={updateCurrentStep} updateDraftRevisionId={updateCurrentRevisionId} viewport={viewport} collaboratorSelections={collaboration.presence} /> : <div className="flex h-full items-center justify-center text-sm text-neutral-500">Show a module or choose a bookend to start building.</div>}
             </main>
 
             {!preview ? <aside className={`min-h-0 border-l border-neutral-800 bg-neutral-950 ${rightOpen ? "hidden xl:flex xl:flex-col" : "hidden xl:flex xl:items-start xl:justify-center xl:pt-3"}`}>
-                {rightOpen ? <><div className="flex h-12 items-center border-b border-neutral-800 px-3"><div><p className="text-xs font-semibold">Style and advanced</p><p className="text-[10px] text-neutral-600">{selectedBlock ? selectedBlock.kind : "Global style"}</p></div><span className="ml-auto"><RailToggleButton side="right" label="Collapse right rail" onClick={() => rememberRail("right", false)} /></span></div><div className="min-h-0 flex-1 overflow-y-auto p-3">
-                    {selectedBlock ? <div className="space-y-4"><div className="grid grid-cols-2 gap-2"><label className="text-xs text-neutral-500">Width<select value={selectedBlock.layout.width} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, width: event.target.value as OnboardingBlock["layout"]["width"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="narrow">Narrow</option><option value="standard">Standard</option><option value="wide">Wide</option><option value="full">Full</option></select></label><label className="text-xs text-neutral-500">Alignment<select value={selectedBlock.layout.alignment} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, alignment: event.target.value as OnboardingBlock["layout"]["alignment"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="left">Left</option><option value="center">Centre</option></select></label></div><label className="block text-xs text-neutral-500">Spacing before<select value={selectedBlock.layout.spacingBefore} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, spacingBefore: event.target.value as OnboardingBlock["layout"]["spacingBefore"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="compact">Compact</option><option value="normal">Normal</option><option value="spacious">Spacious</option></select></label>{selectedBlock.kind === "header" && currentGroup?.key === "bookend:welcome" && currentGroup.definition.steps[0]?.id === currentStep?.id ? <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(selectedBlock.showComposedModuleSummary)} onChange={(event) => updateBlock({ ...selectedBlock, showComposedModuleSummary: event.target.checked })} />Show composed module list</label> : null}{selectedBlock.kind === "form" ? <><label className="block text-xs text-neutral-500">Why we ask<textarea value={selectedBlock.whyWeAsk} onChange={(event) => updateBlock({ ...selectedBlock, whyWeAsk: event.target.value })} rows={3} className="mt-1 w-full rounded-lg border border-neutral-700 bg-black p-2 text-sm text-white" /></label><button type="button" onClick={() => updateBlock({ ...selectedBlock, fields: [...selectedBlock.fields, createOnboardingField()] })} className="h-9 w-full rounded-lg border border-neutral-700 text-xs">Add field</button>{selectedBlock.fields.map((field) => <div key={field.id} className="rounded-lg border border-neutral-800 p-2"><select value={field.type} onChange={(event) => updateBlock({ ...selectedBlock, fields: selectedBlock.fields.map((item) => item.id === field.id ? { ...item, type: event.target.value as typeof field.type, multiple: event.target.value === "file" ? item.multiple : false } : item) })} className="h-8 w-full rounded border border-neutral-700 bg-black px-2 text-xs"><option value="text">Short text</option><option value="email">Email</option><option value="tel">Phone</option><option value="url">URL</option><option value="textarea">Long text</option><option value="file">File</option></select><label className="mt-2 flex items-center gap-2 text-xs text-neutral-400"><input type="checkbox" checked={field.required} onChange={(event) => updateBlock({ ...selectedBlock, fields: selectedBlock.fields.map((item) => item.id === field.id ? { ...item, required: event.target.checked } : item) })} />Required</label></div>)}</> : null}{selectedBlock.kind === "button" ? <label className="block text-xs text-neutral-500">Appearance<select value={selectedBlock.appearance} onChange={(event) => updateBlock({ ...selectedBlock, appearance: event.target.value as "primary" | "secondary" })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="primary">Primary</option><option value="secondary">Secondary</option></select></label> : null}{selectedBlock.kind !== "header" ? <button type="button" onClick={confirmDeleteSelection} className="text-xs text-red-300">{selectedField ? "Delete field" : "Delete block"}</button> : <p className="text-xs text-neutral-600">The Header is required and always stays first.</p>}</div> : <div className="space-y-4"><p className="text-xs leading-5 text-neutral-500">These six colours are shared with Agency Branding and client portals. Changes remain drafts until Publish.</p><section className="space-y-2 rounded-xl border border-neutral-800 p-2"><div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-neutral-300">Colour palette</h3><button type="button" onClick={addThemeSwatch} className="text-[11px] text-neutral-300 underline underline-offset-4">Add colour</button></div>{collaboration.document.theme.swatches.map((swatch) => <div key={swatch.id} className={`grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 ${swatch.hidden ? "opacity-50" : ""}`}><input type="color" aria-label={`${swatch.name} colour`} value={swatch.hex} onChange={(event) => updateThemeSwatch(swatch.id, { hex: event.target.value.toUpperCase() })} className="h-8 w-8 rounded border border-neutral-700 bg-transparent p-0" /><input value={swatch.name} onChange={(event) => updateThemeSwatch(swatch.id, { name: event.target.value })} aria-label="Colour name" className="h-8 min-w-0 rounded border border-neutral-700 bg-black px-2 text-xs text-white" /><button type="button" onClick={() => updateThemeSwatch(swatch.id, { hidden: !swatch.hidden })} className="text-[10px] text-neutral-400">{swatch.hidden ? "Restore" : "Hide"}</button></div>)}</section>{ONBOARDING_THEME_SLOTS.map((slot: OnboardingThemeSlot) => <label key={slot} className="block text-xs text-neutral-400">{ONBOARDING_THEME_SLOT_LABELS[slot]}<select value={collaboration.document.theme.assignments[slot]} onChange={(event) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: event.target.value } } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white">{collaboration.document.theme.swatches.filter((swatch) => !swatch.hidden || swatch.id === collaboration.document.theme.assignments[slot]).map((swatch) => <option key={swatch.id} value={swatch.id}>{swatch.name}</option>)}</select></label>)}{onboardingThemeWarnings(collaboration.document.theme).map((warning) => <p key={warning} className="rounded-lg border border-yellow-900 bg-yellow-950 p-2 text-[11px] text-yellow-200">{warning}</p>)}</div>}
-                    {selectedBlock ? <label className="mt-4 block text-xs text-neutral-500">Spacing after<select value={selectedBlock.layout.spacingAfter} onChange={(event) => updateBlock({ ...selectedBlock, layout: { ...selectedBlock.layout, spacingAfter: event.target.value as OnboardingBlock["layout"]["spacingAfter"] } })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="compact">Compact</option><option value="normal">Normal</option><option value="spacious">Spacious</option></select></label> : null}
-                </div></> : <RailToggleButton side="right" label="Expand right rail" onClick={() => rememberRail("right", true)} />}
+                {rightOpen ? <>
+                    <div data-builder-right-rail-header className="flex h-12 items-center gap-1 border-b border-neutral-800 px-2"><button type="button" onClick={() => setRightTab("inspect")} className={`h-8 rounded-md px-2 text-xs ${rightTab === "inspect" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Inspect</button><button type="button" onClick={() => setRightTab("styles")} className={`h-8 rounded-md px-2 text-xs ${rightTab === "styles" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Styles</button><span className="ml-auto"><RailToggleButton side="right" label="Collapse right rail" onClick={() => rememberRail("right", false)} /></span></div>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-3">{rightTab === "inspect" ? <InspectorPanel currentGroup={currentGroup} step={currentStep} block={selectedBlock} field={selectedField} editable={collaboration.editable} updateStep={updateCurrentStep} updateBlock={updateBlock} updateField={updateSelectedField} addField={addFieldToSelectedForm} deleteSelection={confirmDeleteSelection} /> : <StylesPanel block={selectedBlock} field={selectedField} theme={collaboration.document.theme} updateBlock={updateBlock} updateThemeSwatch={updateThemeSwatch} addThemeSwatch={addThemeSwatch} updateAssignment={(slot, swatchId) => collaboration.updateDocument((document) => ({ ...document, theme: { ...document.theme, assignments: { ...document.theme.assignments, [slot]: swatchId } } }))} />}</div>
+                </> : <RailToggleButton side="right" label="Expand right rail" onClick={() => rememberRail("right", true)} />}
             </aside> : null}
         </div>
         {!preview ? collaboration.presence.filter((person) => person.cursor).map((person) => <div key={`cursor:${person.clientId}`} className="pointer-events-none fixed z-[80] flex items-center gap-1" style={{ left: `${person.cursor!.xRatio * 100}vw`, top: `${person.cursor!.yRatio * 100}vh`, color: person.color }}><span className="h-3 w-3 -translate-x-0.5 -translate-y-0.5 rotate-45 border-l-2 border-t-2" /><span className="rounded px-1 py-0.5 text-[10px] font-semibold text-black" style={{ backgroundColor: person.color }}>{person.name}</span></div>) : null}

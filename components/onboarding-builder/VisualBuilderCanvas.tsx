@@ -22,7 +22,7 @@ import { getFileAcceptValue } from "@/lib/onboarding/forms"
 
 type DefinitionTarget = { kind: "module"; definition: OnboardingModuleDefinitionV2 } | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 }
 
-function AuthorFrame({ block, selected, collaboratorColours, select, children, onDragStart, onDrop }: {
+function AuthorFrame({ block, selected, collaboratorColours, select, children, onDragStart, onDrop, suppressHover = false }: {
     block: OnboardingBlock
     selected: boolean
     collaboratorColours?: string[]
@@ -30,6 +30,7 @@ function AuthorFrame({ block, selected, collaboratorColours, select, children, o
     children: ReactNode
     onDragStart: (event: DragEvent<HTMLDivElement>) => void
     onDrop: (event: DragEvent<HTMLDivElement>) => void
+    suppressHover?: boolean
 }) {
     return <div
         data-builder-block={block.id}
@@ -38,7 +39,7 @@ function AuthorFrame({ block, selected, collaboratorColours, select, children, o
         onDragOver={(event) => event.preventDefault()}
         onDrop={onDrop}
         onClick={(event) => { event.stopPropagation(); select() }}
-        className={`group relative ${onboardingBlockLayoutClasses(block.layout)} rounded-2xl outline-offset-4 transition ${selected ? "outline-2 outline-[var(--onboarding-accent)]" : "outline-transparent hover:outline hover:outline-1 hover:outline-black/15"}`}
+        className={`group relative ${onboardingBlockLayoutClasses(block.layout)} rounded-2xl outline-offset-4 transition ${selected ? "outline-2 outline-[var(--onboarding-accent)]" : suppressHover ? "outline-transparent" : "outline-transparent hover:outline hover:outline-1 hover:outline-black/15"}`}
         style={collaboratorColours?.length ? { boxShadow: `0 0 0 3px ${collaboratorColours[0]}` } : undefined}
     >
         {block.kind !== "header" ? <button type="button" aria-label="Drag block" className={`absolute -left-10 top-1 hidden h-8 w-8 cursor-grab items-center justify-center rounded-lg border border-black/10 bg-white text-slate-500 shadow-sm md:group-hover:flex ${selected ? "md:flex" : ""}`}>⠿</button> : null}
@@ -52,27 +53,32 @@ function InlineText({ value, update, className, multiline = false, placeholder }
         : <input value={value} onChange={(event) => update(event.target.value)} placeholder={placeholder} className={`${className} block w-full border-0 bg-transparent p-0 outline-none placeholder:text-current placeholder:opacity-40`} />
 }
 
-function FormPreview({ block, update }: { block: FormBlock; update: (block: FormBlock) => void }) {
+function FormPreview({ block, update, selectedFieldId, selectField, collaboratorColoursForField }: { block: FormBlock; update: (block: FormBlock) => void; selectedFieldId: string | null; selectField: (fieldId: string) => void; collaboratorColoursForField: (fieldId: string) => string[] }) {
     function updateField(fieldId: string, values: Partial<FormBlock["fields"][number]>) {
         update({ ...block, fields: block.fields.map((field) => field.id === fieldId ? { ...field, ...values } : field) })
     }
 
-    function moveField(index: number, direction: -1 | 1) {
-        const destination = index + direction
-        if (destination < 0 || destination >= block.fields.length) return
+    function dropField(event: DragEvent<HTMLDivElement>, targetId: string) {
+        const sourceId = event.dataTransfer.getData("application/x-betelgeze-field")
+        if (!sourceId || sourceId === targetId) return
+        event.preventDefault()
+        event.stopPropagation()
+        const sourceIndex = block.fields.findIndex((field) => field.id === sourceId)
+        const destination = block.fields.findIndex((field) => field.id === targetId)
+        if (sourceIndex < 0 || destination < 0) return
         const fields = [...block.fields]
-        const [field] = fields.splice(index, 1)
+        const [field] = fields.splice(sourceIndex, 1)
         fields.splice(destination, 0, field)
         update({ ...block, fields })
+        selectField(field.id)
     }
 
     return <div className="space-y-6">
-        {block.fields.map((field, index) => <div key={field.id} className="group/field rounded-xl p-1 outline-offset-2 hover:outline hover:outline-1 hover:outline-black/10 focus-within:outline focus-within:outline-1 focus-within:outline-black/10">
-            <div className="flex items-center gap-2"><InlineText value={field.label} update={(label) => updateField(field.id, { label })} className="text-base font-semibold text-[var(--onboarding-text)]" /><div className="hidden shrink-0 items-center gap-1 md:group-hover/field:flex md:group-focus-within/field:flex"><button type="button" aria-label="Move field up" disabled={index === 0} onClick={() => moveField(index, -1)} className="rounded px-1 text-xs text-slate-500 disabled:opacity-20">↑</button><button type="button" aria-label="Move field down" disabled={index === block.fields.length - 1} onClick={() => moveField(index, 1)} className="rounded px-1 text-xs text-slate-500 disabled:opacity-20">↓</button><button type="button" onClick={() => update({ ...block, fields: block.fields.filter((item) => item.id !== field.id) })} className="text-xs text-red-600">Delete</button></div></div>
+        {block.fields.map((field) => <div key={field.id} data-builder-field={field.id} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData("application/x-betelgeze-field", field.id); event.dataTransfer.effectAllowed = "move" }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropField(event, field.id)} onClick={(event) => { event.stopPropagation(); selectField(field.id) }} className={`group/field cursor-grab rounded-xl p-2 outline-offset-2 transition ${selectedFieldId === field.id ? "outline-2 outline-[var(--onboarding-accent)]" : "hover:outline hover:outline-1 hover:outline-black/10 focus-within:outline focus-within:outline-1 focus-within:outline-black/10"}`} style={collaboratorColoursForField(field.id).length ? { boxShadow: `0 0 0 3px ${collaboratorColoursForField(field.id)[0]}` } : undefined}>
+            <InlineText value={field.label} update={(label) => updateField(field.id, { label })} className="text-base font-semibold text-[var(--onboarding-text)]" />
             {field.required ? <span className="text-xs text-red-500">Required</span> : null}
             <InlineText value={field.helpText} update={(helpText) => updateField(field.id, { helpText })} className="mt-1 text-sm text-[var(--onboarding-muted)]" multiline placeholder="Add help text…" />
             {field.type === "textarea" ? <textarea disabled placeholder={field.placeholder} className="mt-3 min-h-32 w-full rounded-2xl border border-black/20 bg-[var(--onboarding-surface)] px-4 py-3" /> : field.type === "file" ? <div className="mt-3 rounded-2xl border border-dashed border-black/20 bg-[var(--onboarding-page)] p-5 text-center text-sm text-[var(--onboarding-muted)]">Choose {field.multiple ? "files" : "a file"}<p className="mt-1 text-xs">{getFileAcceptValue(field.accept) ?? "Any file"} · up to 500 MB</p></div> : <input disabled type={field.type} placeholder={field.placeholder} className="mt-3 w-full rounded-2xl border border-black/20 bg-[var(--onboarding-surface)] px-4 py-3" />}
-            <div className="mt-2 hidden grid-cols-2 gap-2 rounded-xl bg-black/5 p-2 group-hover/field:grid group-focus-within/field:grid"><select aria-label="Field type" value={field.type} onChange={(event) => updateField(field.id, { type: event.target.value as typeof field.type, multiple: event.target.value === "file" ? field.multiple : false })} className="h-8 rounded-lg border border-black/15 bg-white px-2 text-xs text-slate-800"><option value="text">Short text</option><option value="email">Email</option><option value="tel">Phone</option><option value="url">URL</option><option value="textarea">Long text</option><option value="file">File</option></select><label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={field.required} onChange={(event) => updateField(field.id, { required: event.target.checked })} />Required</label><input value={field.placeholder} onChange={(event) => updateField(field.id, { placeholder: event.target.value })} placeholder="Placeholder" className="col-span-2 h-8 rounded-lg border border-black/15 bg-white px-2 text-xs text-slate-800" />{field.type === "file" ? <><select aria-label="Accepted file type" value={field.accept} onChange={(event) => updateField(field.id, { accept: event.target.value as typeof field.accept })} className="h-8 rounded-lg border border-black/15 bg-white px-2 text-xs text-slate-800"><option value="any">Any file</option><option value="image">Images</option><option value="video">Videos</option><option value="document">Documents</option></select><label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={field.multiple} onChange={(event) => updateField(field.id, { multiple: event.target.checked })} />Multiple</label></> : null}</div>
         </div>)}
         {block.whyWeAsk ? <WhyWeAskCard>{block.whyWeAsk}</WhyWeAskCard> : null}
     </div>
@@ -89,7 +95,9 @@ export function VisualBuilderCanvas({
     theme,
     help,
     selectedBlockId,
+    selectedFieldId,
     selectBlock,
+    selectField,
     selectRoadmapStep,
     updateStep,
     updateDraftRevisionId,
@@ -108,7 +116,9 @@ export function VisualBuilderCanvas({
     theme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
     selectedBlockId: string | null
+    selectedFieldId: string | null
     selectBlock: (id: string | null) => void
+    selectField: (blockId: string, fieldId: string) => void
     selectRoadmapStep: (key: string) => void
     updateStep: (step: OnboardingStepV2) => void
     updateDraftRevisionId: (revisionId: string) => void
@@ -163,6 +173,7 @@ export function VisualBuilderCanvas({
 
     const header = step.blocks[0] as HeaderBlock
     const collaboratorColoursFor = (blockId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}`).map((presence) => presence.color)
+    const collaboratorColoursForField = (blockId: string, fieldId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}:${fieldId}`).map((presence) => presence.color)
 
     if (readOnly) {
         const hasForm = step.blocks.some((block) => block.kind === "form")
@@ -199,9 +210,8 @@ export function VisualBuilderCanvas({
                         <InlineText value={header.estimatedTime} update={(estimatedTime) => replaceBlock({ ...header, estimatedTime })} className="mt-5 inline-flex w-auto rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent)_14%,var(--onboarding-surface))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary)]" placeholder="Estimated time" />
                         {header.showComposedModuleSummary ? <div className="mt-8 rounded-2xl bg-[var(--onboarding-page)] p-5"><p className="font-semibold">Your onboarding includes:</p><div className="mt-4 flex flex-wrap gap-2">{moduleTitles.map((title) => <span key={title} className="rounded-full bg-black/5 px-3 py-1 text-sm font-medium text-[var(--onboarding-primary)]">✓ {title}</span>)}</div></div> : null}
                     </AuthorFrame>
-                    {step.blocks.slice(1).map((block, blockIndex) => <Fragment key={block.id}><details className="group/insert relative mx-auto mt-3 hidden w-fit md:block"><summary aria-label="Insert a block here" className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-full border border-black/15 bg-white text-sm text-slate-500 opacity-0 shadow-sm transition hover:text-slate-900 group-hover/insert:opacity-100 focus:opacity-100">+</summary><div className="absolute left-1/2 z-20 mt-1 flex -translate-x-1/2 gap-1 rounded-xl border border-black/10 bg-white p-1 shadow-xl"><button type="button" disabled={target.kind === "bookend" || step.blocks.some((candidate) => candidate.kind === "form")} onClick={() => insertBlock(blockIndex + 1, "form")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-30">Form</button><button type="button" onClick={() => insertBlock(blockIndex + 1, "video")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">Video</button><button type="button" onClick={() => insertBlock(blockIndex + 1, "button")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">Button</button></div></details><AuthorFrame block={block} selected={selectedBlockId === block.id} collaboratorColours={collaboratorColoursFor(block.id)} select={() => selectBlock(block.id)} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-block", block.id); event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "block", groupKey, stepId: step.id, blockId: block.id, copy: event.shiftKey })); event.dataTransfer.effectAllowed = event.shiftKey ? "copy" : "move" }} onDrop={(event) => dropBlock(event, block.id)}>
-                        {block.kind === "form" ? <FormPreview block={block} update={replaceBlock} /> : block.kind === "video" ? <div>{block.upload?.resolvedUrl || block.upload?.path ? <video src={block.upload?.resolvedUrl ?? block.upload?.path} controls className="aspect-video w-full rounded-2xl bg-black" /> : <div className="aspect-video rounded-2xl border border-dashed border-black/20 bg-[var(--onboarding-page)] p-8 text-center text-sm text-[var(--onboarding-muted)]">Upload a video to show it here.</div>}{selectedBlockId === block.id ? <label className="mt-3 inline-flex cursor-pointer rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm">{uploadingId === block.id ? "Uploading…" : block.upload ? "Replace video" : "Upload video"}<input type="file" accept="video/*" disabled={uploadingId === block.id} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(block, file) }} className="sr-only" /></label> : null}{block.legacyEmbedUrl ? <p className="mt-2 text-xs text-red-700">Replace this legacy embed with an upload before publishing.</p> : null}</div> : block.kind === "button" ? <div><InlineText value={block.label} update={(label) => replaceBlock({ ...block, label })} className={`${block.appearance === "secondary" ? "border border-[var(--onboarding-primary)] text-[var(--onboarding-primary)]" : "bg-[var(--onboarding-primary)] text-white"} inline-flex min-h-12 w-auto rounded-xl px-5 py-3 font-medium`} />{selectedBlockId === block.id ? <input value={block.url} onChange={(event) => replaceBlock({ ...block, url: event.target.value })} placeholder="https://…" className="mt-3 h-10 w-full rounded-lg border border-black/15 bg-white px-3 text-sm text-slate-900" /> : null}</div> : null}
-                        {selectedBlockId === block.id && (block.kind === "video" || block.kind === "button") ? <label className="mt-3 flex items-center gap-2 text-xs text-[var(--onboarding-muted)]"><input type="checkbox" checked={block.kind === "video" ? block.requirement === "finish" : block.required} onChange={(event) => replaceBlock(block.kind === "video" ? { ...block, requirement: event.target.checked ? "finish" : "none" } : { ...block, required: event.target.checked })} />{block.kind === "video" ? "Client must finish this video" : "Client must open this link"}</label> : null}
+                    {step.blocks.slice(1).map((block, blockIndex) => <Fragment key={block.id}><details className="group/insert relative mx-auto mt-3 hidden w-fit md:block"><summary aria-label="Insert a block here" className="flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-full border border-black/15 bg-white text-sm text-slate-500 opacity-0 shadow-sm transition hover:text-slate-900 group-hover/insert:opacity-100 focus:opacity-100">+</summary><div className="absolute left-1/2 z-20 mt-1 flex -translate-x-1/2 gap-1 rounded-xl border border-black/10 bg-white p-1 shadow-xl"><button type="button" disabled={target.kind === "bookend" || step.blocks.some((candidate) => candidate.kind === "form")} onClick={() => insertBlock(blockIndex + 1, "form")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-30">Form</button><button type="button" onClick={() => insertBlock(blockIndex + 1, "video")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">Video</button><button type="button" onClick={() => insertBlock(blockIndex + 1, "button")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">Button</button></div></details><AuthorFrame block={block} selected={selectedBlockId === block.id && !selectedFieldId} suppressHover={block.kind === "form"} collaboratorColours={collaboratorColoursFor(block.id)} select={() => selectBlock(block.id)} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-block", block.id); event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "block", groupKey, stepId: step.id, blockId: block.id, copy: event.shiftKey })); event.dataTransfer.effectAllowed = event.shiftKey ? "copy" : "move" }} onDrop={(event) => dropBlock(event, block.id)}>
+                        {block.kind === "form" ? <FormPreview block={block} update={replaceBlock} selectedFieldId={selectedFieldId} selectField={(fieldId) => selectField(block.id, fieldId)} collaboratorColoursForField={(fieldId) => collaboratorColoursForField(block.id, fieldId)} /> : block.kind === "video" ? <div>{block.upload?.resolvedUrl || block.upload?.path ? <video src={block.upload?.resolvedUrl ?? block.upload?.path} controls className="aspect-video w-full rounded-2xl bg-black" /> : <div className="aspect-video rounded-2xl border border-dashed border-black/20 bg-[var(--onboarding-page)] p-8 text-center text-sm text-[var(--onboarding-muted)]">Upload a video to show it here.</div>}{selectedBlockId === block.id ? <label className="mt-3 inline-flex cursor-pointer rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm">{uploadingId === block.id ? "Uploading…" : block.upload ? "Replace video" : "Upload video"}<input type="file" accept="video/*" disabled={uploadingId === block.id} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(block, file) }} className="sr-only" /></label> : null}{block.legacyEmbedUrl ? <p className="mt-2 text-xs text-red-700">Replace this legacy embed with an upload before publishing.</p> : null}</div> : block.kind === "button" ? <InlineText value={block.label} update={(label) => replaceBlock({ ...block, label })} className={`${block.appearance === "secondary" ? "border border-[var(--onboarding-primary)] text-[var(--onboarding-primary)]" : "bg-[var(--onboarding-primary)] text-white"} inline-flex min-h-12 w-auto rounded-xl px-5 py-3 font-medium`} /> : null}
                     </AuthorFrame></Fragment>)}
                     <details className="group/insert relative mx-auto mt-4 hidden w-fit md:block"><summary aria-label="Add a block" className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full border border-black/15 bg-white text-sm text-slate-500 shadow-sm hover:text-slate-900">+</summary><div className="absolute bottom-10 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-xl border border-black/10 bg-white p-1 shadow-xl"><button type="button" disabled={target.kind === "bookend" || step.blocks.some((block) => block.kind === "form")} onClick={() => insertBlock(step.blocks.length, "form")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-30">Form</button><button type="button" onClick={() => insertBlock(step.blocks.length, "video")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">Video</button><button type="button" onClick={() => insertBlock(step.blocks.length, "button")} className="rounded-lg px-2 py-1 text-xs text-slate-700 hover:bg-slate-100">Button</button></div></details>
                     {uploadError ? <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{uploadError}</p> : null}

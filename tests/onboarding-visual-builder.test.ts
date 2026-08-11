@@ -133,6 +133,22 @@ test("the Builder outline separates collapse, visibility, item identity, and del
     assert.doesNotMatch(builderUi, /ml-4 border-l border-neutral-800/)
 })
 
+test("Builder inspection separates field selection, behaviour, and cosmetic styles", () => {
+    assert.match(builderUi, /data-builder-right-rail-header/)
+    assert.match(builderUi, />Inspect<\/button>/)
+    assert.match(builderUi, />Styles<\/button>/)
+    assert.match(builderUi, /data-builder-field-inspector/)
+    assert.match(builderUi, /data-builder-element-styles/)
+    assert.match(builderUi, /data-builder-branding-styles/)
+    assert.match(builderUi, /if \(!block \|\| field\) return <BrandingInspector/)
+    assert.match(visualCanvas, /selectedBlockId === block\.id && !selectedFieldId/)
+    assert.match(visualCanvas, /suppressHover=\{block\.kind === "form"\}/)
+    assert.match(visualCanvas, /data-builder-field=\{field\.id\}/)
+    assert.match(visualCanvas, /application\/x-betelgeze-field/)
+    assert.doesNotMatch(visualCanvas, /Move field up|Move field down|aria-label="Field type"/)
+    assert.doesNotMatch(visualCanvas, /Client must finish this video|Client must open this link/)
+})
+
 test("collaborative drafts use private Realtime, Yjs merging, presence, author undo, and fail-closed offline editing", () => {
     assert.match(collaboration, /from "yjs"/)
     assert.match(collaboration, /new Y\.UndoManager/)
