@@ -48,6 +48,7 @@ export type OnboardingModuleDefinition = {
     lastEditedBy: string | null
     schemaVersion?: 1 | 2
     mandatory?: boolean
+    sortOrder?: number
     placement?: "start" | "service" | "end"
     serviceIds?: string[]
 }

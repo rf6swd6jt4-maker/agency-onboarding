@@ -207,11 +207,7 @@ export function composeOnboardingSession(input: ComposeInput): ComposedOnboardin
         modules: input.modules,
         mandatoryModuleIds: mandatoryIds,
     })
-    const orderedSources = [
-        ...resolvedSources.filter((source) => moduleById.get(source.moduleId)?.placement !== "end" && (moduleById.get(source.moduleId)?.mandatory || source.sourceKind === "mandatory")),
-        ...resolvedSources.filter((source) => !moduleById.get(source.moduleId)?.mandatory && source.sourceKind === "service"),
-        ...resolvedSources.filter((source) => moduleById.get(source.moduleId)?.placement === "end"),
-    ].filter((source, index, all) => all.findIndex((candidate) => candidate.moduleId === source.moduleId) === index)
+    const orderedSources = resolvedSources
     const modules = orderedSources.map((source, moduleIndex) => {
         const moduleDefinition = moduleById.get(source.moduleId)!
         return {

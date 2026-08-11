@@ -90,6 +90,17 @@ test("Builder defaults expose bookends and mandatory modules with expanded modul
     assert.match(builderUi, /group\.kind === "bookend" \|\| visibleModuleIds\.has/)
 })
 
+test("module ordering is shared by Outline, Modules, persistence, and runtime composition", () => {
+    assert.match(builderUi, /type: "module", moduleId: group\.definition\.id/)
+    assert.match(builderUi, /function reorderModule\(moduleId: string, targetIndex: number\)/)
+    assert.match(builderUi, /sortOrder: index \* 10/)
+    assert.match(builderUi, /leftTab === "outline"[\s\S]*>Add step<\/button>/)
+    assert.match(builderUi, /leftTab === "modules"[\s\S]*>Add module<\/button>/)
+    assert.doesNotMatch(builderUi, />Position<select/)
+    assert.doesNotMatch(builderUi, />New module<\/button>/)
+    assert.match(collaboration, /restoredModules\.every\(\(module\) => typeof module\.sortOrder === "number"\)/)
+})
+
 test("Header and estimated time are independently inspectable blocks", () => {
     assert.match(builderUi, /Header block/)
     assert.match(builderUi, /block\.kind === "estimate"/)

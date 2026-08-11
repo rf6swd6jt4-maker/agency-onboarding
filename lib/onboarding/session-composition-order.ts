@@ -57,5 +57,8 @@ export function resolveOrderedModuleSources(input: {
         }
     }
 
-    return [...selected.values()]
+    return input.modules.flatMap((moduleDefinition) => {
+        const source = selected.get(moduleDefinition.id)
+        return source ? [source] : []
+    })
 }

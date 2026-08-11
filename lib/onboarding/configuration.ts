@@ -75,7 +75,7 @@ function fallbackField(formKey: string, field: (typeof ONBOARDING_FORMS)[string]
 }
 
 function fallbackModules() {
-    return Object.values(MODULES).map<OnboardingModuleDefinition>((module) => ({
+    return Object.values(MODULES).map<OnboardingModuleDefinition>((module, moduleIndex) => ({
         id: stableLegacyId("module", module.key),
         revisionId: stableLegacyId("module-revision", module.key),
         code: module.key,
@@ -86,6 +86,7 @@ function fallbackModules() {
         version: 1,
         lastEditedAt: null,
         lastEditedBy: null,
+        sortOrder: moduleIndex * 10,
         steps: module.steps.map((step) => {
             const form = step.formKey ? ONBOARDING_FORMS[step.formKey] : null
             return {
@@ -240,9 +241,33 @@ function mapModule(row: UnknownRow, revision?: UnknownRow): OnboardingModuleDefi
         lastEditedBy: text(source.updated_by, source.created_by, row.updated_by) ?? null,
         schemaVersion: Number(definition.schemaVersion) === 2 ? 2 : 1,
         mandatory: bool(definition.mandatory),
+        sortOrder: typeof definition.sortOrder === "number" && Number.isFinite(definition.sortOrder) ? Math.round(definition.sortOrder) : undefined,
         placement: ["start", "service", "end"].includes(text(definition.placement) ?? "") ? text(definition.placement) as OnboardingModuleDefinition["placement"] : undefined,
         serviceIds: array(definition.serviceIds).map(String),
     }
+}
+
+function orderedModuleDefinitions<T extends OnboardingModuleDefinition>(modules: T[]) {
+    const hasPersistedOrder = modules.length > 0 && modules.every((moduleDefinition) => typeof moduleDefinition.sortOrder === "number")
+    if (hasPersistedOrder) return [...modules].sort((left, right) => left.sortOrder! - right.sortOrder! || left.name.localeCompare(right.name))
+    const legacyRank = (moduleDefinition: T) => moduleDefinition.code === "system-welcome"
+        ? -1
+        : moduleDefinition.code === "system-completion"
+            ? 3
+            : moduleDefinition.placement === "start"
+                ? 0
+                : moduleDefinition.placement === "end"
+                    ? 2
+                    : 1
+    const hasAnyPersistedOrder = modules.some((moduleDefinition) => typeof moduleDefinition.sortOrder === "number")
+    return [...modules].sort((left, right) => {
+        if (hasAnyPersistedOrder) {
+            const leftOrder = left.sortOrder ?? legacyRank(left) * 10_000
+            const rightOrder = right.sortOrder ?? legacyRank(right) * 10_000
+            if (leftOrder !== rightOrder) return leftOrder - rightOrder
+        }
+        return legacyRank(left) - legacyRank(right) || left.name.localeCompare(right.name)
+    })
 }
 
 function selectRevision(row: UnknownRow, revisions: UnknownRow[], preferDraft: boolean) {
@@ -679,9 +704,9 @@ async function hydrateVisualBookend(
 export async function loadOnboardingBuilderData(workspaceId: string, selectedModuleId?: string | null, currentUserId?: string | null): Promise<OnboardingBuilderData> {
     const raw = await rawConfiguration(workspaceId)
     const useLegacyFallback = !raw.schemaReady || raw.workspaceSlug === "scaylup"
-    const rawEditableModules = raw.modules.length
+    const rawEditableModules = orderedModuleDefinitions(raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, true))).filter((moduleDefinition) => moduleDefinition.status !== "archived")
-        : useLegacyFallback ? fallbackModules() : []
+        : useLegacyFallback ? fallbackModules() : [])
     const editableModules = await Promise.all(rawEditableModules.map(async (moduleDefinition) => ({
         ...moduleDefinition,
         steps: await Promise.all(moduleDefinition.steps.map(async (step) => ({
@@ -809,9 +834,9 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
 export async function loadPublishedOnboardingConfiguration(workspaceId: string): Promise<PublishedOnboardingConfiguration> {
     const raw = await rawConfiguration(workspaceId)
     const useLegacyFallback = !raw.schemaReady || raw.workspaceSlug === "scaylup"
-    const baseModules = raw.modules.length
+    const baseModules = orderedModuleDefinitions(raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false))).filter((moduleDefinition) => moduleDefinition.status === "published")
-        : useLegacyFallback ? fallbackModules() : []
+        : useLegacyFallback ? fallbackModules() : [])
     const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : useLegacyFallback ? fallbackServices(baseModules) : []
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const mandatoryIds = new Set(mandatory.publishedModuleIds)

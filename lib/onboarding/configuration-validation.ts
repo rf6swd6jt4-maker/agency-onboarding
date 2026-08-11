@@ -55,6 +55,7 @@ export function defaultOnboardingModuleDefinition(): Omit<OnboardingModuleDefini
         name: "Untitled module",
         description: "",
         isTest: false,
+        sortOrder: 1_000_000,
         steps: [{
             id: stepId,
             key: codeFromId(stepId, "step"),

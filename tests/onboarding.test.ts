@@ -89,11 +89,11 @@ test("builds stable snapshot onboarding native keys without colliding with legac
     assert.equal(onboardingSnapshotUploadNativeKey("session-1", "step-1", "workspace/path/logo.png"), "session-1:step:step-1:upload:workspace/path/logo.png")
 })
 
-test("orders service modules by descending priority and deduplicates stable module identities", () => {
+test("uses the global Builder order while resolving service priority and deduplicating modules", () => {
     const modules = [
+        { id: "high-only", revisionId: "high-r1", status: "published" },
         { id: "mandatory", revisionId: "mandatory-r1", status: "published" },
         { id: "shared", revisionId: "shared-r1", status: "published" },
-        { id: "high-only", revisionId: "high-r1", status: "published" },
         { id: "low-only", revisionId: "low-r1", status: "published" },
         { id: "draft", revisionId: "draft-r1", status: "draft" },
     ]
@@ -126,9 +126,9 @@ test("orders service modules by descending priority and deduplicates stable modu
     })
 
     assert.deepEqual(sources, [
+        { moduleId: "high-only", sourceKind: "service", sourceServiceRevisionId: "high-service-r1" },
         { moduleId: "mandatory", sourceKind: "mandatory", sourceServiceRevisionId: null },
         { moduleId: "shared", sourceKind: "mandatory", sourceServiceRevisionId: null },
-        { moduleId: "high-only", sourceKind: "service", sourceServiceRevisionId: "high-service-r1" },
         { moduleId: "low-only", sourceKind: "service", sourceServiceRevisionId: "low-service-r1" },
     ])
 })

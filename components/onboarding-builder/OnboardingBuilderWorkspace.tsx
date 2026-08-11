@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react"
+import { Fragment, useEffect, useMemo, useState, useTransition, type DragEvent, type ReactNode } from "react"
 import { createOnboardingModule, removeOnboardingModule } from "@/app/[workspaceSlug]/onboarding-builder/actions"
 import { saveOnboardingHelpSettings } from "@/app/[workspaceSlug]/settings/onboarding-actions"
 import { prepareVisualBuilderVideoUpload, publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
@@ -132,6 +132,7 @@ function TrashIcon() {
 type OutlineDropTarget = {
     groupKey: string
     stepId: string | null
+    moduleIndex?: number
     stepIndex?: number
     blockIndex?: number
     formBlockId?: string
@@ -217,12 +218,14 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
     }
 
     return <div data-builder-outline-tree className="space-y-1">
-        {groups.map((group) => {
+        {groups.map((group, groupIndex) => {
             const moduleId = group.kind === "module" ? group.definition.id : null
             const shown = moduleId ? visibleModuleIds.has(moduleId) : true
             const groupCollapsed = collapsedGroups.has(group.key)
-            return <section key={group.key} className="overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20">
-                <div className="flex h-9 items-center gap-1 px-1.5">
+            return <Fragment key={group.key}>
+                <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: null, moduleIndex: groupIndex }) }} />
+                <section className="overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20">
+                <div title="Drag to reorder module" draggable={editable} onDragStart={(event) => startDrag(event, { type: "module", moduleId: group.definition.id }, group.key, group.title)} onDragEnd={() => setDragging(null)} className={`flex h-9 cursor-grab items-center gap-1 px-1.5 ${dragging?.key === group.key ? "opacity-40" : ""}`}>
                     <button type="button" aria-label={`${groupCollapsed ? "Expand" : "Collapse"} ${group.title}`} aria-expanded={!groupCollapsed} onClick={() => toggleCollapsed(setCollapsedGroups, group.key)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronIcon collapsed={groupCollapsed} /></button>
                     <span className={`transition ${shown ? "" : "opacity-40 grayscale"}`}><OutlineItemIcon kind={group.kind === "module" ? "module" : "bookend"} /></span>
                     <span className={`min-w-0 flex-1 truncate px-1 text-xs font-bold transition ${shown ? "text-neutral-200" : "text-neutral-600"}`}>{group.title}</span>
@@ -271,8 +274,10 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                         </div>
                     })}
                 </div> : null}
-            </section>
+                </section>
+            </Fragment>
         })}
+        {groups.length ? <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: groups.at(-1)!.key, stepId: null, moduleIndex: groups.length }) }} /> : null}
         <section className={`overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20 ${selection.blockId === HELP_BLOCK_ID ? "bg-neutral-800" : ""}`}>
             <button type="button" onClick={onSelectHelp} className="flex h-9 w-full items-center gap-2 px-2 text-left text-xs text-neutral-300"><span className="h-7 w-7 shrink-0" /><OutlineItemIcon kind="help" /><span className="min-w-0 flex-1 truncate font-semibold">Client help</span><RoundPill>Fixed</RoundPill></button>
         </section>
@@ -388,9 +393,7 @@ function StylesPanel({ block, field, theme, updateBlock, updateThemeSwatch, addT
 }
 
 function composeGroups(document: VisualBuilderDocument): DefinitionGroup[] {
-    const modules = [...document.modules]
-    const orderedModules = [...modules].sort((left, right) => (left.placement === "start" ? 0 : left.placement === "end" ? 2 : 1) - (right.placement === "start" ? 0 : right.placement === "end" ? 2 : 1))
-    return orderedModules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module }))
+    return document.modules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module }))
 }
 
 function documentDefinition(document: VisualBuilderDocument, groupKey: string) {
@@ -417,21 +420,29 @@ function railPreference(key: string, fallback: boolean) {
     return window.localStorage.getItem(key) !== "collapsed"
 }
 
-function ModulesPanel({ modules, services, editable, updateModule, createModule, removeModule }: {
+function ModulesPanel({ modules, services, editable, updateModule, removeModule, reorderModule }: {
     modules: OnboardingModuleDefinitionV2[]
     services: OnboardingBuilderData["services"]
     editable: boolean
     updateModule: (module: OnboardingModuleDefinitionV2) => void
-    createModule: () => void
     removeModule: (module: OnboardingModuleDefinitionV2) => void
+    reorderModule: (moduleId: string, targetIndex: number) => void
 }) {
+    const [draggingModuleId, setDraggingModuleId] = useState<string | null>(null)
+    function dropModule(event: DragEvent<HTMLElement>, targetIndex: number) {
+        event.preventDefault()
+        const moduleId = event.dataTransfer.getData("application/x-betelgeze-module")
+        if (moduleId) reorderModule(moduleId, targetIndex)
+        setDraggingModuleId(null)
+    }
     return <div className="space-y-3">
-        <div className="flex items-center justify-between px-1"><p className="text-[11px] leading-4 text-neutral-500">Mandatory modules can sit at either end. Other modules appear only for linked services.</p><button type="button" disabled={!editable} onClick={createModule} className="shrink-0 text-[11px] text-neutral-200 underline underline-offset-4 disabled:opacity-30">Add module</button></div>
-        {modules.map((module) => <section key={module.id} className="space-y-3 rounded-xl border border-neutral-800 bg-black/40 p-3">
-            <div className="flex items-end gap-2"><label className="block min-w-0 flex-1 text-[11px] text-neutral-500">Module name<input value={module.name} disabled={!editable} onChange={(event) => updateModule({ ...module, name: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white" /></label><button type="button" aria-label={`Delete ${module.name}`} title={`Delete ${module.name}`} disabled={!editable} onClick={() => removeModule(module)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-red-300 disabled:opacity-30"><TrashIcon /></button></div>
-            <label className="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(module.mandatory)} disabled={!editable || module.code === "system-welcome" || module.code === "system-completion"} onChange={(event) => updateModule({ ...module, mandatory: event.target.checked, placement: event.target.checked ? "start" : "service", serviceIds: event.target.checked ? [] : module.serviceIds })} />Mandatory</label>
-            {module.mandatory ? <label className="block text-[11px] text-neutral-500">Position<select value={module.placement === "end" ? "end" : "start"} disabled={!editable} onChange={(event) => updateModule({ ...module, placement: event.target.value as "start" | "end" })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white"><option value="start">Start of onboarding</option><option value="end">End of onboarding</option></select></label> : <fieldset disabled={!editable} className="space-y-2"><legend className="text-[11px] text-neutral-500">Linked services</legend>{services.filter((service) => service.state === "active").map((service) => <label key={service.id} className="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={module.serviceIds?.includes(service.id) ?? false} onChange={(event) => updateModule({ ...module, placement: "service", serviceIds: event.target.checked ? [...(module.serviceIds ?? []), service.id] : (module.serviceIds ?? []).filter((id) => id !== service.id) })} />{service.name}</label>)}</fieldset>}
-        </section>)}
+        <p className="px-1 text-[11px] leading-4 text-neutral-500">Drag modules into their client-facing order. Mandatory modules always appear; other modules appear when a linked service is selected.</p>
+        {modules.map((module, moduleIndex) => <Fragment key={module.id}><div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropModule(event, moduleIndex)} /><section className={`space-y-3 rounded-xl border border-neutral-800 bg-black/40 p-3 transition ${draggingModuleId === module.id ? "opacity-40" : ""}`}>
+            <div className="flex items-end gap-2"><span draggable={editable} title="Drag to reorder module" onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-module", module.id); event.dataTransfer.effectAllowed = "move"; setDraggingModuleId(module.id) }} onDragEnd={() => setDraggingModuleId(null)} className="mb-0.5 inline-flex h-9 w-7 cursor-grab items-center justify-center text-neutral-500">↕</span><label className="block min-w-0 flex-1 text-[11px] text-neutral-500">Module name<input value={module.name} disabled={!editable} onChange={(event) => updateModule({ ...module, name: event.target.value })} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-black px-2 text-xs text-white" /></label><button type="button" aria-label={`Delete ${module.name}`} title={`Delete ${module.name}`} disabled={!editable} onClick={() => removeModule(module)} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-800 hover:text-red-300 disabled:opacity-30"><TrashIcon /></button></div>
+            <label className="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={Boolean(module.mandatory)} disabled={!editable} onChange={(event) => updateModule({ ...module, mandatory: event.target.checked, serviceIds: event.target.checked ? [] : module.serviceIds })} />Mandatory</label>
+            {!module.mandatory ? <fieldset disabled={!editable} className="space-y-2"><legend className="text-[11px] text-neutral-500">Linked services</legend>{services.filter((service) => service.state === "active").map((service) => <label key={service.id} className="flex items-center gap-2 text-xs text-neutral-300"><input type="checkbox" checked={module.serviceIds?.includes(service.id) ?? false} onChange={(event) => updateModule({ ...module, serviceIds: event.target.checked ? [...(module.serviceIds ?? []), service.id] : (module.serviceIds ?? []).filter((id) => id !== service.id) })} />{service.name}</label>)}</fieldset> : null}
+        </section></Fragment>)}
+        {modules.length ? <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropModule(event, modules.length)} /> : null}
     </div>
 }
 
@@ -579,6 +590,18 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         return { ...document, linkedChangeSets: [...document.linkedChangeSets, { id: crypto.randomUUID(), definitionIds: participants, createdVersion: collaboration.serverVersion }] }
     }
 
+    function reorderModule(moduleId: string, targetIndex: number) {
+        collaboration.updateDocument((document) => {
+            const sourceIndex = document.modules.findIndex((module) => module.id === moduleId)
+            if (sourceIndex < 0) return document
+            const modules = [...document.modules]
+            const [moved] = modules.splice(sourceIndex, 1)
+            const adjustedIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+            modules.splice(Math.max(0, Math.min(adjustedIndex, modules.length)), 0, moved)
+            return { ...document, modules: modules.map((module, index) => ({ ...module, sortOrder: index * 10 })) }
+        })
+    }
+
     function moveStep(sourceGroupKey: string, targetGroupKey: string, stepId: string, targetIndex: number, copy: boolean) {
         const moved: { step: OnboardingStepV2 | null } = { step: null }
         collaboration.updateDocument((document) => {
@@ -675,8 +698,9 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         if (!raw) return
         event.preventDefault()
         try {
-            const payload = JSON.parse(raw) as { type: "step" | "block" | "field" | "library"; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "checklist" | "form" | "video" | "button"; copy?: boolean }
-            if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy))
+            const payload = JSON.parse(raw) as { type: "module" | "step" | "block" | "field" | "library"; moduleId?: string; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "checklist" | "form" | "video" | "button"; copy?: boolean }
+            if (payload.type === "module" && payload.moduleId && target.moduleIndex !== undefined) reorderModule(payload.moduleId, target.moduleIndex)
+            else if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy))
             else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && target.stepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, target.groupKey, target.stepId, target.blockIndex ?? Number.MAX_SAFE_INTEGER, Boolean(payload.copy))
             else if (payload.type === "field" && payload.groupKey && payload.stepId && payload.formBlockId && payload.fieldId && target.formBlockId && target.fieldIndex !== undefined) {
                 if (payload.groupKey !== target.groupKey || payload.stepId !== target.stepId || payload.formBlockId !== target.formBlockId) {
@@ -949,15 +973,15 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                         <button type="button" onClick={() => setLeftTab("modules")} className={`h-8 rounded-md px-2 text-xs ${leftTab === "modules" ? "bg-neutral-800 text-white" : "text-neutral-500"}`}>Modules</button>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
-                        {leftTab === "modules" ? <ModulesPanel modules={collaboration.document.modules} services={data.services} editable={collaboration.editable} createModule={createModule} removeModule={removeModule} updateModule={(module) => collaboration.updateDocument((document) => ({ ...document, modules: document.modules.map((candidate) => candidate.id === module.id ? module : candidate) }))} /> : null}
+                        {leftTab === "modules" ? <ModulesPanel modules={collaboration.document.modules} services={data.services} editable={collaboration.editable} removeModule={removeModule} reorderModule={reorderModule} updateModule={(module) => collaboration.updateDocument((document) => ({ ...document, modules: document.modules.map((candidate) => candidate.id === module.id ? module : candidate) }))} /> : null}
                         <div className={leftTab === "modules" ? "hidden" : "contents"}>
                         {leftTab === "outline" ? <>
-                            <div className="mb-2 flex items-center justify-between px-1"><p className="text-[11px] text-neutral-600">Cmd/Ctrl-drag to duplicate</p><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="text-[11px] text-neutral-300 underline underline-offset-4 disabled:opacity-30">New module</button></div>
+                            <div className="mb-2 px-1"><p className="text-[11px] text-neutral-600">Drag modules to order them · Cmd/Ctrl-drag steps and elements to duplicate</p></div>
                             <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onSelectHelp={() => { setSelection({ ...selection, blockId: HELP_BLOCK_ID, fieldId: null }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
                         </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag a block into any step. Each block type can appear once per step, or click to append to the selected step.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "checklist", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "checklist" ? "✓" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
                         </div>
                     </div>
-                    <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div>
+                    {leftTab === "outline" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div> : leftTab === "modules" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300 disabled:opacity-30">Add module</button></div> : null}
                 </> : <RailToggleButton side="left" label="Expand left rail" onClick={() => rememberRail("left", true)} />}
             </aside> : null}
 

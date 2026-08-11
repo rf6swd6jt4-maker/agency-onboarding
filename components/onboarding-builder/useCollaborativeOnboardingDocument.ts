@@ -227,8 +227,12 @@ function readDocument(root: Y.Map<unknown>, fallback: VisualBuilderDocument): Vi
     })
     const restoredIds = new Set(modules.map((module) => module.id))
     const restoredModules = [...modules, ...fallback.modules.filter((module) => !restoredIds.has(module.id)).map(upgradeModuleToV2)]
+    const fallbackOrder = new Map(fallback.modules.map((module, index) => [module.id, index]))
+    const orderedModules = restoredModules.every((module) => typeof module.sortOrder === "number")
+        ? [...restoredModules].sort((left, right) => left.sortOrder! - right.sortOrder!)
+        : [...restoredModules].sort((left, right) => (fallbackOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (fallbackOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER) || left.name.localeCompare(right.name))
     return {
-        modules: restoredModules.length ? restoredModules : fallback.modules.map(upgradeModuleToV2),
+        modules: orderedModules.length ? orderedModules : fallback.modules.map(upgradeModuleToV2),
         welcome: upgradeBookendToV2((plain(root.get("welcome")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.welcome),
         completion: upgradeBookendToV2((plain(root.get("completion")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.completion),
         theme: (plain(root.get("theme")) as OnboardingThemeDefinition | undefined) ?? fallback.theme,

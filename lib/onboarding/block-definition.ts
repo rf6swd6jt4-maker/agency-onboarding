@@ -308,7 +308,7 @@ export function moduleV2WithLegacyProjection(module: OnboardingModuleDefinitionV
         description: module.description,
         isTest: module.isTest,
         mandatory: Boolean(module.mandatory),
-        placement: module.placement ?? (module.mandatory ? "start" : "service"),
+        sortOrder: module.sortOrder,
         serviceIds: module.serviceIds ?? [],
         schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
         steps: module.steps.map((sourceStep) => {
