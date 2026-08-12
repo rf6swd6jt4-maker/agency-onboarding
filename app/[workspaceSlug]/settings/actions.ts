@@ -5,8 +5,17 @@ import { redirect } from "next/navigation"
 import { requireWorkspace } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { storeWorkspaceImage } from "@/lib/onboarding/uploads"
-import { INTEGRATION_PROVIDERS, IntegrationProvider, saveWorkspaceIntegration } from "@/lib/workspace-integrations"
-import { verifyWorkspaceIntegration } from "@/lib/workspace-integrations"
+import {
+    discardWorkspaceIntegrationCandidate,
+    disconnectWorkspaceIntegration,
+    INTEGRATION_PROVIDERS,
+    IntegrationProvider,
+    restorePreviousWorkspaceIntegration,
+    saveWorkspaceIntegration,
+    stageWorkspaceIntegrationCandidate,
+    verifyAndActivateWorkspaceIntegrationCandidate,
+    verifyWorkspaceIntegration,
+} from "@/lib/workspace-integrations"
 import { normalizeOnboardingDomain } from "@/lib/onboarding/custom-domain"
 import { attachOnboardingDomain, removeOnboardingDomain, verifyOnboardingDomain } from "@/lib/onboarding/vercel-domains"
 import { allowDirectUploadsFromDomain, removeDirectUploadsFromDomain } from "@/lib/onboarding/r2-cors"
@@ -139,6 +148,114 @@ export async function verifyWorkspaceConnection(slug: string, provider: Integrat
     await assertWorkspaceConnectionIsEditable(workspace.id, provider)
     await verifyWorkspaceIntegration(workspace.id, provider)
     refresh(slug)
+}
+
+export type WorkspaceConnectionActionResult = { ok: true } | { ok: false; error: string }
+
+async function connectionAction(run: () => Promise<void>): Promise<WorkspaceConnectionActionResult> {
+    try {
+        await run()
+        return { ok: true }
+    } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "The connection could not be updated." }
+    }
+}
+
+export async function stageManualWorkspaceConnection(slug: string, provider: IntegrationProvider, formData: FormData): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        if (!INTEGRATION_PROVIDERS.includes(provider)) throw new Error("Unknown connection.")
+        const { workspace, user } = await requireWorkspace(slug, "owner")
+        const config = Object.fromEntries([...formData.entries()].filter(([, value]) => typeof value === "string")) as Record<string, string>
+        const required: Record<IntegrationProvider, string[]> = {
+            stripe: ["secret_key", "webhook_secret"],
+            meta_whatsapp: ["access_token", "phone_number_id", "waba_id", "consent_template_name"],
+        }
+        if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in every required connection detail before continuing.")
+        await stageWorkspaceIntegrationCandidate({ workspaceId: workspace.id, provider, config, authMethod: "manual", userId: user.id })
+        await verifyAndActivateWorkspaceIntegrationCandidate(workspace.id, provider)
+        refresh(slug)
+    })
+}
+
+export async function completeWhatsAppEmbeddedSignup(slug: string, input: {
+    code: string
+    wabaId: string
+    phoneNumberId: string
+    consentTemplateName: string
+    consentTemplateLanguage: string
+}): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        const { workspace, user } = await requireWorkspace(slug, "owner")
+        if (!input.code || !input.wabaId || !input.phoneNumberId) throw new Error("Meta did not return the WhatsApp account and phone number. Run Embedded Signup again.")
+        const appId = process.env.NEXT_PUBLIC_META_APP_ID
+        const appSecret = process.env.META_APP_SECRET
+        if (!appId || !appSecret || !process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID) throw new Error("Betelgeze Embedded Signup is not configured yet. Use manual connection or add the Meta app credentials in Vercel.")
+        const tokenUrl = new URL("https://graph.facebook.com/v25.0/oauth/access_token")
+        tokenUrl.searchParams.set("client_id", appId)
+        tokenUrl.searchParams.set("client_secret", appSecret)
+        tokenUrl.searchParams.set("code", input.code)
+        const tokenResponse = await fetch(tokenUrl, { cache: "no-store" })
+        const tokenPayload = await tokenResponse.json() as { access_token?: string; error?: { message?: string } }
+        if (!tokenResponse.ok || !tokenPayload.access_token) throw new Error(tokenPayload.error?.message ?? "Meta could not finish Embedded Signup.")
+
+        const webhookUrl = new URL("/api/client-messages/meta/whatsapp", process.env.NEXT_PUBLIC_SITE_URL ?? "https://dashboard.betelgeze.com").toString()
+        const verifyToken = process.env.META_WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        if (!verifyToken) throw new Error("The Betelgeze WhatsApp webhook verification token is not configured.")
+        const subscription = await fetch(`https://graph.facebook.com/v25.0/${encodeURIComponent(input.wabaId)}/subscribed_apps`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${tokenPayload.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ override_callback_uri: webhookUrl, verify_token: verifyToken }),
+        })
+        if (!subscription.ok) throw new Error("WhatsApp was authorized, but Meta could not subscribe Betelgeze to its webhooks.")
+        await stageWorkspaceIntegrationCandidate({
+            workspaceId: workspace.id,
+            provider: "meta_whatsapp",
+            authMethod: "embedded_signup",
+            userId: user.id,
+            config: {
+                access_token: tokenPayload.access_token,
+                phone_number_id: input.phoneNumberId,
+                waba_id: input.wabaId,
+                webhook_verify_token: verifyToken,
+                consent_template_name: input.consentTemplateName.trim(),
+                consent_template_language: input.consentTemplateLanguage.trim() || "en_US",
+            },
+        })
+        await verifyAndActivateWorkspaceIntegrationCandidate(workspace.id, "meta_whatsapp")
+        refresh(slug)
+    })
+}
+
+export async function verifyPendingWorkspaceConnection(slug: string, provider: IntegrationProvider): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        const { workspace } = await requireWorkspace(slug, "owner")
+        await verifyAndActivateWorkspaceIntegrationCandidate(workspace.id, provider)
+        refresh(slug)
+    })
+}
+
+export async function discardPendingWorkspaceConnection(slug: string, provider: IntegrationProvider): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        const { workspace } = await requireWorkspace(slug, "owner")
+        await discardWorkspaceIntegrationCandidate(workspace.id, provider)
+        refresh(slug)
+    })
+}
+
+export async function rollbackWorkspaceConnection(slug: string, provider: IntegrationProvider): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        const { workspace } = await requireWorkspace(slug, "owner")
+        await restorePreviousWorkspaceIntegration(workspace.id, provider)
+        refresh(slug)
+    })
+}
+
+export async function disconnectWorkspaceConnection(slug: string, provider: IntegrationProvider): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        const { workspace } = await requireWorkspace(slug, "owner")
+        await disconnectWorkspaceIntegration(workspace.id, provider)
+        refresh(slug)
+    })
 }
 
 export async function saveWorkspaceOnboardingDomain(slug: string, formData: FormData) {

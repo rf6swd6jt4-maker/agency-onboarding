@@ -381,7 +381,7 @@ export async function voidAndReopenRelationshipInvoice(slug: string, relationshi
                 const config = await getWorkspaceProviderConfig(workspace.id, "stripe")
                 return voidStripeInvoice({
                     invoiceId: sale.stripe_invoice_id!,
-                    secretKey: config.secret_key,
+                    secretKey: config.access_token || config.secret_key,
                     idempotencyKey: `${sale.id}:staff-void`,
                 })
             })()

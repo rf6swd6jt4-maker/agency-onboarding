@@ -1,14 +1,17 @@
 import { getRequiredEnv } from "@/lib/env"
 import { toMetaWhatsAppRecipient } from "@/lib/client-messages/addresses"
 import { formatMetaWhatsAppApiError } from "@/lib/client-messages/meta-whatsapp-errors"
+import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 
 type SendMetaWhatsAppMessageInput = {
+    workspaceId?: string
     to: string
     body: string
     replyToMessageId?: string | null
 }
 
 type SendMetaWhatsAppTemplateInput = {
+    workspaceId?: string
     to: string
     templateName: string
     languageCode: string
@@ -22,13 +25,23 @@ export function hasMetaWhatsAppConfig() {
     )
 }
 
+async function metaConfig(workspaceId?: string) {
+    if (workspaceId) return getWorkspaceProviderConfig(workspaceId, "meta_whatsapp")
+    return {
+        access_token: getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN"),
+        phone_number_id: getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID"),
+    }
+}
+
 export async function sendMetaWhatsAppMessage({
+    workspaceId,
     to,
     body,
     replyToMessageId,
 }: SendMetaWhatsAppMessageInput) {
-    const phoneNumberId = getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID")
-    const accessToken = getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN")
+    const config = await metaConfig(workspaceId)
+    const phoneNumberId = config.phone_number_id
+    const accessToken = config.access_token
 
     const response = await fetch(
         `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
@@ -72,13 +85,15 @@ export async function sendMetaWhatsAppMessage({
 }
 
 export async function sendMetaWhatsAppTemplate({
+    workspaceId,
     to,
     templateName,
     languageCode,
     components,
 }: SendMetaWhatsAppTemplateInput) {
-    const phoneNumberId = getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID")
-    const accessToken = getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN")
+    const config = await metaConfig(workspaceId)
+    const phoneNumberId = config.phone_number_id
+    const accessToken = config.access_token
 
     const response = await fetch(
         `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
@@ -122,9 +137,10 @@ export async function sendMetaWhatsAppTemplate({
     return responseBody ? JSON.parse(responseBody) : null
 }
 
-export async function getMetaWhatsAppMedia(mediaId: string) {
-    const phoneNumberId = getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID")
-    const accessToken = getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN")
+export async function getMetaWhatsAppMedia(mediaId: string, workspaceId?: string) {
+    const config = await metaConfig(workspaceId)
+    const phoneNumberId = config.phone_number_id
+    const accessToken = config.access_token
     const params = new URLSearchParams({
         phone_number_id: phoneNumberId,
     })
@@ -153,8 +169,9 @@ export async function getMetaWhatsAppMedia(mediaId: string) {
     return responseBody ? JSON.parse(responseBody) : null
 }
 
-export async function downloadMetaWhatsAppMedia(mediaUrl: string) {
-    const accessToken = getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN")
+export async function downloadMetaWhatsAppMedia(mediaUrl: string, workspaceId?: string) {
+    const config = await metaConfig(workspaceId)
+    const accessToken = config.access_token
     const response = await fetch(mediaUrl, {
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -181,9 +198,10 @@ export async function downloadMetaWhatsAppMedia(mediaUrl: string) {
     }
 }
 
-export async function checkMetaWhatsAppAccess() {
-    const phoneNumberId = getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID")
-    const accessToken = getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN")
+export async function checkMetaWhatsAppAccess(workspaceId?: string) {
+    const config = await metaConfig(workspaceId)
+    const phoneNumberId = config.phone_number_id
+    const accessToken = config.access_token
     const params = new URLSearchParams({
         fields: "id,display_phone_number,verified_name",
     })

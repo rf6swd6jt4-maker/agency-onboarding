@@ -5,7 +5,7 @@ import {
     verifyStripeWebhookSignature,
 } from "@/lib/stripe/api"
 import { handlePaidStripeInvoice } from "@/lib/client-sales/automation"
-import { getStripeWebhookCandidates } from "@/lib/workspace-integrations"
+import { getStripeWebhookCandidates, getWorkspaceIdForConnectedAccount, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { recordAdminActivity } from "@/lib/admin/activity"
 
@@ -61,11 +61,24 @@ export async function POST(request: NextRequest) {
     const { data: sale } = saleId
         ? await supabaseAdmin.from("client_sales").select("workspace_id").eq("id", saleId).maybeSingle()
         : { data: null }
-    const workspaceId = sale?.workspace_id ?? matchedCandidate.workspaceId
+    const externalAccountId = event.account ?? event.context ?? null
+    const connectedWorkspaceId = matchedCandidate.shared && externalAccountId
+        ? await getWorkspaceIdForConnectedAccount("stripe", externalAccountId)
+        : null
+    if (sale?.workspace_id && connectedWorkspaceId && sale.workspace_id !== connectedWorkspaceId) {
+        return Response.json({ error: "Stripe event account does not own the referenced Betelgeze sale" }, { status: 400 })
+    }
+    const workspaceId = matchedCandidate.shared
+        ? connectedWorkspaceId
+        : sale?.workspace_id ?? matchedCandidate.workspaceId
 
-    if (!workspaceId || workspaceId !== matchedCandidate.workspaceId) {
+    if (!workspaceId) {
+        return Response.json({ ok: true, ignored: true, reason: "unresolved_workspace" })
+    }
+    if (matchedCandidate.workspaceId && workspaceId !== matchedCandidate.workspaceId) {
         return Response.json({ error: "Could not resolve workspace for Stripe event" }, { status: 500 })
     }
+    await recordWorkspaceConnectionWebhook(workspaceId, "stripe")
     const { error: eventInsertError } = await supabaseAdmin
         .from("stripe_events")
         .insert({

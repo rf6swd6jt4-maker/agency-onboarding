@@ -824,7 +824,7 @@ export async function sendRelationshipInvoice(input: {
         serviceKeys: lineItems.map((item) => item.serviceKey),
         projectTimeframeDays: relationship.project_timeframe_days,
         daysUntilDue: 7,
-        secretKey: config.secret_key,
+        secretKey: config.access_token || config.secret_key,
     })
     const [{ error: statusError }, { error: workError }] = await Promise.all([
         supabaseAdmin.from("client_sales").update({ status: "invoice_sent", stripe_customer_id: invoice.customerId, stripe_invoice_id: invoice.invoiceId, stripe_invoice_status: invoice.invoiceStatus, stripe_hosted_invoice_url: invoice.hostedInvoiceUrl, stripe_invoice_pdf: invoice.invoicePdf, raw_payload: invoice.rawInvoice, updated_at: new Date().toISOString() }).eq("workspace_id", input.workspaceId).eq("id", sale.id),

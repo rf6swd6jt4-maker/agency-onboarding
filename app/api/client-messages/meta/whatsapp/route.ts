@@ -12,6 +12,7 @@ import {
 } from "@/lib/client-messages/meta-whatsapp"
 import { storeClientMessageMedia } from "@/lib/onboarding/uploads"
 import { handleSaleConsentConfirmation } from "@/lib/client-sales/automation"
+import { getWorkspaceIdForWhatsAppPhoneNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -118,11 +119,12 @@ function logDiagnosticInsertError(context: string, error: unknown) {
     )
 }
 
-async function resolveInboundChannel(fromAddress: string) {
+async function resolveInboundChannel(fromAddress: string, workspaceId: string) {
     const equivalentAddresses = getEquivalentMessageAddresses(fromAddress)
     const { data: exactChannel, error: exactChannelError } = await supabaseAdmin
         .from("client_communication_channels")
         .select("id, client_id, external_address")
+        .eq("workspace_id", workspaceId)
         .eq("provider", "meta_whatsapp")
         .in("external_address", equivalentAddresses)
         .eq("is_active", true)
@@ -144,15 +146,12 @@ async function resolveInboundChannel(fromAddress: string) {
     const { data: client, error: clientError } = await supabaseAdmin
         .from("clients")
         .select("id")
+        .eq("workspace_id", workspaceId)
         .in("phone", equivalentAddresses)
         .is("archived_at", null)
         .maybeSingle()
 
-    if (clientError) {
-        throw new Error(
-            `Could not look up client by WhatsApp phone: ${clientError.message}`
-        )
-    }
+    if (clientError) throw new Error(`Could not look up client by WhatsApp phone: ${clientError.message}`)
 
     if (!client) return null
 
@@ -160,6 +159,7 @@ async function resolveInboundChannel(fromAddress: string) {
         await supabaseAdmin
             .from("client_communication_channels")
             .select("id, client_id, external_address")
+            .eq("workspace_id", workspaceId)
             .eq("client_id", client.id)
             .eq("provider", "meta_whatsapp")
             .eq("is_active", true)
@@ -204,12 +204,14 @@ async function repairChannelAddress(
 }
 
 async function logWebhookError({
+    workspaceId,
     message,
     payload,
     fromAddress,
     toAddress,
     providerMessageId,
 }: {
+    workspaceId: string
     message: string
     payload: unknown
     fromAddress?: string | null
@@ -218,6 +220,7 @@ async function logWebhookError({
 }) {
     try {
         const { error } = await supabaseAdmin.from("client_messages").insert({
+            workspace_id: workspaceId,
             direction: "inbound",
             provider: "meta_whatsapp",
             provider_message_id: providerMessageId ?? null,
@@ -237,11 +240,13 @@ async function logWebhookError({
 }
 
 async function logWebhookNotice({
+    workspaceId,
     message,
     payload,
     fromAddress,
     toAddress,
 }: {
+    workspaceId: string
     message: string
     payload: unknown
     fromAddress?: string | null
@@ -249,6 +254,7 @@ async function logWebhookNotice({
 }) {
     try {
         const { error } = await supabaseAdmin.from("client_messages").insert({
+            workspace_id: workspaceId,
             direction: "inbound",
             provider: "meta_whatsapp",
             from_address: fromAddress ?? null,
@@ -300,9 +306,11 @@ function getStatusError(status: WhatsAppStatus) {
 }
 
 async function handleStatusUpdate({
+    workspaceId,
     status,
     payload,
 }: {
+    workspaceId: string
     status: WhatsAppStatus
     payload: WhatsAppWebhookPayload
 }) {
@@ -315,6 +323,7 @@ async function handleStatusUpdate({
     const { data: message } = await supabaseAdmin
         .from("client_messages")
         .select("id, client_id, raw_payload")
+        .eq("workspace_id", workspaceId)
         .or(
             `provider_message_id.eq.${messageId},whatsapp_message_id.eq.${messageId}`
         )
@@ -356,6 +365,7 @@ async function handleStatusUpdate({
                 updated_at: new Date().toISOString(),
             })
             .eq("consent_template_message_id", messageId)
+            .eq("workspace_id", workspaceId)
         if (message?.client_id) {
             await reportClientPlatformFailure({
                 clientId: message.client_id,
@@ -511,7 +521,7 @@ async function getInboundMessageContent({
 
     if (!mediaPayload?.media.id) return null
 
-    const mediaInfo = await getMetaWhatsAppMedia(mediaPayload.media.id)
+    const mediaInfo = await getMetaWhatsAppMedia(mediaPayload.media.id, workspaceId)
     const mediaUrl =
         typeof mediaInfo?.url === "string" ? mediaInfo.url : null
     const mimeType =
@@ -524,7 +534,7 @@ async function getInboundMessageContent({
         throw new Error("Meta WhatsApp media lookup did not return a URL")
     }
 
-    const downloadedMedia = await downloadMetaWhatsAppMedia(mediaUrl)
+    const downloadedMedia = await downloadMetaWhatsAppMedia(mediaUrl, workspaceId)
     const contentType =
         downloadedMedia.contentType === "application/octet-stream"
             ? mimeType
@@ -566,11 +576,13 @@ async function getInboundMessageContent({
 }
 
 async function handleInboundMessage({
+    workspaceId,
     message,
     value,
     payload,
     appBaseUrl,
 }: {
+    workspaceId: string
     message: WhatsAppMessage
     value: WhatsAppChangeValue
     payload: WhatsAppWebhookPayload
@@ -589,6 +601,7 @@ async function handleInboundMessage({
         ? await supabaseAdmin
               .from("client_messages")
               .select("id")
+              .eq("workspace_id", workspaceId)
               .eq("provider", "meta_whatsapp")
               .eq("provider_message_id", messageId)
               .maybeSingle()
@@ -597,6 +610,7 @@ async function handleInboundMessage({
     if (existingMessage) return
 
     const pendingSaleConfirmation = await handleSaleConsentConfirmation({
+        workspaceId,
         fromAddress: from,
         messageId,
         body: getInboundText(message) ?? "",
@@ -605,7 +619,7 @@ async function handleInboundMessage({
 
     if (pendingSaleConfirmation.handled) return
 
-    const channel = await resolveInboundChannel(from)
+    const channel = await resolveInboundChannel(from, workspaceId)
 
     if (!channel) {
         const unmatchedBody =
@@ -613,6 +627,7 @@ async function handleInboundMessage({
             `[Unsupported ${message.type ?? "message"}]`
 
         const { error } = await supabaseAdmin.from("client_messages").insert({
+            workspace_id: workspaceId,
             direction: "inbound",
             provider: "meta_whatsapp",
             provider_message_id: messageId,
@@ -638,12 +653,14 @@ async function handleInboundMessage({
         .from("clients")
         .select("name, workspace_id, relationship_id")
         .eq("id", channel.client_id)
+        .eq("workspace_id", workspaceId)
         .single()
     const initialBody =
         getInboundText(message) || `[${titleCase(message.type ?? "message")}]`
     const { data: insertedMessage, error: insertError } = await supabaseAdmin
         .from("client_messages")
         .insert({
+            workspace_id: workspaceId,
             client_id: channel.client_id,
             relationship_id: client?.relationship_id ?? null,
             communication_channel_id: channel.id,
@@ -743,9 +760,24 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+    let resolvedWorkspaceId: string | null = null
     try {
         const appBaseUrl = new URL(request.url).origin
         const payload = (await request.json()) as WhatsAppWebhookPayload
+        const phoneNumberIds = [...new Set(payload.entry
+            ?.flatMap((entry) => entry.changes ?? [])
+            .flatMap((change) => change.value?.metadata?.phone_number_id ? [change.value.metadata.phone_number_id] : []) ?? [])]
+        if (phoneNumberIds.length !== 1) {
+            console.warn("Meta WhatsApp webhook could not be scoped to one phone number", { phoneNumberIds })
+            return Response.json({ ok: true, ignored: true, reason: "unresolved_phone_number" })
+        }
+        const workspaceId = await getWorkspaceIdForWhatsAppPhoneNumber(phoneNumberIds[0])
+        if (!workspaceId) {
+            console.warn("Meta WhatsApp webhook used an unconnected phone number", { phoneNumberId: phoneNumberIds[0] })
+            return Response.json({ ok: true, ignored: true, reason: "unconnected_phone_number" })
+        }
+        resolvedWorkspaceId = workspaceId
+        await recordWorkspaceConnectionWebhook(workspaceId, "meta_whatsapp")
         const inboundMessages =
             payload.entry
                 ?.flatMap((entry) => entry.changes ?? [])
@@ -770,6 +802,7 @@ export async function POST(request: NextRequest) {
 
             for (const status of statusUpdates) {
                 await handleStatusUpdate({
+                    workspaceId,
                     status,
                     payload,
                 })
@@ -799,6 +832,7 @@ export async function POST(request: NextRequest) {
             })
 
             await logWebhookNotice({
+                workspaceId,
                 message: notice,
                 payload,
                 fromAddress: getFirstBusinessAddress(payload),
@@ -811,6 +845,7 @@ export async function POST(request: NextRequest) {
         for (const { message, value } of inboundMessages) {
             try {
                 await handleInboundMessage({
+                    workspaceId,
                     message,
                     value,
                     payload,
@@ -824,6 +859,7 @@ export async function POST(request: NextRequest) {
                 errors.push(messageText)
 
                 await logWebhookError({
+                    workspaceId,
                     message: messageText,
                     payload,
                     fromAddress: message.from
@@ -850,10 +886,7 @@ export async function POST(request: NextRequest) {
                 ? error.message
                 : "Unknown WhatsApp webhook error"
 
-        await logWebhookError({
-            message,
-            payload: {},
-        })
+        if (resolvedWorkspaceId) await logWebhookError({ workspaceId: resolvedWorkspaceId, message, payload: {} })
 
         return Response.json({
             ok: true,

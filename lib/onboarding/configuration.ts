@@ -409,6 +409,13 @@ function newestTheme(...themes: Array<OnboardingThemeDefinition | null>) {
     return themes.filter((theme): theme is OnboardingThemeDefinition => Boolean(theme)).sort((left, right) => Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? ""))[0] ?? null
 }
 
+function whatsappIntegrationVerified(value: unknown) {
+    const integration = record(value)
+    if (!bool(integration.enabled)) return false
+    if (text(integration.mode) === "platform_legacy") return Boolean(process.env.META_WHATSAPP_ACCESS_TOKEN && process.env.META_WHATSAPP_PHONE_NUMBER_ID)
+    return Boolean(record(integration.config_hint).verified_at)
+}
+
 async function queryRawConfiguration(workspaceId: string) {
     const [workspaceResult, moduleResult, revisionResult, serviceResult, serviceRevisionResult, assignmentResult, configurationResult, configurationAssignmentResult, swatchResult, themeResult, integrationResult, relationshipServiceResult, saleItemResult, saleResult, relationshipResult, workItemResult, sessionModuleResult, activeSessionResult] = await Promise.all([
         supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).single(),
@@ -645,7 +652,7 @@ export async function loadOnboardingSettingsPageData(workspaceId: string): Promi
         usedBy: usage.get(moduleDefinition.id) ?? [],
     }))
     const whatsappHint = record(raw.whatsapp?.config_hint)
-    const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
+    const whatsappVerified = whatsappIntegrationVerified(raw.whatsapp)
     return {
         schemaReady: raw.schemaReady,
         services,
@@ -790,7 +797,7 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
     ])
     const builderTheme = mapThemeDraftDefinition(themeDraftResult.data?.definition) ?? mapTheme(raw.themes[0], raw.swatches)
     const whatsappHint = record(raw.whatsapp?.config_hint)
-    const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
+    const whatsappVerified = whatsappIntegrationVerified(raw.whatsapp)
     return {
         schemaReady: raw.schemaReady,
         modules,
@@ -860,7 +867,7 @@ export async function loadPublishedOnboardingConfiguration(workspaceId: string):
             : []),
     }))
     const whatsappHint = record(raw.whatsapp?.config_hint)
-    const whatsappVerified = bool(raw.whatsapp?.enabled) && Boolean(whatsappHint.verified_at)
+    const whatsappVerified = whatsappIntegrationVerified(raw.whatsapp)
     return {
         schemaReady: raw.schemaReady,
         bookendsMigrated: raw.schemaReady,

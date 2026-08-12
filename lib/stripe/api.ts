@@ -47,6 +47,8 @@ export type VoidStripeInvoiceResult = {
 export type StripeWebhookEvent = {
     id: string
     type: string
+    account?: string
+    context?: string
     data?: {
         object?: Record<string, unknown>
     }

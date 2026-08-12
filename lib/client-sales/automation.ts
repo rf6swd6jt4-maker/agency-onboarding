@@ -14,6 +14,7 @@ import { isConsentConfirmationText } from "@/lib/client-sales/consent"
 import { completePaymentStage } from "@/lib/relationship-workflow"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
+import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 
 type ClientSale = {
     id: string
@@ -46,6 +47,7 @@ type StripeInvoiceLike = {
 }
 
 type ConfirmationInput = {
+    workspaceId: string
     fromAddress: string
     messageId?: string | null
     body: string
@@ -262,13 +264,16 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
         return { ok: true, skipped: true }
     }
 
-    const templateName =
-        process.env.META_WHATSAPP_CONSENT_TEMPLATE_NAME ??
-        process.env.META_WHATSAPP_ONBOARDING_TEMPLATE_NAME
-    const languageCode =
-        process.env.META_WHATSAPP_CONSENT_TEMPLATE_LANGUAGE ??
-        process.env.META_WHATSAPP_ONBOARDING_TEMPLATE_LANGUAGE ??
-        "en"
+    let whatsappConfig: Record<string, string>
+    try {
+        whatsappConfig = await getWorkspaceProviderConfig(sale.workspace_id, "meta_whatsapp")
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "WhatsApp is not connected for this workspace."
+        await reportSaleAutomationFailure(sale, "load_whatsapp_connection", message)
+        return { ok: false, error: message }
+    }
+    const templateName = whatsappConfig.consent_template_name
+    const languageCode = whatsappConfig.consent_template_language || "en_US"
 
     if (!templateName) {
         await supabaseAdmin
@@ -280,11 +285,11 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
             .eq("id", saleId)
             .eq("workspace_id", sale.workspace_id)
 
-        await reportSaleAutomationFailure(sale, "send_consent_template", "Missing META_WHATSAPP_CONSENT_TEMPLATE_NAME")
+        await reportSaleAutomationFailure(sale, "send_consent_template", "The workspace WhatsApp confirmation template is not configured")
 
         return {
             ok: false,
-            error: "Missing META_WHATSAPP_CONSENT_TEMPLATE_NAME",
+            error: "The workspace WhatsApp confirmation template is not configured",
         }
     }
 
@@ -434,6 +439,7 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
     let templateMessage: unknown
     try {
         templateMessage = await sendMetaWhatsAppTemplate({
+            workspaceId: sale.workspace_id,
             to: sale.client_phone,
             templateName,
             languageCode,
@@ -617,7 +623,7 @@ export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expect
     }
 }
 
-async function findPendingConfirmedSale(fromAddress: string) {
+async function findPendingConfirmedSale(fromAddress: string, workspaceId: string) {
     const equivalentAddresses = getEquivalentSalePhoneAddresses(fromAddress)
     const statuses = [
         "test_paid",
@@ -636,6 +642,7 @@ async function findPendingConfirmedSale(fromAddress: string) {
         .select(
             "id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at"
         )
+        .eq("workspace_id", workspaceId)
         .in("client_phone", equivalentAddresses)
         .in("status", statuses)
         .order("created_at", { ascending: false })
@@ -646,6 +653,7 @@ async function findPendingConfirmedSale(fromAddress: string) {
     const { data: legacySales, error } = await supabaseAdmin
         .from("client_sales")
         .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by")
+        .eq("workspace_id", workspaceId)
         .in("client_phone", equivalentAddresses)
         .in("status", statuses)
         .order("created_at", { ascending: false })
@@ -753,7 +761,7 @@ async function sendLegacyOnboardingLink(input: {
     }
 
     try {
-        const message = await sendMetaWhatsAppMessage({ to: input.destination, body: outboundBody })
+        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: outboundBody })
         const whatsappMessageId = getWhatsAppMessageId(message)
         const [messageUpdate, saleUpdate] = await Promise.all([
             supabaseAdmin.from("client_messages").update({
@@ -785,6 +793,7 @@ async function sendLegacyOnboardingLink(input: {
 }
 
 export async function handleSaleConsentConfirmation({
+    workspaceId,
     fromAddress,
     messageId,
     body,
@@ -794,7 +803,7 @@ export async function handleSaleConsentConfirmation({
         return { handled: false }
     }
 
-    const sale = await findPendingConfirmedSale(fromAddress)
+    const sale = await findPendingConfirmedSale(fromAddress, workspaceId)
 
     if (!sale) return { handled: false }
 

@@ -257,7 +257,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
             messageLogId = messageLog.id
         }
 
-        const providerResponse = await sendMetaWhatsAppMessage({ to: row.destination, body })
+        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: row.workspace_id, to: row.destination, body })
         providerSent = true
         sentProviderId = providerMessageId(providerResponse)
         const messageUpdate = await supabaseAdmin.from("client_messages").update({

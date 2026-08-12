@@ -20,6 +20,12 @@ type BridgeChannel = {
     external_address: string
 }
 
+async function workspaceIdForClient(clientId: string) {
+    const { data, error } = await supabaseAdmin.from("clients").select("workspace_id").eq("id", clientId).single()
+    if (error || !data?.workspace_id) throw new Error(error?.message ?? "Could not resolve the workspace for this client.")
+    return data.workspace_id as string
+}
+
 type SendLoggedClickUpMessageToWhatsAppInput = {
     channel: BridgeChannel
     messageId?: string | null
@@ -226,7 +232,9 @@ export async function sendLoggedClickUpMessageToWhatsApp({
         .single()
 
     try {
+        const workspaceId = await workspaceIdForClient(channel.client_id)
         const whatsappMessage = await sendMetaWhatsAppMessage({
+            workspaceId,
             to: channel.external_address,
             body,
             replyToMessageId: replyToWhatsAppMessageId,
@@ -331,7 +339,9 @@ export async function sendClickUpMessageEditToWhatsApp({
     }
 
     try {
+        const workspaceId = await workspaceIdForClient(channel.client_id)
         const whatsappMessage = await sendMetaWhatsAppMessage({
+            workspaceId,
             to: channel.external_address,
             body: `${body} *`,
             replyToMessageId: existingMessage.whatsapp_message_id,

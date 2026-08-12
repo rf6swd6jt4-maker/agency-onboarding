@@ -17,12 +17,17 @@ import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import { listMaintenanceRouting, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel } from "@/lib/admin/maintenance"
+import { INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, updateWorkspaceUserRole } from "../users/actions"
 import {
     cancelWorkspaceOnboardingDomain,
+    completeWhatsAppEmbeddedSignup,
+    discardPendingWorkspaceConnection,
+    disconnectWorkspaceConnection,
     removeWorkspaceInvitation,
+    rollbackWorkspaceConnection,
     saveWorkspaceConnection,
     saveWorkspaceOnboardingDomain,
     updateWorkspaceCoverLayout,
@@ -32,6 +37,8 @@ import {
     verifyWorkspaceConnection,
     verifyWorkspaceOnboardingDomain,
     saveWorkspaceOfficers,
+    stageManualWorkspaceConnection,
+    verifyPendingWorkspaceConnection,
 } from "./actions"
 
 export const dynamic = "force-dynamic"
@@ -109,10 +116,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
             .select("user_id, role, created_at")
             .eq("workspace_id", workspace.id)
             .order("created_at"),
-        supabaseAdmin
-            .from("workspace_integrations")
-            .select("provider, enabled, mode, config_hint")
-            .eq("workspace_id", workspace.id),
+        listWorkspaceConnections(workspace.id),
         loadLeadgenSettingsPageData(workspace.id),
         listMaintenanceRouting(workspace.id),
         loadOnboardingSettingsPageData(workspace.id),
@@ -126,8 +130,8 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
     const officerRoutes = new Map(maintenanceRouting.map((route) => [route.category, route.responsible_user_id]))
     const officers = users.filter((item) => ["owner", "admin"].includes(normalizeWorkspaceRole(item.role) ?? ""))
     const officerOptions = officers.flatMap(({ user: officer, role: officerRole }) => officer?.id ? [{ id: officer.id, label: `${officer.email ?? workspaceRoleLabel(officerRole)} · ${workspaceRoleLabel(officerRole)}` }] : [])
-    const connections = ["stripe", "meta_whatsapp"].map((provider) =>
-        integrationResult.data?.find((item) => item.provider === provider)
+    const connections = INTEGRATION_PROVIDERS.map((provider) =>
+        integrationResult.find((item) => item.provider === provider)
         ?? { provider, enabled: false, mode: "disabled", config_hint: {} }
     ) as Parameters<typeof WorkspaceConnections>[0]["connections"]
 
@@ -232,10 +236,19 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             description="Manage active provider credentials and verify that the real external path works."
                         >
                             <WorkspaceConnections
+                                workspaceSlug={workspace.slug}
                                 connections={connections}
                                 action={saveWorkspaceConnection.bind(null, workspace.slug)}
                                 verifyAction={verifyWorkspaceConnection.bind(null, workspace.slug)}
+                                manualAction={stageManualWorkspaceConnection.bind(null, workspace.slug)}
+                                completeWhatsAppAction={completeWhatsAppEmbeddedSignup.bind(null, workspace.slug)}
+                                verifyPendingAction={verifyPendingWorkspaceConnection.bind(null, workspace.slug)}
+                                discardPendingAction={discardPendingWorkspaceConnection.bind(null, workspace.slug)}
+                                rollbackAction={rollbackWorkspaceConnection.bind(null, workspace.slug)}
+                                disconnectAction={disconnectWorkspaceConnection.bind(null, workspace.slug)}
                                 canManage={isOwner}
+                                metaAppId={process.env.NEXT_PUBLIC_META_APP_ID ?? null}
+                                metaEmbeddedSignupConfigId={process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID ?? null}
                                 showHeader={false}
                             />
                         </UnifiedSection>
