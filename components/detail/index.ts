@@ -1,0 +1,5 @@
+export { DetailDangerAction, DetailDangerButton, DetailDangerZone } from "./DetailDangerZone"
+export { DetailField, DetailFields } from "./DetailFields"
+export type { DetailFieldIcon } from "./DetailFields"
+export { DetailPageHeader } from "./DetailPageHeader"
+export type { DetailHeaderFact } from "./DetailPageHeader"

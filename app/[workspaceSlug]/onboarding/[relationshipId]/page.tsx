@@ -2,6 +2,7 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
+import { DetailField, DetailFields, DetailPageHeader } from "@/components/detail"
 import { CopyOnboardingLink, OnboardingDangerZone, OnboardingLinkControls } from "@/components/onboarding/OnboardingDetailActions"
 import { archiveOnboarding, restartOnboarding, revokeOnboardingToken, rotateOnboardingToken } from "./actions"
 import { getOnboardingForm } from "@/lib/onboarding/forms"
@@ -9,7 +10,7 @@ import { getOnboardingStepsForModules, type CanonicalSessionStep } from "@/lib/o
 import { MODULES } from "@/lib/onboarding/modules"
 import { relationshipServiceDisplayName } from "@/lib/onboarding/service-display"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
-import { RoundPill } from "@/components/ui"
+import { RelationshipStage, RoundPill, Status } from "@/components/ui"
 import {
     assetHref,
     getRelationship,
@@ -474,51 +475,37 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
-                        <header className="border-b border-neutral-800 pb-5">
-                            <p className="font-mono text-sm text-neutral-500">Onboarding {shortId(relationship.id)}</p>
-                            <div className="mt-2">
-                                <div className="min-w-0">
-                                    <h1 className="text-3xl font-semibold tracking-tight">{relationship.primary_person_name}</h1>
-                                    <p className="mt-3 text-sm text-neutral-400">{relationship.business_name ?? "No company saved"}</p>
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        {(services ?? []).map((service) => (
-                                            <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">
-                                                {relationshipServiceDisplayName(service, serviceRevisions)}
-                                            </RoundPill>
-                                        ))}
-                                        {(normalizedSnapshot?.modules ?? []).map((snapshotModule) => (
-                                            <RoundPill key={snapshotModule.id} tone="sky">
-                                                {snapshotModule.title}
-                                            </RoundPill>
-                                        ))}
-                                        {!normalizedSnapshot && (modules ?? []).map((module) => (
-                                            <RoundPill key={module.module_key} tone="sky">
-                                                {MODULES[module.module_key]?.title ?? module.module_key}
-                                            </RoundPill>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </header>
+                        <DetailPageHeader
+                            category="Onboarding"
+                            reference={shortId(relationship.id)}
+                            title={relationship.primary_person_name}
+                            subtitle={relationship.business_name ?? "No company saved"}
+                            labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
+                            status={<Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} />}
+                            facts={[
+                                { label: "steps", value: `${submittedCount}/${steps.length}` },
+                                { label: "assets", value: assets?.length ?? 0 },
+                            ]}
+                            updated={formatRelativeTime(session?.updated_at ?? relationship.updated_at)}
+                        />
 
-                        <section className="mt-4 grid grid-cols-2 gap-2 sm:mt-6 md:grid-cols-4 md:gap-3">
-                            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                                <p className="text-sm text-neutral-500">Progress</p>
-                                <p className="mt-2 text-2xl font-semibold">{percentage}%</p>
-                            </div>
-                            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                                <p className="text-sm text-neutral-500">Steps</p>
-                                <p className="mt-2 font-medium">{submittedCount} of {steps.length}</p>
-                            </div>
-                            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                                <p className="text-sm text-neutral-500">Session</p>
-                                <p className="mt-2 font-medium capitalize">{session?.status ?? "Not started"}</p>
-                            </div>
-                            <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                                <p className="text-sm text-neutral-500">Assets</p>
-                                <p className="mt-2 font-medium">{assets?.length ?? 0} linked</p>
-                            </div>
-                        </section>
+                        <DetailFields>
+                            <DetailField label="Progress" icon="progress">{percentage}%</DetailField>
+                            <DetailField label="Session" icon="status" className="lg:border-l lg:border-neutral-900 lg:pl-8"><Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} /></DetailField>
+                            <DetailField label="Services" icon="services" className="lg:col-span-2">
+                                <div className="flex flex-wrap gap-1.5">
+                                    {(services ?? []).map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
+                                    {!services?.length ? <span className="text-neutral-600">None</span> : null}
+                                </div>
+                            </DetailField>
+                            <DetailField label="Modules" icon="modules" className="lg:col-span-2">
+                                <div className="flex flex-wrap gap-1.5">
+                                    {(normalizedSnapshot?.modules ?? []).map((snapshotModule) => <RoundPill key={snapshotModule.id} tone="sky">{snapshotModule.title}</RoundPill>)}
+                                    {!normalizedSnapshot && (modules ?? []).map((module) => <RoundPill key={module.module_key} tone="sky">{MODULES[module.module_key]?.title ?? module.module_key}</RoundPill>)}
+                                    {!normalizedSnapshot?.modules.length && !modules?.length ? <span className="text-neutral-600">None</span> : null}
+                                </div>
+                            </DetailField>
+                        </DetailFields>
 
                         <section className="mt-4 overflow-hidden rounded-xl border border-neutral-800 bg-black sm:mt-6">
                             <div className="border-b border-neutral-900 px-5 py-4">
@@ -527,9 +514,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                                         <h2 className="text-lg font-semibold">Onboarding timeline</h2>
                                         <p className="mt-1 text-sm text-neutral-500">Completed steps jump to the submitted information below.</p>
                                     </div>
-                                    <span className={`w-fit rounded-full border px-2.5 py-1 text-xs capitalize ${sessionCompleted ? "border-white/30 bg-white/10 text-white" : "border-neutral-700 bg-neutral-900 text-neutral-300"}`}>
-                                        {session?.status ?? "Not started"}
-                                    </span>
+                                    <Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} />
                                 </div>
                             </div>
                             <div className="px-3 py-3 sm:px-4 sm:py-5">

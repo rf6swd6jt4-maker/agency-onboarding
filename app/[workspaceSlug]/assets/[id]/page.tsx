@@ -2,6 +2,8 @@
 
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailField, DetailFields, DetailPageHeader } from "@/components/detail"
+import { RoundPill, SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import {
@@ -66,7 +68,7 @@ function slugAnchor(value: string) {
 
 export default async function AssetDetailPage({ params }: PageProps) {
     const { workspaceSlug, id } = await params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const asset = await getAsset(workspace.id, id)
     if (!asset) notFound()
     const [relationships, workItems] = await Promise.all([
@@ -89,10 +91,32 @@ export default async function AssetDetailPage({ params }: PageProps) {
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
-                        <header className="border-b border-neutral-800 pb-6">
-                            <p className="font-mono text-sm text-neutral-500">{shortId(asset.id)}</p>
-                            <h1 className="mt-2 text-3xl font-semibold tracking-tight">{asset.title}</h1>
-                        </header>
+                        <DetailPageHeader
+                            category="Asset"
+                            reference={shortId(asset.id)}
+                            title={asset.title}
+                            labels={<SquarePill>{asset.asset_kind.replace(/_/g, " ")}</SquarePill>}
+                            facts={[{ label: relationships.length + workItems.length === 1 ? "link" : "links", value: relationships.length + workItems.length }]}
+                            updated={formatRelativeTime(asset.updated_at)}
+                        />
+
+                        <DetailFields>
+                            <DetailField label="Type" icon="file">{asset.content_type ?? asset.asset_kind.replace(/_/g, " ")}</DetailField>
+                            <DetailField label="Size" icon="size" className="lg:border-l lg:border-neutral-900 lg:pl-8">{formatFileSize(asset.file_size)}</DetailField>
+                            <DetailField label="Source" icon="source">{asset.source_kind.replace(/_/g, " ")}</DetailField>
+                            <DetailField label="Reference" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><span className="font-mono">{shortId(asset.id)}</span></DetailField>
+                            <DetailField label="Relationships" icon="relationship" className="lg:col-span-2">
+                                <div className="flex flex-wrap gap-1.5">
+                                    {relationships.length ? relationships.map((link) => <Link key={link.relationship_id} href={relationshipHubHref(workspace.slug, link.relationship_id)}><RoundPill tone="sky">{link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship"}</RoundPill></Link>) : <span className="text-neutral-600">Workspace only</span>}
+                                </div>
+                            </DetailField>
+                            <DetailField label="Work items" icon="activity" className="lg:col-span-2">
+                                <div className="flex flex-wrap gap-1.5">
+                                    {workItems.length ? workItems.map((link) => <Link key={link.work_item_id} href={workItemHref(workspace.slug, link.work_item_id)}><RoundPill tone="sky">{link.work_item?.title ?? "Work item"}</RoundPill></Link>) : <span className="text-neutral-600">None</span>}
+                                </div>
+                            </DetailField>
+                            <DetailField label="Description" icon="description" className="lg:col-span-2">{asset.description || <span className="text-neutral-600">No description</span>}</DetailField>
+                        </DetailFields>
 
                         {onboardingBackHref ? (
                             <section className="mt-6 rounded-xl border border-sky-500/20 bg-sky-950/10 p-4">
@@ -157,43 +181,10 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     </div>
                 </section>
 
-                <section className="mt-6 grid gap-4 lg:grid-cols-3">
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                        <h2 className="font-semibold">Details</h2>
-                        <dl className="mt-3 space-y-3 text-sm">
-                            <div><dt className="text-neutral-500">Reference</dt><dd className="mt-1 font-mono text-neutral-200">{shortId(asset.id)}</dd></div>
-                            <div><dt className="text-neutral-500">Type</dt><dd className="mt-1 text-neutral-200">{asset.content_type ?? "Native record"}</dd></div>
-                            <div><dt className="text-neutral-500">Size</dt><dd className="mt-1 text-neutral-200">{formatFileSize(asset.file_size)}</dd></div>
-                            <div><dt className="text-neutral-500">Updated</dt><dd className="mt-1 text-neutral-200">{formatRelativeTime(asset.updated_at)}</dd></div>
-                        </dl>
-                    </div>
-
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                        <h2 className="font-semibold">Relationships</h2>
-                        <div className="mt-3 space-y-2">
-                            {relationships.length ? relationships.map((link) => (
-                                <Link key={link.relationship_id} href={relationshipHubHref(workspace.slug, link.relationship_id)} className="block rounded-lg border border-neutral-800 px-3 py-2 text-sm hover:border-neutral-600">
-                                    <span className="block text-neutral-100">{link.relationship?.primary_person_name ?? "Relationship"}</span>
-                                    <span className="mt-1 block text-neutral-500">{link.relationship?.business_name ?? "No business context"}</span>
-                                    <span className="mt-1 block font-mono text-xs text-neutral-600">{shortId(link.relationship_id)}</span>
-                                </Link>
-                            )) : <p className="text-sm text-neutral-500">Workspace-only asset.</p>}
-                        </div>
-                    </div>
-
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                        <h2 className="font-semibold">Work items</h2>
-                        <div className="mt-3 space-y-2">
-                            {workItems.length ? workItems.map((link) => (
-                                <Link key={link.work_item_id} href={workItemHref(workspace.slug, link.work_item_id)} className="block rounded-lg border border-neutral-800 px-3 py-2 text-sm hover:border-neutral-600">
-                                    <span className="block text-neutral-100">{link.work_item?.title ?? "Work item"}</span>
-                                    <span className="mt-1 block capitalize text-neutral-500">{link.work_item?.status ?? "Linked"}</span>
-                                    <span className="mt-1 block font-mono text-xs text-neutral-600">{shortId(link.work_item_id)}</span>
-                                </Link>
-                            )) : <p className="text-sm text-neutral-500">Not attached to work yet.</p>}
-                        </div>
-                    </div>
-                </section>
+                        {role === "owner" || role === "admin" ? <DetailDangerZone>
+                            <DetailDangerAction title="Archive asset" description="Archive will remove this asset from active library views while preserving its links and provenance." control={<DetailDangerButton type="button" disabled>Archive asset</DetailDangerButton>} />
+                            <DetailDangerAction title="Delete asset permanently" description="Permanent deletion will be enabled after archive storage and linked-record safeguards are implemented." control={<DetailDangerButton type="button" tone="delete" disabled>Delete permanently</DetailDangerButton>} />
+                        </DetailDangerZone> : null}
                     </div>
 
                     <ClientContextPanel

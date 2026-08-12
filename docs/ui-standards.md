@@ -1,6 +1,6 @@
 # Betelgeze UI standards
 
-Repeated interface elements use the primitives exported from `components/ui`. New UI must not recreate them with page-local Tailwind classes.
+Repeated interface elements use the primitives exported from `components/ui`, `components/panel`, `components/list`, and `components/detail`. New UI must not recreate them with page-local Tailwind classes.
 
 ## Status
 
@@ -287,6 +287,100 @@ The two divider colours are deliberately different: the darker `border-neutral-9
 When a new list cannot fit this anatomy, first determine whether it is actually a list. Do not extend the standard merely to make galleries, timelines, settings rows, evidence disclosures, or nested planning structures resemble one.
 
 The Assets gallery remains a gallery even though it shares the Library panel header, tabs, and `QuickStats` with Work Items. OKRs remain a nested planning workspace. Settings/source rows and onboarding-builder records remain configuration or authoring controls. None should be forced into `List` merely because they contain repeated records.
+
+## Detail pages
+
+A detail page is the canonical destination for one durable record. Relationship, onboarding, fulfilment, work-item, asset, poll, and activity-event detail routes share one visual sequence even though their content differs:
+
+1. Mandatory `DetailPageHeader`.
+2. Optional `DetailFields` when the record has attributes worth inspecting or editing.
+3. Record-specific content such as a Gantt chart, onboarding timeline, asset preview, poll funnel, updates, or diagnostics.
+4. Mandatory `DetailDangerZone` at the bottom of the primary content column for records that can participate in the shared archive lifecycle.
+
+The record-specific middle remains flexible. The header, fields, and destructive-action anatomy do not.
+
+### DetailPageHeader
+
+```tsx
+<DetailPageHeader
+    category="Relationship"
+    reference={shortId(relationship.id)}
+    title={relationship.primary_person_name}
+    subtitle={relationship.business_name ?? "No company saved"}
+    labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
+    status={<Status label="In progress" tone="yellow" />}
+    facts={[{ label: "open", value: 4 }]}
+    updated="5hr"
+/>
+```
+
+- The first line always identifies the record category and short ID in subdued monospaced text: `Relationship 69e381e`, `Poll e154d7a`, or `Asset c92f810`.
+- The record name is always `text-2xl`, semibold, and tightly tracked. Do not use a different title scale for a more complicated page.
+- An optional subtitle gives one stable secondary identity, such as company, event key, or source context. It is not a description of the whole panel.
+- The right-hand metadata rail is bottom-aligned with the identity block. Its order is categorical labels, one operational `Status`, short numerical facts, then `Updated …` as the final item.
+- Use `RelationshipStage`, `SquarePill`, `Status`, and other shared primitives in their semantic positions. Do not hand-build a badge in the header.
+- Facts are compact and read value first (`4 open`, `2 assets`). Extended explanations and editable attributes belong below.
+- On narrow screens the metadata rail moves below the identity, wraps between whole elements, and never splits a pill or status.
+- The header owns its `border-neutral-800`, `pb-4`, and internal `gap-3`. A page must not wrap it in a second card, add another record title, or override its typography and spacing.
+
+`DetailPageHeader` is distinct from `PanelTabHeader`: a panel-tab header names a workspace view or collection, while a detail header identifies one record. A detail route nested under a panel may retain the panel's shared tab navigation above it, but must not use a second panel heading as the record header.
+
+### DetailFields
+
+```tsx
+<DetailFields>
+    <DetailField label="Status" icon="status">
+        <Status label="To do" tone="grey" />
+    </DetailField>
+    <DetailField label="Assigned to" icon="user" className="lg:border-l lg:pl-8">
+        <Assignee name="Alex Morgan" avatarSrc={avatarUrl} />
+    </DetailField>
+</DetailFields>
+```
+
+- The fields block has the same background as the page and no outer border, rounded card, heading, or inset panel.
+- It starts exactly `1.25rem` (`mt-5`) below the header and uses one column on mobile and two columns from `lg` upward.
+- Every `DetailField` is a restrained row with a muted icon and label, a readable value, `min-h-10`, `py-2`, and a `border-neutral-900` bottom divider.
+- Desktop rows use a fixed `9rem` label track; mobile uses `8rem`. Values take the remaining width and may contain text, inputs, selectors, shared pills, `Status`, `Assignee`, or a popup trigger.
+- The second desktop column adds `border-l border-neutral-900 pl-8`. A full-width field uses `lg:col-span-2`. The page supplies only these placement classes; it must not restyle the row.
+- Editable values remain visually quiet on the page surface. Popups may use their own bordered floating surface. Use established shared primitives inside values instead of local imitations.
+- Omit fields that do not apply. Do not render decorative empty rows to balance the columns.
+- Long descriptions may span both columns. Record-specific analytical summaries such as poll funnel statistics remain content, not fields.
+
+### Record-specific content
+
+- Unique content follows the fields block at the normal `mt-5` or `mt-6` page rhythm and may use the surface best suited to its interaction.
+- A relationship Gantt, onboarding timeline, asset preview, poll funnel, or diagnostic payload is allowed to retain its own internal design because it is not interchangeable record metadata.
+- Do not repeat the record name, category, ID, overall status, or general details heading inside this content.
+
+### DetailDangerZone
+
+```tsx
+<DetailDangerZone>
+    <DetailDangerAction
+        title="Archive relationship"
+        description="Removes it from active lists while preserving its history."
+        control={<DetailDangerButton>Archive relationship</DetailDangerButton>}
+    />
+    <DetailDangerAction
+        title="Delete relationship permanently"
+        description="This cannot be undone."
+        control={<DetailDangerButton tone="delete">Delete permanently</DetailDangerButton>}
+    />
+</DetailDangerZone>
+```
+
+- The danger zone is the final block in the primary content column. Nothing ordinary follows it.
+- It begins with a restrained red top rule and small red heading. The actions themselves remain on the page background; do not place the whole zone in a red card or use a red wash.
+- Actions are vertically divided by `border-neutral-900`. Each row presents a title and concise consequence on the left and one fixed control on the right; controls stack below the explanation on mobile.
+- Archive is always first and uses the restrained red-outline button. It removes a record from active views while preserving history and dependencies.
+- Permanent deletion is always last and uses the solid red button. Its wording must be explicit, and its confirmation must identify irreversible consequences and dependent records.
+- Other destructive lifecycle actions, such as restarting onboarding, may sit between Archive and Delete and use the outline treatment.
+- During the visual-definition phase, unavailable archive/delete actions remain visibly disabled with an honest explanation. Do not connect a destructive control to an unrelated mutation or imply that a placeholder works.
+- Owner/admin visibility, confirmation, server authorization, archive persistence, restoration, and dependency-aware permanent deletion are functional requirements. The shared visual primitive does not replace them.
+- Records that are deliberately immutable for audit or compliance may disable both controls pending a documented retention decision; they must not silently invent different danger-zone styling.
+
+When the archive lifecycle is implemented, active lists exclude archived records by default and the proposed Library `Archived` tab becomes the shared restoration and permanent-deletion surface. That future behaviour must reuse the same archive terminology and must not change this visual contract without updating the components and this document together.
 
 ## TrendChart
 

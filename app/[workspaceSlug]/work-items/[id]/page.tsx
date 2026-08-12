@@ -1,9 +1,10 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailPageHeader } from "@/components/detail"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
-import { SquarePill } from "@/components/ui"
+import { SquarePill, Status } from "@/components/ui"
 import {
     getWorkItem,
     getWorkItemPlanningContext,
@@ -58,13 +59,15 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
-                        <header className="flex items-start gap-4 pb-4">
-                            <div className="min-w-0 flex-1">
-                                <p className="font-mono text-sm text-neutral-500">Work item {shortId(item.id)}</p>
-                                <h1 className="mt-2 text-3xl font-semibold tracking-tight">{item.title}</h1>
-                            </div>
-                            {isAdminItem ? <SquarePill className="mt-1 shrink-0">Admin</SquarePill> : null}
-                        </header>
+                        <DetailPageHeader
+                            category="Work item"
+                            reference={shortId(item.id)}
+                            title={item.title}
+                            labels={isAdminItem ? <SquarePill>Admin</SquarePill> : null}
+                            status={<Status label={status.label} tone={status.tone} />}
+                            facts={[{ label: assets.length === 1 ? "asset" : "assets", value: assets.length }]}
+                            updated={formatRelativeTime(item.updated_at)}
+                        />
 
                 <InlineWorkItemFields
                     workspaceSlug={workspace.slug} workItemId={item.id} status={item.status} statusLabel={status.label} statusTone={status.tone}
@@ -99,12 +102,18 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                     </div>
                 </section>
 
-                        <section className="mt-6 rounded-2xl border border-red-500/20 bg-red-950/10 p-5">
-                            <h2 className="text-lg font-semibold text-red-100">Danger zone placeholder</h2>
-                            <p className="mt-2 text-sm leading-6 text-red-100/70">
-                                Archive/delete controls for work items will be added in a later focused pass.
-                            </p>
-                        </section>
+                        {role === "owner" || role === "admin" ? <DetailDangerZone>
+                            <DetailDangerAction
+                                title="Archive work item"
+                                description="Archive will remove this item from active work lists while retaining its schedule, links, updates, and history."
+                                control={<DetailDangerButton type="button" disabled>Archive work item</DetailDangerButton>}
+                            />
+                            <DetailDangerAction
+                                title="Delete work item permanently"
+                                description="Permanent deletion will be enabled after archive storage and dependency safeguards are implemented."
+                                control={<DetailDangerButton type="button" tone="delete" disabled>Delete permanently</DetailDangerButton>}
+                            />
+                        </DetailDangerZone> : null}
                     </div>
 
                     <ClientContextPanel

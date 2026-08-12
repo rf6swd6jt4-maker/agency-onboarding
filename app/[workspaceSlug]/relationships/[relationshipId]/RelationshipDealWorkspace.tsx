@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import { BuilderPreview } from "@/components/onboarding-builder/BuilderPreview"
+import { DetailField, DetailFields } from "@/components/detail"
 import { RoundPill, SquarePill } from "@/components/ui"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import type { OnboardingHelpSettings, OnboardingModuleDefinition, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
@@ -52,28 +53,6 @@ type Draft = Omit<RelationshipDetails, "lifecyclePhase"> & {
 }
 
 const inputClass = "min-h-7 w-full min-w-0 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:text-white"
-
-function DetailIcon({ kind }: { kind: "identity" | "contact" | "person" | "timeline" | "services" | "description" }) {
-    const path = kind === "identity"
-        ? <><circle cx="12" cy="8" r="4" /><path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6" /></>
-        : kind === "contact"
-            ? <><path d="M5 5h14v14H5z" /><path d="m6 7 6 5 6-5" /></>
-            : kind === "person"
-                ? <><circle cx="8" cy="8" r="3" /><circle cx="16" cy="8" r="3" /><path d="M3 20c.5-4 2.2-6 5-6M21 20c-.5-4-2.2-6-5-6" /></>
-                : kind === "timeline"
-                    ? <><path d="M7 3v3M17 3v3M4 9h16" /><rect x="4" y="5" width="16" height="15" rx="2" /></>
-                    : kind === "services"
-                        ? <><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="7" cy="7" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="17" cy="17" r="1" /></>
-                        : <><path d="M5 5h14M5 9h14M5 13h10M5 17h12" /></>
-    return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">{path}</svg>
-}
-
-function DetailField({ label, icon, children, className = "" }: { label: string; icon: Parameters<typeof DetailIcon>[0]["kind"]; children: ReactNode; className?: string }) {
-    return <div className={`grid min-h-11 grid-cols-[8.5rem_minmax(0,1fr)] items-start gap-3 border-b border-neutral-900 py-2.5 ${className}`}>
-        <p className="flex items-center gap-2 pt-1 text-sm text-neutral-500"><DetailIcon kind={icon} /><span>{label}</span></p>
-        <div className="min-w-0 text-sm text-neutral-200">{children}</div>
-    </div>
-}
 
 function missingText(value: string, message: string) {
     return value.trim() ? null : message
@@ -290,8 +269,8 @@ export function RelationshipDealWorkspace({
         window.location.assign(tabId ? workspaceTabFrameUrl(notice.href, tabId, window.location.origin) : notice.href)
     }
 
-    const detailsPanel = <section data-relationship-details className="overflow-hidden rounded-xl border border-neutral-800 bg-black px-4 sm:px-5">
-        <div className="grid gap-x-8 lg:grid-cols-2">
+    const detailsPanel = <div data-relationship-details>
+        <DetailFields>
             <DetailField label="Name" icon="identity"><input disabled={!canEdit} value={draft.primaryPersonName} onChange={(event) => update("primaryPersonName", event.target.value)} placeholder="Client name" className={inputClass} /></DetailField>
             <DetailField label="Company" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} value={draft.businessName} onChange={(event) => update("businessName", event.target.value)} placeholder="No company" className={inputClass} /></DetailField>
             <DetailField label="Role" icon="identity"><input disabled={!canEdit} value={draft.primaryContactRole} onChange={(event) => update("primaryContactRole", event.target.value)} placeholder="Not set" className={inputClass} /></DetailField>
@@ -301,8 +280,7 @@ export function RelationshipDealWorkspace({
             <DetailField label="Seller" icon="person"><select disabled={!canEdit} value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className={inputClass}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label="Fulfilment manager" icon="person" className="lg:border-l lg:border-neutral-900 lg:pl-8"><select disabled={!canEdit} value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className={inputClass}><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label={invoiced ? "Project timeline" : "Planned project timeline"} icon="timeline" className="lg:col-span-2"><div className="flex items-center gap-2"><input disabled={!canEdit} type="number" min="1" value={draft.projectTimeframeDays ?? ""} onChange={(event) => update("projectTimeframeDays", event.target.value ? Number(event.target.value) : null)} placeholder="Not set" className={`${inputClass} max-w-24`} />{draft.projectTimeframeDays ? <span className="text-neutral-500">days</span> : null}</div></DetailField>
-        </div>
-        <DetailField label="Services" icon="services" className="grid-cols-1 gap-2 sm:grid-cols-[8.5rem_minmax(0,1fr)]">
+        <DetailField label="Services" icon="services" className="lg:col-span-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {selectedServices.map((service) => <RoundPill key={service.code} tone="emerald">{service.name}</RoundPill>)}
                 {!selectedServices.length ? <span className="text-neutral-600">None</span> : null}
@@ -310,10 +288,11 @@ export function RelationshipDealWorkspace({
             </div>
             {servicesOpen && !commercialLocked ? <div className="mt-2 grid gap-1.5 rounded-lg border border-neutral-800 bg-neutral-950 p-2 sm:grid-cols-2 lg:grid-cols-3">{services.map((service) => <label key={service.code} className="flex items-start gap-2 rounded-md px-2 py-2 text-sm hover:bg-neutral-900"><input type="checkbox" checked={draft.selectedCodes.includes(service.code)} onChange={() => toggleService(service.code)} className="mt-0.5" /><span className="min-w-0"><span className="flex items-center gap-1.5"><span className="truncate text-neutral-200">{service.name}</span>{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span><span className="mt-0.5 block truncate text-[11px] text-neutral-600">{service.revisionNumber ? `Revision ${service.revisionNumber}` : service.code}</span></span></label>)}</div> : null}
         </DetailField>
-        <DetailField label="Description" icon="description" className="grid-cols-1 gap-2 border-b-0 sm:grid-cols-[8.5rem_minmax(0,1fr)]"><textarea disabled={!canEdit} value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Add relationship context…" className={`${inputClass} min-h-20 resize-none leading-6`} /></DetailField>
+        <DetailField label="Description" icon="description" className="lg:col-span-2"><textarea disabled={!canEdit} value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Add relationship context…" className={`${inputClass} min-h-20 resize-none leading-6`} /></DetailField>
+        </DetailFields>
         {error && !invoiceOpen ? <p className="border-t border-red-500/20 py-2 text-sm text-red-300">{error}</p> : null}
         {dirty && canEdit ? <div className="flex justify-end gap-2 border-t border-neutral-900 py-2.5"><button type="button" disabled={pending} onClick={() => { setDraft(baseline); setServicesOpen(false); setError(null) }} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => startTransition(() => { void saveDetails() })} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save changes"}</button></div> : null}
-    </section>
+    </div>
 
     const modal = invoiceOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 text-white backdrop-blur-sm">
         <section role="dialog" aria-modal="true" aria-labelledby="invoice-review-title" className="flex max-h-[min(92dvh,56rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">

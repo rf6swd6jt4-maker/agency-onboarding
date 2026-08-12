@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailPageHeader } from "@/components/detail"
 import { RelationshipStage } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
@@ -118,22 +119,20 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
-                        <header className="flex flex-col gap-3 border-b border-neutral-800 pb-4 sm:flex-row sm:items-end sm:justify-between">
-                            <div className="min-w-0">
-                                <p className="font-mono text-xs text-neutral-600">Relationship {shortId(relationship.id)}</p>
-                                <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight">{relationship.primary_person_name}</h1>
-                                <p className="mt-1 truncate text-sm text-neutral-500">{relationship.business_name ?? "No company saved"}</p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-4 text-xs text-neutral-500">
-                                <RelationshipStage phase={relationship.lifecycle_phase} />
-                                <span><strong className="mr-1 text-neutral-200">{plan.items.filter((item) => !["done", "canceled"].includes(item.status)).length}</strong> open</span>
-                                <span><strong className="mr-1 text-neutral-200">{plan.items.filter((item) => !planRanges.has(item.id)).length}</strong> unscheduled</span>
-                                <span>Updated {formatRelativeTime(relationship.updated_at)}</span>
-                            </div>
-                        </header>
+                        <DetailPageHeader
+                            category="Relationship"
+                            reference={shortId(relationship.id)}
+                            title={relationship.primary_person_name}
+                            subtitle={relationship.business_name ?? "No company saved"}
+                            labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
+                            facts={[
+                                { label: "open", value: plan.items.filter((item) => !["done", "canceled"].includes(item.status)).length },
+                                { label: "unscheduled", value: plan.items.filter((item) => !planRanges.has(item.id)).length },
+                            ]}
+                            updated={formatRelativeTime(relationship.updated_at)}
+                        />
 
-                        <div className="mt-5">
-                            <RelationshipDealWorkspace
+                        <RelationshipDealWorkspace
                                 workspaceSlug={workspace.slug}
                                 workspaceName={workspace.name}
                                 relationshipId={relationship.id}
@@ -165,8 +164,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                     <div><p className="text-sm font-medium text-amber-100">Sent invoice is frozen</p><p className="mt-1 text-xs leading-5 text-neutral-400">Void it in Stripe to preserve this snapshot, reopen the deal for edits, and send a new replacement invoice.</p></div>
                                     <VoidInvoiceButton invoiceId={replaceableSale.stripe_invoice_id} alreadyVoided={replaceableSale.status === "invoice_inactive"} action={voidAndReopenRelationshipInvoice.bind(null, workspace.slug, relationship.id, replaceableSale.id)} />
                                 </div> : null}
-                            />
-                        </div>
+                        />
 
                         <section className="mt-5 flex flex-wrap gap-2 border-t border-neutral-900 pt-5 text-sm">
                             {isOnboarding && <Link href={onboardingDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open onboarding detail</Link>}
@@ -174,21 +172,21 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                         </section>
 
                         {(role === "owner" || role === "admin") ? (
-                            <section className="mt-8 border-t border-red-950/70 pt-5">
-                                <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
-                                <div className="mt-3 flex flex-col gap-4 rounded-lg border border-red-950/80 bg-red-950/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-                                    <div className="max-w-2xl">
-                                        <p className="text-sm font-medium text-neutral-200">Archive this relationship</p>
-                                        <p className="mt-1 text-xs leading-5 text-neutral-500">
-                                            Removes it from active relationship lists and WhatsApp confirmation matching while preserving its invoices, messages and other history.
-                                        </p>
-                                    </div>
-                                    <ArchiveRelationshipForm
+                            <DetailDangerZone>
+                                <DetailDangerAction
+                                    title="Archive relationship"
+                                    description="Removes it from active relationship lists and WhatsApp confirmation matching while preserving its invoices, messages, and other history."
+                                    control={<ArchiveRelationshipForm
                                         action={archiveRelationship.bind(null, workspace.slug, relationship.id)}
                                         relationshipName={relationship.business_name ?? relationship.primary_person_name}
-                                    />
-                                </div>
-                            </section>
+                                    />}
+                                />
+                                <DetailDangerAction
+                                    title="Delete relationship permanently"
+                                    description="Permanent deletion will be enabled after the shared archive lifecycle and dependent-record safeguards are implemented."
+                                    control={<DetailDangerButton type="button" tone="delete" disabled>Delete permanently</DetailDangerButton>}
+                                />
+                            </DetailDangerZone>
                         ) : null}
 
                     </div>

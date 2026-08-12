@@ -2,6 +2,7 @@
 
 import { useActionState } from "react"
 import { useSearchParams } from "next/navigation"
+import { DetailDangerButton } from "@/components/detail"
 import { WORKSPACE_TAB_FRAME_PARAM } from "@/lib/workspace-tabs"
 
 type ArchiveRelationshipState = { error?: string }
@@ -30,13 +31,13 @@ export function ArchiveRelationshipForm({
         >
             {tabId ? <input type="hidden" name={WORKSPACE_TAB_FRAME_PARAM} value={tabId} /> : null}
             {state.error ? <p className="mb-2 max-w-sm text-xs leading-5 text-red-300" aria-live="polite">{state.error}</p> : null}
-            <button
+            <DetailDangerButton
                 type="submit"
                 disabled={pending}
-                className="rounded-lg border border-red-900/80 px-3 py-2 text-xs font-medium text-red-300 transition hover:bg-red-950/40 disabled:cursor-wait disabled:opacity-60"
+                className="disabled:cursor-wait"
             >
                 {pending ? "Archiving…" : "Archive relationship"}
-            </button>
+            </DetailDangerButton>
         </form>
     )
 }

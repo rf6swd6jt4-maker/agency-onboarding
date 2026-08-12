@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import { Assignee, RoundPill, Status } from "@/components/ui"
 import { Avatar } from "@/components/account/Avatar"
+import { DetailField, DetailFields } from "@/components/detail"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
 import { workItemPrioritySelectionLabel, workItemPrioritySelectionOptions } from "@/lib/work-item-priority"
 import {
@@ -123,26 +124,6 @@ function timeInputValue(value: string | null) {
         if (!Number.isNaN(parsed.getTime())) return `${String(parsed.getHours()).padStart(2, "0")}:${String(parsed.getMinutes()).padStart(2, "0")}`
     }
     return value.slice(0, 5)
-}
-
-type FieldIcon = "status" | "schedule" | "user" | "parent" | "dependency" | "relationship" | "priority" | "description"
-
-function Icon({ kind }: { kind: FieldIcon }) {
-    const paths: Record<FieldIcon, ReactNode> = {
-        status: <><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" /></>,
-        schedule: <><path d="M7 3v3M17 3v3M4 9h16" /><rect x="4" y="5" width="16" height="15" rx="2" /></>,
-        user: <><circle cx="12" cy="8" r="4" /><path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6" /></>,
-        parent: <><path d="M6 5h5v5H6zM13 14h5v5h-5zM8.5 10v2a4 4 0 0 0 4 4h.5" /></>,
-        dependency: <><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /><path d="M9.5 9.5l5 5" /></>,
-        relationship: <><circle cx="8" cy="9" r="3" /><circle cx="16" cy="9" r="3" /><path d="M2.5 20c.5-3.3 2.3-5 5.5-5M21.5 20c-.5-3.3-2.3-5-5.5-5M10 17h4" /></>,
-        priority: <><path d="M6 21V4M6 5h11l-2 4 2 4H6" /></>,
-        description: <><path d="M5 5h14M5 9h14M5 13h10M5 17h12" /></>,
-    }
-    return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">{paths[kind]}</svg>
-}
-
-function Field({ label, icon, children, className = "" }: { label: string; icon: FieldIcon; children: ReactNode; className?: string }) {
-    return <div className={`grid min-h-10 grid-cols-[8rem_minmax(0,1fr)] items-start gap-2 border-b border-neutral-900 py-2 sm:grid-cols-[9rem_minmax(0,1fr)] ${className}`}><p className="flex items-center gap-2 pt-0.5 text-sm text-neutral-500"><Icon kind={icon} /><span>{label}</span></p><div className="min-w-0 text-sm text-neutral-200">{children}</div></div>
 }
 
 function Search({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
@@ -297,11 +278,10 @@ export function InlineWorkItemFields(props: Props) {
 
     return (
         <div className="relative">
-            <section className="mt-3 py-1">
-                <div className="grid grid-cols-1 lg:grid-cols-2">
+            <DetailFields>
                     <div className="contents">
-                        <Field label="Status" icon="status" className="lg:col-start-1 lg:row-start-1"><Status label={props.statusLabel} tone={props.statusTone} /></Field>
-                        <Field label="Schedule" icon="schedule" className="lg:col-start-1 lg:row-start-2">
+                        <DetailField label="Status" icon="status" className="lg:col-start-1 lg:row-start-1"><Status label={props.statusLabel} tone={props.statusTone} /></DetailField>
+                        <DetailField label="Schedule" icon="schedule" className="lg:col-start-1 lg:row-start-2">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <div className="flex items-center gap-2 whitespace-nowrap">
                                 <div className="relative">
@@ -318,21 +298,21 @@ export function InlineWorkItemFields(props: Props) {
                                 </div>
                                 </div>
                             </div>
-                        </Field>
-                        <Field label="Assigned to" icon="user" className="lg:col-start-1 lg:row-start-3">
+                        </DetailField>
+                        <DetailField label="Assigned to" icon="user" className="lg:col-start-1 lg:row-start-3">
                             <div className="relative inline-flex max-w-full flex-wrap gap-1.5">
                                 <button data-work-item-popup-trigger type="button" onClick={() => toggle("assignees")} className="flex max-w-full flex-wrap gap-1.5 rounded p-0 hover:opacity-90">
                                     {props.assignees.length ? [...props.assignees].sort((left, right) => Number(right.user_id === props.executionOwnerId) - Number(left.user_id === props.executionOwnerId)).map((person) => <span key={person.user_id} className="inline-flex items-center gap-1"><Assignee name={person.username} avatarSrc={person.avatar_url} />{person.user_id === props.executionOwnerId ? <span className="text-[10px] uppercase tracking-wide text-neutral-500">Owner</span> : null}</span>) : <span className="text-neutral-600">Unassigned</span>}
                                 </button>
                                 {open === "assignees" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search users…" /><p className="border-b border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-500">The execution owner drives completion forecasts. Additional assignees are collaborators.</p><div className="max-h-64 overflow-y-auto p-1">{filteredMembers.map((person) => { const assigned = assigneeIds.includes(person.user_id); const owner = executionOwnerId === person.user_id; return <div key={person.user_id} className="flex items-center gap-1 rounded-lg hover:bg-neutral-900"><button type="button" onClick={() => toggleAssignee(person.user_id)} className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-2 text-left"><Avatar src={person.avatar_url} name={person.username} className="h-7 w-7" /><span className="min-w-0 flex-1 truncate text-sm">{person.username}</span><span className="text-sm text-neutral-500">{assigned ? "✓" : ""}</span></button>{assigned ? <button type="button" onClick={() => setExecutionOwnerId(person.user_id)} className={`mr-1 rounded px-2 py-1 text-[11px] ${owner ? "bg-neutral-800 text-white" : "text-neutral-500 hover:text-white"}`}>{owner ? "Owner" : "Make owner"}</button> : null}</div> })}</div><PopupFooter pending={pending} onClear={assigneeIds.length ? () => { setAssigneeIds([]); setExecutionOwnerId(null) } : undefined} onSave={() => save(() => updateWorkItemAssignees(props.workspaceSlug, props.workItemId, assigneeIds, executionOwnerId))} /></Popup> : null}
                             </div>
-                        </Field>
-                        <Field label="Created by" icon="user" className="lg:col-start-1 lg:row-start-4">{props.creator ? <Assignee name={props.creator.username} avatarSrc={props.creator.avatar_url} /> : <span className="text-neutral-600">System or imported</span>}</Field>
+                        </DetailField>
+                        <DetailField label="Created by" icon="user" className="lg:col-start-1 lg:row-start-4">{props.creator ? <Assignee name={props.creator.username} avatarSrc={props.creator.avatar_url} /> : <span className="text-neutral-600">System or imported</span>}</DetailField>
                     </div>
                     <div className="contents">
-                        <Field label="Parent" icon="parent" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("parent")} className="block max-w-full rounded py-0.5 text-left hover:text-white">{props.parent ? <span className="block truncate">{props.parent.title}</span> : "None"}</button>{open === "parent" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-56 overflow-y-auto p-1"><button type="button" onClick={() => setParentId("")} className="w-full rounded-lg px-1.5 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900">No parent</button>{filteredWork.map((item) => <button type="button" key={item.id} onClick={() => setParentId(item.id)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{parentId === item.id ? "✓" : ""}</span></button>)}</div><label className="flex items-center gap-2 border-t border-neutral-800 px-2.5 py-2 text-xs text-neutral-300"><input type="checkbox" checked={waitForParent} disabled={!parentId} onChange={(event) => setWaitForParent(event.target.checked)} /> Wait for parent</label><PopupFooter pending={pending} onClear={parentId ? () => { setParentId(""); setWaitForParent(false) } : undefined} onSave={() => save(() => updateWorkItemParent(props.workspaceSlug, props.workItemId, parentId || null, Boolean(parentId && waitForParent)))} /></Popup> : null}</div></Field>
-                        <Field label="Dependencies" icon="dependency" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("dependencies")} className="max-w-full rounded py-0.5 text-left hover:text-white">{props.dependencies.length ? props.dependencies.map((item) => item.title).join(", ") : "None"}</button>{open === "dependencies" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-64 overflow-y-auto p-1">{filteredWork.map((item) => <button type="button" key={item.id} disabled={item.id === parentId} onClick={() => toggleId(dependencyIds, item.id, setDependencyIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900 disabled:opacity-40"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{dependencyIds.includes(item.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={dependencyIds.length ? () => setDependencyIds([]) : undefined} onSave={() => save(() => updateWorkItemDependencies(props.workspaceSlug, props.workItemId, dependencyIds))} /></Popup> : null}</div></Field>
-                        <Field label="Links" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8">
+                        <DetailField label="Parent" icon="parent" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("parent")} className="block max-w-full rounded py-0.5 text-left hover:text-white">{props.parent ? <span className="block truncate">{props.parent.title}</span> : "None"}</button>{open === "parent" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-56 overflow-y-auto p-1"><button type="button" onClick={() => setParentId("")} className="w-full rounded-lg px-1.5 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900">No parent</button>{filteredWork.map((item) => <button type="button" key={item.id} onClick={() => setParentId(item.id)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{parentId === item.id ? "✓" : ""}</span></button>)}</div><label className="flex items-center gap-2 border-t border-neutral-800 px-2.5 py-2 text-xs text-neutral-300"><input type="checkbox" checked={waitForParent} disabled={!parentId} onChange={(event) => setWaitForParent(event.target.checked)} /> Wait for parent</label><PopupFooter pending={pending} onClear={parentId ? () => { setParentId(""); setWaitForParent(false) } : undefined} onSave={() => save(() => updateWorkItemParent(props.workspaceSlug, props.workItemId, parentId || null, Boolean(parentId && waitForParent)))} /></Popup> : null}</div></DetailField>
+                        <DetailField label="Dependencies" icon="dependency" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("dependencies")} className="max-w-full rounded py-0.5 text-left hover:text-white">{props.dependencies.length ? props.dependencies.map((item) => item.title).join(", ") : "None"}</button>{open === "dependencies" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-64 overflow-y-auto p-1">{filteredWork.map((item) => <button type="button" key={item.id} disabled={item.id === parentId} onClick={() => toggleId(dependencyIds, item.id, setDependencyIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900 disabled:opacity-40"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{dependencyIds.includes(item.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={dependencyIds.length ? () => setDependencyIds([]) : undefined} onSave={() => save(() => updateWorkItemDependencies(props.workspaceSlug, props.workItemId, dependencyIds))} /></Popup> : null}</div></DetailField>
+                        <DetailField label="Links" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8">
                             <div className="relative inline-flex max-w-full flex-wrap gap-1.5">
                                 <button data-work-item-popup-trigger type="button" aria-disabled={props.linksLocked} onClick={() => { if (!props.linksLocked) toggle("links") }} className={`flex max-w-full flex-wrap gap-1.5 rounded p-0 ${props.linksLocked ? "cursor-not-allowed" : "hover:opacity-90"}`}>
                                     {props.relationships.map((relationship) => <RoundPill key={`relationship-${relationship.id}`} tone="sky">{relationship.label}</RoundPill>)}
@@ -367,18 +347,17 @@ export function InlineWorkItemFields(props: Props) {
                                     <PopupFooter pending={pending} onClear={relationshipIds.length || keyResultEstimates.length ? () => { setRelationshipIds([]); setKeyResultEstimates([]) } : undefined} onSave={saveLinks} />
                                 </Popup> : null}
                             </div>
-                        </Field>
-                        <Field label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPrioritySelectionLabel(props.priorityOverride)}</button>{open === "priority" ? <Popup className="w-72"><div className="p-1">{workItemPrioritySelectionOptions.map((option) => { const value = option.value === "system" ? null : Number(option.value); return <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priorityOverride === value ? "✓" : ""}</span></button> })}</div><p className="border-t border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-600">System generated lets the queue decide from deadlines, dependencies, duration, and expected KR movement. Choose another option only to override that result.</p></Popup> : null}</div></Field>
+                        </DetailField>
+                        <DetailField label="Priority" icon="priority" className="lg:col-start-2 lg:row-start-4 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block"><button data-work-item-popup-trigger type="button" onClick={() => toggle("priority")} className="rounded py-0.5 text-left hover:text-white">{workItemPrioritySelectionLabel(props.priorityOverride)}</button>{open === "priority" ? <Popup className="w-72"><div className="p-1">{workItemPrioritySelectionOptions.map((option) => { const value = option.value === "system" ? null : Number(option.value); return <button type="button" key={option.value} onClick={() => save(() => updateWorkItemPriority(props.workspaceSlug, props.workItemId, value))} className="flex w-full items-center justify-between rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span>{option.label}</span><span>{props.priorityOverride === value ? "✓" : ""}</span></button> })}</div><p className="border-t border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-600">System generated lets the queue decide from deadlines, dependencies, duration, and expected KR movement. Choose another option only to override that result.</p></Popup> : null}</div></DetailField>
                     </div>
-                    <Field label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
+                    <DetailField label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
                         <div>
                             <textarea ref={descriptionRef} value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="Add a description…" className="min-h-20 w-full resize-none overflow-hidden bg-transparent py-0 text-sm leading-6 text-neutral-200 caret-neutral-300 outline-none placeholder:text-neutral-600 selection:bg-neutral-600 selection:text-white" />
                             {description !== (props.description ?? "") ? <div className="mt-1 flex justify-end gap-1.5"><button type="button" disabled={pending} onClick={() => setDescription(props.description ?? "")} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => save(() => updateWorkItemDescription(props.workspaceSlug, props.workItemId, description))} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div> : null}
                         </div>
-                    </Field>
-                </div>
-                {error ? <p className="border-t border-red-500/20 py-2 text-sm text-red-300">{error}</p> : null}
-            </section>
+                    </DetailField>
+            </DetailFields>
+            {error ? <p className="border-t border-red-500/20 py-2 text-sm text-red-300">{error}</p> : null}
         </div>
     )
 }

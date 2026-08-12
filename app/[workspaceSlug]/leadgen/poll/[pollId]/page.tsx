@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation"
 import { BetelgezeStatusMark } from "@/components/brand/BetelgezeStatusMark"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailField, DetailFields, DetailPageHeader } from "@/components/detail"
 import { PollDuration } from "@/components/leadgen/PollDuration"
 import { PollLiveRefresh } from "@/components/leadgen/PollLiveRefresh"
+import { SquarePill, Status, type StatusTone } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { sourceCatalogMap, sourceHumanLabel, type LeadgenSourceCatalogRow } from "@/lib/leadgen/source-catalog-ui"
 import { sourceLabel } from "@/lib/leadgen/sources"
@@ -13,12 +15,12 @@ export const dynamic = "force-dynamic"
 
 type PageProps = { params: Promise<{ workspaceSlug: string; pollId: string }> }
 
-const statusStyles: Record<string, { label: string; mark: string; text: string }> = {
-    queued: { label: "Initialising", mark: "bg-neutral-400", text: "text-neutral-300" },
-    running: { label: "In progress", mark: "bg-yellow-300", text: "text-yellow-200" },
-    completed: { label: "Completed", mark: "bg-emerald-300", text: "text-emerald-200" },
-    failed: { label: "Failed", mark: "bg-red-300", text: "text-red-200" },
-    cancelled: { label: "Cancelled", mark: "bg-red-300", text: "text-red-200" },
+const statusStyles: Record<string, { label: string; mark: string; text: string; tone: StatusTone }> = {
+    queued: { label: "Initialising", mark: "bg-neutral-400", text: "text-neutral-300", tone: "grey" },
+    running: { label: "In progress", mark: "bg-yellow-300", text: "text-yellow-200", tone: "yellow" },
+    completed: { label: "Completed", mark: "bg-emerald-300", text: "text-emerald-200", tone: "green" },
+    failed: { label: "Failed", mark: "bg-red-300", text: "text-red-200", tone: "red" },
+    cancelled: { label: "Cancelled", mark: "bg-red-300", text: "text-red-200", tone: "red" },
 }
 
 function statusMeta(status: string) {
@@ -247,22 +249,25 @@ export default async function LeadgenPollObjectPage({ params }: PageProps) {
         <PollLiveRefresh enabled={live} />
         <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="leadgen" />
         <div className="mx-auto max-w-6xl pt-5">
-            <section className="py-6 sm:py-10">
-                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-                    <div>
-                        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Poll {shortId(poll.id)}</h1>
-                        <p className="mt-2 text-sm text-neutral-400 sm:mt-3">{sourceNames(poll.source_snapshot, poll.source_count)} · {formatRelativeTime(poll.created_at)}</p>
-                        {live ? <p className="mt-2 text-xs text-yellow-200">Live view refreshes every few seconds while the poll is active.</p> : null}
-                    </div>
-                    <div className={`inline-flex items-center gap-3 ${meta.text}`}>
-                        <BetelgezeStatusMark className={meta.mark} />
-                        <span>{meta.label}</span>
-                        <span className="font-mono text-sm text-neutral-500"><PollDuration startedAt={poll.started_at} createdAt={poll.created_at} completedAt={poll.completed_at} live={live} /></span>
-                    </div>
-                </div>
-            </section>
+            <DetailPageHeader
+                category="Poll"
+                reference={shortId(poll.id)}
+                title={`${sourceNames(poll.source_snapshot, poll.source_count)} poll`}
+                subtitle={live ? "Live view refreshes automatically while the poll is active." : undefined}
+                labels={<SquarePill>{poll.trigger === "manual" ? "Manual" : "Automated"}</SquarePill>}
+                status={<Status label={meta.label} tone={meta.tone} />}
+                facts={[{ label: "duration", value: <PollDuration startedAt={poll.started_at} createdAt={poll.created_at} completedAt={poll.completed_at} live={live} /> }]}
+                updated={formatRelativeTime(poll.completed_at ?? poll.started_at ?? poll.created_at)}
+            />
 
-            <section className="grid grid-cols-5 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 md:gap-3 md:overflow-visible md:rounded-none md:border-0 md:bg-transparent">
+            <DetailFields>
+                <DetailField label="Status" icon="status"><Status label={meta.label} tone={meta.tone} /></DetailField>
+                <DetailField label="Trigger" icon="source" className="capitalize lg:border-l lg:border-neutral-900 lg:pl-8">{poll.trigger}</DetailField>
+                <DetailField label="Requested by" icon="user"><span className="font-mono">{shortId(poll.requested_by)}</span></DetailField>
+                <DetailField label="Created" icon="time" className="lg:border-l lg:border-neutral-900 lg:pl-8">{formatRelativeTime(poll.created_at)}</DetailField>
+            </DetailFields>
+
+            <section className="mt-5 grid grid-cols-5 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900 md:gap-3 md:overflow-visible md:rounded-none md:border-0 md:bg-transparent">
                 {[
                     ["Seeded", stageMetrics.seed],
                     ["Validated", stageMetrics.business_validation],
@@ -523,6 +528,11 @@ export default async function LeadgenPollObjectPage({ params }: PageProps) {
                     </details>) : <p className="p-5 text-sm text-neutral-500">No source evidence stored.</p>}
                 </div>
             </section>
+
+            <DetailDangerZone>
+                <DetailDangerAction title="Archive poll" description="Archive will remove this poll from active lists while preserving its results, evidence, and diagnostic history." control={<DetailDangerButton type="button" disabled>Archive poll</DetailDangerButton>} />
+                <DetailDangerAction title="Delete poll permanently" description="Permanent deletion will be enabled after archive storage and generated-lead retention safeguards are implemented." control={<DetailDangerButton type="button" tone="delete" disabled>Delete permanently</DetailDangerButton>} />
+            </DetailDangerZone>
         </div>
     </main>
 }

@@ -1,5 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailField, DetailFields, DetailPageHeader } from "@/components/detail"
+import { RelationshipStage, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import {
@@ -9,7 +11,7 @@ import {
     relationshipHubHref,
     workItemHref,
 } from "@/lib/relationships"
-import { formatRelativeTime } from "@/lib/ui/relative-time"
+import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
 
 export const dynamic = "force-dynamic"
@@ -20,7 +22,7 @@ type PageProps = {
 
 export default async function FulfilmentDetailPlaceholder({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const relationship = await getRelationship(workspace.id, relationshipId)
     if (!relationship) notFound()
     const workItems = await listRelationshipTimelineItems(workspace.slug, relationship)
@@ -32,28 +34,23 @@ export default async function FulfilmentDetailPlaceholder({ params }: PageProps)
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
-                        <header className="border-b border-neutral-800 pb-6">
-                            <p className="text-sm text-neutral-500">Fulfilment detail</p>
-                            <h1 className="mt-2 text-3xl font-semibold tracking-tight">{relationship.primary_person_name}</h1>
-                            <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-400">
-                                This panel will replace the old ClickUp Client Work list for this relationship. Future task rows will open global work-item detail panels at `/work-items/[id]`.
-                            </p>
-                        </header>
+                        <DetailPageHeader
+                            category="Fulfilment"
+                            reference={shortId(relationship.id)}
+                            title={relationship.primary_person_name}
+                            subtitle={relationship.business_name ?? "No company saved"}
+                            labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
+                            status={<Status label={openItems.length ? "In progress" : "No open work"} tone={openItems.length ? "yellow" : "grey"} />}
+                            facts={[{ label: "open", value: openItems.length }]}
+                            updated={formatRelativeTime(relationship.updated_at)}
+                        />
 
-                <section className="mt-6 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                        <p className="text-sm text-neutral-500">Open work</p>
-                        <p className="mt-2 font-medium">{openItems.length}</p>
-                    </div>
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                        <p className="text-sm text-neutral-500">Lifecycle</p>
-                        <p className="mt-2 font-medium">{phaseLabel(relationship.lifecycle_phase)}</p>
-                    </div>
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-                        <p className="text-sm text-neutral-500">Updated</p>
-                        <p className="mt-2 font-medium">{formatRelativeTime(relationship.updated_at)}</p>
-                    </div>
-                </section>
+                        <DetailFields>
+                            <DetailField label="Status" icon="status"><Status label={openItems.length ? "In progress" : "No open work"} tone={openItems.length ? "yellow" : "grey"} /></DetailField>
+                            <DetailField label="Lifecycle" icon="timeline" className="lg:border-l lg:border-neutral-900 lg:pl-8"><RelationshipStage phase={relationship.lifecycle_phase} /></DetailField>
+                            <DetailField label="Open work" icon="activity">{openItems.length}</DetailField>
+                            <DetailField label="Updated" icon="time" className="lg:border-l lg:border-neutral-900 lg:pl-8">{formatRelativeTime(relationship.updated_at)}</DetailField>
+                        </DetailFields>
 
                 <section className="mt-6 rounded-2xl border border-neutral-800 bg-black p-5">
                     <h2 className="text-lg font-semibold">Future fulfilment workspace</h2>
@@ -76,12 +73,10 @@ export default async function FulfilmentDetailPlaceholder({ params }: PageProps)
                     </Link>
                 </section>
 
-                        <section className="mt-6 rounded-2xl border border-red-500/20 bg-red-950/10 p-5">
-                            <h2 className="text-lg font-semibold text-red-100">Danger zone placeholder</h2>
-                            <p className="mt-2 text-sm leading-6 text-red-100/70">
-                                Project archive/delete controls will live here after the real fulfilment detail panel is built.
-                            </p>
-                        </section>
+                        {role === "owner" || role === "admin" ? <DetailDangerZone>
+                            <DetailDangerAction title="Archive fulfilment" description="Archive will remove this fulfilment workspace from active views while preserving linked work and assets." control={<DetailDangerButton type="button" disabled>Archive fulfilment</DetailDangerButton>} />
+                            <DetailDangerAction title="Delete fulfilment permanently" description="Permanent deletion will be enabled when fulfilment has an independent archive lifecycle and dependent-record safeguards." control={<DetailDangerButton type="button" tone="delete" disabled>Delete permanently</DetailDangerButton>} />
+                        </DetailDangerZone> : null}
                     </div>
 
                     <ClientContextPanel
