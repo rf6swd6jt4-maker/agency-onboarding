@@ -14,7 +14,7 @@ type Props = {
     workspaceSlug: string
     connections: WorkspaceConnection[]
     action?: (provider: IntegrationProvider, formData: FormData) => Promise<void>
-    verifyAction?: (provider: IntegrationProvider) => Promise<void>
+    verifyAction: Action
     manualAction: ManualAction
     completeWhatsAppAction: WhatsAppAction
     verifyPendingAction: Action
@@ -95,7 +95,7 @@ function ManualFields({ provider }: { provider: IntegrationProvider }) {
     </>
 }
 
-export function WorkspaceConnections({ workspaceSlug, connections, manualAction, completeWhatsAppAction, verifyPendingAction, discardPendingAction, rollbackAction, disconnectAction, canManage, metaAppId, metaEmbeddedSignupConfigId, showHeader = true }: Props) {
+export function WorkspaceConnections({ workspaceSlug, connections, verifyAction, manualAction, completeWhatsAppAction, verifyPendingAction, discardPendingAction, rollbackAction, disconnectAction, canManage, metaAppId, metaEmbeddedSignupConfigId, showHeader = true }: Props) {
     const router = useRouter()
     const [selected, setSelected] = useState<IntegrationProvider | null>(null)
     const [advanced, setAdvanced] = useState(false)
@@ -221,7 +221,7 @@ export function WorkspaceConnections({ workspaceSlug, connections, manualAction,
             <div className="space-y-5 p-4 sm:p-5">
                 {connection.enabled ? <div className="rounded-xl border border-neutral-800 bg-neutral-900/70 p-4"><div className="flex items-center justify-between gap-3"><Status {...statusFor(connection)} /><span className="text-xs text-neutral-500">{connection.auth_method === "legacy" || connection.mode === "platform_legacy" ? "Protected fallback" : connection.auth_method?.replace("_", " ")}</span></div>{connectionDetail(connection) ? <p className="mt-3 text-sm text-neutral-300">{connectionDetail(connection)}</p> : null}<div className="mt-4"><CapabilityList connection={connection} /></div></div> : null}
 
-                {connection.last_verified_at ? <p className="text-xs text-neutral-500">Last verified {new Date(connection.last_verified_at).toLocaleString()}{connection.last_webhook_at ? ` · last webhook ${new Date(connection.last_webhook_at).toLocaleString()}` : ""}</p> : null}
+                <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-neutral-500">{connection.last_verified_at ? `Last verified ${new Date(connection.last_verified_at).toLocaleString()}${connection.last_webhook_at ? ` · last webhook ${new Date(connection.last_webhook_at).toLocaleString()}` : ""}` : "Connection has not been re-verified yet"}</p>{connection.enabled ? <button type="button" disabled={pending} onClick={() => run(() => verifyAction(selected))} className="h-8 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 transition hover:border-neutral-500 hover:text-white disabled:opacity-50">{pending ? "Verifying…" : "Verify now"}</button> : null}</div>
 
                 {selected === "stripe" ? <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Stripe</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Stripe opens in a separate secure window. Betelgeze receives only the permissions declared by its Stripe App.</p><label className="mt-4 block text-sm text-neutral-300">Account mode<select value={stripeMode} onChange={(event) => setStripeMode(event.target.value as "test" | "live")} className={inputClass}><option value="live">Live account</option><option value="test">Test account</option></select></label><button type="button" disabled={pending} onClick={startStripe} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue to Stripe</button></div>
                 : <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Meta</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Choose the agency&apos;s Meta business and WhatsApp number. Betelgeze then subscribes its webhook and verifies the confirmation template.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Confirmation template<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} className={inputClass} /></label><label className="block text-sm text-neutral-300">Language<input value={templateLanguage} onChange={(event) => setTemplateLanguage(event.target.value)} className={inputClass} /></label></div><button type="button" disabled={pending || !templateName.trim()} onClick={startWhatsApp} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue with Meta</button></div>}

@@ -142,12 +142,14 @@ export async function saveWorkspaceConnection(slug: string, provider: Integratio
     refresh(slug)
 }
 
-export async function verifyWorkspaceConnection(slug: string, provider: IntegrationProvider) {
-    if (!INTEGRATION_PROVIDERS.includes(provider)) throw new Error("Unknown connection.")
-    const { workspace } = await requireWorkspace(slug, "owner")
-    await assertWorkspaceConnectionIsEditable(workspace.id, provider)
-    await verifyWorkspaceIntegration(workspace.id, provider)
-    refresh(slug)
+export async function verifyWorkspaceConnection(slug: string, provider: IntegrationProvider): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        if (!INTEGRATION_PROVIDERS.includes(provider)) throw new Error("Unknown connection.")
+        const { workspace } = await requireWorkspace(slug, "owner")
+        await assertWorkspaceConnectionIsEditable(workspace.id, provider)
+        await verifyWorkspaceIntegration(workspace.id, provider)
+        refresh(slug)
+    })
 }
 
 export type WorkspaceConnectionActionResult = { ok: true } | { ok: false; error: string }

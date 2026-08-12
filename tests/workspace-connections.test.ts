@@ -38,6 +38,12 @@ test("Settings uses one popup lifecycle with automatic and manual connection pat
     assert.match(settingsUi, /Use manual credentials/u)
     assert.match(settingsUi, /The current connection remains active until the replacement passes every required check/u)
     assert.match(settingsUi, /Restore previous/u)
+    assert.match(settingsUi, /Verify now/u)
+})
+
+test("manual Stripe verification derives account mode from the credential instead of a missing Account property", () => {
+    assert.match(integrations, /stripeAccountMode/u)
+    assert.doesNotMatch(integrations, /mode: account\.livemode \? "live" : "test"/u)
 })
 
 test("provider runtime operations use the workspace connection", () => {

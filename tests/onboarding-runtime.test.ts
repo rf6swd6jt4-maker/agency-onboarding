@@ -128,7 +128,7 @@ test("token rotation and revocation preserve sessions while invalidating old lin
 })
 
 test("duplicate paid Stripe events resume automation and record the eventual outcome", () => {
-    assert.match(stripeWebhook, /duplicateEvent && !isPaidInvoiceEvent/u)
+    assert.match(stripeWebhook, /duplicateEvent && !isResumableAutomationEvent/u)
     assert.match(stripeWebhook, /Paid invoice automation resumed and completed/u)
     assert.match(stripeWebhook, /idempotencyKey:\s*`stripe\.invoice\.paid_processed:/u)
 })

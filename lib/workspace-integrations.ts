@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto"
 import { getRequiredEnv } from "@/lib/env"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { stripeAccountMode } from "@/lib/stripe/mode"
 
 export const INTEGRATION_PROVIDERS = ["stripe", "meta_whatsapp"] as const
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number]
@@ -174,11 +175,16 @@ async function metaGet(path: string, accessToken: string) {
 async function verifyStripeCandidate(config: IntegrationConfig) {
     const account = await stripeAccount(config)
     if (!account.id) throw new Error("Stripe verified the token but did not return an account ID.")
+    const mode = stripeAccountMode({
+        credential: config.secret_key || config.access_token,
+        configuredLivemode: config.livemode,
+        accountLivemode: account.livemode,
+    })
     return {
-        ...integrationHint("stripe", { ...config, account_id: account.id, livemode: String(Boolean(account.livemode)) }),
+        ...integrationHint("stripe", { ...config, account_id: account.id, livemode: String(mode === "live") }),
         account_id: account.id,
         account_name: account.business_profile?.name ?? account.settings?.dashboard?.display_name ?? null,
-        mode: account.livemode ? "live" : "test",
+        mode,
         verified_at: new Date().toISOString(),
         capabilities: {
             account_access: true,
