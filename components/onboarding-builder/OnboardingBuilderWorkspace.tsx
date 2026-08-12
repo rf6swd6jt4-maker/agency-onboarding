@@ -6,6 +6,7 @@ import { saveOnboardingHelpSettings } from "@/app/[workspaceSlug]/settings/onboa
 import { prepareVisualBuilderVideoUpload, publishVisualOnboardingRelease, rotateVisualOnboardingPreview } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import { Avatar } from "@/components/account/Avatar"
 import { VisualBuilderCanvas } from "@/components/onboarding-builder/VisualBuilderCanvas"
+import { BackToBetelgeze } from "@/components/onboarding-builder/OnboardingBuilderWindowControls"
 import { useCollaborativeOnboardingDocument, type VisualBuilderDocument } from "@/components/onboarding-builder/useCollaborativeOnboardingDocument"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
@@ -985,7 +986,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     return <div onPointerMove={(event) => collaboration.updateActivity({ cursor: normalizedBuilderCursor(event.clientX, event.clientY, window.innerWidth, window.innerHeight) })} onPointerLeave={() => collaboration.updateActivity({ cursor: null })} className="flex h-dvh min-h-[42rem] flex-col overflow-hidden bg-neutral-950 text-white">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-neutral-800 bg-black px-3 sm:px-4">
-            <a href={`/${workspaceSlug}/settings#onboarding`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white"><BuilderIcon name="back" /><span className="hidden sm:inline">Back to Betelgeze</span></a>
+            <BackToBetelgeze workspaceSlug={workspaceSlug} href={`/${workspaceSlug}/settings#onboarding`} className="inline-flex h-9 items-center gap-2 rounded-lg px-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white"><BuilderIcon name="back" /><span className="hidden sm:inline">Back to Betelgeze</span></BackToBetelgeze>
             <span className="hidden h-5 w-px bg-neutral-800 sm:block" />
             <div className="min-w-0"><p className="truncate text-sm font-medium">Onboarding Builder</p><p className="hidden text-[11px] text-neutral-600 sm:block">{workspaceName}</p></div>
             <div className="ml-1 hidden items-center sm:flex"><BuilderNavigationButton label="Go back" onClick={() => window.history.back()}><BuilderNavigationIcon name="back" /></BuilderNavigationButton><BuilderNavigationButton label="Go forward" onClick={() => window.history.forward()}><BuilderNavigationIcon name="forward" /></BuilderNavigationButton><BuilderNavigationButton label="Reload Builder" onClick={() => window.location.reload()}><BuilderNavigationIcon name="reload" /></BuilderNavigationButton></div>

@@ -17,6 +17,8 @@ const visualActions = readFileSync("app/[workspaceSlug]/onboarding-builder/visua
 const searchRoute = readFileSync("app/api/workspaces/[workspaceSlug]/search/route.ts", "utf8")
 const servicesUi = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
 const onboardingUi = readFileSync("components/settings/OnboardingSettings.tsx", "utf8")
+const builderWindowControls = readFileSync("components/onboarding-builder/OnboardingBuilderWindowControls.tsx", "utf8")
+const builderWindowProtocol = readFileSync("lib/onboarding-builder-window.ts", "utf8")
 const brandingUi = readFileSync("components/settings/AgencyBrandingEditor.tsx", "utf8")
 const builderUi = readFileSync("components/onboarding-builder/OnboardingBuilderWorkspace.tsx", "utf8")
 const workspaceShell = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
@@ -198,9 +200,15 @@ test("Builder opens outside the workspace shell and leaves a lightweight tab pla
     assert.match(builderPage, /Onboarding Builder open in another tab/)
     assert.match(builderPage, /<WorkspaceTabBridge/)
     assert.ok(builderPage.indexOf("if (tabId)") < builderPage.indexOf("loadOnboardingBuilderData(workspace.id"))
-    assert.match(workspaceShell, /window\.open\(href, "_blank", "noopener,noreferrer"\)\s+navigateActiveTab\(href\)/)
+    assert.match(workspaceShell, /openOnboardingBuilderWindow\(href, workspace\.slug\)\s+navigateActiveTab\(href\)/)
     assert.match(workspaceBridge, /isWorkspaceOnboardingBuilderUrl\(nextUrl/)
+    assert.match(workspaceBridge, /openOnboardingBuilderWindow\(nextUrl, workspaceSlug\)/)
     assert.match(workspaceBridge, /window\.location\.assign\(workspaceTabFrameUrl\(nextUrl, tabId/)
+    assert.match(builderWindowControls, /disabled:bg-neutral-700|bg-neutral-700/)
+    assert.match(builderWindowControls, /Onboarding Builder is already open/)
+    assert.match(builderWindowProtocol, /window\.opener\.top/)
+    assert.match(builderWindowProtocol, /window\.close\(\)/)
+    assert.match(workspaceShell, /message\.type !== "return"/)
 })
 
 test("all configuration Server Actions re-authorize admins and use transactional RPCs", () => {
@@ -238,7 +246,8 @@ test("private search includes dynamic services and modules without weakening the
 test("Settings and Builder authoring controls are not forced into canonical List", () => {
     for (const source of [servicesUi, onboardingUi, brandingUi, builderUi]) assert.doesNotMatch(source, /components\/list\/List/)
     assert.match(servicesUi, /SquarePill tone="yellow">Test/)
-    assert.match(onboardingUi, /Open Onboarding Builder/)
+    assert.match(onboardingUi, /OnboardingBuilderLauncher/)
+    assert.match(builderWindowControls, /Open Onboarding Builder/)
 })
 
 test("module configuration has moved out of Settings and into the Builder", () => {

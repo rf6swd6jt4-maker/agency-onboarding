@@ -13,6 +13,7 @@ import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
+import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type OnboardingBuilderWindowSignal } from "@/lib/onboarding-builder-window"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
 import {
@@ -1198,7 +1199,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
     function navigateWorkspaceDestination(href: string) {
         if (isStandaloneBuilderHref(href)) {
-            window.open(href, "_blank", "noopener,noreferrer")
+            openOnboardingBuilderWindow(href, workspace.slug)
             navigateActiveTab(href)
             return
         }
@@ -1218,7 +1219,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         window.requestAnimationFrame(() => postToTab(tabId, { type: "activate", active, refresh: false }))
     }
 
-    function switchTab(tab: WorkspaceTab) {
+    const switchTab = useCallback((tab: WorkspaceTab) => {
         if (tab.id === activeTabIdRef.current) return
         const previousTabId = activeTabIdRef.current
         const refresh = tab.seenRevision < mutationRevisionRef.current
@@ -1237,7 +1238,20 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 setRouteLoadingTabId(tab.id)
             }
         })
-    }
+    }, [ensureTabFrameLocation, postToTab, saveTabsState, tabs])
+
+    useEffect(() => {
+        function receiveBuilderReturn(event: MessageEvent<OnboardingBuilderWindowSignal>) {
+            const message = event.data
+            if (event.origin !== window.location.origin || message?.source !== ONBOARDING_BUILDER_WINDOW_SOURCE || message.workspaceSlug !== workspace.slug || message.type !== "return") return
+            const builderTab = tabs.find((tab) => isWorkspaceOnboardingBuilderUrl(tab.url, workspace.slug, window.location.origin))
+            if (builderTab) switchTab(builderTab)
+            window.focus()
+        }
+
+        window.addEventListener("message", receiveBuilderReturn)
+        return () => window.removeEventListener("message", receiveBuilderReturn)
+    }, [switchTab, tabs, workspace.slug])
 
     function switchTabFromKeyboard(event: ReactKeyboardEvent<HTMLButtonElement>, tabIndex: number) {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return

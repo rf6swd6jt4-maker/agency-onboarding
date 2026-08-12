@@ -13,6 +13,7 @@ import {
     type WorkspaceTabParentMessage,
 } from "@/lib/workspace-tabs"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
+import { openOnboardingBuilderWindow } from "@/lib/onboarding-builder-window"
 
 type Props = {
     tabId: string
@@ -103,12 +104,16 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             if (!(target instanceof Element)) return
             const anchor = target.closest("a[href]") as HTMLAnchorElement | null
             if (!anchor || anchor.hasAttribute("download")) return
+            if (anchor.getAttribute("aria-disabled") === "true") {
+                event.preventDefault()
+                return
+            }
             const destination = new URL(anchor.href, window.location.href)
             if (destination.origin !== window.location.origin || destination.searchParams.has(WORKSPACE_TAB_FRAME_PARAM)) return
             const nextUrl = `${destination.pathname}${destination.search}${destination.hash}`
             if (isWorkspaceOnboardingBuilderUrl(nextUrl, workspaceSlug, window.location.origin)) {
                 event.preventDefault()
-                window.open(nextUrl, "_blank", "noopener,noreferrer")
+                openOnboardingBuilderWindow(nextUrl, workspaceSlug)
                 window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
                 reportNavigationStart(nextUrl)
                 window.location.assign(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))

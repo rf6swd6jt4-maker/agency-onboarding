@@ -14,6 +14,7 @@ import {
     workspaceTabHistoryStep,
     workspaceRouteCanShowRelationshipContext,
 } from "../lib/workspace-tabs.ts"
+import { ONBOARDING_BUILDER_WINDOW_TTL_MS, onboardingBuilderWindowIsFresh, onboardingBuilderWindowName } from "../lib/onboarding-builder-window.ts"
 
 const origin = "https://dashboard.betelgeze.com"
 
@@ -47,6 +48,13 @@ test("recognizes only the current workspace's standalone onboarding Builder", ()
     assert.equal(isWorkspaceOnboardingBuilderUrl("/another/onboarding-builder", "scaylup", origin), false)
     assert.equal(isWorkspaceOnboardingBuilderUrl("/scaylup/onboarding-builder/nested", "scaylup", origin), false)
     assert.equal(isWorkspaceOnboardingBuilderUrl("https://example.com/scaylup/onboarding-builder", "scaylup", origin), false)
+})
+
+test("tracks one named Builder window per workspace and expires stale presence", () => {
+    assert.equal(onboardingBuilderWindowName("Scaylup & Co"), "betelgeze-onboarding-builder-Scaylup---Co")
+    assert.equal(onboardingBuilderWindowIsFresh({ open: true, updatedAt: 1_000 }, 1_000 + ONBOARDING_BUILDER_WINDOW_TTL_MS - 1), true)
+    assert.equal(onboardingBuilderWindowIsFresh({ open: true, updatedAt: 1_000 }, 1_000 + ONBOARDING_BUILDER_WINDOW_TTL_MS), false)
+    assert.equal(onboardingBuilderWindowIsFresh({ open: false, updatedAt: 1_000 }, 1_001), false)
 })
 
 test("only treats a frame as synchronized when route, query, hash, and tab identity match", () => {
