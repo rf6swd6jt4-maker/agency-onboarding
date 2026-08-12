@@ -656,6 +656,60 @@ async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipI
     return result.data
 }
 
+async function ensureRelationshipInvoiceAsset(input: {
+    workspaceId: string
+    relationshipId: string
+    actorId: string
+    saleId: string
+    invoiceId: string
+    hostedInvoiceUrl: string | null
+    invoicePdf: string | null
+    currency: string
+    totalAmount: number
+}) {
+    const assetId = randomUUID()
+    const asset = {
+        id: assetId,
+        workspace_id: input.workspaceId,
+        title: `Invoice ${input.invoiceId}`,
+        description: "Stripe invoice sent to the client.",
+        asset_kind: "invoice",
+        source_kind: "stripe_invoice",
+        external_url: input.hostedInvoiceUrl ?? input.invoicePdf,
+        native_kind: "client_sale",
+        native_id: input.saleId,
+        metadata: {
+            relationship_id: input.relationshipId,
+            stripe_invoice_id: input.invoiceId,
+            invoice_pdf: input.invoicePdf,
+            currency: input.currency.toUpperCase(),
+            total_amount: input.totalAmount,
+        },
+        created_by: input.actorId,
+    }
+    const inserted = await supabaseAdmin.from("assets").insert(asset).select("id").single()
+    let resolvedId = inserted.data?.id ?? null
+    if (inserted.error?.code === "23505") {
+        const existing = await supabaseAdmin.from("assets").select("id")
+            .eq("workspace_id", input.workspaceId).eq("native_kind", "client_sale").eq("native_id", input.saleId).maybeSingle()
+        resolvedId = existing.data?.id ?? null
+    } else if (inserted.error) {
+        console.error("Could not create the canonical invoice asset", { saleId: input.saleId, code: inserted.error.code })
+        return null
+    }
+    if (!resolvedId) return null
+    const linked = await supabaseAdmin.from("asset_relationships").upsert({
+        workspace_id: input.workspaceId,
+        relationship_id: input.relationshipId,
+        asset_id: resolvedId,
+    }, { onConflict: "asset_id,relationship_id" })
+    if (linked.error) {
+        console.error("Could not link the invoice asset to its relationship", { saleId: input.saleId, code: linked.error.code })
+        return null
+    }
+    return resolvedId
+}
+
 export async function sendRelationshipInvoice(input: {
     workspaceId: string
     relationshipId: string
@@ -778,6 +832,17 @@ export async function sendRelationshipInvoice(input: {
     ])
     if (statusError || workError) throw new Error(statusError?.message ?? workError?.message ?? "Could not record the sent invoice")
     await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "invoiced" })
+    const invoiceAssetId = await ensureRelationshipInvoiceAsset({
+        workspaceId: input.workspaceId,
+        relationshipId: input.relationshipId,
+        actorId: input.actorId,
+        saleId: sale.id,
+        invoiceId: invoice.invoiceId,
+        hostedInvoiceUrl: invoice.hostedInvoiceUrl,
+        invoicePdf: invoice.invoicePdf,
+        currency,
+        totalAmount: lineItems.reduce((total, item) => total + item.amount, 0),
+    })
     await recordAdminActivity({
         workspaceId: input.workspaceId,
         category: "billing",
@@ -793,6 +858,12 @@ export async function sendRelationshipInvoice(input: {
         metricClassification: "internal_call",
         metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length },
     })
+    return {
+        saleId: sale.id,
+        invoiceId: invoice.invoiceId,
+        hostedInvoiceUrl: invoice.hostedInvoiceUrl,
+        invoiceAssetId,
+    }
 }
 
 export async function advanceRelationshipWorkflow(input: { workspaceId: string; relationshipId: string; workItemId: string; action: string | null; actorId: string }) {

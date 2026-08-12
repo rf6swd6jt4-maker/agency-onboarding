@@ -135,6 +135,37 @@ test("commercial save persists exact identities, negotiated currency, and sent-s
     assert.doesNotMatch(detail, /Object\.entries\(SERVICES\)/)
 })
 
+test("relationship invoicing uses the visible details workspace and three-stage review", () => {
+    const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")
+    const workspace = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/RelationshipDealWorkspace.tsx", "utf8")
+    const gantt = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/RelationshipGantt.tsx", "utf8")
+    const workflow = readFileSync("lib/relationship-workflow.ts", "utf8")
+
+    assert.match(detail, /<RelationshipDealWorkspace/)
+    assert.doesNotMatch(detail, /key=\{relationship\.updated_at\}/)
+    assert.doesNotMatch(detail, /<details/)
+    assert.doesNotMatch(detail, /Commercial details and delivery team/)
+    for (const label of [
+        "Planned project timeline",
+        "Project timeline",
+        "Services",
+        "Description",
+        "Review Relationship Information",
+        "Review Onboarding",
+        "Pricing",
+        "Invoice Client",
+        "Invoice sent",
+        "Open invoice",
+    ]) assert.match(workspace, new RegExp(label))
+    assert.match(workspace, /<BuilderPreview/)
+    assert.doesNotMatch(workspace, /service_assignee_/)
+    assert.match(gantt, /onInvoiceRequest\(\)/)
+    assert.match(readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8"), /existing\?\.assignee_user_id \?\? service\?\.defaultAssigneeId/)
+    assert.match(workflow, /source_kind: "stripe_invoice"/)
+    assert.match(workflow, /from\("asset_relationships"\)\.upsert/)
+    assert.ok(workflow.indexOf("moveRelationshipToStage") < workflow.lastIndexOf("invoiceAssetId = await ensureRelationshipInvoiceAsset"))
+})
+
 test("sent-unpaid invoices can be voided and reopened without mutating their frozen snapshot", () => {
     const actions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
     const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")

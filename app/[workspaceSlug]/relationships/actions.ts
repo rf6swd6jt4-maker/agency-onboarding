@@ -40,6 +40,27 @@ export type WorkspaceCreateActionState = {
     error?: string
 }
 
+export type RelationshipDealDetailsInput = {
+    primaryPersonName: string
+    businessName: string
+    primaryContactRole: string
+    primaryPhone: string
+    whatsappPhone: string
+    primaryEmail: string
+    sellerUserId: string
+    fulfilmentManagerUserId: string
+    projectTimeframeDays: number | null
+    description: string
+    services: Array<{
+        code: string
+        serviceId: string | null
+        revisionId: string | null
+        priceCents: number
+        currency: string
+        assigneeUserId?: string | null
+    }>
+}
+
 function formString(formData: FormData, key: string) {
     return String(formData.get(key) ?? "").trim()
 }
@@ -150,14 +171,22 @@ function currencyCode(value: string) {
 }
 
 export async function saveRelationshipCommercialDetails(slug: string, relationshipId: string, formData: FormData) {
-    const { workspace, user } = await requireWorkspace(slug, "admin")
+    const { workspace, user, role } = await requireWorkspace(slug)
     const serviceKeys = [...new Set(formData.getAll("service_key").map(String).filter(Boolean))]
-    const sellerId = nullableFormString(formData, "seller_user_id")
+    let sellerId = nullableFormString(formData, "seller_user_id")
     const managerId = nullableFormString(formData, "fulfilment_manager_user_id")
     const whatsappPhone = nullableFormString(formData, "whatsapp_phone")
     const timeframe = Number(formData.get("project_timeframe_days") ?? 0)
+    const includesRelationshipDetails = formData.has("primary_person_name")
+    const primaryPersonName = formString(formData, "primary_person_name")
+    const businessName = nullableFormString(formData, "business_name")
+    const primaryContactRole = nullableFormString(formData, "primary_contact_role")
+    const primaryPhone = nullableFormString(formData, "primary_phone")
+    const primaryEmail = nullableFormString(formData, "primary_email")
+    const description = nullableFormString(formData, "description")
+    if (includesRelationshipDetails && !primaryPersonName) throw new Error("Add the client's name before saving the relationship")
     const [{ data: relationship, error: relationshipError }, existingServicesResult, { data: frozenSales }, configuration] = await Promise.all([
-        supabaseAdmin.from("relationships").select("lifecycle_phase").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
+        supabaseAdmin.from("relationships").select("lifecycle_phase, seller_user_id").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId),
         supabaseAdmin.from("client_sales").select("id, status").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId).in("status", [
             "invoice_sent", "payment_failed", "paid", "test_paid", "paid_consent_template_sending", "paid_awaiting_whatsapp_confirm",
@@ -166,6 +195,11 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
         loadPublishedOnboardingConfiguration(workspace.id),
     ])
     if (relationshipError || !relationship) throw new Error(relationshipError?.message ?? "Relationship not found")
+    const canManageCommercialDetails = role === "owner" || role === "admin"
+    if (!canManageCommercialDetails && relationship.seller_user_id !== user.id) {
+        throw new Error("Only this relationship's seller or a workspace admin can update its invoice details")
+    }
+    if (!canManageCommercialDetails) sellerId = relationship.seller_user_id
     let existingServices = existingServicesResult.data ?? []
     if (existingServicesResult.error) {
         if (existingServicesResult.error.code !== "42703" && !existingServicesResult.error.message.toLowerCase().includes("schema cache")) throw new Error(existingServicesResult.error.message)
@@ -213,7 +247,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             service_key: serviceKey,
             price_cents: submittedPrices.get(serviceKey) ?? 0,
             currency: submittedCurrencies.get(serviceKey) ?? "USD",
-            assignee_user_id: nullableFormString(formData, `service_assignee_${serviceKey}`),
+            assignee_user_id: nullableFormString(formData, `service_assignee_${serviceKey}`) ?? existing?.assignee_user_id ?? service?.defaultAssigneeId ?? null,
             ...(configuration.schemaReady && serviceId && serviceRevisionId ? { service_id: serviceId, service_revision_id: serviceRevisionId } : {}),
         }
     })
@@ -274,8 +308,55 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
         }
         if (serviceError) throw new Error(serviceError.message)
     }
+    if (includesRelationshipDetails) {
+        const { error: detailsError } = await supabaseAdmin.from("relationships").update({
+            primary_person_name: primaryPersonName,
+            business_name: businessName,
+            primary_contact_role: primaryContactRole,
+            primary_phone: primaryPhone,
+            primary_email: primaryEmail,
+            notes_summary: description,
+            updated_at: new Date().toISOString(),
+        }).eq("workspace_id", workspace.id).eq("id", relationshipId)
+        if (detailsError) throw new Error(detailsError.message)
+    }
     if (relationship.lifecycle_phase === "potential_client") await ensureSalesStage({ workspaceId: workspace.id, relationshipId, sellerId })
     relationshipRevalidatePaths(slug, relationshipId)
+}
+
+export async function saveRelationshipDealDetails(slug: string, relationshipId: string, input: RelationshipDealDetailsInput): Promise<{ ok: true } | { ok: false; error: string }> {
+    const formData = new FormData()
+    formData.set("primary_person_name", input.primaryPersonName)
+    formData.set("business_name", input.businessName)
+    formData.set("primary_contact_role", input.primaryContactRole)
+    formData.set("primary_phone", input.primaryPhone)
+    formData.set("whatsapp_phone", input.whatsappPhone)
+    formData.set("primary_email", input.primaryEmail)
+    formData.set("seller_user_id", input.sellerUserId)
+    formData.set("fulfilment_manager_user_id", input.fulfilmentManagerUserId)
+    formData.set("project_timeframe_days", input.projectTimeframeDays ? String(input.projectTimeframeDays) : "")
+    formData.set("description", input.description)
+    for (const service of input.services) {
+        formData.append("service_key", service.code)
+        formData.set(`service_price_${service.code}`, (service.priceCents / 100).toFixed(2))
+        formData.set(`service_currency_${service.code}`, service.currency)
+        if (service.serviceId) formData.set(`service_id_${service.code}`, service.serviceId)
+        if (service.revisionId) formData.set(`service_revision_id_${service.code}`, service.revisionId)
+        if (service.assigneeUserId) formData.set(`service_assignee_${service.code}`, service.assigneeUserId)
+    }
+    try {
+        await saveRelationshipCommercialDetails(slug, relationshipId, formData)
+        return { ok: true }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "The relationship could not be saved"
+        const safe = message.startsWith("Void and replace")
+            || message.startsWith("Add the client's name")
+            || message.includes("service")
+            || message.includes("currency")
+            ? message
+            : "The relationship could not be saved. Review the details and try again."
+        return { ok: false, error: safe }
+    }
 }
 
 export async function voidAndReopenRelationshipInvoice(slug: string, relationshipId: string, saleId: string): Promise<{ ok: boolean; error?: string }> {
@@ -373,6 +454,7 @@ export async function archiveRelationship(
 
 export async function proceedRelationshipCurrentWork(slug: string, relationshipId: string, workItemId: string) {
     let workflowAction: string | null = null
+    let invoice: Awaited<ReturnType<typeof sendRelationshipInvoice>> | null = null
     try {
         const { workspace, user, role } = await requireWorkspace(slug)
         const { data: item } = await supabaseAdmin.from("work_items")
@@ -389,13 +471,19 @@ export async function proceedRelationshipCurrentWork(slug: string, relationshipI
             if (!assignment) throw new Error("This work item is not assigned to you")
         }
         if (workflowAction === "send_invoice") {
-            await sendRelationshipInvoice({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id })
+            invoice = await sendRelationshipInvoice({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id })
         } else {
             if (workflowAction === "await_payment" || workflowAction === "await_onboarding") throw new Error("This stage advances automatically when the external step completes")
             await advanceRelationshipWorkflow({ workspaceId: workspace.id, relationshipId, workItemId, action: workflowAction, actorId: user.id })
         }
         relationshipRevalidatePaths(slug, relationshipId)
-        return { ok: true as const }
+        return {
+            ok: true as const,
+            invoice: invoice ? {
+                id: invoice.invoiceId,
+                href: invoice.invoiceAssetId ? assetHref(slug, invoice.invoiceAssetId) : invoice.hostedInvoiceUrl,
+            } : null,
+        }
     } catch (error) {
         const message = error instanceof Error ? error.message : "Could not proceed with this work item"
         const invoiceValidationMessage = workflowAction === "send_invoice" && [

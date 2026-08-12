@@ -181,12 +181,13 @@ function Icon({ kind }: { kind: "fit" | "minus" | "plus" | "labels" }) {
     return <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">{path}</svg>
 }
 
-export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initialPlan, canEdit, currentWork }: {
+export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initialPlan, canEdit, currentWork, onInvoiceRequest }: {
     workspaceSlug: string
     relationshipId: string
     plan: RelationshipGanttPlan
     canEdit: boolean
     currentWork?: { id: string; title: string; action: string | null; role: string; status: string; unassignedCount: number; blocked: boolean } | null
+    onInvoiceRequest?: () => void
 }) {
     const router = useRouter()
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -1128,8 +1129,12 @@ export function RelationshipGantt({ workspaceSlug, relationshipId, plan: initial
             <span className="font-medium text-neutral-500">Current</span>
             <Link href={`/${workspaceSlug}/work-items/${currentWork.id}`} className="min-w-0 flex-1 truncate font-medium text-white hover:underline">{currentWork.title}</Link>
             {currentWork.unassignedCount ? <span className="text-amber-300">{currentWork.unassignedCount} service{currentWork.unassignedCount === 1 ? "" : "s"} unassigned</span> : null}
-            <label className="flex items-center gap-1.5 text-neutral-400"><input type="checkbox" checked={confirmBeforeProceeding} onChange={(event) => { setConfirmBeforeProceeding(event.target.checked); window.localStorage.setItem("betelgeze-current-work-confirm", String(event.target.checked)) }} />Confirm before continuing</label>
+            {currentWork.action !== "send_invoice" ? <label className="flex items-center gap-1.5 text-neutral-400"><input type="checkbox" checked={confirmBeforeProceeding} onChange={(event) => { setConfirmBeforeProceeding(event.target.checked); window.localStorage.setItem("betelgeze-current-work-confirm", String(event.target.checked)) }} />Confirm before continuing</label> : null}
             <button type="button" disabled={pending || currentWork.blocked || currentWork.action === "await_payment" || currentWork.action === "await_onboarding"} onClick={() => {
+                if (currentWork.action === "send_invoice" && onInvoiceRequest) {
+                    onInvoiceRequest()
+                    return
+                }
                 if (confirmBeforeProceeding && !window.confirm(`Complete “${currentWork.title}” and continue?`)) return
                 startTransition(() => { void proceedRelationshipCurrentWork(workspaceSlug, relationshipId, currentWork.id).then((outcome) => {
                     if (!outcome.ok) {
