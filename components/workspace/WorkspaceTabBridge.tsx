@@ -9,6 +9,7 @@ import {
     WORKSPACE_TAB_FRAME_PARAM,
     WORKSPACE_TAB_MESSAGE_SOURCE,
     workspaceTabFrameUrl,
+    workspaceRouteIsRecordDetail,
     type WorkspaceTabFrameMessage,
     type WorkspaceTabParentMessage,
 } from "@/lib/workspace-tabs"
@@ -122,6 +123,18 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             if (anchor.target === "_blank") return
             const currentUrl = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`, workspaceSlug, window.location.origin)
             if (normalizeWorkspaceUrl(nextUrl, workspaceSlug, window.location.origin) === currentUrl) return
+            if (workspaceRouteIsRecordDetail(nextUrl, workspaceSlug, window.location.origin)) {
+                event.preventDefault()
+                const message: WorkspaceTabFrameMessage = {
+                    source: WORKSPACE_TAB_MESSAGE_SOURCE,
+                    target: "host",
+                    tabId,
+                    type: "open-tab",
+                    url: nextUrl,
+                }
+                window.parent.postMessage(message, window.location.origin)
+                return
+            }
             event.preventDefault()
             // Stop page-local refreshers before replacing the frame URL. A
             // queued router.refresh() can otherwise win the App Router race

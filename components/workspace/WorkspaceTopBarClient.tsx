@@ -32,6 +32,7 @@ import {
     workspaceTabHistoryStep,
     workspaceTabFrameUrl,
     workspaceRouteCanShowRelationshipContext,
+    workspaceRouteIsRecordDetail,
     type WorkspaceTabFrameMessage,
     type WorkspaceTabParentMessage,
     type WorkspaceTabRelationshipContext,
@@ -385,6 +386,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const mobileSearchInputRef = useRef<HTMLInputElement>(null)
     const sidebarTransitionTimeout = useRef<number | null>(null)
     const activeTabIdRef = useRef("")
+    const tabsRef = useRef<WorkspaceTab[]>([])
     const tabsBootstrappedRef = useRef(false)
     const shellRootRef = useRef<HTMLDivElement>(null)
     const tabStripRef = useRef<HTMLDivElement>(null)
@@ -567,6 +569,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const current = normalizeWorkspaceUrl(`${pathname}${query ? `?${query}` : ""}`)
         const stored = readTabsState(current)
         activeTabIdRef.current = stored.activeId
+        tabsRef.current = stored.tabs
         tabFrameOrderRef.current = stored.tabs.map((tab) => tab.id)
         mutationRevisionRef.current = Math.max(0, ...stored.tabs.map((tab) => tab.seenRevision))
         saveTabsState(stored.tabs, stored.activeId)
@@ -580,6 +583,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     useEffect(() => {
         activeTabIdRef.current = activeTabId
     }, [activeTabId])
+
+    useEffect(() => {
+        tabsRef.current = tabs
+    }, [tabs])
 
     useEffect(() => {
         const activeTab = tabs.find((tab) => tab.id === activeTabId)
@@ -682,6 +689,61 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         return true
     }, [postToTab, saveTabsState])
 
+    const openWorkspaceTab = useCallback((href: string) => {
+        const url = normalizeWorkspaceUrl(href)
+        const currentTabs = tabsRef.current
+        const existingTab = currentTabs.find((tab) => tab.url === url)
+        const previousTabId = activeTabIdRef.current
+
+        if (existingTab) {
+            if (existingTab.id === previousTabId) return
+            const refresh = existingTab.seenRevision < mutationRevisionRef.current
+            const nextTabs = currentTabs.map((tab) => tab.id === existingTab.id && refresh
+                ? { ...tab, seenRevision: mutationRevisionRef.current }
+                : tab)
+            tabsRef.current = nextTabs
+            activeTabIdRef.current = existingTab.id
+            setTabs(nextTabs)
+            setActiveTabId(existingTab.id)
+            saveTabsState(nextTabs, existingTab.id)
+            window.requestAnimationFrame(() => {
+                postToTab(previousTabId, { type: "activate", active: false, refresh: false })
+                postToTab(existingTab.id, { type: "activate", active: true, refresh })
+                const desiredUrl = pendingNavigationRef.current.get(existingTab.id) ?? existingTab.url
+                if (ensureTabFrameLocation(existingTab.id, desiredUrl)) setRouteLoadingTabId(existingTab.id)
+            })
+            return
+        }
+
+        if (currentTabs.length >= 8) {
+            const tabId = activeTabIdRef.current
+            if (!tabId) return
+            updateTabForShellNavigation(tabId, url)
+            pendingNavigationRef.current.set(tabId, url)
+            requestTabFrameNavigation(tabId, url)
+            return
+        }
+
+        const tab: WorkspaceTab = {
+            id: createTabId(),
+            title: titleForUrl(url),
+            url,
+            history: [url],
+            historyIndex: 0,
+            seenRevision: mutationRevisionRef.current,
+        }
+        const nextTabs = [...currentTabs, tab]
+        tabFrameOrderRef.current.push(tab.id)
+        tabsRef.current = nextTabs
+        activeTabIdRef.current = tab.id
+        setTabs(nextTabs)
+        setActiveTabId(tab.id)
+        sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tab.id), "true")
+        setContextOpenByTab((current) => ({ ...current, [tab.id]: true }))
+        saveTabsState(nextTabs, tab.id)
+        window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
+    }, [ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
+
     useEffect(() => {
         function receiveFrameMessage(event: MessageEvent<WorkspaceTabFrameMessage>) {
             if (event.origin !== window.location.origin) return
@@ -757,6 +819,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(message.tabId)
             }
 
+            if (message.type === "open-tab" && message.url) {
+                openWorkspaceTab(message.url)
+            }
+
             if (message.type === "reopen-closed-tab") {
                 reopenClosedTab()
             }
@@ -789,7 +855,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         window.addEventListener("message", receiveFrameMessage)
         return () => window.removeEventListener("message", receiveFrameMessage)
-    }, [normalizeWorkspaceUrl, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [normalizeWorkspaceUrl, openWorkspaceTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
 
     useEffect(() => {
         if (!tabsHydrated) return
@@ -1078,7 +1144,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (!href) return false
         event.preventDefault()
         setSearchOpen(false)
-        navigateWorkspaceDestination(href)
+        navigateSearchDestination(href)
         return true
     }
 
@@ -1201,6 +1267,18 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (isStandaloneBuilderHref(href)) {
             openOnboardingBuilderWindow(href, workspace.slug)
             navigateActiveTab(href)
+            return
+        }
+        navigateActiveTab(href)
+    }
+
+    function navigateSearchDestination(href: string) {
+        if (isStandaloneBuilderHref(href)) {
+            navigateWorkspaceDestination(href)
+            return
+        }
+        if (workspaceRouteIsRecordDetail(href, workspace.slug, window.location.origin)) {
+            openWorkspaceTab(href)
             return
         }
         navigateActiveTab(href)
@@ -1515,7 +1593,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         creationNoticeTimeoutRef.current = null
         const { href } = creationNotice
         setCreationNotice(null)
-        navigateActiveTab(href)
+        if (workspaceRouteIsRecordDetail(href, workspace.slug, window.location.origin)) openWorkspaceTab(href)
+        else navigateActiveTab(href)
     }
 
     return <div ref={shellRootRef} data-workspace-shell-root>
@@ -1552,7 +1631,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                 {query.trim().length >= 2 && !searchLoading && searchResults.length === 0 && <p className="px-3 py-3 text-sm text-neutral-500">No core results found.</p>}
                                 {query.trim().length >= 2 && !searchLoading && searchResults.map((item) => (
                                     <div key={item.id} className="border-b border-neutral-900 last:border-0">
-                                        <Link href={item.href} data-global-loading="false" target={isStandaloneBuilderHref(item.href) ? "_blank" : undefined} rel={isStandaloneBuilderHref(item.href) ? "noopener noreferrer" : undefined} className="block px-3 py-2 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateWorkspaceDestination(item.href) }}>
+                                        <Link href={item.href} data-global-loading="false" target={isStandaloneBuilderHref(item.href) ? "_blank" : undefined} rel={isStandaloneBuilderHref(item.href) ? "noopener noreferrer" : undefined} className="block px-3 py-2 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateSearchDestination(item.href) }}>
                                             <SearchResultContent item={item} />
                                         </Link>
                                         {item.hubHref && item.hubHref !== item.href && (
@@ -1583,7 +1662,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                     {query.trim().length >= 2 && !searchLoading && searchResults.length === 0 && <p className="px-3 py-3 text-sm text-neutral-500">No core results found.</p>}
                                     {query.trim().length >= 2 && !searchLoading && searchResults.map((item) => (
                                         <div key={item.id} className="border-b border-neutral-900 last:border-0">
-                                            <Link href={item.href} data-global-loading="false" target={isStandaloneBuilderHref(item.href) ? "_blank" : undefined} rel={isStandaloneBuilderHref(item.href) ? "noopener noreferrer" : undefined} className="block px-3 py-3 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateWorkspaceDestination(item.href) }}>
+                                            <Link href={item.href} data-global-loading="false" target={isStandaloneBuilderHref(item.href) ? "_blank" : undefined} rel={isStandaloneBuilderHref(item.href) ? "noopener noreferrer" : undefined} className="block px-3 py-3 hover:bg-neutral-900" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); setSearchOpen(false); navigateSearchDestination(item.href) }}>
                                                 <SearchResultContent item={item} mobile />
                                             </Link>
                                             {item.hubHref && item.hubHref !== item.href && (

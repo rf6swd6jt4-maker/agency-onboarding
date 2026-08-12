@@ -13,6 +13,7 @@ import {
     workspaceTabFrameUrl,
     workspaceTabHistoryStep,
     workspaceRouteCanShowRelationshipContext,
+    workspaceRouteIsRecordDetail,
 } from "../lib/workspace-tabs.ts"
 import { ONBOARDING_BUILDER_WINDOW_TTL_MS, onboardingBuilderWindowIsFresh, onboardingBuilderWindowName } from "../lib/onboarding-builder-window.ts"
 
@@ -95,6 +96,29 @@ test("workspace shell only supports relationship context on detail routes", () =
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/work/client-1", "scaylup", origin), true)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/onboarding", "scaylup", origin), false)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/relationships", "scaylup", origin), false)
+})
+
+test("record details open as switchable workspace tabs while hubs and actions stay in place", () => {
+    for (const path of [
+        "/scaylup/relationships/client-1",
+        "/scaylup/onboarding/client-1",
+        "/scaylup/work/client-1",
+        "/scaylup/work-items/item-1",
+        "/scaylup/assets/asset-1",
+        "/scaylup/leadgen/poll/poll-1",
+        "/scaylup/admin/activity/event-1",
+        "/scaylup/admin/okrs/okr-1",
+    ]) assert.equal(workspaceRouteIsRecordDetail(path, "scaylup", origin), true, path)
+
+    for (const path of [
+        "/scaylup/relationships",
+        "/scaylup/work-items?create=work-item",
+        "/scaylup/settings#leadgen",
+        "/scaylup/leadgen/polls",
+        "/scaylup/admin/activity",
+        "/another/relationships/client-1",
+        "https://example.com/scaylup/work-items/item-1",
+    ]) assert.equal(workspaceRouteIsRecordDetail(path, "scaylup", origin), false, path)
 })
 
 test("tab history cannot move before its creation page or past its newest page", () => {

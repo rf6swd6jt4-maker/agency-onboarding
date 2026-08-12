@@ -17,7 +17,7 @@ export type WorkspaceTabFrameMessage = {
     source: typeof WORKSPACE_TAB_MESSAGE_SOURCE
     target: "host"
     tabId: string
-    type: "location" | "mutation" | "action-start" | "action-end" | "context-status" | "context-obstruction" | "navigation-start" | "poll-started" | "reopen-closed-tab"
+    type: "location" | "mutation" | "action-start" | "action-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab"
     url?: string
     relationshipId?: string | null
     contextSupported?: boolean
@@ -70,6 +70,18 @@ export function isWorkspaceOnboardingBuilderUrl(value: string, workspaceSlug: st
     const parsed = new URL(value, origin)
     return parsed.origin === new URL(origin).origin
         && parsed.pathname === `/${workspaceSlug}/onboarding-builder`
+}
+
+export function workspaceRouteIsRecordDetail(value: string, workspaceSlug: string, origin: string) {
+    const parsed = new URL(value, origin)
+    if (parsed.origin !== new URL(origin).origin) return false
+    const prefix = `/${workspaceSlug}/`
+    if (!parsed.pathname.startsWith(prefix)) return false
+    const segments = parsed.pathname.slice(prefix.length).split("/").filter(Boolean)
+    if (segments.length === 2 && ["relationships", "onboarding", "work", "work-items", "assets"].includes(segments[0])) return true
+    return segments.length === 3
+        && ((segments[0] === "leadgen" && segments[1] === "poll")
+            || (segments[0] === "admin" && ["activity", "okrs"].includes(segments[1])))
 }
 
 export function workspaceTabFrameMatchesUrl(actualValue: string, desiredValue: string, tabId: string, origin: string) {

@@ -211,6 +211,16 @@ test("Builder opens outside the workspace shell and leaves a lightweight tab pla
     assert.match(workspaceShell, /message\.type !== "return"/)
 })
 
+test("record navigation opens or reuses internal workspace tabs without changing shell navigation", () => {
+    assert.match(workspaceBridge, /workspaceRouteIsRecordDetail\(nextUrl/)
+    assert.match(workspaceBridge, /type: "open-tab"/)
+    assert.match(workspaceShell, /message\.type === "open-tab"/)
+    assert.match(workspaceShell, /currentTabs\.find\(\(tab\) => tab\.url === url\)/)
+    assert.match(workspaceShell, /currentTabs\.length >= 8/)
+    assert.match(workspaceShell, /navigateWorkspaceDestination\(item\.href\); closeSidebarAfterNavigation\(\)/)
+    assert.match(workspaceShell, /navigateSearchDestination\(item\.href\)/)
+})
+
 test("all configuration Server Actions re-authorize admins and use transactional RPCs", () => {
     for (const source of [builderActions, serviceActions, onboardingActions, brandingActions]) assert.match(source, /requireWorkspace\(slug, "admin"\)/)
     assert.match(builderActions, /save_onboarding_module_draft/)
