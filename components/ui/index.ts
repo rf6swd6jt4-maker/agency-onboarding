@@ -1,4 +1,5 @@
 export { Assignee } from "./Assignee"
+export { AnchoredPopup } from "./AnchoredPopup"
 export { RoundPill } from "./RoundPill"
 export { RelationshipStage, relationshipPhaseColours, relationshipPhaseTones } from "./RelationshipStage"
 export { SquarePill } from "./SquarePill"

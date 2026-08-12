@@ -267,6 +267,8 @@ The two divider colours are deliberately different: the darker `border-neutral-9
 - Every `ListItem` receives the shared subtle hover background so the active record is easy to track across a wide row.
 - On mobile, `MobileListActionSurface` makes the entire item one accessible action target. Tapping anywhere opens the item's action popup; it does not navigate immediately. The canonical `Open …` action is first, followed by secondary and destructive actions.
 - The three-dot `ListActionMenu` is hidden on mobile. From `sm` upward, the action surface disappears, the linked title is the default navigation affordance, and the three-dot menu is restored as the final element.
+- List action popups use `AnchoredPopup`. They open directly above the pressed three-dot button or mobile action surface with a `6px` gap, align to its trailing edge, and stay at least `8px` inside the visible viewport. If vertical space is limited, the popup scrolls internally instead of crossing the top edge. They portal into the highest same-origin document with the platform popup stack level so list shells, sticky rows, and iframe boundaries cannot cover them.
+- Do not create page-local absolute dropdowns, below-first menus, or fixed coordinates for list actions. `AnchoredPopup` owns repositioning on scrolling, resizing, mobile visual-viewport changes, and trigger/content size changes.
 - Destructive operations remain inside the action popup and keep their confirmation behaviour at every breakpoint.
 - Creator avatars in lists use the stable, versioned `/api/profile-avatars/[username]` rendition rather than direct signed upload URLs. This keeps the displayed file small and cacheable across tab openings; do not restore per-render signed URLs in list implementations.
 - A genuine failed or critical record may add a very faint semantic wash to `ListItem`, but this must not replace its `Status` or alter the standard geometry.
@@ -345,6 +347,7 @@ The record-specific middle remains flexible. The header, fields, and destructive
 - Desktop rows use a fixed `9rem` label track; mobile uses `8rem`. Values take the remaining width and may contain text, inputs, selectors, shared pills, `Status`, `Assignee`, or a popup trigger.
 - The second desktop column adds `border-l border-neutral-900 pl-8`. A full-width field uses `lg:col-span-2`. The page supplies only these placement classes; it must not restyle the row.
 - Editable values remain visually quiet on the page surface. Popups may use their own bordered floating surface. Use established shared primitives inside values instead of local imitations.
+- Every field popup uses `AnchoredPopup`, anchored to the exact pressed field value. It opens directly above that trigger, is clamped within the visible viewport, scrolls internally when space is constrained, and portals in front of page, shell, and same-origin iframe content. This placement is recalculated while the page, visual viewport, trigger, or popup changes size or position.
 - Omit fields that do not apply. Do not render decorative empty rows to balance the columns.
 - Long descriptions may span both columns. Record-specific analytical summaries such as poll funnel statistics remain content, not fields.
 

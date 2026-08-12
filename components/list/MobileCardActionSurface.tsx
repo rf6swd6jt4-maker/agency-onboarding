@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
+import { type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useId, useState } from "react"
+import { AnchoredPopup } from "@/components/ui"
 import type { ListAction } from "./ListActionMenu"
 
 const REMOVE_WARNING = "Remove this item from Betelgeze? This keeps the interface clean, but the action may not be reversible from this screen."
@@ -20,104 +21,56 @@ export function MobileCardActionSurface({
     mobileListSurface?: boolean
 }) {
     const [open, setOpen] = useState(false)
-    const [position, setPosition] = useState<{ top: number; right: number } | null>(null)
+    const [anchor, setAnchor] = useState<HTMLElement | null>(null)
     const menuId = useId()
-    const surfaceRef = useRef<HTMLDivElement>(null)
-    const menuRef = useRef<HTMLDivElement>(null)
-    const ignoreNextCardClick = useRef(false)
     const visibleActions = actions.filter((action): action is ListAction => {
         if (!action) return false
         return Boolean(action.label && (action.href || action.action || action.copyText))
     })
 
-    const updatePosition = useCallback(() => {
-        const rect = surfaceRef.current?.getBoundingClientRect()
-        if (!rect) return
-        const estimatedHeight = Math.min(window.innerHeight - 32, visibleActions.length * 38 + 8)
-        const preferredTop = rect.bottom + 8
-        const top = preferredTop + estimatedHeight > window.innerHeight - 16
-            ? Math.max(16, rect.top - estimatedHeight - 8)
-            : preferredTop
-        setPosition({
-            top,
-            right: Math.max(16, window.innerWidth - rect.right),
-        })
-    }, [visibleActions.length])
-
     useEffect(() => {
-        function close(event: MouseEvent) {
-            if (!open) return
-            const target = event.target as Node
-            if (menuRef.current?.contains(target)) return
-            ignoreNextCardClick.current = Boolean(surfaceRef.current?.contains(target))
-            setOpen(false)
-        }
-        function escape(event: KeyboardEvent) {
-            if (event.key === "Escape") setOpen(false)
-        }
         function closeForOtherDropdown(event: Event) {
             if ((event as CustomEvent<string>).detail !== menuId) setOpen(false)
         }
-        function reposition() {
-            if (open) updatePosition()
-        }
-
-        document.addEventListener("mousedown", close)
-        document.addEventListener("keydown", escape)
-        window.addEventListener("resize", reposition)
-        window.addEventListener("scroll", reposition, true)
         window.addEventListener("betelgeze:dropdown-open", closeForOtherDropdown)
         return () => {
-            document.removeEventListener("mousedown", close)
-            document.removeEventListener("keydown", escape)
-            window.removeEventListener("resize", reposition)
-            window.removeEventListener("scroll", reposition, true)
             window.removeEventListener("betelgeze:dropdown-open", closeForOtherDropdown)
         }
-    }, [menuId, open, updatePosition])
+    }, [menuId])
 
-    function openMenu() {
+    function openMenu(trigger: HTMLElement) {
         if (visibleActions.length === 0) return
-        updatePosition()
+        setAnchor(trigger)
         window.dispatchEvent(new CustomEvent("betelgeze:dropdown-open", { detail: menuId }))
         setOpen(true)
     }
 
     function handleClick(event: ReactMouseEvent<HTMLDivElement>) {
         const target = event.target as HTMLElement
-        if (ignoreNextCardClick.current) {
-            ignoreNextCardClick.current = false
-            return
-        }
         if (target.closest("a,button,input,select,textarea,summary")) return
         if (open) {
             setOpen(false)
             return
         }
-        openMenu()
+        openMenu(event.currentTarget)
     }
 
     function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
         if (event.key === "Enter" || event.key === " ") {
             event.preventDefault()
-            openMenu()
+            openMenu(event.currentTarget)
         }
     }
 
-    function handleMobileListClick() {
-        if (ignoreNextCardClick.current) {
-            ignoreNextCardClick.current = false
-            return
-        }
+    function handleMobileListClick(event: ReactMouseEvent<HTMLButtonElement>) {
         if (open) {
             setOpen(false)
             return
         }
-        openMenu()
+        openMenu(event.currentTarget)
     }
 
     return <div
-        ref={surfaceRef}
         className={`${mobileListSurface ? "relative" : ""} ${className}`}
         role={mobileListSurface ? undefined : "button"}
         tabIndex={mobileListSurface ? undefined : 0}
@@ -127,7 +80,7 @@ export function MobileCardActionSurface({
     >
         {children}
         {mobileListSurface ? <button type="button" aria-label={label} aria-expanded={open} aria-haspopup="menu" className="absolute inset-0 z-10 sm:hidden" onClick={handleMobileListClick} /> : null}
-        {open && <div ref={menuRef} role="menu" style={position ? { top: position.top, right: position.right } : undefined} className="fixed z-[9999] w-[calc(100vw-2rem)] max-w-52 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl">
+        {open && <AnchoredPopup anchor={anchor} align="end" role="menu" onDismiss={() => setOpen(false)} className="w-52 rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/60">
             {visibleActions.map((item) => {
                 const itemClassName = `block min-h-9 w-full px-3 py-2 text-left text-sm ${item.danger ? "text-red-300 hover:bg-red-950/40" : "text-neutral-200 hover:bg-neutral-900"}`
                 if (item.href) {
@@ -165,7 +118,7 @@ export function MobileCardActionSurface({
                     </button>
                 </form>
             })}
-        </div>}
+        </AnchoredPopup>}
     </div>
 }
 

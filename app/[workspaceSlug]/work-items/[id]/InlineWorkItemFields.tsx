@@ -1,9 +1,8 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react"
-import { createPortal } from "react-dom"
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
-import { Assignee, RoundPill, Status } from "@/components/ui"
+import { AnchoredPopup, Assignee, RoundPill, Status } from "@/components/ui"
 import { Avatar } from "@/components/account/Avatar"
 import { DetailField, DetailFields } from "@/components/detail"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
@@ -32,7 +31,6 @@ type KeyResultOption = {
     impact_hypothesis: string | null
 }
 type KeyResultEstimate = { keyResultId: string; expectedMovement: string; impactHypothesis: string }
-let activePopupTrigger: HTMLElement | null = null
 
 type Props = {
     workspaceSlug: string
@@ -130,32 +128,11 @@ function Search({ value, onChange, placeholder }: { value: string; onChange: (va
     return <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="h-9 w-full border-b border-neutral-800 bg-transparent px-2.5 text-sm text-white outline-none placeholder:text-neutral-600" />
 }
 
-function Popup({ children, className = "w-72" }: { children: ReactNode; className?: string }) {
-    const popupRef = useRef<HTMLDivElement>(null)
-    const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
-    const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
+const PopupContext = createContext<{ anchor: HTMLElement | null; dismiss: () => void }>({ anchor: null, dismiss: () => undefined })
 
-    useLayoutEffect(() => {
-        const trigger = activePopupTrigger
-        if (!trigger) return
-        const triggerRect = trigger.getBoundingClientRect()
-        const frameRect = window.frameElement?.getBoundingClientRect() ?? { left: 0, top: 0 }
-        const popupWidth = popupRef.current?.offsetWidth ?? 320
-        const popupHeight = popupRef.current?.offsetHeight ?? 240
-        const viewportWidth = window.parent === window ? window.innerWidth : window.parent.innerWidth
-        const viewportHeight = window.parent === window ? window.innerHeight : window.parent.innerHeight
-        const desiredLeft = frameRect.left + triggerRect.left
-        const below = frameRect.top + triggerRect.bottom + 4
-        const boundedHeight = Math.min(popupHeight, viewportHeight - 16)
-        const above = frameRect.top + triggerRect.top - boundedHeight - 4
-        setPosition({
-            left: Math.max(8, Math.min(desiredLeft, viewportWidth - popupWidth - 8)),
-            top: Math.max(8, Math.min(below + boundedHeight <= viewportHeight - 8 ? below : above, viewportHeight - boundedHeight - 8)),
-        })
-    }, [])
-
-    if (!parentDocument) return null
-    return createPortal(<div ref={popupRef} data-work-item-popup style={position ?? { visibility: "hidden" }} className={`fixed z-[100] max-h-[calc(100vh-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/60 ${className}`}>{children}</div>, parentDocument.body)
+function Popup({ anchor, children, className = "w-72", onDismiss }: { anchor?: HTMLElement | null; children: ReactNode; className?: string; onDismiss?: () => void }) {
+    const context = useContext(PopupContext)
+    return <AnchoredPopup anchor={anchor ?? context.anchor} onDismiss={onDismiss ?? context.dismiss} workItemPopup className={`rounded-xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/60 ${className}`}>{children}</AnchoredPopup>
 }
 
 function PopupFooter({ onSave, onClear, pending }: { onSave: () => void; onClear?: () => void; pending: boolean }) {
@@ -170,6 +147,7 @@ function MinimalDateTimeInputs({ date, time, onDateChange, onTimeChange, timeLab
 export function InlineWorkItemFields(props: Props) {
     const router = useRouter()
     const [open, setOpen] = useState<string | null>(null)
+    const [popupTrigger, setPopupTrigger] = useState<HTMLElement | null>(null)
     const [query, setQuery] = useState("")
     const [error, setError] = useState<string | null>(null)
     const [pending, startTransition] = useTransition()
@@ -210,8 +188,8 @@ export function InlineWorkItemFields(props: Props) {
         textarea.style.height = `${Math.max(80, textarea.scrollHeight)}px`
     }, [description])
 
-    function toggle(name: string) {
-        activePopupTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    function toggle(name: string, trigger?: HTMLElement) {
+        if (trigger) setPopupTrigger(trigger)
         setError(null); setQuery("")
         if (open !== name) {
             setStartDate(dateInputValue(started ? props.actualStartAt : props.plannedStartDate))
@@ -277,7 +255,11 @@ export function InlineWorkItemFields(props: Props) {
     const filteredKeyResults = useMemo(() => props.keyResultOptions.filter((result) => `${result.code} ${result.name} ${result.objective}`.toLowerCase().includes(query.toLowerCase())), [props.keyResultOptions, query])
 
     return (
-        <div className="relative">
+        <PopupContext.Provider value={{ anchor: popupTrigger, dismiss: () => setOpen(null) }}>
+        <div className="relative" onClickCapture={(event) => {
+            const trigger = (event.target as Element).closest<HTMLElement>("[data-work-item-popup-trigger]")
+            if (trigger) setPopupTrigger(trigger)
+        }}>
             <DetailFields>
                     <div className="contents">
                         <DetailField label="Status" icon="status" className="lg:col-start-1 lg:row-start-1"><Status label={props.statusLabel} tone={props.statusTone} /></DetailField>
@@ -285,26 +267,26 @@ export function InlineWorkItemFields(props: Props) {
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <div className="flex items-center gap-2 whitespace-nowrap">
                                 <div className="relative">
-                                    <button data-work-item-popup-trigger type="button" onClick={() => toggle("start")} className="rounded py-0.5 hover:text-white">{started ? displayDate(props.actualStartAt, props.actualStartHasTime ? timeInputValue(props.actualStartAt) : null) : displayDate(props.plannedStartDate, props.plannedStartTime)}</button>
-                                    {open === "start" ? <Popup className="w-64"><div className="p-2.5"><p className="mb-1.5 text-xs text-neutral-500">{started ? "Actual start" : "Planned start"}</p><MinimalDateTimeInputs date={startDate} time={startTime} onDateChange={setStartDate} onTimeChange={setStartTime} timeLabel="Optional start time" /></div><PopupFooter pending={pending} onClear={startDate || startTime ? () => { setStartDate(""); setStartTime("") } : undefined} onSave={() => save(() => updateWorkItemSchedule(props.workspaceSlug, props.workItemId, dateStorageValue(startDate), timeStorageValue(startTime), dateStorageValue(dueDate), timeStorageValue(dueTime), completed, started, started ? actualIsoValue(startDate, startTime) : undefined, completed ? actualIsoValue(dueDate, dueTime) : undefined))} /></Popup> : null}
+                                    <button data-work-item-popup-trigger type="button" onClick={(event) => toggle("start", event.currentTarget)} className="rounded py-0.5 hover:text-white">{started ? displayDate(props.actualStartAt, props.actualStartHasTime ? timeInputValue(props.actualStartAt) : null) : displayDate(props.plannedStartDate, props.plannedStartTime)}</button>
+                                    {open === "start" ? <Popup anchor={popupTrigger} onDismiss={() => setOpen(null)} className="w-64"><div className="p-2.5"><p className="mb-1.5 text-xs text-neutral-500">{started ? "Actual start" : "Planned start"}</p><MinimalDateTimeInputs date={startDate} time={startTime} onDateChange={setStartDate} onTimeChange={setStartTime} timeLabel="Optional start time" /></div><PopupFooter pending={pending} onClear={startDate || startTime ? () => { setStartDate(""); setStartTime("") } : undefined} onSave={() => save(() => updateWorkItemSchedule(props.workspaceSlug, props.workItemId, dateStorageValue(startDate), timeStorageValue(startTime), dateStorageValue(dueDate), timeStorageValue(dueTime), completed, started, started ? actualIsoValue(startDate, startTime) : undefined, completed ? actualIsoValue(dueDate, dueTime) : undefined))} /></Popup> : null}
                                 </div>
                                 <span className="text-neutral-600">→</span>
                                 </div>
                                 <div className="flex items-center gap-2 whitespace-nowrap">
                                 <span className="text-neutral-500">{props.status === "done" ? "Finished" : "Due"}</span>
                                 <div className="relative">
-                                    <button data-work-item-popup-trigger type="button" onClick={() => toggle("due")} className="rounded py-0.5 hover:text-white">{completed ? displayDate(props.actualCompletedAt, props.actualCompletedHasTime ? timeInputValue(props.actualCompletedAt) : null) : displayDate(props.dueDate, props.dueTime)}</button>
-                                    {open === "due" ? <Popup className="w-64"><div className="p-2.5"><p className="mb-1.5 text-xs text-neutral-500">{completed ? "Finished" : "Due date"}</p><MinimalDateTimeInputs date={dueDate} time={dueTime} onDateChange={setDueDate} onTimeChange={setDueTime} timeLabel="Optional finish time" /></div><PopupFooter pending={pending} onClear={dueDate || dueTime ? () => { setDueDate(""); setDueTime("") } : undefined} onSave={() => save(() => updateWorkItemSchedule(props.workspaceSlug, props.workItemId, dateStorageValue(startDate), timeStorageValue(startTime), dateStorageValue(dueDate), timeStorageValue(dueTime), completed, started, started ? actualIsoValue(startDate, startTime) : undefined, completed ? actualIsoValue(dueDate, dueTime) : undefined))} /></Popup> : null}
+                                    <button data-work-item-popup-trigger type="button" onClick={(event) => toggle("due", event.currentTarget)} className="rounded py-0.5 hover:text-white">{completed ? displayDate(props.actualCompletedAt, props.actualCompletedHasTime ? timeInputValue(props.actualCompletedAt) : null) : displayDate(props.dueDate, props.dueTime)}</button>
+                                    {open === "due" ? <Popup anchor={popupTrigger} onDismiss={() => setOpen(null)} className="w-64"><div className="p-2.5"><p className="mb-1.5 text-xs text-neutral-500">{completed ? "Finished" : "Due date"}</p><MinimalDateTimeInputs date={dueDate} time={dueTime} onDateChange={setDueDate} onTimeChange={setDueTime} timeLabel="Optional finish time" /></div><PopupFooter pending={pending} onClear={dueDate || dueTime ? () => { setDueDate(""); setDueTime("") } : undefined} onSave={() => save(() => updateWorkItemSchedule(props.workspaceSlug, props.workItemId, dateStorageValue(startDate), timeStorageValue(startTime), dateStorageValue(dueDate), timeStorageValue(dueTime), completed, started, started ? actualIsoValue(startDate, startTime) : undefined, completed ? actualIsoValue(dueDate, dueTime) : undefined))} /></Popup> : null}
                                 </div>
                                 </div>
                             </div>
                         </DetailField>
                         <DetailField label="Assigned to" icon="user" className="lg:col-start-1 lg:row-start-3">
                             <div className="relative inline-flex max-w-full flex-wrap gap-1.5">
-                                <button data-work-item-popup-trigger type="button" onClick={() => toggle("assignees")} className="flex max-w-full flex-wrap gap-1.5 rounded p-0 hover:opacity-90">
+                                <button data-work-item-popup-trigger type="button" onClick={(event) => toggle("assignees", event.currentTarget)} className="flex max-w-full flex-wrap gap-1.5 rounded p-0 hover:opacity-90">
                                     {props.assignees.length ? [...props.assignees].sort((left, right) => Number(right.user_id === props.executionOwnerId) - Number(left.user_id === props.executionOwnerId)).map((person) => <span key={person.user_id} className="inline-flex items-center gap-1"><Assignee name={person.username} avatarSrc={person.avatar_url} />{person.user_id === props.executionOwnerId ? <span className="text-[10px] uppercase tracking-wide text-neutral-500">Owner</span> : null}</span>) : <span className="text-neutral-600">Unassigned</span>}
                                 </button>
-                                {open === "assignees" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search users…" /><p className="border-b border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-500">The execution owner drives completion forecasts. Additional assignees are collaborators.</p><div className="max-h-64 overflow-y-auto p-1">{filteredMembers.map((person) => { const assigned = assigneeIds.includes(person.user_id); const owner = executionOwnerId === person.user_id; return <div key={person.user_id} className="flex items-center gap-1 rounded-lg hover:bg-neutral-900"><button type="button" onClick={() => toggleAssignee(person.user_id)} className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-2 text-left"><Avatar src={person.avatar_url} name={person.username} className="h-7 w-7" /><span className="min-w-0 flex-1 truncate text-sm">{person.username}</span><span className="text-sm text-neutral-500">{assigned ? "✓" : ""}</span></button>{assigned ? <button type="button" onClick={() => setExecutionOwnerId(person.user_id)} className={`mr-1 rounded px-2 py-1 text-[11px] ${owner ? "bg-neutral-800 text-white" : "text-neutral-500 hover:text-white"}`}>{owner ? "Owner" : "Make owner"}</button> : null}</div> })}</div><PopupFooter pending={pending} onClear={assigneeIds.length ? () => { setAssigneeIds([]); setExecutionOwnerId(null) } : undefined} onSave={() => save(() => updateWorkItemAssignees(props.workspaceSlug, props.workItemId, assigneeIds, executionOwnerId))} /></Popup> : null}
+                                {open === "assignees" ? <Popup anchor={popupTrigger} onDismiss={() => setOpen(null)} className="w-80"><Search value={query} onChange={setQuery} placeholder="Search users…" /><p className="border-b border-neutral-800 px-2.5 py-2 text-xs leading-5 text-neutral-500">The execution owner drives completion forecasts. Additional assignees are collaborators.</p><div className="max-h-64 overflow-y-auto p-1">{filteredMembers.map((person) => { const assigned = assigneeIds.includes(person.user_id); const owner = executionOwnerId === person.user_id; return <div key={person.user_id} className="flex items-center gap-1 rounded-lg hover:bg-neutral-900"><button type="button" onClick={() => toggleAssignee(person.user_id)} className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-2 text-left"><Avatar src={person.avatar_url} name={person.username} className="h-7 w-7" /><span className="min-w-0 flex-1 truncate text-sm">{person.username}</span><span className="text-sm text-neutral-500">{assigned ? "✓" : ""}</span></button>{assigned ? <button type="button" onClick={() => setExecutionOwnerId(person.user_id)} className={`mr-1 rounded px-2 py-1 text-[11px] ${owner ? "bg-neutral-800 text-white" : "text-neutral-500 hover:text-white"}`}>{owner ? "Owner" : "Make owner"}</button> : null}</div> })}</div><PopupFooter pending={pending} onClear={assigneeIds.length ? () => { setAssigneeIds([]); setExecutionOwnerId(null) } : undefined} onSave={() => save(() => updateWorkItemAssignees(props.workspaceSlug, props.workItemId, assigneeIds, executionOwnerId))} /></Popup> : null}
                             </div>
                         </DetailField>
                         <DetailField label="Created by" icon="user" className="lg:col-start-1 lg:row-start-4">{props.creator ? <Assignee name={props.creator.username} avatarSrc={props.creator.avatar_url} /> : <span className="text-neutral-600">System or imported</span>}</DetailField>
@@ -359,5 +341,6 @@ export function InlineWorkItemFields(props: Props) {
             </DetailFields>
             {error ? <p className="border-t border-red-500/20 py-2 text-sm text-red-300">{error}</p> : null}
         </div>
+        </PopupContext.Provider>
     )
 }
