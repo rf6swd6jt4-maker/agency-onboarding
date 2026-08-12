@@ -50,6 +50,12 @@ test("provider runtime operations use the workspace connection", () => {
 test("webhooks resolve workspace identity before processing tenant data", () => {
     assert.match(stripeWebhook, /getWorkspaceIdForConnectedAccount\("stripe", externalAccountId\)/u)
     assert.match(stripeWebhook, /recordWorkspaceConnectionWebhook\(workspaceId, "stripe"\)/u)
+    assert.match(stripeWebhook, /candidate\.livemode === null \|\| candidate\.livemode === event\.livemode/u)
+    assert.match(stripeWebhook, /account\.application\.deauthorized/u)
+    assert.match(stripeWebhook, /disconnectWorkspaceIntegration\(workspaceId, "stripe"\)/u)
+    assert.match(stripeWebhook, /isResumableAutomationEvent/u)
+    assert.match(integrations, /STRIPE_APP_TEST_WEBHOOK_SECRET/u)
+    assert.match(integrations, /STRIPE_APP_LIVE_WEBHOOK_SECRET/u)
     assert.match(whatsappWebhook, /getWorkspaceIdForWhatsAppPhoneNumber\(phoneNumberIds\[0\]\)/u)
     assert.match(whatsappWebhook, /handleSaleConsentConfirmation\(\{\s*workspaceId,/u)
     assert.match(saleAutomation, /findPendingConfirmedSale\(fromAddress, workspaceId\)/u)

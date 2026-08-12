@@ -183,7 +183,12 @@ async function verifyStripeCandidate(config: IntegrationConfig) {
         capabilities: {
             account_access: true,
             invoice_access: true,
-            webhook_routing: Boolean(config.webhook_secret || process.env.STRIPE_APP_WEBHOOK_SECRET),
+            webhook_routing: Boolean(
+                config.webhook_secret ||
+                process.env.STRIPE_APP_TEST_WEBHOOK_SECRET ||
+                process.env.STRIPE_APP_LIVE_WEBHOOK_SECRET ||
+                process.env.STRIPE_APP_WEBHOOK_SECRET
+            ),
         },
     }
 }
@@ -392,17 +397,30 @@ export async function recordWorkspaceConnectionWebhook(workspaceId: string, prov
 }
 
 export async function getStripeWebhookCandidates() {
+    type StripeWebhookCandidate = {
+        workspaceId: string | null
+        webhookSecret: string
+        shared: boolean
+        livemode: boolean | null
+    }
     const { data } = await supabaseAdmin.from("workspace_integrations").select("workspace_id, mode, previous_mode, auth_method, enabled, config_encrypted").eq("provider", "stripe").eq("enabled", true)
-    const candidates = (data ?? []).flatMap((item) => {
+    const candidates: StripeWebhookCandidate[] = (data ?? []).flatMap((item): StripeWebhookCandidate[] => {
         try {
-            if (item.mode === "platform_legacy" || forceSavedLegacy(item.previous_mode)) return [{ workspaceId: item.workspace_id as string | null, webhookSecret: getRequiredEnv("STRIPE_WEBHOOK_SECRET"), shared: false }]
+            if (item.mode === "platform_legacy" || forceSavedLegacy(item.previous_mode)) return [{ workspaceId: item.workspace_id as string | null, webhookSecret: getRequiredEnv("STRIPE_WEBHOOK_SECRET"), shared: false, livemode: null }]
             if (item.mode === "connected" && item.config_encrypted && item.auth_method !== "oauth") {
                 const config = decryptWorkspaceIntegration(item.config_encrypted)
-                return config.webhook_secret ? [{ workspaceId: item.workspace_id as string | null, webhookSecret: config.webhook_secret, shared: false }] : []
+                return config.webhook_secret ? [{ workspaceId: item.workspace_id as string | null, webhookSecret: config.webhook_secret, shared: false, livemode: null }] : []
             }
         } catch { return [] }
         return []
     })
-    if (process.env.STRIPE_APP_WEBHOOK_SECRET) candidates.push({ workspaceId: null, webhookSecret: process.env.STRIPE_APP_WEBHOOK_SECRET, shared: true })
-    return candidates.filter((candidate, index, all) => all.findIndex((other) => other.workspaceId === candidate.workspaceId && other.webhookSecret === candidate.webhookSecret) === index)
+    if (process.env.STRIPE_APP_TEST_WEBHOOK_SECRET) candidates.push({ workspaceId: null, webhookSecret: process.env.STRIPE_APP_TEST_WEBHOOK_SECRET, shared: true, livemode: false })
+    if (process.env.STRIPE_APP_LIVE_WEBHOOK_SECRET) candidates.push({ workspaceId: null, webhookSecret: process.env.STRIPE_APP_LIVE_WEBHOOK_SECRET, shared: true, livemode: true })
+    // Compatibility fallback for the first universal-connections release.
+    if (process.env.STRIPE_APP_WEBHOOK_SECRET) candidates.push({ workspaceId: null, webhookSecret: process.env.STRIPE_APP_WEBHOOK_SECRET, shared: true, livemode: null })
+    return candidates.filter((candidate, index, all) => all.findIndex((other) =>
+        other.workspaceId === candidate.workspaceId &&
+        other.webhookSecret === candidate.webhookSecret &&
+        other.livemode === candidate.livemode
+    ) === index)
 }

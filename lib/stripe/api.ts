@@ -47,6 +47,7 @@ export type VoidStripeInvoiceResult = {
 export type StripeWebhookEvent = {
     id: string
     type: string
+    livemode?: boolean
     account?: string
     context?: string
     data?: {

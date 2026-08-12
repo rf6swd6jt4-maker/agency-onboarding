@@ -40,9 +40,14 @@ destination to send invoice events to:
 
 `https://<dashboard-host>/api/stripe/webhook`
 
-The shared App signing secret is `STRIPE_APP_WEBHOOK_SECRET`. Events are mapped
-to a workspace by Stripe account/context and checked against Betelgeze invoice
-ownership before automation runs.
+Create separate test and live App event destinations. Store their signing
+secrets as `STRIPE_APP_TEST_WEBHOOK_SECRET` and
+`STRIPE_APP_LIVE_WEBHOOK_SECRET`. The older `STRIPE_APP_WEBHOOK_SECRET` remains
+only as a temporary compatibility fallback. Events are matched to their mode,
+mapped to a workspace by Stripe account/context, and checked against Betelgeze
+invoice ownership before automation runs. An
+`account.application.deauthorized` event disconnects the affected workspace
+without affecting any other agency.
 
 ## Meta Embedded Signup
 

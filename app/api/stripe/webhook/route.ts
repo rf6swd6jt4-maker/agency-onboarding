@@ -5,7 +5,7 @@ import {
     verifyStripeWebhookSignature,
 } from "@/lib/stripe/api"
 import { handlePaidStripeInvoice } from "@/lib/client-sales/automation"
-import { getStripeWebhookCandidates, getWorkspaceIdForConnectedAccount, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
+import { disconnectWorkspaceIntegration, getStripeWebhookCandidates, getWorkspaceIdForConnectedAccount, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { recordAdminActivity } from "@/lib/admin/activity"
 
@@ -16,6 +16,10 @@ function isPaidInvoiceEvent(type: string) {
     // Stripe can emit either event for a successful invoice payment. Both
     // contain the invoice object and must advance the same sale workflow.
     return type === "invoice.paid" || type === "invoice.payment_succeeded"
+}
+
+function isResumableAutomationEvent(type: string) {
+    return isPaidInvoiceEvent(type) || type === "account.application.deauthorized"
 }
 
 function isMissingStripeStatusRpc(error: { code?: string; message?: string } | null | undefined) {
@@ -45,13 +49,21 @@ async function reportStripeAutomationFailure(workspaceId: string, eventId: strin
 export async function POST(request: NextRequest) {
     const payload = await request.text()
     const signature = request.headers.get("stripe-signature")
+    let event: StripeWebhookEvent
+    try {
+        event = JSON.parse(payload) as StripeWebhookEvent
+    } catch {
+        return Response.json({ error: "Invalid Stripe event payload" }, { status: 400 })
+    }
     const candidates = await getStripeWebhookCandidates()
-    const matchedCandidate = candidates.find((candidate) => verifyStripeWebhookSignature({ payload, signatureHeader: signature, secret: candidate.webhookSecret }))
+    const matchedCandidate = candidates.find((candidate) =>
+        (candidate.livemode === null || candidate.livemode === event.livemode) &&
+        verifyStripeWebhookSignature({ payload, signatureHeader: signature, secret: candidate.webhookSecret })
+    )
     if (!matchedCandidate) {
         return Response.json({ error: "Invalid signature" }, { status: 400 })
     }
 
-    const event = JSON.parse(payload) as StripeWebhookEvent
     const invoice = event.data?.object
     const saleId =
         invoice && typeof invoice === "object" && !Array.isArray(invoice) &&
@@ -99,11 +111,27 @@ export async function POST(request: NextRequest) {
         )
     }
 
-    if (duplicateEvent && !isPaidInvoiceEvent(event.type)) return Response.json({ ok: true, duplicate: true })
+    if (duplicateEvent && !isResumableAutomationEvent(event.type)) return Response.json({ ok: true, duplicate: true })
 
     if (!duplicateEvent) await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.webhook.received", summary: `Stripe event received: ${event.type}`, entityType: "stripe_event", entityId: event.id, direction: "inbound", metadata: { event_type: event.type, sale_id: saleId } })
 
-    if (isPaidInvoiceEvent(event.type)) {
+    if (event.type === "account.application.deauthorized") {
+        await disconnectWorkspaceIntegration(workspaceId, "stripe")
+        await recordAdminActivity({
+            workspaceId,
+            category: "billing",
+            level: "warning",
+            eventKey: "stripe.connection.deauthorized",
+            summary: "Stripe disconnected the workspace authorization",
+            entityType: "stripe_account",
+            entityId: externalAccountId ?? event.id,
+            actorKind: "automation",
+            correlationId: event.id,
+            idempotencyKey: `stripe.connection.deauthorized:${event.id}`,
+            outcome: "succeeded",
+            metadata: { stripe_event_id: event.id, account_id: externalAccountId },
+        })
+    } else if (isPaidInvoiceEvent(event.type)) {
         if (!invoice) {
             await reportStripeAutomationFailure(workspaceId, event.id, "paid_invoice_payload", "Paid invoice event missing invoice object")
             return Response.json(
