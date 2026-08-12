@@ -255,7 +255,6 @@ export default async function LeadgenPollObjectPage({ params }: PageProps) {
                 title={`${sourceNames(poll.source_snapshot, poll.source_count)} poll`}
                 subtitle={live ? "Live view refreshes automatically while the poll is active." : undefined}
                 labels={<SquarePill>{poll.trigger === "manual" ? "Manual" : "Automated"}</SquarePill>}
-                status={<Status label={meta.label} tone={meta.tone} />}
                 facts={[{ label: "duration", value: <PollDuration startedAt={poll.started_at} createdAt={poll.created_at} completedAt={poll.completed_at} live={live} /> }]}
                 updated={formatRelativeTime(poll.completed_at ?? poll.started_at ?? poll.created_at)}
             />

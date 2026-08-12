@@ -1,9 +1,9 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react"
 
 export function DetailDangerZone({ children }: { children: ReactNode }) {
-    return <section className="mt-10 border-t border-red-950/70 pt-5">
-        <h2 className="text-sm font-semibold text-red-300">Danger zone</h2>
-        <div className="mt-3 divide-y divide-neutral-900 border-y border-neutral-900">{children}</div>
+    return <section className="mt-10 overflow-hidden rounded-xl border border-red-900/45 bg-red-950/10">
+        <h2 className="px-4 pb-3 pt-4 text-sm font-semibold text-red-200/90">Danger zone</h2>
+        <div className="divide-y divide-red-950/70 border-t border-red-950/70 px-4">{children}</div>
     </section>
 }
 
@@ -19,7 +19,7 @@ export function DetailDangerAction({ title, description, control }: { title: str
 
 export function DetailDangerButton({ tone = "archive", className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { tone?: "archive" | "delete" }) {
     const toneClass = tone === "delete"
-        ? "bg-red-600 text-white hover:bg-red-500"
-        : "border border-red-900/80 text-red-300 hover:bg-red-950/40"
+        ? "border border-red-800/70 bg-red-900/30 text-red-100 hover:bg-red-900/45"
+        : "border border-red-900/70 bg-red-950/15 text-red-200 hover:bg-red-950/35"
     return <button {...props} className={`inline-flex min-h-9 items-center justify-center rounded-lg px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-35 ${toneClass} ${className}`} />
 }

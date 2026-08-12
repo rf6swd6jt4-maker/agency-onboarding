@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailField, DetailFields, DetailPageHeader } from "@/components/detail"
-import { RelationshipStage, Status } from "@/components/ui"
+import { RelationshipStage, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import {
@@ -39,9 +39,7 @@ export default async function FulfilmentDetailPlaceholder({ params }: PageProps)
                             reference={shortId(relationship.id)}
                             title={relationship.primary_person_name}
                             subtitle={relationship.business_name ?? "No company saved"}
-                            labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
-                            status={<Status label={openItems.length ? "In progress" : "No open work"} tone={openItems.length ? "yellow" : "grey"} />}
-                            facts={[{ label: "open", value: openItems.length }]}
+                            labels={relationship.source_metadata.is_test === true ? <SquarePill tone="yellow">Test</SquarePill> : null}
                             updated={formatRelativeTime(relationship.updated_at)}
                         />
 

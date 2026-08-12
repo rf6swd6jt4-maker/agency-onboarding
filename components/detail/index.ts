@@ -2,4 +2,4 @@ export { DetailDangerAction, DetailDangerButton, DetailDangerZone } from "./Deta
 export { DetailField, DetailFields } from "./DetailFields"
 export type { DetailFieldIcon } from "./DetailFields"
 export { DetailPageHeader } from "./DetailPageHeader"
-export type { DetailHeaderFact } from "./DetailPageHeader"
+export type { DetailHeaderFact, DetailHeaderFacts } from "./DetailPageHeader"

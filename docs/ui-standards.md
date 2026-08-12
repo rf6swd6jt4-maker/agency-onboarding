@@ -307,9 +307,8 @@ The record-specific middle remains flexible. The header, fields, and destructive
     reference={shortId(relationship.id)}
     title={relationship.primary_person_name}
     subtitle={relationship.business_name ?? "No company saved"}
-    labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
-    status={<Status label="In progress" tone="yellow" />}
-    facts={[{ label: "open", value: 4 }]}
+    labels={<SquarePill tone="yellow">Test</SquarePill>}
+    facts={[{ label: "assets", value: 4 }]}
     updated="5hr"
 />
 ```
@@ -317,9 +316,11 @@ The record-specific middle remains flexible. The header, fields, and destructive
 - The first line always identifies the record category and short ID in subdued monospaced text: `Relationship 69e381e`, `Poll e154d7a`, or `Asset c92f810`.
 - The record name is always `text-2xl`, semibold, and tightly tracked. Do not use a different title scale for a more complicated page.
 - An optional subtitle gives one stable secondary identity, such as company, event key, or source context. It is not a description of the whole panel.
-- The right-hand metadata rail is bottom-aligned with the identity block. Its order is categorical labels, one operational `Status`, short numerical facts, then `Updated …` as the final item.
-- Use `RelationshipStage`, `SquarePill`, `Status`, and other shared primitives in their semantic positions. Do not hand-build a badge in the header.
-- Facts are compact and read value first (`4 open`, `2 assets`). Extended explanations and editable attributes belong below.
+- The right-hand metadata rail is bottom-aligned with the identity block. Its order is key categorical labels, up to two short numerical facts, then `Updated …` as the final item.
+- Header labels are reserved for meaningful classification or exception labels such as `Test`, `Stuck`, an asset kind, a manual poll, or a relationship lifecycle stage when that stage is not already obvious from the page. Use the shared `SquarePill` or `RelationshipStage`; do not hand-build a badge.
+- Operational `Status` never appears in `DetailPageHeader`. It belongs in one `DetailField`, which is the page's canonical overall-status location. Do not repeat that same overall status in a content-block heading.
+- Facts are optional, limited to two, and read value first (`2 assets`, `1m 42s duration`). Prefer facts that are not stated again below. If no unrepeated metric is useful, show only labels and `Updated …` rather than filling the rail for symmetry.
+- Do not promote field values such as progress, trigger, source, or status into the header merely because there is room.
 - On narrow screens the metadata rail moves below the identity, wraps between whole elements, and never splits a pill or status.
 - The header owns its `border-neutral-800`, `pb-4`, and internal `gap-3`. A page must not wrap it in a second card, add another record title, or override its typography and spacing.
 
@@ -371,10 +372,10 @@ The record-specific middle remains flexible. The header, fields, and destructive
 ```
 
 - The danger zone is the final block in the primary content column. Nothing ordinary follows it.
-- It begins with a restrained red top rule and small red heading. The actions themselves remain on the page background; do not place the whole zone in a red card or use a red wash.
-- Actions are vertically divided by `border-neutral-900`. Each row presents a title and concise consequence on the left and one fixed control on the right; controls stack below the explanation on mobile.
-- Archive is always first and uses the restrained red-outline button. It removes a record from active views while preserving history and dependencies.
-- Permanent deletion is always last and uses the solid red button. Its wording must be explicit, and its confirmation must identify irreversible consequences and dependent records.
+- It is one restrained red-tinted box: a low-opacity red-black background, muted red border, rounded corners, and small red heading. The treatment must read as a warning without becoming the visually loudest block on the page.
+- Actions are vertically divided by subdued dark-red rules. Each row presents a title and concise consequence on the left and one fixed control on the right; controls stack below the explanation on mobile.
+- Archive is always first and uses the quieter red-outline button. It removes a record from active views while preserving history and dependencies.
+- Permanent deletion is always last and uses a slightly stronger dark-red filled button, never a bright solid red. Its wording must be explicit, and its confirmation must identify irreversible consequences and dependent records.
 - Other destructive lifecycle actions, such as restarting onboarding, may sit between Archive and Delete and use the outline treatment.
 - During the visual-definition phase, unavailable archive/delete actions remain visibly disabled with an honest explanation. Do not connect a destructive control to an unrelated mutation or imply that a placeholder works.
 - Owner/admin visibility, confirmation, server authorization, archive persistence, restoration, and dependency-aware permanent deletion are functional requirements. The shared visual primitive does not replace them.

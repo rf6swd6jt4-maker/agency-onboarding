@@ -10,13 +10,14 @@ import { getOnboardingStepsForModules, type CanonicalSessionStep } from "@/lib/o
 import { MODULES } from "@/lib/onboarding/modules"
 import { relationshipServiceDisplayName } from "@/lib/onboarding/service-display"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
-import { RelationshipStage, RoundPill, Status } from "@/components/ui"
+import { RoundPill, SquarePill, Status } from "@/components/ui"
 import {
     assetHref,
     getRelationship,
     workItemHref,
 } from "@/lib/relationships"
 import { getProgressPercentage } from "@/lib/onboarding/progress"
+import { isOnboardingStuck } from "@/lib/onboarding/stuck"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -462,11 +463,17 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
         : [{ data: [] }, { data: [] }, { data: [] }]
 
     const steps = buildStepDetails(canonicalSteps, (workItems ?? []) as WorkItemRow[], (assets ?? []) as AssetRow[], new Set((editRequests ?? []).map((request) => request.session_step_id)))
-    const submittedCount = steps.filter((step) => step.status === "submitted" || step.status === "reviewed").length
     const percentage = getProgressPercentage(steps.map((step) => ({ key: step.key })), steps.filter((step) => step.status === "submitted" || step.status === "reviewed").map((step) => step.key))
+    const latestActivity = [
+        session?.updated_at,
+        ...(workItems ?? []).map((item) => item.updated_at ?? item.created_at),
+        ...(assets ?? []).map((asset) => asset.updated_at ?? asset.created_at),
+    ].filter((value): value is string => Boolean(value)).reduce<string | null>((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, null)
     const onboardingUrl = session ? getOnboardingUrl(workspace.slug, session.session_token, workspace.custom_onboarding_domain, workspace.custom_onboarding_domain_status === "verified") : null
     const canManage = role === "owner" || role === "admin"
     const sessionCompleted = session?.status === "completed"
+    const sessionStuck = session ? isOnboardingStuck({ percentage, createdAt: session.created_at, lastActivityAt: latestActivity }) : false
+    const isTest = Boolean(session?.is_test) || relationship.source_metadata.is_test === true
     const timeline = computeTimeline(steps, Boolean(session), sessionCompleted)
 
     return (
@@ -480,18 +487,14 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                             reference={shortId(relationship.id)}
                             title={relationship.primary_person_name}
                             subtitle={relationship.business_name ?? "No company saved"}
-                            labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
-                            status={<Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} />}
-                            facts={[
-                                { label: "steps", value: `${submittedCount}/${steps.length}` },
-                                { label: "assets", value: assets?.length ?? 0 },
-                            ]}
-                            updated={formatRelativeTime(session?.updated_at ?? relationship.updated_at)}
+                            labels={isTest || sessionStuck ? <>{isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}{sessionStuck ? <SquarePill tone="red">Stuck</SquarePill> : null}</> : null}
+                            facts={[{ label: "assets", value: assets?.length ?? 0 }]}
+                            updated={formatRelativeTime(latestActivity ?? relationship.updated_at)}
                         />
 
                         <DetailFields>
                             <DetailField label="Progress" icon="progress">{percentage}%</DetailField>
-                            <DetailField label="Session" icon="status" className="lg:border-l lg:border-neutral-900 lg:pl-8"><Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} /></DetailField>
+                            <DetailField label="Status" icon="status" className="lg:border-l lg:border-neutral-900 lg:pl-8"><Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} /></DetailField>
                             <DetailField label="Services" icon="services" className="lg:col-span-2">
                                 <div className="flex flex-wrap gap-1.5">
                                     {(services ?? []).map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
@@ -509,12 +512,9 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
 
                         <section className="mt-4 overflow-hidden rounded-xl border border-neutral-800 bg-black sm:mt-6">
                             <div className="border-b border-neutral-900 px-5 py-4">
-                                <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-                                    <div>
-                                        <h2 className="text-lg font-semibold">Onboarding timeline</h2>
-                                        <p className="mt-1 text-sm text-neutral-500">Completed steps jump to the submitted information below.</p>
-                                    </div>
-                                    <Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} />
+                                <div>
+                                    <h2 className="text-lg font-semibold">Onboarding timeline</h2>
+                                    <p className="mt-1 text-sm text-neutral-500">Completed steps jump to the submitted information below.</p>
                                 </div>
                             </div>
                             <div className="px-3 py-3 sm:px-4 sm:py-5">

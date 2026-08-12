@@ -4,7 +4,7 @@ import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailPageHea
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
-import { SquarePill, Status } from "@/components/ui"
+import { SquarePill } from "@/components/ui"
 import {
     getWorkItem,
     getWorkItemPlanningContext,
@@ -64,8 +64,6 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                             reference={shortId(item.id)}
                             title={item.title}
                             labels={isAdminItem ? <SquarePill>Admin</SquarePill> : null}
-                            status={<Status label={status.label} tone={status.tone} />}
-                            facts={[{ label: assets.length === 1 ? "asset" : "assets", value: assets.length }]}
                             updated={formatRelativeTime(item.updated_at)}
                         />
 

@@ -5,13 +5,17 @@ export type DetailHeaderFact = {
     value: ReactNode
 }
 
+export type DetailHeaderFacts =
+    | readonly []
+    | readonly [DetailHeaderFact]
+    | readonly [DetailHeaderFact, DetailHeaderFact]
+
 export function DetailPageHeader({
     category,
     reference,
     title,
     subtitle,
     labels,
-    status,
     facts = [],
     updated,
 }: {
@@ -20,8 +24,7 @@ export function DetailPageHeader({
     title: ReactNode
     subtitle?: ReactNode
     labels?: ReactNode
-    status?: ReactNode
-    facts?: DetailHeaderFact[]
+    facts?: DetailHeaderFacts
     updated: string
 }) {
     return <header className="border-b border-neutral-800 pb-4">
@@ -33,7 +36,6 @@ export function DetailPageHeader({
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-500 sm:shrink-0 sm:justify-end">
                 {labels}
-                {status}
                 {facts.map((fact) => <span key={fact.label} className="shrink-0 whitespace-nowrap"><strong className="mr-1 font-semibold text-neutral-200">{fact.value}</strong> {fact.label}</span>)}
                 <span className="shrink-0 whitespace-nowrap">Updated {updated}</span>
             </div>

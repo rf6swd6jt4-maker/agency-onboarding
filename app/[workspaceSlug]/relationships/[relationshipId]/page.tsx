@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailPageHeader } from "@/components/detail"
-import { RelationshipStage } from "@/components/ui"
+import { RelationshipStage, SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import {
@@ -124,7 +124,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                             reference={shortId(relationship.id)}
                             title={relationship.primary_person_name}
                             subtitle={relationship.business_name ?? "No company saved"}
-                            labels={<RelationshipStage phase={relationship.lifecycle_phase} />}
+                            labels={<>{relationship.source_metadata.is_test === true ? <SquarePill tone="yellow">Test</SquarePill> : null}<RelationshipStage phase={relationship.lifecycle_phase} /></>}
                             facts={[
                                 { label: "open", value: plan.items.filter((item) => !["done", "canceled"].includes(item.status)).length },
                                 { label: "unscheduled", value: plan.items.filter((item) => !planRanges.has(item.id)).length },

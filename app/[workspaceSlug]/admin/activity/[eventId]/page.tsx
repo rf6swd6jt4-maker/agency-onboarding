@@ -79,7 +79,6 @@ export default async function AdminActivityDetailPage({ params }: PageProps) {
                     title={event.summary}
                     subtitle={event.event_key}
                     labels={<SquarePill>{adminActivityCategoryLabel(event.category)}</SquarePill>}
-                    status={<Status label={status.label} tone={status.tone} />}
                     updated={formatRelativeTime(event.occurred_at)}
                 />
             </div>
@@ -87,7 +86,7 @@ export default async function AdminActivityDetailPage({ params }: PageProps) {
             <DetailFields>
                 <DetailField label="Occurred" icon="time">{new Date(event.occurred_at).toLocaleString("en-IE", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Dublin" })}</DetailField>
                 <DetailField label="Actor" icon="user" className="lg:border-l lg:border-neutral-900 lg:pl-8"><Assignee name={actorName} avatarSrc={actorAvatar} compact /></DetailField>
-                <DetailField label="Outcome" icon="status">{event.outcome ?? (event.level === "error" ? "failed" : "succeeded")}</DetailField>
+                <DetailField label="Status" icon="status"><Status label={status.label} tone={status.tone} /></DetailField>
                 <DetailField label="Actor kind" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8">{event.actor_kind ?? (event.actor_user_id ? "staff" : "automation")}</DetailField>
                 <DetailField label="Correlation" icon="dependency"><span className="font-mono">{event.correlation_id ?? "—"}</span></DetailField>
                 <DetailField label="Causation" icon="dependency" className="lg:border-l lg:border-neutral-900 lg:pl-8"><span className="font-mono">{event.causation_event_id ?? "—"}</span></DetailField>

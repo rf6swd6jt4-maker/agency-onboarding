@@ -34,11 +34,22 @@ test("detail field implementations use the shared borderless field rows", async 
     assert.match(workItemFields, /<DetailFields>/)
 })
 
+test("detail headers omit operational status and allow at most two unrepeated facts", async () => {
+    const header = await readFile("components/detail/DetailPageHeader.tsx", "utf8")
+    const onboarding = await readFile("app/[workspaceSlug]/onboarding/[relationshipId]/page.tsx", "utf8")
+
+    assert.doesNotMatch(header, /status\??:/)
+    assert.match(header, /readonly \[DetailHeaderFact, DetailHeaderFact\]/)
+    assert.match(onboarding, /<SquarePill tone="yellow">Test<\/SquarePill>/)
+    assert.match(onboarding, /<SquarePill tone="red">Stuck<\/SquarePill>/)
+    assert.equal(onboarding.match(/<Status /g)?.length, 1, "onboarding must render its overall status only in the Status field")
+})
+
 test("the detail danger zone preserves archive-before-delete ordering and visual tones", async () => {
     const source = await readFile("components/detail/DetailDangerZone.tsx", "utf8")
 
-    assert.match(source, /border-t border-red-950\/70/)
-    assert.match(source, /divide-y divide-neutral-900/)
+    assert.match(source, /rounded-xl border border-red-900\/45 bg-red-950\/10/)
+    assert.match(source, /divide-y divide-red-950\/70/)
     assert.match(source, /tone === "delete"/)
-    assert.match(source, /border border-red-900\/80/)
+    assert.match(source, /bg-red-900\/30/)
 })
