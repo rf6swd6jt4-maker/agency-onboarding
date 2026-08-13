@@ -19,7 +19,10 @@ import {
 } from "@/lib/onboarding/runtime-mode"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { relationshipFulfilmentServiceDefinition } from "@/lib/onboarding/service-display"
-import { createServiceThumbnailPublicUrl } from "@/lib/onboarding/uploads"
+import {
+    createPrivateUploadSignedUrl,
+    createServiceThumbnailPublicUrl,
+} from "@/lib/onboarding/uploads"
 
 type WorkflowRole = "task" | "lifecycle_stage" | "service_group" | "review" | "automation"
 type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
@@ -811,6 +814,10 @@ export async function sendRelationshipInvoice(input: {
     billingInterval?: StripeRecurringInterval
     billingIntervalCount?: number
 }) {
+    // Stripe accepts Checkout expiries from 30 minutes to 24 hours. Keeping a
+    // one-minute margin avoids crossing its upper bound while the request is in
+    // flight, and gives every private thumbnail the exact same expiry instant.
+    const checkoutExpiresAt = Math.floor(Date.now() / 1_000) + (24 * 60 * 60) - 60
     const billingModel = input.billingModel ?? "one_off"
     const billingInterval = input.billingInterval ?? "month"
     const billingIntervalCount = Math.round(input.billingIntervalCount ?? 1)
@@ -850,7 +857,19 @@ export async function sendRelationshipInvoice(input: {
         resumesFrozenVersionedSale: Boolean(resumableSale),
     })
     const currency = (selectedServices[0]?.currency ?? "usd").toLowerCase()
-    let lineItems = selectedServices.map((service, index) => {
+    const checkoutThumbnailUrl = async (path: string | null | undefined) => {
+        if (!path) return null
+
+        const publicUrl = createServiceThumbnailPublicUrl(path)
+        if (publicUrl || billingModel !== "recurring") return publicUrl
+
+        const remainingSeconds = Math.max(
+            1,
+            checkoutExpiresAt - Math.floor(Date.now() / 1_000),
+        )
+        return createPrivateUploadSignedUrl(path, remainingSeconds)
+    }
+    let lineItems = await Promise.all(selectedServices.map(async (service, index) => {
         const definition = preflight.serviceDefinitions[index]
         const name = definition?.checkoutDisplayName || definition?.name || SERVICES[service.service_key]?.title || service.service_key
         return {
@@ -858,9 +877,9 @@ export async function sendRelationshipInvoice(input: {
             name,
             description: definition?.checkoutDescription || definition?.description || name,
             amount: service.price_cents!,
-            imageUrl: createServiceThumbnailPublicUrl(definition?.thumbnailPath),
+            imageUrl: await checkoutThumbnailUrl(definition?.thumbnailPath),
         }
-    })
+    }))
     // Validate the integration before creating a sale record. This keeps a missing
     // or disconnected Stripe setup from leaving a retryable-looking draft behind.
     const config = await getWorkspaceProviderConfig(input.workspaceId, "stripe")
@@ -908,7 +927,7 @@ export async function sendRelationshipInvoice(input: {
             .select("service_code, service_name, service_revision_id, description, amount_cents, currency, sort_order")
             .eq("workspace_id", input.workspaceId).eq("client_sale_id", sale.id).order("sort_order")
         if (frozenItemsError || !frozenItems?.length) throw new Error(frozenItemsError?.message ?? "The invoice snapshot contains no services")
-        lineItems = frozenItems.map((item) => {
+        lineItems = await Promise.all(frozenItems.map(async (item) => {
             const definition = preflight.configuration.services.find((service) => service.revisionId === item.service_revision_id || service.code === item.service_code)
             const name = definition?.checkoutDisplayName || item.service_name
             return {
@@ -916,9 +935,9 @@ export async function sendRelationshipInvoice(input: {
                 name,
                 description: definition?.checkoutDescription || item.description || item.service_name,
                 amount: item.amount_cents,
-                imageUrl: createServiceThumbnailPublicUrl(definition?.thumbnailPath),
+                imageUrl: await checkoutThumbnailUrl(definition?.thumbnailPath),
             }
-        })
+        }))
     }
     if (preflight.runtimeMode === "shadow" && preflight.shadowComparison) {
         await recordAdminActivity({
@@ -960,6 +979,7 @@ export async function sendRelationshipInvoice(input: {
             intervalCount: billingIntervalCount,
             successUrl: `${siteUrl}/payment/complete?session_id={CHECKOUT_SESSION_ID}`,
             cancelUrl: `${siteUrl}/payment/cancelled`,
+            expiresAt: checkoutExpiresAt,
             secretKey: config.access_token || config.secret_key,
         })
         const preparedAt = new Date().toISOString()

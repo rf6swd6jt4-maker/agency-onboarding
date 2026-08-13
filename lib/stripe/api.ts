@@ -35,6 +35,7 @@ export type CreateStripeSubscriptionCheckoutInput = {
     intervalCount: number
     successUrl: string
     cancelUrl: string
+    expiresAt: number
     secretKey?: string
 }
 
@@ -345,6 +346,7 @@ export async function createStripeSubscriptionCheckout({
     intervalCount,
     successUrl,
     cancelUrl,
+    expiresAt,
     secretKey,
 }: CreateStripeSubscriptionCheckoutInput): Promise<StripeSubscriptionCheckoutResult> {
     const key = secretKey ?? getStripeSecretKey()
@@ -366,6 +368,7 @@ export async function createStripeSubscriptionCheckout({
         client_reference_id: saleId,
         success_url: successUrl,
         cancel_url: cancelUrl,
+        expires_at: expiresAt,
         billing_address_collection: "required",
         "phone_number_collection[enabled]": true,
         submit_type: "subscribe",
