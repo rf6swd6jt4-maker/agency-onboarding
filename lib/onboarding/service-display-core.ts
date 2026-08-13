@@ -21,6 +21,9 @@ export type OnboardingServiceRevisionDisplay = {
     revisionNumber: number
     name: string
     description: string
+    checkoutDisplayName: string
+    checkoutDescription: string
+    thumbnailPath: string | null
     defaultPriceCents: number
     currency: string
     isTest: boolean
@@ -32,6 +35,10 @@ export type RelationshipDealServiceOption = {
     revisionId: string | null
     name: string
     description: string
+    checkoutDisplayName: string
+    checkoutDescription: string
+    thumbnailPath: string | null
+    thumbnailUrl: string | null
     defaultPriceCents: number
     currency: string
     defaultAssigneeId: string | null
@@ -86,6 +93,10 @@ export function buildRelationshipDealServiceOptionsCore(input: {
                 revisionId: selected?.service_revision_id ?? service.revisionId,
                 name: selectedRevision?.name ?? service.name,
                 description: selectedRevision?.description ?? service.description,
+                checkoutDisplayName: selectedRevision?.checkoutDisplayName || service.checkoutDisplayName || selectedRevision?.name || service.name,
+                checkoutDescription: selectedRevision?.checkoutDescription || service.checkoutDescription || selectedRevision?.description || service.description,
+                thumbnailPath: selectedRevision?.thumbnailPath ?? service.thumbnailPath ?? null,
+                thumbnailUrl: service.thumbnailUrl ?? null,
                 defaultPriceCents: selectedRevision?.defaultPriceCents ?? service.defaultPriceCents,
                 currency: (selectedRevision?.currency ?? service.currency).toUpperCase(),
                 defaultAssigneeId: selected?.assignee_user_id ?? service.defaultAssigneeId,
@@ -104,6 +115,10 @@ export function buildRelationshipDealServiceOptionsCore(input: {
                 revisionId: selected?.service_revision_id ?? null,
                 name: service.title,
                 description: service.description,
+                checkoutDisplayName: service.title,
+                checkoutDescription: service.description,
+                thumbnailPath: null,
+                thumbnailUrl: null,
                 defaultPriceCents: 0,
                 currency: (selected?.currency ?? "USD").toUpperCase(),
                 defaultAssigneeId: selected?.assignee_user_id ?? null,
@@ -125,6 +140,10 @@ export function buildRelationshipDealServiceOptionsCore(input: {
             revisionId: selected.service_revision_id ?? current?.revisionId ?? null,
             name: revision?.name ?? current?.name ?? legacyServices[selected.service_key]?.title ?? selected.service_key,
             description: revision?.description ?? current?.description ?? legacyServices[selected.service_key]?.description ?? "Existing relationship service",
+            checkoutDisplayName: revision?.checkoutDisplayName || current?.checkoutDisplayName || revision?.name || current?.name || legacyServices[selected.service_key]?.title || selected.service_key,
+            checkoutDescription: revision?.checkoutDescription || current?.checkoutDescription || revision?.description || current?.description || legacyServices[selected.service_key]?.description || "Existing relationship service",
+            thumbnailPath: revision?.thumbnailPath ?? current?.thumbnailPath ?? null,
+            thumbnailUrl: current?.thumbnailUrl ?? null,
             defaultPriceCents: revision?.defaultPriceCents ?? current?.defaultPriceCents ?? 0,
             currency: (revision?.currency ?? current?.currency ?? selected.currency ?? "USD").toUpperCase(),
             defaultAssigneeId: selected.assignee_user_id ?? current?.defaultAssigneeId ?? null,

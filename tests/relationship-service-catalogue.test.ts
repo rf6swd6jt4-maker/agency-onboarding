@@ -156,6 +156,8 @@ test("relationship invoicing uses the visible details workspace and three-stage 
         "Invoice Client",
         "Invoice sent",
         "Open invoice",
+        "Recurring retainer",
+        "Send retainer checkout",
     ]) assert.match(workspace, new RegExp(label))
     assert.match(workspace, /<BuilderPreview/)
     assert.doesNotMatch(workspace, /service_assignee_/)
@@ -163,7 +165,7 @@ test("relationship invoicing uses the visible details workspace and three-stage 
     assert.match(readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8"), /existing\?\.assignee_user_id \?\? service\?\.defaultAssigneeId/)
     assert.match(workflow, /source_kind: "stripe_invoice"/)
     assert.match(workflow, /from\("asset_relationships"\)\.upsert/)
-    assert.ok(workflow.indexOf("moveRelationshipToStage") < workflow.lastIndexOf("invoiceAssetId = await ensureRelationshipInvoiceAsset"))
+    assert.ok(workflow.indexOf("moveRelationshipToStage") < workflow.lastIndexOf("const assetId = await ensureRelationshipInvoiceAsset"))
 })
 
 test("sent-unpaid invoices can be voided and reopened without mutating their frozen snapshot", () => {
@@ -178,6 +180,36 @@ test("sent-unpaid invoices can be voided and reopened without mutating their fro
     assert.match(detail, /"invoice_inactive"/)
     assert.match(detail, /VoidInvoiceButton/)
     assert.match(stripe, /\/void`/)
+})
+
+test("recurring retainers create personalised Checkout and keep renewals out of onboarding", () => {
+    const workflow = readFileSync("lib/relationship-workflow.ts", "utf8")
+    const stripe = readFileSync("lib/stripe/api.ts", "utf8")
+    const automation = readFileSync("lib/client-sales/automation.ts", "utf8")
+    const webhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8")
+    const services = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
+    const migration = readFileSync("supabase/migrations/20260814090000_recurring_retainer_checkout.sql", "utf8")
+
+    assert.match(stripe, /mode: "subscription"/)
+    assert.match(stripe, /client_reference_id: saleId/)
+    assert.match(stripe, /subscription_data\[metadata\]\[client_sale_id\]/)
+    assert.match(stripe, /product_data\]\[name/)
+    assert.match(stripe, /product_data\]\[description/)
+    assert.match(stripe, /product_data\]\[images\]\[0/)
+    assert.match(workflow, /sendRecurringCheckoutRequest/)
+    assert.ok(workflow.indexOf("stripe_checkout_session_id: checkout.checkoutSessionId") < workflow.indexOf("await sendRecurringCheckoutRequest"))
+    const paidHandler = automation.slice(automation.indexOf("export async function handlePaidStripeInvoice"))
+    assert.match(paidHandler, /const isLaterRenewal/)
+    assert.ok(paidHandler.indexOf("if (isLaterRenewal)") < paidHandler.indexOf("ensurePaidOnboardingSession(sale)"))
+    assert.match(paidHandler, /stripe\.subscription\.renewal_paid/)
+    assert.match(webhook, /checkout\.session\.completed/)
+    assert.match(webhook, /customer\.subscription\./)
+    assert.match(webhook, /stripe\.subscription\.renewal_failed/)
+    assert.match(services, /service-thumbnails\/upload/)
+    assert.match(services, /Checkout name/)
+    assert.match(services, /Checkout description/)
+    assert.match(migration, /billing_model in \('one_off', 'recurring'\)/)
+    assert.match(migration, /reopen_expired_recurring_checkout/)
 })
 
 test("relationship and onboarding labels resolve versioned service revisions", () => {

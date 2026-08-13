@@ -41,11 +41,10 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
         supabaseAdmin.from("client_sales")
-            .select("id, status, stripe_invoice_id, stripe_invoice_status, created_at")
+            .select("id, status, billing_model, stripe_invoice_id, stripe_invoice_status, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
             .in("status", ["invoice_sent", "payment_failed", "invoice_inactive"])
-            .not("stripe_invoice_id", "is", null)
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -70,8 +69,9 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
         revisions: serviceRevisions,
     })
     const replaceableSale = replaceableSaleResult.data && (
-        replaceableSaleResult.data.status !== "invoice_inactive"
-        || ["void", "voided"].includes(String(replaceableSaleResult.data.stripe_invoice_status ?? "").toLowerCase())
+        replaceableSaleResult.data.billing_model === "recurring"
+            ? Boolean(replaceableSaleResult.data.stripe_checkout_session_id) && (replaceableSaleResult.data.status !== "invoice_inactive" || String(replaceableSaleResult.data.stripe_checkout_status ?? "").toLowerCase() === "expired")
+            : Boolean(replaceableSaleResult.data.stripe_invoice_id) && (replaceableSaleResult.data.status !== "invoice_inactive" || ["void", "voided"].includes(String(replaceableSaleResult.data.stripe_invoice_status ?? "").toLowerCase()))
     ) ? replaceableSaleResult.data : null
     const lookedUpCurrentWork = await currentRelationshipWork({ workspaceId: workspace.id, relationshipId: relationship.id, userId: user.id, isManager: role === "owner" || role === "admin" })
     // The Gantt plan is the authoritative rendered view. If the compact current-work
@@ -98,6 +98,9 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             revisionId: service.revisionId,
             name: service.name,
             description: service.description,
+            checkoutDisplayName: service.checkoutDisplayName,
+            checkoutDescription: service.checkoutDescription,
+            thumbnailUrl: service.thumbnailUrl,
             defaultPriceCents: service.defaultPriceCents,
             currency: service.currency,
             isTest: service.isTest,
@@ -160,9 +163,9 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                 plan={plan}
                                 canEdit={role === "owner" || role === "admin"}
                                 currentWork={currentWork}
-                                frozenInvoiceNotice={replaceableSale?.stripe_invoice_id ? <div className="mt-3 flex flex-col gap-3 rounded-lg border border-amber-500/25 bg-amber-950/10 p-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <div><p className="text-sm font-medium text-amber-100">Sent invoice is frozen</p><p className="mt-1 text-xs leading-5 text-neutral-400">Void it in Stripe to preserve this snapshot, reopen the deal for edits, and send a new replacement invoice.</p></div>
-                                    <VoidInvoiceButton invoiceId={replaceableSale.stripe_invoice_id} alreadyVoided={replaceableSale.status === "invoice_inactive"} action={voidAndReopenRelationshipInvoice.bind(null, workspace.slug, relationship.id, replaceableSale.id)} />
+                                frozenInvoiceNotice={replaceableSale ? <div className="mt-3 flex flex-col gap-3 rounded-lg border border-amber-500/25 bg-amber-950/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div><p className="text-sm font-medium text-amber-100">{replaceableSale.billing_model === "recurring" ? "Sent retainer checkout is frozen" : "Sent invoice is frozen"}</p><p className="mt-1 text-xs leading-5 text-neutral-400">{replaceableSale.billing_model === "recurring" ? "Expire it in Stripe to preserve this snapshot, reopen the deal for edits, and send a replacement checkout." : "Void it in Stripe to preserve this snapshot, reopen the deal for edits, and send a new replacement invoice."}</p></div>
+                                    <VoidInvoiceButton referenceId={replaceableSale.billing_model === "recurring" ? replaceableSale.stripe_checkout_session_id! : replaceableSale.stripe_invoice_id!} kind={replaceableSale.billing_model === "recurring" ? "recurring" : "one_off"} alreadyVoided={replaceableSale.status === "invoice_inactive"} action={voidAndReopenRelationshipInvoice.bind(null, workspace.slug, relationship.id, replaceableSale.id)} />
                                 </div> : null}
                         />
 

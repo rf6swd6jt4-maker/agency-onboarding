@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { BuilderPreview } from "@/components/onboarding-builder/BuilderPreview"
 import { DetailField, DetailFields } from "@/components/detail"
 import { RoundPill, SquarePill } from "@/components/ui"
@@ -22,6 +23,9 @@ type DealService = {
     revisionId: string | null
     name: string
     description: string
+    checkoutDisplayName: string
+    checkoutDescription: string
+    thumbnailUrl: string | null
     defaultPriceCents: number
     currency: string
     isTest: boolean
@@ -50,6 +54,9 @@ type Draft = Omit<RelationshipDetails, "lifecyclePhase"> & {
     selectedCodes: string[]
     prices: Record<string, number>
     currency: string
+    billingModel: "one_off" | "recurring"
+    billingInterval: "week" | "month" | "year"
+    billingIntervalCount: number
 }
 
 const inputClass = "min-h-7 w-full min-w-0 bg-transparent text-sm text-neutral-200 outline-none placeholder:text-neutral-700 focus:text-white"
@@ -75,6 +82,10 @@ function priceLabel(cents: number, currency: string) {
     }
 }
 
+function intervalCountMaximum(interval: Draft["billingInterval"]) {
+    return interval === "year" ? 3 : interval === "month" ? 36 : 156
+}
+
 function buildInitialDraft(details: RelationshipDetails, services: DealService[]): Draft {
     const selected = services.filter((service) => service.selected)
     return {
@@ -91,6 +102,9 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
         selectedCodes: selected.map((service) => service.code),
         prices: Object.fromEntries(services.map((service) => [service.code, service.selected ? service.selectedPriceCents : service.defaultPriceCents])),
         currency: selected[0]?.selectedCurrency ?? services[0]?.currency ?? "USD",
+        billingModel: "one_off",
+        billingInterval: "month",
+        billingIntervalCount: 1,
     }
 }
 
@@ -141,7 +155,7 @@ export function RelationshipDealWorkspace({
     const [invoiceStep, setInvoiceStep] = useState(0)
     const [previewModule, setPreviewModule] = useState<OnboardingModuleDefinition | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [notice, setNotice] = useState<{ label: string; href: string | null } | null>(null)
+    const [notice, setNotice] = useState<{ label: string; href: string | null; actionLabel: string } | null>(null)
     const [pending, startTransition] = useTransition()
     const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
     const selectedServices = services.filter((service) => draft.selectedCodes.includes(service.code))
@@ -165,6 +179,7 @@ export function RelationshipDealWorkspace({
     ].filter((issue): issue is string => Boolean(issue))
     const pricingIssues = [
         /^[A-Z]{3}$/.test(draft.currency.toUpperCase()) ? null : "Use a three-letter currency code",
+        draft.billingModel === "recurring" && (draft.billingIntervalCount < 1 || draft.billingIntervalCount > intervalCountMaximum(draft.billingInterval)) ? `Use a recurring interval between 1 and ${intervalCountMaximum(draft.billingInterval)}` : null,
         ...selectedServices.flatMap((service) => (draft.prices[service.code] ?? 0) > 0 ? [] : [`Add a positive price for ${service.name}`]),
     ].filter((issue): issue is string => Boolean(issue))
     const totalCents = selectedServices.reduce((total, service) => total + (draft.prices[service.code] ?? 0), 0)
@@ -250,13 +265,21 @@ export function RelationshipDealWorkspace({
         startTransition(() => {
             void (async () => {
                 if (!await saveDetails()) return
-                const outcome = await proceedRelationshipCurrentWork(workspaceSlug, relationshipId, currentWork.id)
+                const outcome = await proceedRelationshipCurrentWork(workspaceSlug, relationshipId, currentWork.id, {
+                    billingModel: draft.billingModel,
+                    billingInterval: draft.billingInterval,
+                    billingIntervalCount: draft.billingIntervalCount,
+                })
                 if (!outcome.ok) {
                     setError(outcome.error)
                     return
                 }
                 setInvoiceOpen(false)
-                setNotice({ label: "Invoice sent", href: outcome.invoice?.href ?? null })
+                setNotice({
+                    label: outcome.invoice?.kind === "recurring" ? "Recurring checkout sent" : "Invoice sent",
+                    href: outcome.invoice?.href ?? null,
+                    actionLabel: outcome.invoice?.kind === "recurring" ? "Open checkout" : "Open invoice",
+                })
                 router.refresh()
                 postGanttSync(workspaceSlug)
             })().catch(() => setError("The invoice could not be sent. Please try again."))
@@ -315,10 +338,35 @@ export function RelationshipDealWorkspace({
                     <label className="text-xs text-neutral-500 sm:col-span-2">Description<textarea value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Optional relationship context" className="mt-1.5 min-h-20 w-full resize-none rounded-lg border border-neutral-700 bg-black px-3 py-2 text-sm leading-6 text-white" /></label>
                 </div> : null}
                 {invoiceStep === 1 ? <div className="space-y-3">{onboardingIssues.length ? <div className="rounded-lg border border-amber-500/25 bg-amber-950/15 px-3 py-2.5 text-xs leading-5 text-amber-200">{onboardingIssues.map((issue) => <p key={issue}>{issue}</p>)}</div> : null}<div className="flex flex-wrap gap-1.5">{assignedModules.map((module) => <RoundPill key={module.id} tone="sky">{module.name}</RoundPill>)}</div><div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{assignedModules.map((module) => <div key={module.id} className="flex items-center gap-3 px-3 py-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-neutral-100">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} step{module.steps.length === 1 ? "" : "s"}{module.mandatory ? " · mandatory" : " · selected service"}</p></div><button type="button" onClick={() => setPreviewModule(module)} className="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-neutral-500">Preview</button></div>)}</div></div> : null}
-                {invoiceStep === 2 ? <div><div className="mb-4 flex flex-col justify-between gap-3 rounded-xl border border-neutral-800 bg-black p-3 sm:flex-row sm:items-center"><div><p className="text-sm font-medium">Invoice currency</p><p className="mt-1 text-xs text-neutral-600">One currency applies to the whole invoice.</p></div><input value={draft.currency} onChange={(event) => update("currency", event.target.value.toUpperCase().slice(0, 3))} maxLength={3} aria-label="Invoice currency" className="h-9 w-24 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm uppercase text-white" /></div><div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_8rem_9rem] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-100">{service.name}</p><p className="mt-1 text-xs text-neutral-600">Default {priceLabel(service.defaultPriceCents, draft.currency)}</p></div><label className="text-xs text-neutral-500">Price<input type="number" min="0" step="0.01" value={(draft.prices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, prices: { ...current.prices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label><p className="text-right text-sm font-medium text-neutral-200">{priceLabel(draft.prices[service.code] ?? 0, draft.currency)}</p></div>)}</div><div className="mt-4 flex items-end justify-between gap-4 border-t border-neutral-800 pt-4"><div><p className="text-xs text-neutral-500">Invoice total</p><p className="mt-1 text-2xl font-semibold">{priceLabel(totalCents, draft.currency)}</p></div><p className="max-w-sm text-right text-xs leading-5 text-neutral-600">Sending freezes these services, prices and the published onboarding shown in the previous step.</p></div></div> : null}
+                {invoiceStep === 2 ? <div className="space-y-4">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                        <button type="button" onClick={() => update("billingModel", "one_off")} className={`rounded-xl border p-3 text-left transition ${draft.billingModel === "one_off" ? "border-sky-400/60 bg-sky-500/10" : "border-neutral-800 bg-black hover:border-neutral-700"}`}>
+                            <span className="block text-sm font-medium text-neutral-100">One-off invoice</span>
+                            <span className="mt-1 block text-xs leading-5 text-neutral-500">Stripe emails a hosted invoice for one payment.</span>
+                        </button>
+                        <button type="button" onClick={() => update("billingModel", "recurring")} className={`rounded-xl border p-3 text-left transition ${draft.billingModel === "recurring" ? "border-teal-400/60 bg-teal-500/10" : "border-neutral-800 bg-black hover:border-neutral-700"}`}>
+                            <span className="block text-sm font-medium text-neutral-100">Recurring retainer</span>
+                            <span className="mt-1 block text-xs leading-5 text-neutral-500">Betelgeze emails a personalised Stripe Checkout page and Stripe charges the saved method on schedule.</span>
+                        </button>
+                    </div>
+                    <div className="flex flex-col justify-between gap-3 rounded-xl border border-neutral-800 bg-black p-3 sm:flex-row sm:items-end">
+                        <label className="text-xs text-neutral-500">Currency<input value={draft.currency} onChange={(event) => update("currency", event.target.value.toUpperCase().slice(0, 3))} maxLength={3} className="mt-1.5 h-9 w-24 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm uppercase text-white" /></label>
+                        {draft.billingModel === "recurring" ? <div className="flex gap-2">
+                            <label className="text-xs text-neutral-500">Repeat every<input type="number" min="1" max={intervalCountMaximum(draft.billingInterval)} value={draft.billingIntervalCount} onChange={(event) => update("billingIntervalCount", Math.max(1, Math.min(intervalCountMaximum(draft.billingInterval), Math.round(Number(event.target.value) || 1))))} className="mt-1.5 h-9 w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
+                            <label className="text-xs text-neutral-500">Period<select value={draft.billingInterval} onChange={(event) => { const interval = event.target.value as Draft["billingInterval"]; setDraft((current) => ({ ...current, billingInterval: interval, billingIntervalCount: Math.min(current.billingIntervalCount, intervalCountMaximum(interval)) })) }} className="mt-1.5 h-9 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white"><option value="week">Week(s)</option><option value="month">Month(s)</option><option value="year">Year(s)</option></select></label>
+                        </div> : <p className="max-w-md text-xs leading-5 text-neutral-600">Payment is due once. Existing invoice and WhatsApp onboarding automation stays unchanged.</p>}
+                    </div>
+                    <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className="grid gap-3 px-3 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_9rem] sm:items-center">
+                        <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={48} height={48} unoptimized className="h-full w-full object-cover" /> : "Service"}</div>
+                        <div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-100">{service.checkoutDisplayName || service.name}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">{service.checkoutDescription || service.description || `Default ${priceLabel(service.defaultPriceCents, draft.currency)}`}</p></div>
+                        <label className="text-xs text-neutral-500">Price<input type="number" min="0" step="0.01" value={(draft.prices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, prices: { ...current.prices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
+                        <p className="text-right text-sm font-medium text-neutral-200">{priceLabel(draft.prices[service.code] ?? 0, draft.currency)}{draft.billingModel === "recurring" ? <span className="mt-0.5 block text-[10px] font-normal text-neutral-600">each period</span> : null}</p>
+                    </div>)}</div>
+                    <div className="flex items-end justify-between gap-4 border-t border-neutral-800 pt-4"><div><p className="text-xs text-neutral-500">{draft.billingModel === "recurring" ? "Retainer total per period" : "Invoice total"}</p><p className="mt-1 text-2xl font-semibold">{priceLabel(totalCents, draft.currency)}</p></div><p className="max-w-sm text-right text-xs leading-5 text-neutral-600">Sending freezes these services, prices and the published onboarding shown in the previous step.</p></div>
+                </div> : null}
                 {error ? <p role="alert" className="mt-4 rounded-lg border border-red-500/20 bg-red-950/20 px-3 py-2.5 text-sm text-red-300">{error}</p> : null}
             </div>
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className={`h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0`}>Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? "Sending invoice…" : "Invoice Client"}</button>}</footer>
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? draft.billingModel === "recurring" ? "Creating checkout…" : "Sending invoice…" : draft.billingModel === "recurring" ? "Send retainer checkout" : "Invoice Client"}</button>}</footer>
         </section>
     </div>, parentDocument.body) : null
 
@@ -330,6 +378,6 @@ export function RelationshipDealWorkspace({
         <div className="mt-5"><RelationshipGantt workspaceSlug={workspaceSlug} relationshipId={relationshipId} plan={plan} canEdit={canEdit} currentWork={currentWork} onInvoiceRequest={openInvoiceReview} /></div>
         {modal}
         {preview}
-        {notice ? <WorkspaceSuccessNotice label={notice.label} actionLabel={notice.href ? "Open invoice" : undefined} onAction={notice.href ? navigateToInvoice : undefined} /> : null}
+        {notice ? <WorkspaceSuccessNotice label={notice.label} actionLabel={notice.href ? notice.actionLabel : undefined} onAction={notice.href ? navigateToInvoice : undefined} /> : null}
     </>
 }

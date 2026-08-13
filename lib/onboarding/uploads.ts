@@ -20,6 +20,7 @@ export { MAX_ONBOARDING_UPLOAD_SIZE } from "@/lib/onboarding/forms"
 const R2_SIGNED_URL_TTL_SECONDS = 60 * 60
 const R2_BRIDGE_MEDIA_SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60
 const R2_UPLOAD_URL_TTL_SECONDS = 15 * 60
+const MAX_SERVICE_THUMBNAIL_SIZE = 10 * 1024 * 1024
 
 function getR2Client() {
     return new S3Client({
@@ -66,6 +67,10 @@ function getPublicR2Url(path: string) {
         .join("/")
 
     return `${publicBaseUrl}/${encodedPath}`
+}
+
+export function createServiceThumbnailPublicUrl(path: string | null | undefined) {
+    return path ? getPublicR2Url(path) : null
 }
 
 function encodeStoragePath(path: string) {
@@ -230,6 +235,48 @@ export async function createSignedAssetUpload(
             kind,
             provider: "r2" as const,
         },
+    }
+}
+
+export async function createSignedServiceThumbnailUpload(
+    workspaceId: string,
+    file: {
+        name: string
+        size: number
+        type: string
+    }
+) {
+    if (!file.name.trim() || !Number.isSafeInteger(file.size) || file.size <= 0) {
+        throw new Error("Choose a non-empty image file.")
+    }
+    if (!file.type.startsWith("image/")) {
+        throw new Error("Service thumbnails must be image files.")
+    }
+    if (file.size > MAX_SERVICE_THUMBNAIL_SIZE) {
+        throw new Error(`${file.name} is larger than the 10MB thumbnail limit.`)
+    }
+
+    const fileName = sanitizeFileName(file.name) || "service-thumbnail"
+    const path = `${workspaceId}/service-thumbnails/${randomUUID()}-${fileName}`
+    const uploadUrl = await getSignedUrl(
+        getR2Client(),
+        new PutObjectCommand({
+            Bucket: getR2BucketName(),
+            Key: path,
+            ContentType: file.type,
+        }),
+        { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }
+    )
+
+    return {
+        uploadUrl,
+        thumbnail: {
+            name: file.name,
+            path,
+            size: file.size,
+            type: file.type,
+        },
+        previewUrl: await createPrivateUploadSignedUrl(path),
     }
 }
 

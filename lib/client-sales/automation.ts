@@ -32,6 +32,14 @@ type ClientSale = {
     correlation_id?: string | null
     onboarding_session_id?: string | null
     snapshot_frozen_at?: string | null
+    billing_model?: "one_off" | "recurring" | null
+    stripe_subscription_id?: string | null
+    stripe_invoice_id?: string | null
+    stripe_subscription_status?: string | null
+    initial_payment_received_at?: string | null
+    latest_payment_at?: string | null
+    latest_invoice_id?: string | null
+    latest_invoice_status?: string | null
 }
 
 type StripeInvoiceLike = {
@@ -41,9 +49,38 @@ type StripeInvoiceLike = {
     amount_paid?: unknown
     hosted_invoice_url?: unknown
     invoice_pdf?: unknown
+    subscription?: unknown
+    subscription_details?: {
+        metadata?: { client_sale_id?: string }
+        subscription?: unknown
+    }
+    parent?: {
+        subscription_details?: {
+            metadata?: { client_sale_id?: string }
+            subscription?: unknown
+        }
+    }
     metadata?: {
         client_sale_id?: string
     }
+}
+
+export function stripeInvoiceSaleId(invoice: StripeInvoiceLike) {
+    const value = invoice.metadata?.client_sale_id
+        ?? invoice.parent?.subscription_details?.metadata?.client_sale_id
+        ?? invoice.subscription_details?.metadata?.client_sale_id
+    return typeof value === "string" && value.trim() ? value : null
+}
+
+function stripeInvoiceSubscriptionId(invoice: StripeInvoiceLike) {
+    const value = invoice.parent?.subscription_details?.subscription
+        ?? invoice.subscription_details?.subscription
+        ?? invoice.subscription
+    if (typeof value === "string") return value
+    if (value && typeof value === "object" && !Array.isArray(value) && typeof (value as { id?: unknown }).id === "string") {
+        return (value as { id: string }).id
+    }
+    return null
 }
 
 type ConfirmationInput = {
@@ -192,7 +229,7 @@ async function createCompatibilityOnboardingSession(
 
 async function loadSaleForPaidInvoice(expectedWorkspaceId: string, saleId: string | null, invoiceId: string | null) {
     let snapshotQuery = supabaseAdmin.from("client_sales")
-        .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at")
+        .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at, billing_model, stripe_invoice_id, stripe_subscription_id, stripe_subscription_status, initial_payment_received_at, latest_payment_at, latest_invoice_id, latest_invoice_status")
         .eq("workspace_id", expectedWorkspaceId)
         .limit(1)
     snapshotQuery = saleId ? snapshotQuery.eq("id", saleId) : snapshotQuery.eq("stripe_invoice_id", invoiceId!)
@@ -534,10 +571,7 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
 
 export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expectedWorkspaceId: string) {
     const invoiceId = typeof invoice.id === "string" ? invoice.id : null
-    const saleId =
-        typeof invoice.metadata?.client_sale_id === "string"
-            ? invoice.metadata.client_sale_id
-            : null
+    const saleId = stripeInvoiceSaleId(invoice)
 
     if (!saleId && !invoiceId) {
         return { ok: true, skipped: true, reason: "not_betelgeze_invoice" as const }
@@ -560,6 +594,38 @@ export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expect
             : { ok: true, skipped: true, reason: "not_betelgeze_invoice" as const }
     }
 
+    const paidAt = new Date().toISOString()
+    const subscriptionId = stripeInvoiceSubscriptionId(invoice)
+    const invoiceStatus = typeof invoice.status === "string" ? invoice.status : "paid"
+    const isRecurring = sale.billing_model === "recurring"
+    const isLaterRenewal = isRecurring && Boolean(sale.initial_payment_received_at) && sale.stripe_invoice_id !== invoiceId
+    if (isLaterRenewal) {
+        const { error: renewalError } = await supabaseAdmin.from("client_sales").update({
+            stripe_subscription_id: subscriptionId ?? sale.stripe_subscription_id ?? null,
+            stripe_subscription_status: "active",
+            latest_payment_at: paidAt,
+            latest_invoice_id: invoiceId,
+            latest_invoice_status: invoiceStatus,
+            raw_payload: invoice,
+            updated_at: paidAt,
+        }).eq("id", sale.id).eq("workspace_id", expectedWorkspaceId)
+        if (renewalError) return { ok: false, error: renewalError.message }
+        await recordAdminActivity({
+            workspaceId: expectedWorkspaceId,
+            category: "billing",
+            eventKey: "stripe.subscription.renewal_paid",
+            summary: "Recurring retainer renewal paid",
+            entityType: "stripe_subscription",
+            entityId: subscriptionId ?? sale.stripe_subscription_id ?? sale.id,
+            actorKind: "automation",
+            correlationId: sale.correlation_id ?? sale.id,
+            idempotencyKey: `stripe.subscription.renewal_paid:${invoiceId ?? paidAt}`,
+            outcome: "succeeded",
+            metadata: { sale_id: sale.id, relationship_id: sale.relationship_id, invoice_id: invoiceId },
+        })
+        return { ok: true, skipped: true, renewal: true, correlationId: sale.correlation_id ?? sale.id }
+    }
+
     // Stripe commonly delivers invoice.paid and invoice.payment_succeeded at
     // nearly the same time. Claim the pre-payment state atomically so the
     // second event cannot reset consent_template_sending back to paid.
@@ -567,8 +633,8 @@ export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expect
         .from("client_sales")
         .update({
             status: "paid",
-            stripe_invoice_status:
-                typeof invoice.status === "string" ? invoice.status : "paid",
+            stripe_invoice_id: invoiceId,
+            stripe_invoice_status: invoiceStatus,
             stripe_customer_id:
                 typeof invoice.customer === "string" ? invoice.customer : null,
             stripe_hosted_invoice_url:
@@ -579,12 +645,20 @@ export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expect
                 typeof invoice.invoice_pdf === "string"
                     ? invoice.invoice_pdf
                     : null,
+            ...(isRecurring ? {
+                stripe_subscription_id: subscriptionId,
+                stripe_subscription_status: "active",
+                initial_payment_received_at: sale.initial_payment_received_at ?? paidAt,
+                latest_payment_at: paidAt,
+                latest_invoice_id: invoiceId,
+                latest_invoice_status: invoiceStatus,
+            } : {}),
             raw_payload: invoice,
-            updated_at: new Date().toISOString(),
+            updated_at: paidAt,
         })
         .eq("id", sale.id)
         .eq("workspace_id", expectedWorkspaceId)
-        .eq("status", "invoice_sent")
+        .in("status", ["invoice_sent", "payment_failed"])
         .select("id")
         .maybeSingle()
 

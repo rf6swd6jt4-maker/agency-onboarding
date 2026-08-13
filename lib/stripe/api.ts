@@ -12,8 +12,30 @@ type StripeRequestOptions = {
 
 export type StripeInvoiceLineItemInput = {
     serviceKey: string
+    name?: string
     description: string
     amount: number
+    imageUrl?: string | null
+}
+
+export type StripeRecurringInterval = "week" | "month" | "year"
+
+export type CreateStripeSubscriptionCheckoutInput = {
+    saleId: string
+    relationshipId: string
+    workspaceId: string
+    name: string
+    email: string
+    phone?: string | null
+    currency: string
+    lineItems: StripeInvoiceLineItemInput[]
+    serviceKeys: string[]
+    projectTimeframeDays?: number | null
+    interval: StripeRecurringInterval
+    intervalCount: number
+    successUrl: string
+    cancelUrl: string
+    secretKey?: string
 }
 
 export type CreateStripeInvoiceInput = {
@@ -42,6 +64,15 @@ export type VoidStripeInvoiceResult = {
     invoiceId: string
     invoiceStatus: string
     rawInvoice: unknown
+}
+
+export type StripeSubscriptionCheckoutResult = {
+    customerId: string
+    checkoutSessionId: string
+    checkoutStatus: string | null
+    checkoutUrl: string
+    expiresAt: string | null
+    rawCheckout: unknown
 }
 
 export type StripeWebhookEvent = {
@@ -177,6 +208,20 @@ function getInvoiceFields(invoice: unknown) {
     }
 }
 
+function getCheckoutFields(checkout: unknown) {
+    const value = checkout && typeof checkout === "object" && !Array.isArray(checkout)
+        ? checkout as { id?: unknown; status?: unknown; url?: unknown; expires_at?: unknown }
+        : {}
+    return {
+        checkoutSessionId: typeof value.id === "string" && value.id.trim() ? value.id : null,
+        checkoutStatus: typeof value.status === "string" ? value.status : null,
+        checkoutUrl: typeof value.url === "string" && value.url.trim() ? value.url : null,
+        expiresAt: typeof value.expires_at === "number"
+            ? new Date(value.expires_at * 1_000).toISOString()
+            : null,
+    }
+}
+
 export async function createAndSendStripeInvoice({
     saleId,
     name,
@@ -285,6 +330,87 @@ export async function createAndSendStripeInvoice({
     }
 }
 
+export async function createStripeSubscriptionCheckout({
+    saleId,
+    relationshipId,
+    workspaceId,
+    name,
+    email,
+    phone,
+    currency,
+    lineItems,
+    serviceKeys,
+    projectTimeframeDays,
+    interval,
+    intervalCount,
+    successUrl,
+    cancelUrl,
+    secretKey,
+}: CreateStripeSubscriptionCheckoutInput): Promise<StripeSubscriptionCheckoutResult> {
+    const key = secretKey ?? getStripeSecretKey()
+    const customer = await stripeRequest("/customers", {
+        idempotencyKey: `${saleId}:customer`,
+        params: {
+            name,
+            email,
+            phone: getStripeCustomerPhone(phone),
+            "metadata[client_sale_id]": saleId,
+            "metadata[relationship_id]": relationshipId,
+            "metadata[workspace_id]": workspaceId,
+        },
+    }, key)
+    const customerId = asStripeId(customer, "customer")
+    const params: Record<string, string | number | boolean | null | undefined> = {
+        mode: "subscription",
+        customer: customerId,
+        client_reference_id: saleId,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        billing_address_collection: "required",
+        "phone_number_collection[enabled]": true,
+        submit_type: "subscribe",
+        "custom_text[submit][message]": "Your first payment starts the recurring service schedule shown above.",
+        "metadata[client_sale_id]": saleId,
+        "metadata[relationship_id]": relationshipId,
+        "metadata[workspace_id]": workspaceId,
+        "subscription_data[metadata][client_sale_id]": saleId,
+        "subscription_data[metadata][relationship_id]": relationshipId,
+        "subscription_data[metadata][workspace_id]": workspaceId,
+        "subscription_data[metadata][service_keys]": serviceKeys.join(","),
+        "subscription_data[metadata][project_timeframe_days]": projectTimeframeDays ?? undefined,
+    }
+
+    for (const [index, item] of lineItems.entries()) {
+        const base = `line_items[${index}]`
+        params[`${base}[quantity]`] = 1
+        params[`${base}[price_data][currency]`] = currency
+        params[`${base}[price_data][unit_amount]`] = item.amount
+        params[`${base}[price_data][recurring][interval]`] = interval
+        params[`${base}[price_data][recurring][interval_count]`] = intervalCount
+        params[`${base}[price_data][product_data][name]`] = item.name || item.description
+        params[`${base}[price_data][product_data][description]`] = item.description
+        params[`${base}[price_data][product_data][metadata][service_key]`] = item.serviceKey
+        if (item.imageUrl) params[`${base}[price_data][product_data][images][0]`] = item.imageUrl
+    }
+
+    const checkout = await stripeRequest("/checkout/sessions", {
+        idempotencyKey: `${saleId}:subscription-checkout`,
+        params,
+    }, key)
+    const fields = getCheckoutFields(checkout)
+    if (!fields.checkoutSessionId || !fields.checkoutUrl) {
+        throw new Error("Stripe did not return a usable recurring Checkout page")
+    }
+    return {
+        customerId,
+        checkoutSessionId: fields.checkoutSessionId,
+        checkoutStatus: fields.checkoutStatus,
+        checkoutUrl: fields.checkoutUrl,
+        expiresAt: fields.expiresAt,
+        rawCheckout: checkout,
+    }
+}
+
 export async function voidStripeInvoice(input: {
     invoiceId: string
     secretKey?: string
@@ -304,6 +430,23 @@ export async function voidStripeInvoice(input: {
         invoiceStatus: fields.invoiceStatus,
         rawInvoice: invoice,
     }
+}
+
+export async function expireStripeCheckoutSession(input: {
+    checkoutSessionId: string
+    secretKey?: string
+    idempotencyKey: string
+}) {
+    const checkout = await stripeRequest(
+        `/checkout/sessions/${encodeURIComponent(input.checkoutSessionId)}/expire`,
+        { idempotencyKey: input.idempotencyKey },
+        input.secretKey ?? getStripeSecretKey(),
+    )
+    const fields = getCheckoutFields(checkout)
+    if (!fields.checkoutSessionId || fields.checkoutStatus !== "expired") {
+        throw new Error("Stripe did not confirm that the Checkout page was expired")
+    }
+    return { ...fields, rawCheckout: checkout }
 }
 
 export { verifyStripeWebhookSignature }

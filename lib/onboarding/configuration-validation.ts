@@ -146,6 +146,9 @@ export function normalizeServiceDefinition(input: unknown) {
         definition: {
             name,
             description: cleanText(value.description, 4_000),
+            checkoutDisplayName: cleanText(value.checkoutDisplayName, 120),
+            checkoutDescription: cleanText(value.checkoutDescription, 500),
+            thumbnailPath: cleanText(value.thumbnailPath, 2_000) || null,
             defaultPriceCents,
             currency,
             defaultAssigneeUserId: cleanText(value.defaultAssigneeId, 120) || null,

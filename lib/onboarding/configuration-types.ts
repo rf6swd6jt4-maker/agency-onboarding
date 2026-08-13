@@ -73,6 +73,10 @@ export type OnboardingServiceDefinition = {
     code: string
     name: string
     description: string
+    checkoutDisplayName?: string
+    checkoutDescription?: string
+    thumbnailPath?: string | null
+    thumbnailUrl?: string | null
     state: OnboardingServiceState
     version: number
     isTest: boolean

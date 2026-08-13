@@ -13,6 +13,9 @@ export async function saveOnboardingService(slug: string, serviceId: string | nu
         if (configurationSchemaUnavailable(serviceId)) return { ok: false, error: "The editable service catalogue is still being prepared for this workspace." }
         const normalized = normalizeServiceDefinition(input)
         if (!normalized.ok) return normalized
+        if (normalized.definition.thumbnailPath && !normalized.definition.thumbnailPath.startsWith(`${workspace.id}/service-thumbnails/`)) {
+            return { ok: false, error: "The service thumbnail does not belong to this workspace." }
+        }
         const outcome = await configurationRpc<SavedService>("save_onboarding_service_revision", {
             p_workspace_id: workspace.id,
             p_actor_user_id: user.id,

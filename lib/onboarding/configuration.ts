@@ -115,6 +115,10 @@ function fallbackServices(modules: OnboardingModuleDefinition[]) {
         code: service.key,
         name: service.title,
         description: service.description,
+        checkoutDisplayName: service.title,
+        checkoutDescription: service.description,
+        thumbnailPath: null,
+        thumbnailUrl: null,
         state: "active",
         version: 1,
         isTest: false,
@@ -581,6 +585,10 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
             code,
             name: text(revision.name, revision.title, definition.name, row.name, row.title) ?? code,
             description: text(revision.description, definition.description, row.description) ?? "",
+            checkoutDisplayName: text(definition.checkoutDisplayName, definition.checkout_display_name) ?? "",
+            checkoutDescription: text(definition.checkoutDescription, definition.checkout_description) ?? "",
+            thumbnailPath: text(definition.thumbnailPath, definition.thumbnail_path) ?? null,
+            thumbnailUrl: null,
             state: status === "archived" || row.archived_at ? "archived" : status === "retired" || row.retired_at ? "retired" : "active",
             version: Math.max(1, integer(revision.version, revision.revision_number, row.version)),
             isTest: bool(revision.is_test, definition.isTest, definition.is_test, row.is_test),
@@ -596,6 +604,15 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
             lastEditedAt: text(revision.updated_at, revision.created_at, row.updated_at) ?? null,
         }
     })
+}
+
+async function hydrateServiceThumbnails(services: OnboardingServiceDefinition[]) {
+    return Promise.all(services.map(async (service) => ({
+        ...service,
+        thumbnailUrl: service.thumbnailPath
+            ? await createPrivateUploadSignedUrl(service.thumbnailPath)
+            : null,
+    })))
 }
 
 async function loadAssignees(workspaceId: string) {
@@ -636,7 +653,7 @@ export async function loadOnboardingSettingsPageData(workspaceId: string): Promi
     const publishedModules = raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false)))
         : useLegacyFallback ? fallbackModules() : []
-    const services = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, publishedModules, serviceArchiveBlockers(raw)) : useLegacyFallback ? fallbackServices(publishedModules) : []
+    const services = await hydrateServiceThumbnails(raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, publishedModules, serviceArchiveBlockers(raw)) : useLegacyFallback ? fallbackServices(publishedModules) : [])
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const usage = new Map<string, Array<{ id: string; name: string }>>()
     for (const service of services) {
@@ -844,7 +861,7 @@ export async function loadPublishedOnboardingConfiguration(workspaceId: string):
     const baseModules = orderedModuleDefinitions(raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false))).filter((moduleDefinition) => moduleDefinition.status === "published")
         : useLegacyFallback ? fallbackModules() : [])
-    const storedServices = raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : useLegacyFallback ? fallbackServices(baseModules) : []
+    const storedServices = await hydrateServiceThumbnails(raw.services.length ? mapServices(raw.services, raw.serviceRevisions, raw.assignments, baseModules) : useLegacyFallback ? fallbackServices(baseModules) : [])
     const mandatory = mapMandatory(raw.configurations, raw.configurationAssignments)
     const mandatoryIds = new Set(mandatory.publishedModuleIds)
     const modules = baseModules.map((moduleDefinition) => {

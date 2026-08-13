@@ -19,7 +19,58 @@ function isPaidInvoiceEvent(type: string) {
 }
 
 function isResumableAutomationEvent(type: string) {
-    return isPaidInvoiceEvent(type) || type === "account.application.deauthorized"
+    return isPaidInvoiceEvent(type)
+        || type === "account.application.deauthorized"
+        || type === "checkout.session.completed"
+        || type.startsWith("customer.subscription.")
+        || ["invoice.payment_failed", "invoice.payment_action_required", "invoice.voided", "invoice.marked_uncollectible"].includes(type)
+}
+
+function stripeObjectSaleId(value: Record<string, unknown> | undefined) {
+    if (!value) return null
+    const metadata = value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata)
+        ? value.metadata as Record<string, unknown>
+        : null
+    if (typeof metadata?.client_sale_id === "string") return metadata.client_sale_id
+    const parent = value.parent && typeof value.parent === "object" && !Array.isArray(value.parent)
+        ? value.parent as Record<string, unknown>
+        : null
+    const parentDetails = parent?.subscription_details && typeof parent.subscription_details === "object" && !Array.isArray(parent.subscription_details)
+        ? parent.subscription_details as Record<string, unknown>
+        : null
+    const legacyDetails = value.subscription_details && typeof value.subscription_details === "object" && !Array.isArray(value.subscription_details)
+        ? value.subscription_details as Record<string, unknown>
+        : null
+    for (const details of [parentDetails, legacyDetails]) {
+        const detailsMetadata = details?.metadata && typeof details.metadata === "object" && !Array.isArray(details.metadata)
+            ? details.metadata as Record<string, unknown>
+            : null
+        if (typeof detailsMetadata?.client_sale_id === "string") return detailsMetadata.client_sale_id
+    }
+    return null
+}
+
+function stripeObjectId(value: unknown) {
+    if (typeof value === "string") return value
+    return value && typeof value === "object" && !Array.isArray(value) && typeof (value as { id?: unknown }).id === "string"
+        ? (value as { id: string }).id
+        : null
+}
+
+function stripeObjectSubscriptionId(value: Record<string, unknown> | undefined) {
+    if (!value) return null
+    const direct = stripeObjectId(value.subscription)
+    if (direct) return direct
+    const parent = value.parent && typeof value.parent === "object" && !Array.isArray(value.parent)
+        ? value.parent as Record<string, unknown>
+        : null
+    for (const source of [parent?.subscription_details, value.subscription_details]) {
+        if (source && typeof source === "object" && !Array.isArray(source)) {
+            const id = stripeObjectId((source as Record<string, unknown>).subscription)
+            if (id) return id
+        }
+    }
+    return null
 }
 
 function isMissingStripeStatusRpc(error: { code?: string; message?: string } | null | undefined) {
@@ -65,13 +116,9 @@ export async function POST(request: NextRequest) {
     }
 
     const invoice = event.data?.object
-    const saleId =
-        invoice && typeof invoice === "object" && !Array.isArray(invoice) &&
-        typeof (invoice as { metadata?: { client_sale_id?: unknown } }).metadata?.client_sale_id === "string"
-            ? (invoice as { metadata: { client_sale_id: string } }).metadata.client_sale_id
-            : null
+    const saleId = stripeObjectSaleId(invoice)
     const { data: sale } = saleId
-        ? await supabaseAdmin.from("client_sales").select("workspace_id").eq("id", saleId).maybeSingle()
+        ? await supabaseAdmin.from("client_sales").select("workspace_id, billing_model, initial_payment_received_at, status, stripe_subscription_id").eq("id", saleId).maybeSingle()
         : { data: null }
     const externalAccountId = event.account ?? event.context ?? null
     const connectedWorkspaceId = matchedCandidate.shared && externalAccountId
@@ -131,6 +178,40 @@ export async function POST(request: NextRequest) {
             outcome: "succeeded",
             metadata: { stripe_event_id: event.id, account_id: externalAccountId },
         })
+    } else if (event.type === "checkout.session.completed") {
+        const checkout = event.data?.object
+        if (saleId && checkout) {
+            const checkoutId = stripeObjectId(checkout.id)
+            const subscriptionId = stripeObjectId(checkout.subscription)
+            const { error } = await supabaseAdmin.from("client_sales").update({
+                stripe_checkout_session_id: checkoutId,
+                stripe_checkout_status: typeof checkout.status === "string" ? checkout.status : "complete",
+                stripe_subscription_id: subscriptionId,
+                stripe_subscription_status: "active",
+                stripe_customer_id: stripeObjectId(checkout.customer),
+                raw_payload: event,
+                updated_at: new Date().toISOString(),
+            }).eq("workspace_id", workspaceId).eq("id", saleId)
+            if (error) {
+                await reportStripeAutomationFailure(workspaceId, event.id, "record_checkout_completion", error.message)
+                return Response.json({ error: "Could not record Checkout completion" }, { status: 500 })
+            }
+            await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.checkout.completed", summary: "Recurring Checkout completed", entityType: "stripe_checkout_session", entityId: checkoutId ?? event.id, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.checkout.completed:${event.id}`, outcome: "succeeded", metadata: { sale_id: saleId, subscription_id: subscriptionId } })
+        }
+    } else if (event.type.startsWith("customer.subscription.")) {
+        const subscription = event.data?.object
+        const subscriptionId = stripeObjectId(subscription?.id)
+        if (subscriptionId) {
+            const status = typeof subscription?.status === "string" ? subscription.status : null
+            const update = { stripe_subscription_id: subscriptionId, stripe_subscription_status: status, raw_payload: event, updated_at: new Date().toISOString() }
+            const query = supabaseAdmin.from("client_sales").update(update).eq("workspace_id", workspaceId)
+            const { error } = saleId ? await query.eq("id", saleId) : await query.eq("stripe_subscription_id", subscriptionId)
+            if (error) {
+                await reportStripeAutomationFailure(workspaceId, event.id, "record_subscription_status", error.message)
+                return Response.json({ error: "Could not record subscription status" }, { status: 500 })
+            }
+            await recordAdminActivity({ workspaceId, category: "billing", level: event.type === "customer.subscription.deleted" ? "warning" : "info", eventKey: event.type === "customer.subscription.deleted" ? "stripe.subscription.cancelled" : "stripe.subscription.updated", summary: event.type === "customer.subscription.deleted" ? "Recurring retainer cancelled" : "Recurring retainer status updated", entityType: "stripe_subscription", entityId: subscriptionId, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.subscription.status:${event.id}`, outcome: "succeeded", metadata: { sale_id: saleId, subscription_status: status, event_type: event.type } })
+        }
     } else if (isPaidInvoiceEvent(event.type)) {
         if (!invoice) {
             await reportStripeAutomationFailure(workspaceId, event.id, "paid_invoice_payload", "Paid invoice event missing invoice object")
@@ -194,6 +275,7 @@ export async function POST(request: NextRequest) {
         })
     } else if (
         event.type === "invoice.payment_failed" ||
+        event.type === "invoice.payment_action_required" ||
         event.type === "invoice.voided" ||
         event.type === "invoice.marked_uncollectible"
     ) {
@@ -206,8 +288,28 @@ export async function POST(request: NextRequest) {
         const invoiceId = typeof invoice?.id === "string" ? invoice.id : null
 
         if (invoiceId) {
-            const nextSaleStatus = event.type === "invoice.payment_failed" ? "payment_failed" : "invoice_inactive"
+            const nextSaleStatus = event.type === "invoice.payment_failed" || event.type === "invoice.payment_action_required" ? "payment_failed" : "invoice_inactive"
             const invoiceStatus = typeof invoice?.status === "string" ? invoice.status : null
+            if (saleId && sale?.billing_model === "recurring") {
+                const renewalFailure = Boolean(sale.initial_payment_received_at)
+                const subscriptionId = stripeObjectSubscriptionId(invoice as Record<string, unknown> | undefined)
+                    ?? sale.stripe_subscription_id
+                const { error: recurringError } = await supabaseAdmin.from("client_sales").update({
+                    ...(renewalFailure ? {} : { status: nextSaleStatus, stripe_invoice_id: invoiceId, stripe_invoice_status: invoiceStatus }),
+                    stripe_subscription_id: subscriptionId,
+                    stripe_subscription_status: event.type === "invoice.payment_failed" || event.type === "invoice.payment_action_required" ? "past_due" : invoiceStatus,
+                    latest_invoice_id: invoiceId,
+                    latest_invoice_status: invoiceStatus,
+                    raw_payload: event,
+                    updated_at: new Date().toISOString(),
+                }).eq("id", saleId).eq("workspace_id", workspaceId)
+                if (recurringError) {
+                    await reportStripeAutomationFailure(workspaceId, event.id, "update_subscription_invoice_status", recurringError.message)
+                    return Response.json({ error: "Could not update recurring payment status" }, { status: 500 })
+                }
+                await recordAdminActivity({ workspaceId, category: "billing", level: "warning", eventKey: renewalFailure ? "stripe.subscription.renewal_failed" : "stripe.subscription.initial_payment_failed", summary: renewalFailure ? "Recurring retainer renewal failed" : "Initial recurring retainer payment failed", entityType: "stripe_subscription", entityId: subscriptionId ?? invoiceId, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.subscription.payment_failed:${event.id}`, outcome: "failed", metadata: { sale_id: saleId, invoice_id: invoiceId, renewal: renewalFailure } })
+                return Response.json({ ok: true, duplicate: duplicateEvent })
+            }
             const statusRpc = await supabaseAdmin.rpc("record_stripe_invoice_status_event", {
                 p_workspace_id: workspaceId,
                 p_invoice_id: invoiceId,
@@ -232,7 +334,7 @@ export async function POST(request: NextRequest) {
                     await reportStripeAutomationFailure(workspaceId, event.id, "update_invoice_status", saleUpdateError.message)
                     return Response.json({ error: "Could not update invoice status" }, { status: 500 })
                 }
-                await recordAdminActivity({ workspaceId, category: "billing", level: event.type === "invoice.payment_failed" ? "warning" : "info", eventKey: `stripe.invoice.${event.type.split(".").at(-1)}`, summary: `Invoice status updated: ${nextSaleStatus.replace(/_/g, " ")}`, entityType: "stripe_invoice", entityId: invoiceId, metadata: { stripe_event_id: event.id, event_type: event.type, sale_status: nextSaleStatus } })
+                await recordAdminActivity({ workspaceId, category: "billing", level: nextSaleStatus === "payment_failed" ? "warning" : "info", eventKey: `stripe.invoice.${event.type.split(".").at(-1)}`, summary: `Invoice status updated: ${nextSaleStatus.replace(/_/g, " ")}`, entityType: "stripe_invoice", entityId: invoiceId, metadata: { stripe_event_id: event.id, event_type: event.type, sale_status: nextSaleStatus } })
             } else if (statusRpc.error) {
                 await reportStripeAutomationFailure(workspaceId, event.id, "update_invoice_status", statusRpc.error.message)
                 return Response.json({ error: "Could not update invoice status" }, { status: 500 })

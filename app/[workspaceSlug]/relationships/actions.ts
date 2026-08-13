@@ -18,7 +18,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, sendRelationshipInvoice } from "@/lib/relationship-workflow"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
-import { voidStripeInvoice } from "@/lib/stripe/api"
+import { expireStripeCheckoutSession, voidStripeInvoice, type StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
 
 const creatablePhases = new Set<RelationshipPhase>([
@@ -363,13 +363,46 @@ export async function voidAndReopenRelationshipInvoice(slug: string, relationshi
     try {
         const { workspace, user } = await requireWorkspace(slug, "admin")
         const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales")
-            .select("id, relationship_id, status, stripe_invoice_id, stripe_invoice_status, correlation_id, onboarding_session_id")
+            .select("id, relationship_id, status, billing_model, stripe_invoice_id, stripe_invoice_status, stripe_checkout_session_id, stripe_checkout_status, stripe_subscription_id, correlation_id, onboarding_session_id, initial_payment_received_at")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationshipId)
             .eq("id", saleId)
             .maybeSingle()
         if (saleError || !sale) throw new Error(saleError?.message ?? "Invoice not found")
-        const alreadyVoided = sale.status === "invoice_inactive" && ["void", "voided"].includes(String(sale.stripe_invoice_status ?? "").toLowerCase())
+        const recurring = sale.billing_model === "recurring"
+        const alreadyVoided = sale.status === "invoice_inactive" && (recurring
+            ? String(sale.stripe_checkout_status ?? "").toLowerCase() === "expired"
+            : ["void", "voided"].includes(String(sale.stripe_invoice_status ?? "").toLowerCase()))
+        if (recurring) {
+            if (!sale.stripe_checkout_session_id || sale.stripe_subscription_id || sale.initial_payment_received_at || (!alreadyVoided && !["invoice_sent", "payment_failed"].includes(sale.status))) {
+                return { ok: false, error: sale.onboarding_session_id || sale.status.startsWith("paid") ? "Paid or onboarding retainers cannot be replaced from this deal." : "This recurring Checkout request is no longer eligible to be replaced." }
+            }
+            const correlationId = sale.correlation_id ?? randomUUID()
+            const providerResult = alreadyVoided
+                ? { checkoutSessionId: sale.stripe_checkout_session_id, checkoutStatus: "expired" }
+                : await (async () => {
+                    const config = await getWorkspaceProviderConfig(workspace.id, "stripe")
+                    return expireStripeCheckoutSession({
+                        checkoutSessionId: sale.stripe_checkout_session_id!,
+                        secretKey: config.access_token || config.secret_key,
+                        idempotencyKey: `${sale.id}:staff-expire`,
+                    })
+                })()
+            const { error: reopenError } = await supabaseAdmin.rpc("reopen_expired_recurring_checkout", {
+                p_workspace_id: workspace.id,
+                p_actor_user_id: user.id,
+                p_relationship_id: relationshipId,
+                p_sale_id: sale.id,
+                p_correlation_id: correlationId,
+                p_provider_summary: {
+                    checkout_session_id: providerResult.checkoutSessionId,
+                    checkout_status: providerResult.checkoutStatus,
+                },
+            })
+            if (reopenError) throw new Error(`Stripe expired the Checkout page, but Betelgeze could not reopen the deal: ${reopenError.message}`)
+            relationshipRevalidatePaths(slug, relationshipId)
+            return { ok: true }
+        }
         if (!sale.stripe_invoice_id || (!alreadyVoided && !["invoice_sent", "payment_failed"].includes(sale.status))) {
             return { ok: false, error: sale.onboarding_session_id || sale.status.startsWith("paid") ? "Paid or onboarding invoices cannot be voided from this deal." : "This invoice is no longer eligible to be voided." }
         }
@@ -401,9 +434,9 @@ export async function voidAndReopenRelationshipInvoice(slug: string, relationshi
         return { ok: true }
     } catch (error) {
         const message = error instanceof Error ? error.message : "The invoice could not be voided."
-        if (message.startsWith("Stripe voided the invoice")) return { ok: false, error: message }
+        if (message.startsWith("Stripe voided the invoice") || message.startsWith("Stripe expired the Checkout page")) return { ok: false, error: message }
         if (message.endsWith("is not connected for this workspace.")) return { ok: false, error: message }
-        return { ok: false, error: "The invoice could not be voided in Stripe. Review the connection and invoice status, then try again." }
+        return { ok: false, error: "The payment request could not be deactivated in Stripe. Review the connection and provider status, then try again." }
     }
 }
 
@@ -452,7 +485,12 @@ export async function archiveRelationship(
     redirect(tabId ? workspaceTabFrameUrl(relationshipsHref, tabId, "http://localhost") : relationshipsHref)
 }
 
-export async function proceedRelationshipCurrentWork(slug: string, relationshipId: string, workItemId: string) {
+export async function proceedRelationshipCurrentWork(
+    slug: string,
+    relationshipId: string,
+    workItemId: string,
+    payment?: { billingModel?: "one_off" | "recurring"; billingInterval?: StripeRecurringInterval; billingIntervalCount?: number }
+) {
     let workflowAction: string | null = null
     let invoice: Awaited<ReturnType<typeof sendRelationshipInvoice>> | null = null
     try {
@@ -471,7 +509,15 @@ export async function proceedRelationshipCurrentWork(slug: string, relationshipI
             if (!assignment) throw new Error("This work item is not assigned to you")
         }
         if (workflowAction === "send_invoice") {
-            invoice = await sendRelationshipInvoice({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id })
+            invoice = await sendRelationshipInvoice({
+                workspaceId: workspace.id,
+                relationshipId,
+                workItemId,
+                actorId: user.id,
+                billingModel: payment?.billingModel ?? "one_off",
+                billingInterval: payment?.billingInterval,
+                billingIntervalCount: payment?.billingIntervalCount,
+            })
         } else {
             if (workflowAction === "await_payment" || workflowAction === "await_onboarding") throw new Error("This stage advances automatically when the external step completes")
             await advanceRelationshipWorkflow({ workspaceId: workspace.id, relationshipId, workItemId, action: workflowAction, actorId: user.id })
@@ -480,8 +526,9 @@ export async function proceedRelationshipCurrentWork(slug: string, relationshipI
         return {
             ok: true as const,
             invoice: invoice ? {
-                id: invoice.invoiceId,
-                href: invoice.invoiceAssetId ? assetHref(slug, invoice.invoiceAssetId) : invoice.hostedInvoiceUrl,
+                id: invoice.referenceId,
+                kind: invoice.kind,
+                href: invoice.assetId ? assetHref(slug, invoice.assetId) : invoice.href,
             } : null,
         }
     } catch (error) {
@@ -496,6 +543,10 @@ export async function proceedRelationshipCurrentWork(slug: string, relationshipI
             "Publish every onboarding module",
             "Onboarding welcome and completion",
             "The onboarding invoice migration is incomplete",
+            "The recurring retainer migration is not applied yet",
+            "Choose a recurring schedule",
+            "Missing SMTP_",
+            "NEXT_PUBLIC_SITE_URL is required",
             "INVOICE_",
             "ONBOARDING_",
         ].some((prefix) => message.startsWith(prefix))

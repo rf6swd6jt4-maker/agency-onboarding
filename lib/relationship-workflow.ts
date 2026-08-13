@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
-import { createAndSendStripeInvoice } from "@/lib/stripe/api"
+import { createAndSendStripeInvoice, createStripeSubscriptionCheckout, type StripeRecurringInterval } from "@/lib/stripe/api"
+import { assertEmailDeliveryConfigured, sendRecurringCheckoutRequest } from "@/lib/email"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { SERVICES } from "@/lib/onboarding/services"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -18,6 +19,7 @@ import {
 } from "@/lib/onboarding/runtime-mode"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { relationshipFulfilmentServiceDefinition } from "@/lib/onboarding/service-display"
+import { createServiceThumbnailPublicUrl } from "@/lib/onboarding/uploads"
 
 type WorkflowRole = "task" | "lifecycle_stage" | "service_group" | "review" | "automation"
 type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
@@ -639,9 +641,9 @@ async function preflightRelationshipInvoice(input: {
     }
 }
 
-async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipId: string) {
+async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipId: string, billingModel: "one_off" | "recurring") {
     const result = await supabaseAdmin.from("client_sales")
-        .select("id, correlation_id")
+        .select("id, correlation_id, billing_model")
         .eq("workspace_id", workspaceId)
         .eq("relationship_id", relationshipId)
         .eq("status", "draft")
@@ -650,10 +652,43 @@ async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipI
         .limit(1)
         .maybeSingle()
     if (result.error) {
+        const missingBillingModel = result.error.code === "42703" || result.error.code === "PGRST204" || result.error.message.toLowerCase().includes("billing_model")
+        if (missingBillingModel && billingModel === "recurring") {
+            throw new Error("The recurring retainer migration is not applied yet. Apply the latest database migration before creating a recurring Checkout page")
+        }
+        if (missingBillingModel) {
+            const legacy = await supabaseAdmin.from("client_sales")
+                .select("id, correlation_id")
+                .eq("workspace_id", workspaceId)
+                .eq("relationship_id", relationshipId)
+                .eq("status", "draft")
+                .not("snapshot_frozen_at", "is", null)
+                .order("created_at", { ascending: false })
+                .limit(1)
+                .maybeSingle()
+            if (legacy.error) throw new Error(legacy.error.message)
+            return legacy.data
+        }
         if (isMissingInvoiceSnapshotColumn(result.error)) return null
         throw new Error(result.error.message)
     }
-    return result.data
+    const storedModel = result.data?.billing_model ?? "one_off"
+    return storedModel === billingModel ? result.data : null
+}
+
+function billingCadenceLabel(interval: StripeRecurringInterval, count: number) {
+    if (interval === "month" && count === 1) return "per month"
+    if (interval === "month" && count === 3) return "every 3 months"
+    if (interval === "year" && count === 1) return "per year"
+    return `every ${count} ${interval}${count === 1 ? "" : "s"}`
+}
+
+function amountLabel(amount: number, currency: string) {
+    try {
+        return new Intl.NumberFormat("en-IE", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100)
+    } catch {
+        return `${currency.toUpperCase()} ${(amount / 100).toFixed(2)}`
+    }
 }
 
 async function ensureRelationshipInvoiceAsset(input: {
@@ -710,15 +745,86 @@ async function ensureRelationshipInvoiceAsset(input: {
     return resolvedId
 }
 
+async function ensureRelationshipCheckoutAsset(input: {
+    workspaceId: string
+    relationshipId: string
+    actorId: string
+    saleId: string
+    checkoutSessionId: string
+    checkoutUrl: string
+    currency: string
+    totalAmount: number
+    interval: StripeRecurringInterval
+    intervalCount: number
+}) {
+    const assetId = randomUUID()
+    const asset = {
+        id: assetId,
+        workspace_id: input.workspaceId,
+        title: `Recurring checkout ${input.checkoutSessionId}`,
+        description: "Stripe subscription Checkout page sent to the client.",
+        asset_kind: "invoice",
+        source_kind: "other",
+        external_url: input.checkoutUrl,
+        native_kind: "client_sale",
+        native_id: input.saleId,
+        metadata: {
+            relationship_id: input.relationshipId,
+            stripe_checkout_session_id: input.checkoutSessionId,
+            billing_model: "recurring",
+            billing_interval: input.interval,
+            billing_interval_count: input.intervalCount,
+            currency: input.currency.toUpperCase(),
+            total_amount: input.totalAmount,
+        },
+        created_by: input.actorId,
+    }
+    const inserted = await supabaseAdmin.from("assets").insert(asset).select("id").single()
+    let resolvedId = inserted.data?.id ?? null
+    if (inserted.error?.code === "23505") {
+        const existing = await supabaseAdmin.from("assets").select("id")
+            .eq("workspace_id", input.workspaceId).eq("native_kind", "client_sale").eq("native_id", input.saleId).maybeSingle()
+        resolvedId = existing.data?.id ?? null
+    } else if (inserted.error) {
+        console.error("Could not create the recurring checkout asset", { saleId: input.saleId, code: inserted.error.code })
+        return null
+    }
+    if (!resolvedId) return null
+    const { error } = await supabaseAdmin.from("asset_relationships").upsert({
+        workspace_id: input.workspaceId,
+        relationship_id: input.relationshipId,
+        asset_id: resolvedId,
+    }, { onConflict: "asset_id,relationship_id" })
+    if (error) {
+        console.error("Could not link recurring checkout asset", { saleId: input.saleId, code: error.code })
+        return null
+    }
+    return resolvedId
+}
+
 export async function sendRelationshipInvoice(input: {
     workspaceId: string
     relationshipId: string
     workItemId: string
     actorId: string
+    billingModel?: "one_off" | "recurring"
+    billingInterval?: StripeRecurringInterval
+    billingIntervalCount?: number
 }) {
-    const { data: relationship } = await supabaseAdmin.from("relationships")
-        .select("primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, project_timeframe_days")
-        .eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).single()
+    const billingModel = input.billingModel ?? "one_off"
+    const billingInterval = input.billingInterval ?? "month"
+    const billingIntervalCount = Math.round(input.billingIntervalCount ?? 1)
+    const maximumIntervalCount = billingInterval === "year" ? 3 : billingInterval === "month" ? 36 : 156
+    if (billingModel === "recurring" && (!(["week", "month", "year"] as string[]).includes(billingInterval) || billingIntervalCount < 1 || billingIntervalCount > maximumIntervalCount)) {
+        throw new Error(`Choose a recurring schedule between 1 and ${maximumIntervalCount} ${billingInterval}s`)
+    }
+    if (billingModel === "recurring") assertEmailDeliveryConfigured()
+    const [{ data: relationship }, { data: workspace }] = await Promise.all([
+        supabaseAdmin.from("relationships")
+            .select("primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, project_timeframe_days")
+            .eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).single(),
+        supabaseAdmin.from("workspaces").select("name").eq("id", input.workspaceId).single(),
+    ])
     const serviceResult = await supabaseAdmin.from("relationship_services")
         .select("service_key, price_cents, currency, service_id, service_revision_id")
         .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).order("created_at")
@@ -736,7 +842,7 @@ export async function sendRelationshipInvoice(input: {
     if (!relationship || !relationship.primary_email || !relationship.whatsapp_phone || !selectedServices.length || selectedServices.some((service) => typeof service.price_cents !== "number" || service.price_cents <= 0)) {
         throw new Error("Add a billing email, WhatsApp phone, and a positive price for every selected service before sending the invoice")
     }
-    const resumableSale = await findResumableFrozenInvoiceSale(input.workspaceId, input.relationshipId)
+    const resumableSale = await findResumableFrozenInvoiceSale(input.workspaceId, input.relationshipId, billingModel)
     const preflight = await preflightRelationshipInvoice({
         workspaceId: input.workspaceId,
         whatsappPhone: relationship.whatsapp_phone,
@@ -744,11 +850,17 @@ export async function sendRelationshipInvoice(input: {
         resumesFrozenVersionedSale: Boolean(resumableSale),
     })
     const currency = (selectedServices[0]?.currency ?? "usd").toLowerCase()
-    let lineItems = selectedServices.map((service, index) => ({
-        serviceKey: service.service_key,
-        description: preflight.serviceDefinitions[index]?.name ?? SERVICES[service.service_key]?.title ?? service.service_key,
-        amount: service.price_cents!,
-    }))
+    let lineItems = selectedServices.map((service, index) => {
+        const definition = preflight.serviceDefinitions[index]
+        const name = definition?.checkoutDisplayName || definition?.name || SERVICES[service.service_key]?.title || service.service_key
+        return {
+            serviceKey: service.service_key,
+            name,
+            description: definition?.checkoutDescription || definition?.description || name,
+            amount: service.price_cents!,
+            imageUrl: createServiceThumbnailPublicUrl(definition?.thumbnailPath),
+        }
+    })
     // Validate the integration before creating a sale record. This keeps a missing
     // or disconnected Stripe setup from leaving a retryable-looking draft behind.
     const config = await getWorkspaceProviderConfig(input.workspaceId, "stripe")
@@ -768,6 +880,11 @@ export async function sendRelationshipInvoice(input: {
             total_amount: lineItems.reduce((total, item) => total + item.amount, 0),
             status: "draft",
             created_by: input.actorId,
+            ...(billingModel === "recurring" ? {
+                billing_model: billingModel,
+                billing_interval: billingInterval,
+                billing_interval_count: billingIntervalCount,
+            } : {}),
             ...(preflight.configuration.schemaReady ? { correlation_id: correlationId } : {}),
         }
         const insertedSale = await supabaseAdmin.from("client_sales").insert(salePayload).select("id, correlation_id").single()
@@ -788,10 +905,20 @@ export async function sendRelationshipInvoice(input: {
             throw new Error(freezeError.message)
         }
         const { data: frozenItems, error: frozenItemsError } = await supabaseAdmin.from("client_sale_items")
-            .select("service_code, service_name, amount_cents, currency, sort_order")
+            .select("service_code, service_name, service_revision_id, description, amount_cents, currency, sort_order")
             .eq("workspace_id", input.workspaceId).eq("client_sale_id", sale.id).order("sort_order")
         if (frozenItemsError || !frozenItems?.length) throw new Error(frozenItemsError?.message ?? "The invoice snapshot contains no services")
-        lineItems = frozenItems.map((item) => ({ serviceKey: item.service_code, description: item.service_name, amount: item.amount_cents }))
+        lineItems = frozenItems.map((item) => {
+            const definition = preflight.configuration.services.find((service) => service.revisionId === item.service_revision_id || service.code === item.service_code)
+            const name = definition?.checkoutDisplayName || item.service_name
+            return {
+                serviceKey: item.service_code,
+                name,
+                description: definition?.checkoutDescription || item.description || item.service_name,
+                amount: item.amount_cents,
+                imageUrl: createServiceThumbnailPublicUrl(definition?.thumbnailPath),
+            }
+        })
     }
     if (preflight.runtimeMode === "shadow" && preflight.shadowComparison) {
         await recordAdminActivity({
@@ -814,6 +941,87 @@ export async function sendRelationshipInvoice(input: {
             },
         })
     }
+    const totalAmount = lineItems.reduce((total, item) => total + item.amount, 0)
+    if (billingModel === "recurring") {
+        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/g, "")
+        if (!siteUrl) throw new Error("NEXT_PUBLIC_SITE_URL is required before recurring Checkout pages can be sent")
+        const checkout = await createStripeSubscriptionCheckout({
+            saleId: sale.id,
+            relationshipId: input.relationshipId,
+            workspaceId: input.workspaceId,
+            name: relationship.business_name ?? relationship.primary_person_name,
+            email: relationship.primary_email,
+            phone: relationship.whatsapp_phone,
+            currency,
+            lineItems,
+            serviceKeys: lineItems.map((item) => item.serviceKey),
+            projectTimeframeDays: relationship.project_timeframe_days,
+            interval: billingInterval,
+            intervalCount: billingIntervalCount,
+            successUrl: `${siteUrl}/payment/complete?session_id={CHECKOUT_SESSION_ID}`,
+            cancelUrl: `${siteUrl}/payment/cancelled`,
+            secretKey: config.access_token || config.secret_key,
+        })
+        const preparedAt = new Date().toISOString()
+        const { error: preparedError } = await supabaseAdmin.from("client_sales").update({
+            billing_model: "recurring",
+            billing_interval: billingInterval,
+            billing_interval_count: billingIntervalCount,
+            stripe_customer_id: checkout.customerId,
+            stripe_checkout_session_id: checkout.checkoutSessionId,
+            stripe_checkout_status: checkout.checkoutStatus,
+            stripe_checkout_url: checkout.checkoutUrl,
+            stripe_checkout_expires_at: checkout.expiresAt,
+            raw_payload: checkout.rawCheckout,
+            updated_at: preparedAt,
+        }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
+        if (preparedError) throw new Error(preparedError.message)
+        await sendRecurringCheckoutRequest({
+            to: relationship.primary_email,
+            clientName: relationship.primary_person_name,
+            workspaceName: workspace?.name ?? "Your agency",
+            checkoutUrl: checkout.checkoutUrl,
+            services: lineItems.map((item) => item.name || item.description),
+            totalLabel: amountLabel(totalAmount, currency),
+            cadenceLabel: billingCadenceLabel(billingInterval, billingIntervalCount),
+        })
+        const sentAt = new Date().toISOString()
+        const [{ error: statusError }, { error: workError }] = await Promise.all([
+            supabaseAdmin.from("client_sales").update({ status: "invoice_sent", checkout_email_sent_at: sentAt, updated_at: sentAt }).eq("workspace_id", input.workspaceId).eq("id", sale.id),
+            completeWorkflowItem(input.workspaceId, input.workItemId),
+        ])
+        if (statusError || workError) throw new Error(statusError?.message ?? workError?.message ?? "Could not record the sent recurring checkout")
+        await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "invoiced" })
+        const assetId = await ensureRelationshipCheckoutAsset({
+            workspaceId: input.workspaceId,
+            relationshipId: input.relationshipId,
+            actorId: input.actorId,
+            saleId: sale.id,
+            checkoutSessionId: checkout.checkoutSessionId,
+            checkoutUrl: checkout.checkoutUrl,
+            currency,
+            totalAmount,
+            interval: billingInterval,
+            intervalCount: billingIntervalCount,
+        })
+        await recordAdminActivity({
+            workspaceId: input.workspaceId,
+            category: "billing",
+            eventKey: "stripe.checkout.subscription_sent",
+            summary: "Recurring Stripe Checkout page sent",
+            entityType: "stripe_checkout_session",
+            entityId: checkout.checkoutSessionId,
+            direction: "outbound",
+            actorUserId: input.actorId,
+            correlationId: saleCorrelationId,
+            idempotencyKey: `stripe.checkout.subscription_sent:${sale.id}`,
+            outcome: "succeeded",
+            metricClassification: "internal_call",
+            metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length, billing_interval: billingInterval, billing_interval_count: billingIntervalCount },
+        })
+        return { saleId: sale.id, kind: "recurring" as const, referenceId: checkout.checkoutSessionId, href: assetId ? null : checkout.checkoutUrl, assetId }
+    }
+
     const invoice = await createAndSendStripeInvoice({
         saleId: sale.id,
         name: relationship.business_name ?? relationship.primary_person_name,
@@ -832,7 +1040,7 @@ export async function sendRelationshipInvoice(input: {
     ])
     if (statusError || workError) throw new Error(statusError?.message ?? workError?.message ?? "Could not record the sent invoice")
     await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "invoiced" })
-    const invoiceAssetId = await ensureRelationshipInvoiceAsset({
+    const assetId = await ensureRelationshipInvoiceAsset({
         workspaceId: input.workspaceId,
         relationshipId: input.relationshipId,
         actorId: input.actorId,
@@ -841,7 +1049,7 @@ export async function sendRelationshipInvoice(input: {
         hostedInvoiceUrl: invoice.hostedInvoiceUrl,
         invoicePdf: invoice.invoicePdf,
         currency,
-        totalAmount: lineItems.reduce((total, item) => total + item.amount, 0),
+        totalAmount,
     })
     await recordAdminActivity({
         workspaceId: input.workspaceId,
@@ -858,12 +1066,7 @@ export async function sendRelationshipInvoice(input: {
         metricClassification: "internal_call",
         metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length },
     })
-    return {
-        saleId: sale.id,
-        invoiceId: invoice.invoiceId,
-        hostedInvoiceUrl: invoice.hostedInvoiceUrl,
-        invoiceAssetId,
-    }
+    return { saleId: sale.id, kind: "one_off" as const, referenceId: invoice.invoiceId, href: assetId ? null : invoice.hostedInvoiceUrl, assetId }
 }
 
 export async function advanceRelationshipWorkflow(input: { workspaceId: string; relationshipId: string; workItemId: string; action: string | null; actorId: string }) {

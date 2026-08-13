@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { saveOnboardingService, setOnboardingServiceState } from "@/app/[workspaceSlug]/settings/service-actions"
 import { Assignee, RoundPill, SquarePill, Status, type StatusTone } from "@/components/ui"
@@ -19,6 +20,10 @@ function blankService(): OnboardingServiceDefinition {
         code: "Generated after save",
         name: "",
         description: "",
+        checkoutDisplayName: "",
+        checkoutDescription: "",
+        thumbnailPath: null,
+        thumbnailUrl: null,
         state: "active",
         version: 0,
         isTest: false,
@@ -44,6 +49,7 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
     const [price, setPrice] = useState((service.defaultPriceCents / 100).toFixed(2))
     const [error, setError] = useState<string | null>(null)
     const [pending, startTransition] = useTransition()
+    const [uploading, setUploading] = useState(false)
     const [mobileDialog, setMobileDialog] = useState(false)
     const editorRef = useRef<HTMLElement>(null)
     const closeRef = useRef<HTMLButtonElement>(null)
@@ -99,6 +105,43 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
         run(() => setOnboardingServiceState(workspaceSlug, service.id, state))
     }
 
+    async function uploadThumbnail(file: File | null) {
+        if (!file) return
+        setError(null)
+        setUploading(true)
+        try {
+            const prepared = await fetch(`/api/workspaces/${encodeURIComponent(workspaceSlug)}/service-thumbnails/upload`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: file.name, size: file.size, type: file.type }),
+            })
+            const payload = await prepared.json() as {
+                error?: string
+                uploadUrl?: string
+                previewUrl?: string
+                thumbnail?: { path?: string }
+            }
+            if (!prepared.ok || !payload.uploadUrl || !payload.thumbnail?.path) {
+                throw new Error(payload.error ?? "Could not prepare the thumbnail upload.")
+            }
+            const uploaded = await fetch(payload.uploadUrl, {
+                method: "PUT",
+                headers: { "Content-Type": file.type },
+                body: file,
+            })
+            if (!uploaded.ok) throw new Error("The thumbnail upload did not complete.")
+            setDraft((current) => ({
+                ...current,
+                thumbnailPath: payload.thumbnail!.path!,
+                thumbnailUrl: payload.previewUrl ?? null,
+            }))
+        } catch (uploadError) {
+            setError(uploadError instanceof Error ? uploadError.message : "The thumbnail could not be uploaded.")
+        } finally {
+            setUploading(false)
+        }
+    }
+
     return <aside ref={editorRef} role={mobileDialog ? "dialog" : undefined} aria-modal={mobileDialog ? true : undefined} aria-labelledby="service-editor-title" aria-label={service.id ? `Edit ${service.name}` : "Create service"} className="fixed inset-x-0 bottom-0 top-0 z-[80] flex min-h-0 flex-col border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/60 lg:sticky lg:top-5 lg:z-0 lg:max-h-[calc(100dvh-2.5rem)] lg:rounded-2xl lg:border">
         <div className="flex items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-5">
             <div className="min-w-0 flex-1"><h3 id="service-editor-title" className="truncate text-lg font-semibold">{service.id ? service.name : "New service"}</h3><p className="mt-1 text-xs text-neutral-500">{service.id ? `Revision ${service.version} · ${service.code}` : "A permanent internal code is generated on first save."}</p></div>
@@ -106,8 +149,32 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
         </div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-5">
             {!schemaReady ? <p className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-100">The editable catalogue schema is not available yet. Existing services remain visible but read-only.</p> : null}
+            <div>
+                <p className="text-sm text-neutral-300">Service thumbnail <span className="text-neutral-600">(optional)</span></p>
+                <div className="mt-2 flex items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3">
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[10px] uppercase tracking-[0.12em] text-neutral-600">
+                        {draft.thumbnailUrl ? <Image src={draft.thumbnailUrl} alt="" width={80} height={80} unoptimized className="h-full w-full object-cover" /> : "No image"}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                        <p className="text-xs leading-5 text-neutral-500">Shown in payment review and, when public media delivery is enabled, on Stripe Checkout.</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            <label className="inline-flex h-9 cursor-pointer items-center rounded-lg border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-neutral-500">
+                                {uploading ? "Uploading…" : draft.thumbnailPath ? "Replace image" : "Upload image"}
+                                <input type="file" accept="image/*" disabled={uploading || pending} onChange={(event) => { void uploadThumbnail(event.target.files?.[0] ?? null); event.currentTarget.value = "" }} className="sr-only" />
+                            </label>
+                            {draft.thumbnailPath ? <button type="button" disabled={uploading || pending} onClick={() => setDraft((current) => ({ ...current, thumbnailPath: null, thumbnailUrl: null }))} className="h-9 px-2 text-xs text-neutral-500 hover:text-white">Remove</button> : null}
+                        </div>
+                    </div>
+                </div>
+            </div>
             <label className="block text-sm text-neutral-300">Service name<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required maxLength={120} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
             <label className="block text-sm text-neutral-300">Description <span className="text-neutral-600">(optional)</span><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} rows={4} className="mt-2 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>
+            <div className="rounded-xl border border-neutral-800 bg-black p-3">
+                <p className="text-sm font-medium text-neutral-200">Client-facing payment details</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-600">Used on recurring Checkout pages. Blank fields fall back to the service name and description above.</p>
+                <label className="mt-3 block text-sm text-neutral-300">Checkout name<input value={draft.checkoutDisplayName ?? ""} onChange={(event) => setDraft({ ...draft, checkoutDisplayName: event.target.value })} maxLength={120} placeholder={draft.name || "Service name"} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-white" /></label>
+                <label className="mt-3 block text-sm text-neutral-300">Checkout description<textarea value={draft.checkoutDescription ?? ""} onChange={(event) => setDraft({ ...draft, checkoutDescription: event.target.value })} maxLength={500} rows={3} placeholder={draft.description || "What the client is subscribing to"} className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-white" /></label>
+            </div>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
                 <label className="block text-sm text-neutral-300">Default price<div className="mt-2 flex"><span className="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-neutral-700 bg-neutral-900 px-3 text-sm text-neutral-500">{draft.currency}</span><input value={price} onChange={(event) => setPrice(event.target.value)} onBlur={() => { if (price.trim()) setPrice((parsedPriceCents / 100).toFixed(2)) }} type="number" min="0" step="0.01" className="h-11 min-w-0 flex-1 rounded-r-lg border border-neutral-700 bg-black px-3 text-white" /></div></label>
                 <label className="block text-sm text-neutral-300">Currency<input value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value.toUpperCase().slice(0, 3) })} maxLength={3} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 uppercase text-white" /></label>
@@ -124,7 +191,7 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
             {service.id && service.state === "active" ? <button type="button" disabled={pending || dirty} onClick={() => changeState("retired")} className="h-10 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-30">Retire</button> : null}
             {service.id && service.state === "retired" ? <button type="button" disabled={pending || dirty || Boolean(service.archiveBlockers.length)} onClick={() => changeState("archived")} className="h-10 px-2 text-sm text-red-300 hover:text-red-200 disabled:opacity-30">Archive</button> : null}
             {service.id && service.state === "archived" ? <button type="button" disabled={pending} onClick={() => changeState("retired")} className="h-10 px-2 text-sm text-neutral-300 hover:text-white disabled:opacity-30">Restore as Retired</button> : null}
-            <button type="button" disabled={pending || !schemaReady || (service.state === "archived") || (service.state === "active" && !dirty && Boolean(service.id))} onClick={save} className="ml-auto h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40">{pending ? "Saving…" : !service.id ? "Create service" : service.state === "retired" ? "Save revision and reactivate" : service.state === "archived" ? "Restore before editing" : "Save new revision"}</button>
+            <button type="button" disabled={pending || uploading || !schemaReady || (service.state === "archived") || (service.state === "active" && !dirty && Boolean(service.id))} onClick={save} className="ml-auto h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40">{pending ? "Saving…" : !service.id ? "Create service" : service.state === "retired" ? "Save revision and reactivate" : service.state === "archived" ? "Restore before editing" : "Save new revision"}</button>
         </div>
     </aside>
 }
@@ -149,9 +216,10 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
                 {services.map((service) => {
                     const status = serviceStatus(service.state)
                     const assignee = service.defaultAssigneeId ? assigneeById.get(service.defaultAssigneeId) : null
-                    return <button key={service.id} type="button" onClick={() => setSelectedId(service.id)} className="block w-full bg-black/35 px-4 py-3 text-left transition hover:bg-neutral-800/70 sm:px-5">
-                        <span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium text-white">{service.name}</span>{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}<Status label={status.label} tone={status.tone} className="ml-auto shrink-0" /></span>
-                        <span className="mt-2 flex min-w-0 items-center gap-2 text-xs text-neutral-500"><span className="shrink-0 tabular-nums">{new Intl.NumberFormat("en-US", { style: "currency", currency: service.currency }).format(service.defaultPriceCents / 100)}</span><span className="truncate">Priority {service.displayPriority}</span><span className="hidden min-w-0 flex-1 gap-1 overflow-hidden sm:flex">{service.modules.slice(0, 3).map((module) => <RoundPill key={module.moduleId}>{module.moduleName}</RoundPill>)}{service.modules.length > 3 ? <span className="self-center">+{service.modules.length - 3}</span> : null}</span>{assignee ? <Assignee name={assignee.name} avatarSrc={assignee.avatarSrc} compact compactSize="md" className="ml-auto" /> : <span className="ml-auto shrink-0">Unassigned</span>}</span>
+                    return <button key={service.id} type="button" onClick={() => setSelectedId(service.id)} className="flex w-full items-center gap-3 bg-black/35 px-4 py-3 text-left transition hover:bg-neutral-800/70 sm:px-5">
+                        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={44} height={44} unoptimized className="h-full w-full object-cover" /> : "Service"}</span>
+                        <span className="min-w-0 flex-1"><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium text-white">{service.name}</span>{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}<Status label={status.label} tone={status.tone} className="ml-auto shrink-0" /></span>
+                        <span className="mt-2 flex min-w-0 items-center gap-2 text-xs text-neutral-500"><span className="shrink-0 tabular-nums">{new Intl.NumberFormat("en-US", { style: "currency", currency: service.currency }).format(service.defaultPriceCents / 100)}</span><span className="truncate">Priority {service.displayPriority}</span><span className="hidden min-w-0 flex-1 gap-1 overflow-hidden sm:flex">{service.modules.slice(0, 3).map((module) => <RoundPill key={module.moduleId}>{module.moduleName}</RoundPill>)}{service.modules.length > 3 ? <span className="self-center">+{service.modules.length - 3}</span> : null}</span>{assignee ? <Assignee name={assignee.name} avatarSrc={assignee.avatarSrc} compact compactSize="md" className="ml-auto" /> : <span className="ml-auto shrink-0">Unassigned</span>}</span></span>
                     </button>
                 })}
                 {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first catalogue service and assign its onboarding modules.</p></div> : null}
