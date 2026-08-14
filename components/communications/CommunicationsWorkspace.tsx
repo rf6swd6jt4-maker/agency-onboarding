@@ -4,7 +4,6 @@ import Link from "next/link"
 import { useState } from "react"
 
 import { Status, type StatusTone } from "@/components/ui"
-import { relationshipHubHref, workspaceHref } from "@/lib/relationships"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 
 export type CommunicationMessage = {
@@ -28,6 +27,15 @@ type CommunicationsWorkspaceProps = {
     activeArea: "clients" | "team" | "calendar"
     conversations: ClientConversation[]
     selectedConversationId: string | null
+}
+
+function workspaceHref(workspaceSlug: string, suffix = "") {
+    const cleanSuffix = suffix.replace(/^\/+/, "")
+    return `/${workspaceSlug}${cleanSuffix ? `/${cleanSuffix}` : ""}`
+}
+
+function relationshipHubHref(workspaceSlug: string, relationshipId: string) {
+    return workspaceHref(workspaceSlug, `relationships/${relationshipId}`)
 }
 
 function BackIcon() {

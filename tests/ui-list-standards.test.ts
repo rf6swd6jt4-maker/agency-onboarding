@@ -41,6 +41,7 @@ test("Communications uses its dedicated responsive conversation workspace instea
     assert.match(workspace, /lg:hidden/)
     assert.match(workspace, /Back to client chats/)
     assert.match(workspace, /activeArea !== "clients"/)
+    assert.doesNotMatch(workspace, /@\/lib\/relationships/, "the client workspace must not import the server-only relationships module")
 })
 
 test("the Admin work queue uses the same canonical row anatomy", async () => {
