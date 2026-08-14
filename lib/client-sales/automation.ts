@@ -1,17 +1,14 @@
-import { randomUUID } from "crypto"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { SERVICES } from "@/lib/onboarding/services"
 import { createOnboardingClient, getOnboardingUrl } from "@/lib/onboarding/client-creation"
-import { createRelationshipOnboardingSession } from "@/lib/onboarding/canonical"
 import { processWorkspaceOnboardingOutbox } from "@/lib/onboarding/outbox"
-import { getOnboardingRuntimeMode } from "@/lib/onboarding/runtime-mode"
 import { getEquivalentMessageAddresses } from "@/lib/client-messages/addresses"
 import {
     sendMetaWhatsAppMessage,
     sendMetaWhatsAppTemplate,
 } from "@/lib/client-messages/meta-whatsapp"
 import { isConsentConfirmationText } from "@/lib/client-sales/consent"
-import { activateRelationshipOnboardingAfterPayment, completePaymentStage } from "@/lib/relationship-workflow"
+import { activateRelationshipOnboardingAfterPayment } from "@/lib/relationship-workflow"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
@@ -32,38 +29,12 @@ type ClientSale = {
     correlation_id?: string | null
     onboarding_session_id?: string | null
     snapshot_frozen_at?: string | null
-    billing_model?: "one_off" | "recurring" | null
     stripe_subscription_id?: string | null
-    stripe_invoice_id?: string | null
     stripe_subscription_status?: string | null
     initial_payment_received_at?: string | null
     latest_payment_at?: string | null
     latest_invoice_id?: string | null
     latest_invoice_status?: string | null
-    checkout_flow?: "legacy_invoice" | "onboarding_payment_gate" | null
-}
-
-type StripeInvoiceLike = {
-    id?: unknown
-    status?: unknown
-    customer?: unknown
-    amount_paid?: unknown
-    hosted_invoice_url?: unknown
-    invoice_pdf?: unknown
-    subscription?: unknown
-    subscription_details?: {
-        metadata?: { client_sale_id?: string }
-        subscription?: unknown
-    }
-    parent?: {
-        subscription_details?: {
-            metadata?: { client_sale_id?: string }
-            subscription?: unknown
-        }
-    }
-    metadata?: {
-        client_sale_id?: string
-    }
 }
 
 type StripeCheckoutLike = {
@@ -74,24 +45,6 @@ type StripeCheckoutLike = {
     subscription?: unknown
     invoice?: unknown
     metadata?: { client_sale_id?: string }
-}
-
-export function stripeInvoiceSaleId(invoice: StripeInvoiceLike) {
-    const value = invoice.metadata?.client_sale_id
-        ?? invoice.parent?.subscription_details?.metadata?.client_sale_id
-        ?? invoice.subscription_details?.metadata?.client_sale_id
-    return typeof value === "string" && value.trim() ? value : null
-}
-
-function stripeInvoiceSubscriptionId(invoice: StripeInvoiceLike) {
-    const value = invoice.parent?.subscription_details?.subscription
-        ?? invoice.subscription_details?.subscription
-        ?? invoice.subscription
-    if (typeof value === "string") return value
-    if (value && typeof value === "object" && !Array.isArray(value) && typeof (value as { id?: unknown }).id === "string") {
-        return (value as { id: string }).id
-    }
-    return null
 }
 
 type ConfirmationInput = {
@@ -121,10 +74,9 @@ const CONSENT_TEMPLATE_TERMINAL_STATUSES = new Set([
 
 const CONSENT_TEMPLATE_CLAIM_TIMEOUT_MS = 15 * 60 * 1_000
 
-type SaleFlow = "paid" | "manual_migration" | "onboarding_payment_gate"
+type SaleFlow = "manual_migration" | "onboarding_payment_gate"
 
-function getSaleFlow(rawPayload: unknown, checkoutFlow?: string | null): SaleFlow {
-    if (checkoutFlow === "onboarding_payment_gate") return "onboarding_payment_gate"
+function getSaleFlow(rawPayload: unknown): SaleFlow {
     if (
         rawPayload &&
         typeof rawPayload === "object" &&
@@ -134,7 +86,7 @@ function getSaleFlow(rawPayload: unknown, checkoutFlow?: string | null): SaleFlo
         return "manual_migration"
     }
 
-    return "paid"
+    return "onboarding_payment_gate"
 }
 
 function getConsentStatus(flow: SaleFlow, state: "sending" | "awaiting" | "failed") {
@@ -154,9 +106,9 @@ function getConsentStatus(flow: SaleFlow, state: "sending" | "awaiting" | "faile
     }
 
     return {
-        sending: "paid_consent_template_sending",
-        awaiting: "paid_awaiting_whatsapp_confirm",
-        failed: "paid_consent_template_failed",
+        sending: "sold_confirmation_sending",
+        awaiting: "sold_awaiting_whatsapp_confirm",
+        failed: "sold_confirmation_failed",
     }[state]
 }
 
@@ -192,7 +144,7 @@ function isMissingOnboardingRuntimeColumn(error: { code?: string; message?: stri
 }
 
 async function ensurePaidOnboardingSession(sale: ClientSale) {
-    if (sale.checkout_flow === "onboarding_payment_gate" && sale.onboarding_session_id) {
+    if (sale.onboarding_session_id) {
         const { data: existingSession, error: existingSessionError } = await supabaseAdmin
             .from("relationship_onboarding_sessions")
             .select("id, session_token, relationship_id")
@@ -200,7 +152,9 @@ async function ensurePaidOnboardingSession(sale: ClientSale) {
             .eq("id", sale.onboarding_session_id)
             .maybeSingle()
         if (existingSessionError) throw new Error(existingSessionError.message)
-        if (!existingSession?.session_token || !existingSession.relationship_id) throw new Error("The confirmed onboarding session could not be found")
+        if (!existingSession?.session_token || !existingSession.relationship_id) {
+            throw new Error("The confirmed onboarding session could not be found")
+        }
         return {
             sessionId: existingSession.id,
             sessionToken: existingSession.session_token,
@@ -208,84 +162,31 @@ async function ensurePaidOnboardingSession(sale: ClientSale) {
             created: false,
         }
     }
-    const runtimeMode = getOnboardingRuntimeMode()
-    const snapshotStateAvailable = Object.prototype.hasOwnProperty.call(
-        sale,
-        "snapshot_frozen_at"
-    )
-    const usesVersionedSaleSnapshot = Boolean(sale.snapshot_frozen_at)
-    const shouldUseVersionedRuntime = usesVersionedSaleSnapshot || (
-        runtimeMode === "versioned" && !snapshotStateAvailable
-    )
 
-    if (!shouldUseVersionedRuntime) {
-        return createCompatibilityOnboardingSession(sale, "legacy")
-    }
-
-    const correlationId = sale.correlation_id ?? randomUUID()
-    const functionName = sale.checkout_flow === "onboarding_payment_gate" ? "prepare_confirmed_onboarding_session" : "create_paid_onboarding_session"
-    const { data, error } = await supabaseAdmin.rpc(functionName, {
+    const { data, error } = await supabaseAdmin.rpc("prepare_confirmed_onboarding_session", {
         p_workspace_id: sale.workspace_id,
         p_sale_id: sale.id,
-        p_correlation_id: correlationId,
-        p_idempotency_key: `onboarding.payment:${sale.id}`,
+        p_correlation_id: sale.correlation_id ?? sale.id,
+        p_idempotency_key: `onboarding.confirmed:${sale.id}`,
     })
-    if (!error && data && typeof data === "object") {
-        const result = data as Record<string, unknown>
-        const sessionId = typeof result.session_id === "string" ? result.session_id : null
-        const sessionToken = typeof result.session_token === "string" ? result.session_token : null
-        const relationshipId = typeof result.relationship_id === "string" ? result.relationship_id : sale.relationship_id
-        if (!sessionId || !sessionToken || !relationshipId) throw new Error("Paid onboarding session RPC returned an incomplete result")
-        return { sessionId, sessionToken, relationshipId, created: result.created === true }
+    if (error) {
+        if (isMissingPaidSessionRpc(error)) {
+            throw new Error("The onboarding payment gate migration is not applied yet")
+        }
+        throw new Error(error.message)
     }
-    if (!isMissingPaidSessionRpc(error)) throw new Error(error?.message ?? "Could not create paid onboarding session")
-    if (sale.checkout_flow === "onboarding_payment_gate") {
-        throw new Error("The onboarding payment gate migration is not applied yet")
+    if (!data || typeof data !== "object") {
+        throw new Error("Confirmed onboarding session RPC returned an incomplete result")
     }
-
-    // Compatibility for deployments where the new migration has not reached
-    // the database yet. A frozen sale stays on the versioned definition even
-    // if the global runtime mode is rolled back after the invoice was sent.
-    return createCompatibilityOnboardingSession(sale, "versioned")
-}
-
-async function createCompatibilityOnboardingSession(
-    sale: ClientSale,
-    compositionSource: "versioned" | "legacy"
-) {
-    if (!sale.relationship_id) throw new Error("Paid sale has no relationship")
-    const { data: workspace } = await supabaseAdmin.from("workspaces").select("slug").eq("id", sale.workspace_id).single()
-    if (!workspace) throw new Error("Paid sale workspace was not found")
-    const legacy = await createRelationshipOnboardingSession({
-        workspaceId: sale.workspace_id,
-        workspaceSlug: workspace.slug,
-        relationshipId: sale.relationship_id,
-        serviceKeys: asStringArray(sale.service_keys),
-        projectTimeframeDays: sale.project_timeframe_days,
-        createdBy: sale.created_by,
-        sourceSaleId: sale.id,
-        compositionSource,
-    })
-    return { sessionId: legacy.id, sessionToken: legacy.sessionToken, relationshipId: legacy.relationshipId, created: legacy.created }
-}
-
-async function loadSaleForPaidInvoice(expectedWorkspaceId: string, saleId: string | null, invoiceId: string | null) {
-    let snapshotQuery = supabaseAdmin.from("client_sales")
-        .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, checkout_flow, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at, billing_model, stripe_invoice_id, stripe_subscription_id, stripe_subscription_status, initial_payment_received_at, latest_payment_at, latest_invoice_id, latest_invoice_status")
-        .eq("workspace_id", expectedWorkspaceId)
-        .limit(1)
-    snapshotQuery = saleId ? snapshotQuery.eq("id", saleId) : snapshotQuery.eq("stripe_invoice_id", invoiceId!)
-    const snapshotResult = await snapshotQuery
-    if (!snapshotResult.error) return snapshotResult.data?.[0] as ClientSale | undefined
-    if (snapshotResult.error.code !== "42703" && !snapshotResult.error.message.toLowerCase().includes("schema cache")) throw new Error(snapshotResult.error.message)
-    let legacyQuery = supabaseAdmin.from("client_sales")
-        .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by")
-        .eq("workspace_id", expectedWorkspaceId)
-        .limit(1)
-    legacyQuery = saleId ? legacyQuery.eq("id", saleId) : legacyQuery.eq("stripe_invoice_id", invoiceId!)
-    const legacyResult = await legacyQuery
-    if (legacyResult.error) throw new Error(legacyResult.error.message)
-    return legacyResult.data?.[0] as ClientSale | undefined
+    const result = data as Record<string, unknown>
+    const sessionId = typeof result.session_id === "string" ? result.session_id : null
+    const sessionToken = typeof result.session_token === "string" ? result.session_token : null
+    const relationshipId =
+        typeof result.relationship_id === "string" ? result.relationship_id : sale.relationship_id
+    if (!sessionId || !sessionToken || !relationshipId) {
+        throw new Error("Confirmed onboarding session RPC returned an incomplete result")
+    }
+    return { sessionId, sessionToken, relationshipId, created: result.created === true }
 }
 
 function getWhatsAppMessageId(response: unknown) {
@@ -326,13 +227,13 @@ async function reportSaleAutomationFailure(sale: Pick<ClientSale, "id" | "worksp
 export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceId: string) {
     const { data: sale } = await supabaseAdmin
         .from("client_sales")
-        .select("id, client_phone, status, consent_template_sent_at, raw_payload, checkout_flow, workspace_id, relationship_id, client_id, updated_at")
+        .select("id, client_phone, status, consent_template_sent_at, raw_payload, workspace_id, relationship_id, client_id, updated_at")
         .eq("id", saleId)
         .eq("workspace_id", expectedWorkspaceId)
         .single()
 
     if (!sale) return { ok: false, error: "Sale not found" }
-    const flow = getSaleFlow(sale.raw_payload, sale.checkout_flow)
+    const flow = getSaleFlow(sale.raw_payload)
     const sendingStatus = getConsentStatus(flow, "sending")
     const awaitingStatus = getConsentStatus(flow, "awaiting")
     const failedStatus = getConsentStatus(flow, "failed")
@@ -613,149 +514,6 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
     }
 }
 
-export async function handlePaidStripeInvoice(invoice: StripeInvoiceLike, expectedWorkspaceId: string) {
-    const invoiceId = typeof invoice.id === "string" ? invoice.id : null
-    const saleId = stripeInvoiceSaleId(invoice)
-
-    if (!saleId && !invoiceId) {
-        return { ok: true, skipped: true, reason: "not_betelgeze_invoice" as const }
-    }
-
-    let sale: ClientSale | undefined
-    try {
-        sale = await loadSaleForPaidInvoice(expectedWorkspaceId, saleId, invoiceId)
-    } catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : "Could not load sale" }
-    }
-
-    if (!sale) {
-        // A shared Stripe account can receive payments for invoices created
-        // outside Betelgeze. Only a Betelgeze sale reference should turn a
-        // missing sale into an automation failure; an unrelated invoice is a
-        // successful no-op.
-        return saleId
-            ? { ok: false, error: "Betelgeze invoice references an unknown sale" }
-            : { ok: true, skipped: true, reason: "not_betelgeze_invoice" as const }
-    }
-
-    const paidAt = new Date().toISOString()
-    const subscriptionId = stripeInvoiceSubscriptionId(invoice)
-    const invoiceStatus = typeof invoice.status === "string" ? invoice.status : "paid"
-    const isRecurring = sale.billing_model === "recurring"
-    const isLaterRenewal = isRecurring && Boolean(sale.initial_payment_received_at && sale.latest_invoice_id) && sale.latest_invoice_id !== invoiceId
-    if (isLaterRenewal) {
-        const { error: renewalError } = await supabaseAdmin.from("client_sales").update({
-            stripe_subscription_id: subscriptionId ?? sale.stripe_subscription_id ?? null,
-            stripe_subscription_status: "active",
-            latest_payment_at: paidAt,
-            latest_invoice_id: invoiceId,
-            latest_invoice_status: invoiceStatus,
-            raw_payload: invoice,
-            updated_at: paidAt,
-        }).eq("id", sale.id).eq("workspace_id", expectedWorkspaceId)
-        if (renewalError) return { ok: false, error: renewalError.message }
-        await recordAdminActivity({
-            workspaceId: expectedWorkspaceId,
-            category: "billing",
-            eventKey: "stripe.subscription.renewal_paid",
-            summary: "Recurring retainer renewal paid",
-            entityType: "stripe_subscription",
-            entityId: subscriptionId ?? sale.stripe_subscription_id ?? sale.id,
-            actorKind: "automation",
-            correlationId: sale.correlation_id ?? sale.id,
-            idempotencyKey: `stripe.subscription.renewal_paid:${invoiceId ?? paidAt}`,
-            outcome: "succeeded",
-            metadata: { sale_id: sale.id, relationship_id: sale.relationship_id, invoice_id: invoiceId },
-        })
-        return { ok: true, skipped: true, renewal: true, correlationId: sale.correlation_id ?? sale.id }
-    }
-
-    // Stripe commonly delivers invoice.paid and invoice.payment_succeeded at
-    // nearly the same time. Claim the pre-payment state atomically so the
-    // second event cannot reset consent_template_sending back to paid.
-    const { data: claimedPaidSale, error: claimPaidError } = await supabaseAdmin
-        .from("client_sales")
-        .update({
-            status: "paid",
-            stripe_invoice_id: invoiceId,
-            stripe_invoice_status: invoiceStatus,
-            stripe_customer_id:
-                typeof invoice.customer === "string" ? invoice.customer : null,
-            stripe_hosted_invoice_url:
-                typeof invoice.hosted_invoice_url === "string"
-                    ? invoice.hosted_invoice_url
-                    : null,
-            stripe_invoice_pdf:
-                typeof invoice.invoice_pdf === "string"
-                    ? invoice.invoice_pdf
-                    : null,
-            ...(isRecurring ? {
-                stripe_subscription_id: subscriptionId,
-                stripe_subscription_status: "active",
-                initial_payment_received_at: sale.initial_payment_received_at ?? paidAt,
-                latest_payment_at: paidAt,
-                latest_invoice_id: invoiceId,
-                latest_invoice_status: invoiceStatus,
-            } : {}),
-            raw_payload: invoice,
-            updated_at: paidAt,
-        })
-        .eq("id", sale.id)
-        .eq("workspace_id", expectedWorkspaceId)
-        .in("status", sale.checkout_flow === "onboarding_payment_gate"
-            ? ["onboarding_payment_pending", "onboarding_link_sent", "onboarding_link_failed", "payment_failed"]
-            : ["invoice_sent", "payment_failed"])
-        .select("id")
-        .maybeSingle()
-
-    if (claimPaidError) {
-        return { ok: false, error: claimPaidError.message }
-    }
-
-    const resumableStatuses = new Set([
-        "paid",
-        "paid_consent_template_failed",
-        "onboarding_link_failed",
-        ...CONSENT_TEMPLATE_SENDING_STATUSES,
-        ...CONSENT_TEMPLATE_TERMINAL_STATUSES,
-    ])
-    if (sale.checkout_flow === "onboarding_payment_gate") {
-        if (!claimedPaidSale && sale.status !== "paid") return { ok: true, skipped: true, correlationId: sale.correlation_id ?? sale.id }
-        let onboardingSession: Awaited<ReturnType<typeof ensurePaidOnboardingSession>>
-        try {
-            onboardingSession = await ensurePaidOnboardingSession({ ...sale, status: "paid" })
-            await activateRelationshipOnboardingAfterPayment({ workspaceId: sale.workspace_id, relationshipId: onboardingSession.relationshipId })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "Could not unlock onboarding after payment"
-            await reportSaleAutomationFailure(sale, "unlock_onboarding_after_payment", message)
-            return { ok: false, error: message }
-        }
-        return { ok: true, onboardingSessionId: onboardingSession.sessionId, sessionCreated: onboardingSession.created, correlationId: sale.correlation_id ?? sale.id }
-    }
-    if (!claimedPaidSale && !resumableStatuses.has(sale.status)) return { ok: true, skipped: true, correlationId: sale.correlation_id ?? sale.id }
-
-    let onboardingSession: Awaited<ReturnType<typeof ensurePaidOnboardingSession>>
-    try {
-        onboardingSession = await ensurePaidOnboardingSession(sale)
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "Could not create paid onboarding session"
-        await reportSaleAutomationFailure(sale, "create_paid_onboarding_session", message)
-        return { ok: false, error: message }
-    }
-
-    if (onboardingSession.relationshipId) {
-        await completePaymentStage({ workspaceId: sale.workspace_id, relationshipId: onboardingSession.relationshipId })
-    }
-
-    const consent = await sendSaleConsentTemplate(sale.id, sale.workspace_id)
-    return {
-        ...consent,
-        onboardingSessionId: onboardingSession.sessionId,
-        sessionCreated: onboardingSession.created,
-        correlationId: sale.correlation_id ?? sale.id,
-    }
-}
-
 export async function handleCompletedStripeCheckout(checkout: StripeCheckoutLike, expectedWorkspaceId: string) {
     const saleId = typeof checkout.metadata?.client_sale_id === "string" ? checkout.metadata.client_sale_id : null
     if (!saleId) return { ok: true, skipped: true, reason: "not_betelgeze_checkout" as const }
@@ -763,10 +521,10 @@ export async function handleCompletedStripeCheckout(checkout: StripeCheckoutLike
         return { ok: true, skipped: true, reason: "payment_pending" as const }
     }
     const { data: sale, error } = await supabaseAdmin.from("client_sales")
-        .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, checkout_flow, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at, billing_model, stripe_subscription_id")
+        .select("id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at, stripe_subscription_id")
         .eq("workspace_id", expectedWorkspaceId).eq("id", saleId).maybeSingle()
     if (error) return { ok: false, error: error.message }
-    if (!sale || sale.checkout_flow !== "onboarding_payment_gate") return { ok: true, skipped: true, reason: "legacy_checkout" as const }
+    if (!sale) return { ok: false, error: "Betelgeze Checkout references an unknown sale" }
     const paidAt = new Date().toISOString()
     const objectId = (value: unknown) => typeof value === "string" ? value : null
     const { data: claimed, error: claimError } = await supabaseAdmin.from("client_sales").update({
@@ -776,8 +534,7 @@ export async function handleCompletedStripeCheckout(checkout: StripeCheckoutLike
         stripe_customer_id: objectId(checkout.customer),
         stripe_subscription_id: objectId(checkout.subscription),
         stripe_subscription_status: objectId(checkout.subscription) ? "active" : null,
-        stripe_invoice_id: objectId(checkout.invoice),
-        initial_payment_received_at: sale.billing_model === "recurring" ? paidAt : null,
+        initial_payment_received_at: paidAt,
         latest_payment_at: paidAt,
         latest_invoice_id: objectId(checkout.invoice),
         latest_invoice_status: "paid",
@@ -820,7 +577,7 @@ async function findPendingConfirmedSale(fromAddress: string, workspaceId: string
     const snapshotResult = await supabaseAdmin
         .from("client_sales")
         .select(
-            "id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, checkout_flow, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at"
+            "id, client_id, relationship_id, client_name, client_email, client_phone, service_keys, project_timeframe_days, status, raw_payload, workspace_id, created_by, correlation_id, onboarding_session_id, snapshot_frozen_at"
         )
         .eq("workspace_id", workspaceId)
         .in("client_phone", equivalentAddresses)
@@ -987,7 +744,7 @@ export async function handleSaleConsentConfirmation({
 
     if (!sale) return { handled: false }
 
-    const flow = getSaleFlow(sale.raw_payload, sale.checkout_flow)
+    const flow = getSaleFlow(sale.raw_payload)
     if (flow === "onboarding_payment_gate" && sale.status === "paid") {
         return { handled: true, ok: true, skipped: true }
     }
@@ -1170,7 +927,7 @@ export async function handleSaleConsentConfirmation({
         status: "whatsapp_consent_confirmed",
         raw_payload: rawPayload,
     })
-    if (inboundMessageError && flow === "paid") {
+    if (inboundMessageError && flow !== "manual_migration") {
         await reportSaleAutomationFailure(sale, "record_consent_message", inboundMessageError.message)
         return { handled: true, ok: false, error: inboundMessageError.message }
     }

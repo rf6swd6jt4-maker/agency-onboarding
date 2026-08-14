@@ -25,12 +25,14 @@ type DealService = {
     checkoutDisplayName: string
     checkoutDescription: string
     thumbnailUrl: string | null
-    defaultPriceCents: number
+    defaultUpfrontPriceCents: number
+    defaultRecurringPriceCents: number
     currency: string
     isTest: boolean
     revisionNumber: number | null
     selected: boolean
-    selectedPriceCents: number
+    selectedUpfrontPriceCents: number
+    selectedRecurringPriceCents: number
     selectedCurrency: string
     selectedAssigneeId: string | null
     moduleIds: string[]
@@ -51,9 +53,9 @@ type RelationshipDetails = {
 type CurrentWork = { id: string; title: string; action: string | null; role: string; status: string; unassignedCount: number; blocked: boolean }
 type Draft = Omit<RelationshipDetails, "lifecyclePhase"> & {
     selectedCodes: string[]
-    prices: Record<string, number>
+    upfrontPrices: Record<string, number>
+    recurringPrices: Record<string, number>
     currency: string
-    billingModel: "one_off" | "recurring"
     billingInterval: "week" | "month" | "year"
     billingIntervalCount: number
 }
@@ -99,9 +101,9 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
         projectTimeframeDays: details.projectTimeframeDays,
         description: details.description,
         selectedCodes: selected.map((service) => service.code),
-        prices: Object.fromEntries(services.map((service) => [service.code, service.selected ? service.selectedPriceCents : service.defaultPriceCents])),
+        upfrontPrices: Object.fromEntries(services.map((service) => [service.code, service.selected ? service.selectedUpfrontPriceCents : service.defaultUpfrontPriceCents])),
+        recurringPrices: Object.fromEntries(services.map((service) => [service.code, service.selected ? service.selectedRecurringPriceCents : service.defaultRecurringPriceCents])),
         currency: selected[0]?.selectedCurrency ?? services[0]?.currency ?? "USD",
-        billingModel: "one_off",
         billingInterval: "month",
         billingIntervalCount: 1,
     }
@@ -176,10 +178,12 @@ export function RelationshipDealWorkspace({
     ].filter((issue): issue is string => Boolean(issue))
     const pricingIssues = [
         /^[A-Z]{3}$/.test(draft.currency.toUpperCase()) ? null : "Use a three-letter currency code",
-        draft.billingModel === "recurring" && (draft.billingIntervalCount < 1 || draft.billingIntervalCount > intervalCountMaximum(draft.billingInterval)) ? `Use a recurring interval between 1 and ${intervalCountMaximum(draft.billingInterval)}` : null,
-        ...selectedServices.flatMap((service) => (draft.prices[service.code] ?? 0) > 0 ? [] : [`Add a positive price for ${service.name}`]),
+        selectedServices.some((service) => (draft.recurringPrices[service.code] ?? 0) > 0) && (draft.billingIntervalCount < 1 || draft.billingIntervalCount > intervalCountMaximum(draft.billingInterval)) ? `Use a recurring interval between 1 and ${intervalCountMaximum(draft.billingInterval)}` : null,
+        ...selectedServices.flatMap((service) => (draft.upfrontPrices[service.code] ?? 0) > 0 || (draft.recurringPrices[service.code] ?? 0) > 0 ? [] : [`Add an upfront or recurring price for ${service.name}`]),
     ].filter((issue): issue is string => Boolean(issue))
-    const totalCents = selectedServices.reduce((total, service) => total + (draft.prices[service.code] ?? 0), 0)
+    const upfrontTotalCents = selectedServices.reduce((total, service) => total + (draft.upfrontPrices[service.code] ?? 0), 0)
+    const recurringTotalCents = selectedServices.reduce((total, service) => total + (draft.recurringPrices[service.code] ?? 0), 0)
+    const dueTodayCents = upfrontTotalCents + recurringTotalCents
 
     useEffect(() => {
         if (!notice) return
@@ -216,7 +220,8 @@ export function RelationshipDealWorkspace({
                 code: service.code,
                 serviceId: service.serviceId,
                 revisionId: service.revisionId,
-                priceCents: Math.max(0, Math.round(draft.prices[service.code] ?? 0)),
+                upfrontPriceCents: Math.max(0, Math.round(draft.upfrontPrices[service.code] ?? 0)),
+                recurringPriceCents: Math.max(0, Math.round(draft.recurringPrices[service.code] ?? 0)),
                 currency: draft.currency.toUpperCase(),
                 assigneeUserId: service.selectedAssigneeId,
             })),
@@ -251,7 +256,7 @@ export function RelationshipDealWorkspace({
     }
 
     function invoiceClient() {
-        if (!currentWork || !["sell_client", "send_invoice"].includes(currentWork.action ?? "")) {
+        if (!currentWork || currentWork.action !== "sell_client") {
             setError("This relationship is no longer waiting to be sold. Reload and review its current stage.")
             return
         }
@@ -263,7 +268,6 @@ export function RelationshipDealWorkspace({
             void (async () => {
                 if (!await saveDetails()) return
                 const outcome = await proceedRelationshipCurrentWork(workspaceSlug, relationshipId, currentWork.id, {
-                    billingModel: draft.billingModel,
                     billingInterval: draft.billingInterval,
                     billingIntervalCount: draft.billingIntervalCount,
                 })
@@ -309,7 +313,7 @@ export function RelationshipDealWorkspace({
     const modal = invoiceOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 text-white backdrop-blur-sm">
         <section role="dialog" aria-modal="true" aria-labelledby="invoice-review-title" className="flex max-h-[min(92dvh,56rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <header className="shrink-0 border-b border-neutral-800 px-4 py-4 sm:px-6">
-                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">Sell client</p><h2 id="invoice-review-title" className="mt-1 text-xl font-semibold">{invoiceStep === 0 ? "Review Relationship Information" : invoiceStep === 1 ? "Review Onboarding" : "Pricing"}</h2><p className="mt-1 text-sm text-neutral-500">{invoiceStep === 0 ? "Double-check the client's details and the services they are buying." : invoiceStep === 1 ? "Confirm the published onboarding this client will receive." : "Choose one-off or recurring payment and review the agreed prices."}</p></div><button type="button" aria-label="Close sale review" onClick={() => { setInvoiceOpen(false); setError(null) }} className="text-neutral-500 hover:text-white">✕</button></div>
+                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">Sell client</p><h2 id="invoice-review-title" className="mt-1 text-xl font-semibold">{invoiceStep === 0 ? "Review Relationship Information" : invoiceStep === 1 ? "Review Onboarding" : "Pricing"}</h2><p className="mt-1 text-sm text-neutral-500">{invoiceStep === 0 ? "Double-check the client's details and the services they are buying." : invoiceStep === 1 ? "Confirm the published onboarding this client will receive." : "Review each service's upfront and ongoing charges."}</p></div><button type="button" aria-label="Close sale review" onClick={() => { setInvoiceOpen(false); setError(null) }} className="text-neutral-500 hover:text-white">✕</button></div>
                 <div className="mt-4 grid grid-cols-3 gap-2" aria-label={`Step ${invoiceStep + 1} of 3`}>{["Relationship", "Onboarding", "Pricing"].map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= invoiceStep ? "bg-white" : "bg-neutral-800"}`} /><p className={`mt-1.5 text-[11px] ${index === invoiceStep ? "text-white" : "text-neutral-600"}`}>{index + 1}. {label}</p></div>)}</div>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
@@ -328,30 +332,21 @@ export function RelationshipDealWorkspace({
                 </div> : null}
                 {invoiceStep === 1 ? <div className="space-y-3">{onboardingIssues.length ? <div className="rounded-lg border border-amber-500/25 bg-amber-950/15 px-3 py-2.5 text-xs leading-5 text-amber-200">{onboardingIssues.map((issue) => <p key={issue}>{issue}</p>)}</div> : null}<div className="flex flex-wrap gap-1.5">{assignedModules.map((module) => <RoundPill key={module.id} tone="sky">{module.name}</RoundPill>)}</div><div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{assignedModules.map((module) => <div key={module.id} className="flex items-center gap-3 px-3 py-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-neutral-100">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} step{module.steps.length === 1 ? "" : "s"}{module.mandatory ? " · mandatory" : " · selected service"}</p></div><button type="button" onClick={() => setPreviewModule(module)} className="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-neutral-500">Preview</button></div>)}</div></div> : null}
                 {invoiceStep === 2 ? <div className="space-y-4">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                        <button type="button" onClick={() => update("billingModel", "one_off")} className={`rounded-xl border p-3 text-left transition ${draft.billingModel === "one_off" ? "border-sky-400/60 bg-sky-500/10" : "border-neutral-800 bg-black hover:border-neutral-700"}`}>
-                            <span className="block text-sm font-medium text-neutral-100">One-off payment</span>
-                            <span className="mt-1 block text-xs leading-5 text-neutral-500">The onboarding Pay button opens Stripe Checkout for one payment.</span>
-                        </button>
-                        <button type="button" onClick={() => update("billingModel", "recurring")} className={`rounded-xl border p-3 text-left transition ${draft.billingModel === "recurring" ? "border-teal-400/60 bg-teal-500/10" : "border-neutral-800 bg-black hover:border-neutral-700"}`}>
-                            <span className="block text-sm font-medium text-neutral-100">Recurring retainer</span>
-                            <span className="mt-1 block text-xs leading-5 text-neutral-500">The same hosted Checkout collects the first payment, then Stripe charges the saved method on schedule.</span>
-                        </button>
-                    </div>
                     <div className="flex flex-col justify-between gap-3 rounded-xl border border-neutral-800 bg-black p-3 sm:flex-row sm:items-end">
                         <label className="text-xs text-neutral-500">Currency<input value={draft.currency} onChange={(event) => update("currency", event.target.value.toUpperCase().slice(0, 3))} maxLength={3} className="mt-1.5 h-9 w-24 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm uppercase text-white" /></label>
-                        {draft.billingModel === "recurring" ? <div className="flex gap-2">
+                        {recurringTotalCents > 0 ? <div className="flex gap-2">
                             <label className="text-xs text-neutral-500">Repeat every<input type="number" min="1" max={intervalCountMaximum(draft.billingInterval)} value={draft.billingIntervalCount} onChange={(event) => update("billingIntervalCount", Math.max(1, Math.min(intervalCountMaximum(draft.billingInterval), Math.round(Number(event.target.value) || 1))))} className="mt-1.5 h-9 w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
                             <label className="text-xs text-neutral-500">Period<select value={draft.billingInterval} onChange={(event) => { const interval = event.target.value as Draft["billingInterval"]; setDraft((current) => ({ ...current, billingInterval: interval, billingIntervalCount: Math.min(current.billingIntervalCount, intervalCountMaximum(interval)) })) }} className="mt-1.5 h-9 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white"><option value="week">Week(s)</option><option value="month">Month(s)</option><option value="year">Year(s)</option></select></label>
-                        </div> : <p className="max-w-md text-xs leading-5 text-neutral-600">Payment is due once through the required first onboarding step.</p>}
+                        </div> : <p className="max-w-md text-xs leading-5 text-neutral-600">No recurring charges are currently included. Checkout will collect the upfront total once.</p>}
                     </div>
-                    <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className="grid gap-3 px-3 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_9rem] sm:items-center">
+                    <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className="grid gap-3 px-3 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_8rem] sm:items-center">
                         <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={48} height={48} unoptimized className="h-full w-full object-cover" /> : "Service"}</div>
-                        <div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-100">{service.checkoutDisplayName || service.name}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">{service.checkoutDescription || service.description || `Default ${priceLabel(service.defaultPriceCents, draft.currency)}`}</p></div>
-                        <label className="text-xs text-neutral-500">Price<input type="number" min="0" step="0.01" value={(draft.prices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, prices: { ...current.prices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
-                        <p className="text-right text-sm font-medium text-neutral-200">{priceLabel(draft.prices[service.code] ?? 0, draft.currency)}{draft.billingModel === "recurring" ? <span className="mt-0.5 block text-[10px] font-normal text-neutral-600">each period</span> : null}</p>
+                        <div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-100">{service.checkoutDisplayName || service.name}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">{service.checkoutDescription || service.description || "Client-facing service"}</p></div>
+                        <label className="text-xs text-neutral-500">Upfront<input type="number" min="0" step="0.01" value={(draft.upfrontPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, upfrontPrices: { ...current.upfrontPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
+                        <label className="text-xs text-neutral-500">Recurring<input type="number" min="0" step="0.01" value={(draft.recurringPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, recurringPrices: { ...current.recurringPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
                     </div>)}</div>
-                    <div className="flex items-end justify-between gap-4 border-t border-neutral-800 pt-4"><div><p className="text-xs text-neutral-500">{draft.billingModel === "recurring" ? "Retainer total per period" : "Payment total"}</p><p className="mt-1 text-2xl font-semibold">{priceLabel(totalCents, draft.currency)}</p></div><p className="max-w-sm text-right text-xs leading-5 text-neutral-600">Sending the WhatsApp confirmation freezes these services, prices and the onboarding shown in the previous step.</p></div>
+                    <div className="grid gap-3 border-t border-neutral-800 pt-4 sm:grid-cols-3"><div><p className="text-xs text-neutral-500">Upfront fees</p><p className="mt-1 text-lg font-semibold">{priceLabel(upfrontTotalCents, draft.currency)}</p></div><div><p className="text-xs text-neutral-500">Recurring total</p><p className="mt-1 text-lg font-semibold">{priceLabel(recurringTotalCents, draft.currency)}</p></div><div className="sm:text-right"><p className="text-xs text-neutral-500">Due at Checkout</p><p className="mt-1 text-2xl font-semibold">{priceLabel(dueTodayCents, draft.currency)}</p></div></div>
+                    <p className="text-right text-xs leading-5 text-neutral-600">Due at Checkout includes the upfront fees and the first recurring period. Sending the WhatsApp confirmation freezes these services, prices and onboarding.</p>
                 </div> : null}
                 {error ? <p role="alert" className="mt-4 rounded-lg border border-red-500/20 bg-red-950/20 px-3 py-2.5 text-sm text-red-300">{error}</p> : null}
             </div>

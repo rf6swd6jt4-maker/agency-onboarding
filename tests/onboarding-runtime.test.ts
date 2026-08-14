@@ -42,12 +42,12 @@ const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
 
 test("sale confirmation prepares the immutable session and payment reuses it before unlock", () => {
-    assert.match(saleAutomation, /sale\.checkout_flow === "onboarding_payment_gate" \? "prepare_confirmed_onboarding_session" : "create_paid_onboarding_session"/u)
+    assert.match(saleAutomation, /rpc\("prepare_confirmed_onboarding_session"/u)
     assert.match(saleAutomation, /sale\.onboarding_session_id/u)
     assert.match(saleAutomation, /relationship_onboarding_sessions/u)
-    assert.match(saleAutomation, /p_idempotency_key:\s*`onboarding\.payment:\$\{sale\.id\}`/u)
-    const handler = saleAutomation.slice(saleAutomation.indexOf("export async function handlePaidStripeInvoice"))
-    assert.ok(handler.indexOf("ensurePaidOnboardingSession(sale)") < handler.indexOf("sendSaleConsentTemplate(sale.id, sale.workspace_id)"))
+    assert.match(saleAutomation, /p_idempotency_key:\s*`onboarding\.confirmed:\$\{sale\.id\}`/u)
+    assert.match(saleAutomation, /handleCompletedStripeCheckout/u)
+    assert.match(saleAutomation, /activateRelationshipOnboardingAfterPayment/u)
 })
 
 test("confirmed sales expose one fixed Payment step that creates hosted Stripe Checkout before onboarding unlocks", () => {
@@ -61,8 +61,9 @@ test("confirmed sales expose one fixed Payment step that creates hosted Stripe C
     assert.match(onboardingBlocks, /bg-\[#635bff\]/u)
     assert.match(stripePaymentButton, /Pay with Stripe/u)
     assert.match(stripePaymentButton, /stripe-wordmark-white\.jpg/u)
-    assert.match(onboardingCheckout, /createStripePaymentCheckout/u)
-    assert.match(onboardingCheckout, /createStripeSubscriptionCheckout/u)
+    assert.match(onboardingCheckout, /createStripeMixedCheckout/u)
+    assert.match(onboardingCheckout, /billingComponent: "upfront"/u)
+    assert.match(onboardingCheckout, /billingComponent: "recurring"/u)
     assert.match(onboardingCheckout, /successUrl: `\$\{input\.origin\}\/api\/onboarding\/session\/\$\{input\.token\}\/payment-return/u)
     assert.match(onboardingCheckoutRoute, /new URL\(result\.checkoutUrl!\)/u)
     assert.match(onboardingCheckoutRoute, /Response\.redirect\(destination, 303\)/u)
@@ -82,18 +83,20 @@ test("confirmed sales expose one fixed Payment step that creates hosted Stripe C
 test("selling retries reuse the frozen sale and never duplicate an in-flight or sent WhatsApp confirmation", () => {
     assert.match(relationshipWorkflow, /"sold_confirmation_sending"/u)
     assert.match(relationshipWorkflow, /"sold_awaiting_whatsapp_confirm"/u)
-    assert.match(relationshipWorkflow, /const needsPreparation = \["draft", "sale_confirmation_pending", "sold_confirmation_failed"\]/u)
+    assert.match(relationshipWorkflow, /findResumableFrozenSale/u)
+    assert.match(relationshipWorkflow, /status: "sale_confirmation_pending"/u)
     assert.match(relationshipActions, /"inProgress" in consent && consent\.inProgress/u)
     assert.match(saleAutomation, /CONSENT_TEMPLATE_TERMINAL_STATUSES/u)
     assert.match(saleAutomation, /sale\.consent_template_sent_at/u)
-    assert.match(saleAutomation, /flow === "onboarding_payment_gate" && sale\.status === "paid"/u)
+    assert.match(saleAutomation, /sale\.status === "paid"/u)
     assert.match(saleAutomation, /"onboarding_payment_pending",\s*"onboarding_link_sent"/u)
 })
 
-test("invoice send freezes versioned configuration before the idempotent Stripe request", () => {
-    assert.match(relationshipWorkflow, /preflightRelationshipInvoice/u)
+test("selling freezes versioned configuration before Checkout can be created", () => {
+    assert.match(relationshipWorkflow, /preflightRelationshipSale/u)
     assert.match(relationshipWorkflow, /rpc\("freeze_client_sale_configuration"/u)
-    assert.ok(relationshipWorkflow.indexOf('rpc("freeze_client_sale_configuration"') < relationshipWorkflow.indexOf("createAndSendStripeInvoice({"))
+    assert.doesNotMatch(relationshipWorkflow, /createAndSendStripeInvoice|createStripeSubscriptionCheckout/u)
+    assert.match(onboardingCheckout, /createStripeMixedCheckout/u)
     assert.match(relationshipActions, /This sale is already frozen\. Create a replacement sale before changing services or negotiated prices/u)
 })
 
@@ -115,8 +118,8 @@ test("invoice snapshots and paid sessions use the published Builder module compo
 
 test("invoice preflight requires a verified connection without requiring the optional help action", () => {
     const preflight = relationshipWorkflow.slice(
-        relationshipWorkflow.indexOf("async function preflightRelationshipInvoice"),
-        relationshipWorkflow.indexOf("export async function sendRelationshipInvoice")
+        relationshipWorkflow.indexOf("async function preflightRelationshipSale"),
+        relationshipWorkflow.indexOf("export async function prepareRelationshipSale")
     )
     assert.match(preflight, /configuration\.help\.whatsappVerified/u)
     assert.doesNotMatch(preflight, /configuration\.help\.whatsappEnabled/u)
@@ -177,40 +180,28 @@ test("token rotation and revocation preserve sessions while invalidating old lin
     assert.match(tokenActions, /getOnboardingUrl\(/u)
 })
 
-test("duplicate paid Stripe events resume automation and record the eventual outcome", () => {
+test("duplicate Stripe billing events remain resumable and idempotent", () => {
     assert.match(stripeWebhook, /duplicateEvent && !isResumableAutomationEvent/u)
-    assert.match(stripeWebhook, /Paid invoice automation resumed and completed/u)
-    assert.match(stripeWebhook, /idempotencyKey:\s*`stripe\.invoice\.paid_processed:/u)
+    assert.match(stripeWebhook, /idempotencyKey:\s*`stripe\.subscription\.invoice_paid:/u)
 })
 
-test("paid Stripe events ignore invoices that were not created by Betelgeze", () => {
-    const paidHandler = saleAutomation.slice(saleAutomation.indexOf("export async function handlePaidStripeInvoice"))
-    assert.match(paidHandler, /return saleId[\s\S]{0,180}Betelgeze invoice references an unknown sale[\s\S]{0,180}reason: "not_betelgeze_invoice"/u)
-    assert.match(stripeWebhook, /result\.reason === "not_betelgeze_invoice"/u)
+test("paid Stripe events ignore invoices without Betelgeze ownership metadata", () => {
+    assert.match(stripeWebhook, /if \(!saleId\)/u)
     assert.match(stripeWebhook, /eventKey: "stripe\.invoice\.paid_ignored"/u)
     assert.match(stripeWebhook, /return Response\.json\(\{ ok: true, ignored: true/u)
 })
 
-test("Stripe invoice automation remains inside the verified workspace", () => {
-    assert.match(stripeWebhook, /handlePaidStripeInvoice\(invoice, workspaceId\)/u)
-    assert.match(stripeWebhook, /\.eq\("stripe_invoice_id", invoiceId\)[\s\S]{0,120}\.eq\("workspace_id", workspaceId\)/u)
-    const paidLoader = saleAutomation.slice(
-        saleAutomation.indexOf("async function loadSaleForPaidInvoice"),
-        saleAutomation.indexOf("function getWhatsAppMessageId")
-    )
-    assert.match(paidLoader, /\.eq\("workspace_id", expectedWorkspaceId\)/u)
-    const paidHandler = saleAutomation.slice(saleAutomation.indexOf("export async function handlePaidStripeInvoice"))
-    assert.match(paidHandler, /loadSaleForPaidInvoice\(expectedWorkspaceId, saleId, invoiceId\)/u)
-    assert.match(paidHandler, /\.eq\("id", sale\.id\)[\s\S]{0,120}\.eq\("workspace_id", expectedWorkspaceId\)/u)
-    assert.match(stripeWebhook, /rpc\("record_stripe_invoice_status_event"/u)
-    assert.match(onboardingOperations, /create or replace function public\.record_stripe_invoice_status_event/u)
-    assert.match(onboardingOperations, /record_stripe_invoice_status_event[\s\S]+record_workspace_admin_activity/u)
+test("Stripe billing automation remains inside the verified workspace", () => {
+    assert.match(stripeWebhook, /sale\.workspace_id !== connectedWorkspaceId/u)
+    assert.match(stripeWebhook, /\.eq\("id", saleId\)\.eq\("workspace_id", workspaceId\)/u)
+    assert.match(stripeWebhook, /handleCompletedStripeCheckout\(checkout, workspaceId\)/u)
+    assert.doesNotMatch(stripeWebhook, /record_stripe_invoice_status_event/u)
 })
 
 test("stale consent claims reconcile safely without blind WhatsApp retries", () => {
     const consent = saleAutomation.slice(
         saleAutomation.indexOf("export async function sendSaleConsentTemplate"),
-        saleAutomation.indexOf("export async function handlePaidStripeInvoice")
+        saleAutomation.indexOf("export async function handleCompletedStripeCheckout")
     )
     assert.match(consent, /CONSENT_TEMPLATE_CLAIM_TIMEOUT_MS/u)
     assert.match(consent, /\.contains\("raw_payload", \{ client_sale_id: saleId \}\)/u)
@@ -222,13 +213,14 @@ test("stale consent claims reconcile safely without blind WhatsApp retries", () 
     assert.match(consent, /verify_consent_claim/u)
 })
 
-test("runtime modes preserve Settings authoring and truthful legacy composition order", () => {
+test("runtime modes preserve Settings authoring while confirmed sales always use the frozen Builder session", () => {
     assert.match(runtimeMode, /if \(!normalized \|\| normalized === "versioned"\) return "versioned"/u)
     assert.match(runtimeMode, /normalized === "shadow" \|\| normalized === "legacy"/u)
     assert.match(runtimeMode, /ONBOARDING_RUNTIME_MODE must be versioned, shadow, or legacy/u)
     assert.match(runtimeMode, /displayPriority: identity === "legacy"[\s\S]{0,120}selectedServices\.length - index/u)
     assert.match(canonical, /compositionSource[\s\S]{0,120}\? compositionSource === "legacy"[\s\S]{0,120}: getOnboardingRuntimeMode\(\) !== "versioned"/u)
-    assert.match(saleAutomation, /serviceKeys: asStringArray\(sale\.service_keys\),/u)
+    assert.match(saleAutomation, /rpc\("prepare_confirmed_onboarding_session"/u)
+    assert.doesNotMatch(saleAutomation, /createCompatibilityOnboardingSession/u)
 })
 
 test("durable onboarding outbox claims, crash-recovers, and finishes delivery and cleanup independently", () => {

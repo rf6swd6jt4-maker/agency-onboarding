@@ -80,7 +80,8 @@ export type OnboardingServiceDefinition = {
     state: OnboardingServiceState
     version: number
     isTest: boolean
-    defaultPriceCents: number
+    defaultUpfrontPriceCents: number
+    defaultRecurringPriceCents: number
     currency: string
     defaultAssigneeId: string | null
     displayPriority: number

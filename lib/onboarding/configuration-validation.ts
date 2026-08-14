@@ -135,8 +135,10 @@ export function normalizeServiceDefinition(input: unknown) {
     const value = input && typeof input === "object" ? input as Partial<OnboardingServiceDefinition> : {}
     const name = cleanText(value.name, 120)
     if (!name) return { ok: false as const, error: "Give this service a name before saving." }
-    const defaultPriceCents = Number(value.defaultPriceCents)
-    if (!Number.isSafeInteger(defaultPriceCents) || defaultPriceCents < 0) return { ok: false as const, error: "Enter a valid default price." }
+    const defaultUpfrontPriceCents = Number(value.defaultUpfrontPriceCents)
+    const defaultRecurringPriceCents = Number(value.defaultRecurringPriceCents)
+    if (!Number.isSafeInteger(defaultUpfrontPriceCents) || defaultUpfrontPriceCents < 0) return { ok: false as const, error: "Enter a valid default upfront price." }
+    if (!Number.isSafeInteger(defaultRecurringPriceCents) || defaultRecurringPriceCents < 0) return { ok: false as const, error: "Enter a valid default recurring price." }
     const currency = cleanText(value.currency, 3).toUpperCase()
     if (!/^[A-Z]{3}$/.test(currency)) return { ok: false as const, error: "Use a three-letter currency code, such as USD." }
     const moduleIds = (Array.isArray(value.modules) ? value.modules : []).map((module) => String(module.moduleId ?? "")).filter(Boolean)
@@ -149,7 +151,8 @@ export function normalizeServiceDefinition(input: unknown) {
             checkoutDisplayName: cleanText(value.checkoutDisplayName, 120),
             checkoutDescription: cleanText(value.checkoutDescription, 500),
             thumbnailPath: cleanText(value.thumbnailPath, 2_000) || null,
-            defaultPriceCents,
+            defaultUpfrontPriceCents,
+            defaultRecurringPriceCents,
             currency,
             defaultAssigneeUserId: cleanText(value.defaultAssigneeId, 120) || null,
             isTest: Boolean(value.isTest),

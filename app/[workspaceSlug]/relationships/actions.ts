@@ -1,6 +1,5 @@
 "use server"
 
-import { randomUUID } from "crypto"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { createOnboardingClient } from "@/lib/onboarding/client-creation"
@@ -16,10 +15,9 @@ import {
 } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
-import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, finalizeRelationshipSaleConfirmation, sendRelationshipInvoice } from "@/lib/relationship-workflow"
+import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, finalizeRelationshipSaleConfirmation, prepareRelationshipSale } from "@/lib/relationship-workflow"
 import { sendSaleConsentTemplate } from "@/lib/client-sales/automation"
-import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
-import { expireStripeCheckoutSession, voidStripeInvoice, type StripeRecurringInterval } from "@/lib/stripe/api"
+import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
 
 const creatablePhases = new Set<RelationshipPhase>([
@@ -57,7 +55,8 @@ export type RelationshipDealDetailsInput = {
         code: string
         serviceId: string | null
         revisionId: string | null
-        priceCents: number
+        upfrontPriceCents: number
+        recurringPriceCents: number
         currency: string
         assigneeUserId?: string | null
     }>
@@ -190,7 +189,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     if (includesRelationshipDetails && !primaryPersonName) throw new Error("Add the client's name before saving the relationship")
     const [{ data: relationship, error: relationshipError }, existingServicesResult, { data: frozenSales }, configuration] = await Promise.all([
         supabaseAdmin.from("relationships").select("lifecycle_phase, seller_user_id").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
-        supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId),
+        supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId),
         supabaseAdmin.from("client_sales").select("id, status").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId).in("status", [
             "invoice_sent", "payment_failed", "paid", "test_paid", "paid_consent_template_sending", "paid_awaiting_whatsapp_confirm",
             "paid_consent_template_failed", "whatsapp_confirmed", "onboarding_created", "onboarding_link_sent", "onboarding_link_failed",
@@ -201,23 +200,18 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     if (relationshipError || !relationship) throw new Error(relationshipError?.message ?? "Relationship not found")
     const canManageCommercialDetails = role === "owner" || role === "admin"
     if (!canManageCommercialDetails && relationship.seller_user_id !== user.id) {
-        throw new Error("Only this relationship's seller or a workspace admin can update its invoice details")
+        throw new Error("Only this relationship's seller or a workspace admin can update its commercial details")
     }
     if (!canManageCommercialDetails) sellerId = relationship.seller_user_id
-    let existingServices = existingServicesResult.data ?? []
-    if (existingServicesResult.error) {
-        if (existingServicesResult.error.code !== "42703" && !existingServicesResult.error.message.toLowerCase().includes("schema cache")) throw new Error(existingServicesResult.error.message)
-        const legacy = await supabaseAdmin.from("relationship_services")
-            .select("service_key, price_cents, currency, assignee_user_id")
-            .eq("workspace_id", workspace.id).eq("relationship_id", relationshipId)
-        if (legacy.error) throw new Error(legacy.error.message)
-        existingServices = (legacy.data ?? []).map((service) => ({ ...service, service_id: null, service_revision_id: null }))
-    }
+    if (existingServicesResult.error) throw new Error(existingServicesResult.error.message)
+    const existingServices = existingServicesResult.data ?? []
     const existingByKey = new Map((existingServices ?? []).map((service) => [service.service_key, service]))
     const catalogueByCode = new Map(configuration.services.map((service) => [service.code, service]))
-    const submittedPrices = new Map(serviceKeys.map((serviceKey) => [serviceKey, priceCents(formString(formData, `service_price_${serviceKey}`))]))
+    const submittedUpfrontPrices = new Map(serviceKeys.map((serviceKey) => [serviceKey, priceCents(formString(formData, `service_upfront_price_${serviceKey}`))]))
+    const submittedRecurringPrices = new Map(serviceKeys.map((serviceKey) => [serviceKey, priceCents(formString(formData, `service_recurring_price_${serviceKey}`))]))
     const submittedCurrencies = new Map(serviceKeys.map((serviceKey) => [serviceKey, currencyCode(formString(formData, `service_currency_${serviceKey}`) || catalogueByCode.get(serviceKey)?.currency || existingByKey.get(serviceKey)?.currency || "USD")]))
-    const existingPrices = new Map((existingServices ?? []).map((service) => [service.service_key, Number(service.price_cents) || 0]))
+    const existingUpfrontPrices = new Map(existingServices.map((service) => [service.service_key, Number(service.upfront_price_cents) || 0]))
+    const existingRecurringPrices = new Map(existingServices.map((service) => [service.service_key, Number(service.recurring_price_cents) || 0]))
     const existingCurrencies = new Map((existingServices ?? []).map((service) => [service.service_key, String(service.currency ?? "USD").toUpperCase()]))
     const serviceIdentityChanged = configuration.schemaReady && serviceKeys.some((serviceKey) => {
         const existing = existingByKey.get(serviceKey)
@@ -226,8 +220,9 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             existing?.service_id !== current.id || existing?.service_revision_id !== current.revisionId
         )
     })
-    const commercialChanged = serviceIdentityChanged || serviceKeys.length !== existingPrices.size || serviceKeys.some((serviceKey) => (
-        existingPrices.get(serviceKey) !== submittedPrices.get(serviceKey)
+    const commercialChanged = serviceIdentityChanged || serviceKeys.length !== existingUpfrontPrices.size || serviceKeys.some((serviceKey) => (
+        existingUpfrontPrices.get(serviceKey) !== submittedUpfrontPrices.get(serviceKey)
+        || existingRecurringPrices.get(serviceKey) !== submittedRecurringPrices.get(serviceKey)
         || existingCurrencies.get(serviceKey) !== submittedCurrencies.get(serviceKey)
     ))
     if (frozenSales?.length && commercialChanged) throw new Error("This sale is already frozen. Create a replacement sale before changing services or negotiated prices")
@@ -258,80 +253,39 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             workspace_id: workspace.id,
             relationship_id: relationshipId,
             service_key: serviceKey,
-            price_cents: submittedPrices.get(serviceKey) ?? 0,
+            upfront_price_cents: submittedUpfrontPrices.get(serviceKey) ?? 0,
+            recurring_price_cents: submittedRecurringPrices.get(serviceKey) ?? 0,
+            price_cents: (submittedUpfrontPrices.get(serviceKey) ?? 0) + (submittedRecurringPrices.get(serviceKey) ?? 0),
             currency: submittedCurrencies.get(serviceKey) ?? "USD",
             assignee_user_id: nullableFormString(formData, `service_assignee_${serviceKey}`) ?? existing?.assignee_user_id ?? service?.defaultAssigneeId ?? null,
             ...(configuration.schemaReady && serviceId && serviceRevisionId ? { service_id: serviceId, service_revision_id: serviceRevisionId } : {}),
         }
     })
-    let savedTransactionally = false
-    if (configuration.schemaReady) {
-        const { error: rpcError } = await supabaseAdmin.rpc("save_relationship_commercial_configuration", {
-            p_workspace_id: workspace.id,
-            p_actor_user_id: user.id,
-            p_relationship_id: relationshipId,
-            p_details: {
-                seller_user_id: sellerId,
-                fulfilment_manager_user_id: managerId,
-                whatsapp_phone: whatsappPhone,
-                project_timeframe_days: Number.isFinite(timeframe) && timeframe > 0 ? Math.round(timeframe) : null,
-            },
-            p_services: versionedRows.map((row) => ({
-                service_key: row.service_key,
-                service_id: "service_id" in row ? row.service_id : null,
-                service_revision_id: "service_revision_id" in row ? row.service_revision_id : null,
-                price_cents: row.price_cents,
-                currency: row.currency,
-                assignee_user_id: row.assignee_user_id,
-            })),
-        })
-        if (rpcError) {
-            const missingRpc = rpcError.code === "42883" || rpcError.code === "PGRST202" || rpcError.message.toLowerCase().includes("schema cache")
-            if (!missingRpc) throw new Error(rpcError.message)
-        } else {
-            savedTransactionally = true
-        }
-    }
-    if (!savedTransactionally) {
-        const { error } = await supabaseAdmin.from("relationships").update({
+    const { error: saveError } = await supabaseAdmin.rpc("save_relationship_dual_pricing_configuration", {
+        p_workspace_id: workspace.id,
+        p_actor_user_id: user.id,
+        p_relationship_id: relationshipId,
+        p_details: {
             seller_user_id: sellerId,
             fulfilment_manager_user_id: managerId,
             whatsapp_phone: whatsappPhone,
             project_timeframe_days: Number.isFinite(timeframe) && timeframe > 0 ? Math.round(timeframe) : null,
-            updated_at: new Date().toISOString(),
-        }).eq("workspace_id", workspace.id).eq("id", relationshipId)
-        if (error) throw new Error(error.message)
-        if (!frozenSales?.length) {
-            const { error: deleteError } = await supabaseAdmin.from("relationship_services").delete().eq("workspace_id", workspace.id).eq("relationship_id", relationshipId)
-            if (deleteError) throw new Error(deleteError.message)
-        }
-    }
-    if (!savedTransactionally && !frozenSales?.length && versionedRows.length) {
-        let { error: serviceError } = await supabaseAdmin.from("relationship_services").insert(versionedRows)
-        if (serviceError?.code === "42703") {
-            const legacyRows = versionedRows.map((row) => ({
-                workspace_id: row.workspace_id,
-                relationship_id: row.relationship_id,
-                service_key: row.service_key,
-                price_cents: row.price_cents,
-                currency: row.currency,
-                assignee_user_id: row.assignee_user_id,
-            }))
-            serviceError = (await supabaseAdmin.from("relationship_services").insert(legacyRows)).error
-        }
-        if (serviceError) throw new Error(serviceError.message)
-    }
-    if (includesRelationshipDetails) {
-        const { error: detailsError } = await supabaseAdmin.from("relationships").update({
-            primary_person_name: primaryPersonName,
-            business_name: businessName,
-            primary_contact_role: primaryContactRole,
-            primary_phone: primaryPhone,
-            primary_email: primaryEmail,
-            notes_summary: description,
-            updated_at: new Date().toISOString(),
-        }).eq("workspace_id", workspace.id).eq("id", relationshipId)
-        if (detailsError) throw new Error(detailsError.message)
+            ...(includesRelationshipDetails ? {
+                primary_person_name: primaryPersonName,
+                business_name: businessName,
+                primary_contact_role: primaryContactRole,
+                primary_phone: primaryPhone,
+                primary_email: primaryEmail,
+                description,
+            } : {}),
+        },
+        p_services: versionedRows,
+    })
+    if (saveError) {
+        const missingMigration = saveError.code === "42883" || saveError.code === "PGRST202"
+        throw new Error(missingMigration
+            ? "The dual-price sale migration is not applied yet"
+            : saveError.message)
     }
     if (relationship.lifecycle_phase === "potential_client") await ensureSalesStage({ workspaceId: workspace.id, relationshipId, sellerId })
     relationshipRevalidatePaths(slug, relationshipId)
@@ -351,7 +305,8 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
     formData.set("description", input.description)
     for (const service of input.services) {
         formData.append("service_key", service.code)
-        formData.set(`service_price_${service.code}`, (service.priceCents / 100).toFixed(2))
+        formData.set(`service_upfront_price_${service.code}`, (service.upfrontPriceCents / 100).toFixed(2))
+        formData.set(`service_recurring_price_${service.code}`, (service.recurringPriceCents / 100).toFixed(2))
         formData.set(`service_currency_${service.code}`, service.currency)
         if (service.serviceId) formData.set(`service_id_${service.code}`, service.serviceId)
         if (service.revisionId) formData.set(`service_revision_id_${service.code}`, service.revisionId)
@@ -369,87 +324,6 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
             ? message
             : "The relationship could not be saved. Review the details and try again."
         return { ok: false, error: safe }
-    }
-}
-
-export async function voidAndReopenRelationshipInvoice(slug: string, relationshipId: string, saleId: string): Promise<{ ok: boolean; error?: string }> {
-    try {
-        const { workspace, user } = await requireWorkspace(slug, "admin")
-        const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales")
-            .select("id, relationship_id, status, billing_model, stripe_invoice_id, stripe_invoice_status, stripe_checkout_session_id, stripe_checkout_status, stripe_subscription_id, correlation_id, onboarding_session_id, initial_payment_received_at")
-            .eq("workspace_id", workspace.id)
-            .eq("relationship_id", relationshipId)
-            .eq("id", saleId)
-            .maybeSingle()
-        if (saleError || !sale) throw new Error(saleError?.message ?? "Invoice not found")
-        const recurring = sale.billing_model === "recurring"
-        const alreadyVoided = sale.status === "invoice_inactive" && (recurring
-            ? String(sale.stripe_checkout_status ?? "").toLowerCase() === "expired"
-            : ["void", "voided"].includes(String(sale.stripe_invoice_status ?? "").toLowerCase()))
-        if (recurring) {
-            if (!sale.stripe_checkout_session_id || sale.stripe_subscription_id || sale.initial_payment_received_at || (!alreadyVoided && !["invoice_sent", "payment_failed"].includes(sale.status))) {
-                return { ok: false, error: sale.onboarding_session_id || sale.status.startsWith("paid") ? "Paid or onboarding retainers cannot be replaced from this deal." : "This recurring Checkout request is no longer eligible to be replaced." }
-            }
-            const correlationId = sale.correlation_id ?? randomUUID()
-            const providerResult = alreadyVoided
-                ? { checkoutSessionId: sale.stripe_checkout_session_id, checkoutStatus: "expired" }
-                : await (async () => {
-                    const config = await getWorkspaceProviderConfig(workspace.id, "stripe")
-                    return expireStripeCheckoutSession({
-                        checkoutSessionId: sale.stripe_checkout_session_id!,
-                        secretKey: config.access_token || config.secret_key,
-                        idempotencyKey: `${sale.id}:staff-expire`,
-                    })
-                })()
-            const { error: reopenError } = await supabaseAdmin.rpc("reopen_expired_recurring_checkout", {
-                p_workspace_id: workspace.id,
-                p_actor_user_id: user.id,
-                p_relationship_id: relationshipId,
-                p_sale_id: sale.id,
-                p_correlation_id: correlationId,
-                p_provider_summary: {
-                    checkout_session_id: providerResult.checkoutSessionId,
-                    checkout_status: providerResult.checkoutStatus,
-                },
-            })
-            if (reopenError) throw new Error(`Stripe expired the Checkout page, but Betelgeze could not reopen the deal: ${reopenError.message}`)
-            relationshipRevalidatePaths(slug, relationshipId)
-            return { ok: true }
-        }
-        if (!sale.stripe_invoice_id || (!alreadyVoided && !["invoice_sent", "payment_failed"].includes(sale.status))) {
-            return { ok: false, error: sale.onboarding_session_id || sale.status.startsWith("paid") ? "Paid or onboarding invoices cannot be voided from this deal." : "This invoice is no longer eligible to be voided." }
-        }
-
-        const correlationId = sale.correlation_id ?? randomUUID()
-        const providerResult = alreadyVoided
-            ? { invoiceId: sale.stripe_invoice_id, invoiceStatus: "void" }
-            : await (async () => {
-                const config = await getWorkspaceProviderConfig(workspace.id, "stripe")
-                return voidStripeInvoice({
-                    invoiceId: sale.stripe_invoice_id!,
-                    secretKey: config.access_token || config.secret_key,
-                    idempotencyKey: `${sale.id}:staff-void`,
-                })
-            })()
-        const { error: reopenError } = await supabaseAdmin.rpc("reopen_voided_client_sale", {
-            p_workspace_id: workspace.id,
-            p_actor_user_id: user.id,
-            p_relationship_id: relationshipId,
-            p_sale_id: sale.id,
-            p_correlation_id: correlationId,
-            p_provider_summary: {
-                invoice_id: providerResult.invoiceId,
-                invoice_status: providerResult.invoiceStatus,
-            },
-        })
-        if (reopenError) throw new Error(`Stripe voided the invoice, but Betelgeze could not reopen the deal: ${reopenError.message}`)
-        relationshipRevalidatePaths(slug, relationshipId)
-        return { ok: true }
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "The invoice could not be voided."
-        if (message.startsWith("Stripe voided the invoice") || message.startsWith("Stripe expired the Checkout page")) return { ok: false, error: message }
-        if (message.endsWith("is not connected for this workspace.")) return { ok: false, error: message }
-        return { ok: false, error: "The payment request could not be deactivated in Stripe. Review the connection and provider status, then try again." }
     }
 }
 
@@ -502,10 +376,10 @@ export async function proceedRelationshipCurrentWork(
     slug: string,
     relationshipId: string,
     workItemId: string,
-    payment?: { billingModel?: "one_off" | "recurring"; billingInterval?: StripeRecurringInterval; billingIntervalCount?: number }
+    payment?: { billingInterval?: StripeRecurringInterval; billingIntervalCount?: number }
 ) {
     let workflowAction: string | null = null
-    let invoice: Awaited<ReturnType<typeof sendRelationshipInvoice>> | null = null
+    let sale: Awaited<ReturnType<typeof prepareRelationshipSale>> | null = null
     try {
         const { workspace, user, role } = await requireWorkspace(slug)
         const { data: item } = await supabaseAdmin.from("work_items")
@@ -521,23 +395,19 @@ export async function proceedRelationshipCurrentWork(
                 .select("user_id").eq("workspace_id", workspace.id).eq("work_item_id", workItemId).eq("user_id", user.id).maybeSingle()
             if (!assignment) throw new Error("This work item is not assigned to you")
         }
-        if (workflowAction === "send_invoice" || workflowAction === "sell_client") {
-            invoice = await sendRelationshipInvoice({
+        if (workflowAction === "sell_client") {
+            sale = await prepareRelationshipSale({
                 workspaceId: workspace.id,
                 relationshipId,
                 workItemId,
                 actorId: user.id,
-                billingModel: payment?.billingModel ?? "one_off",
                 billingInterval: payment?.billingInterval,
                 billingIntervalCount: payment?.billingIntervalCount,
-                deferPaymentUntilOnboarding: workflowAction === "sell_client",
             })
-            if (workflowAction === "sell_client") {
-                const consent = await sendSaleConsentTemplate(invoice.saleId, workspace.id)
-                if (!consent.ok) throw new Error(consent.error ?? "The WhatsApp confirmation could not be sent")
-                if (!("inProgress" in consent && consent.inProgress)) {
-                    await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: invoice.saleId })
-                }
+            const consent = await sendSaleConsentTemplate(sale.saleId, workspace.id)
+            if (!consent.ok) throw new Error(consent.error ?? "The WhatsApp confirmation could not be sent")
+            if (!("inProgress" in consent && consent.inProgress)) {
+                await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: sale.saleId })
             }
         } else {
             if (workflowAction === "await_payment" || workflowAction === "await_onboarding") throw new Error("This stage advances automatically when the external step completes")
@@ -546,15 +416,11 @@ export async function proceedRelationshipCurrentWork(
         relationshipRevalidatePaths(slug, relationshipId)
         return {
             ok: true as const,
-            invoice: invoice ? {
-                id: invoice.referenceId,
-                kind: invoice.kind,
-                href: invoice.assetId ? assetHref(slug, invoice.assetId) : invoice.href,
-            } : null,
+            sale: sale ? { id: sale.saleId, kind: "checkout" as const } : null,
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : "Could not proceed with this work item"
-        const invoiceValidationMessage = (workflowAction === "send_invoice" || workflowAction === "sell_client") && [
+        const saleValidationMessage = workflowAction === "sell_client" && [
             "Add a billing",
             "Add a usable client WhatsApp",
             "Verify and enable",
@@ -563,19 +429,15 @@ export async function proceedRelationshipCurrentWork(
             "Choose a current Active service revision",
             "Publish every onboarding module",
             "Onboarding welcome and completion",
-            "The onboarding invoice migration is incomplete",
-            "The recurring retainer migration is not applied yet",
+            "The dual-price sale migration is incomplete",
+            "This sale has too many separate Stripe Checkout line items",
             "Choose a recurring schedule",
-            "Email delivery",
-            "Missing SMTP_",
-            "NEXT_PUBLIC_SITE_URL is required",
-            "INVOICE_",
             "ONBOARDING_",
         ].some((prefix) => message.startsWith(prefix))
-        const safeMessage = invoiceValidationMessage || message.endsWith("is not connected for this workspace.") || message === "Work item not found" || message === "Work item does not belong to this relationship" || message === "This work item is not assigned to you" || message === "This stage advances automatically when the external step completes" || message === "Choose a fulfilment manager before completing onboarding review" || message === "Complete every required review work item before moving to fulfilment"
+        const safeMessage = saleValidationMessage || message.endsWith("is not connected for this workspace.") || message === "Work item not found" || message === "Work item does not belong to this relationship" || message === "This work item is not assigned to you" || message === "This stage advances automatically when the external step completes" || message === "Choose a fulfilment manager before completing onboarding review" || message === "Complete every required review work item before moving to fulfilment"
             ? message
-            : workflowAction === "send_invoice" || workflowAction === "sell_client"
-                ? workflowAction === "sell_client" ? "Could not send the WhatsApp confirmation. Check the connection and commercial details, then try again." : "Could not send the invoice. Check the Stripe connection and commercial details, then try again."
+            : workflowAction === "sell_client"
+                ? "Could not send the WhatsApp confirmation. Check the connection and commercial details, then try again."
                 : "Could not proceed with this work item. Please try again."
         return { ok: false as const, error: safeMessage }
     }

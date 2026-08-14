@@ -553,7 +553,7 @@ export async function listRelationshipTimelineItems(workspaceSlug: string, relat
                 .limit(16),
             supabaseAdmin
                 .from("client_sales")
-                .select("id, status, total_amount, currency, created_at, updated_at, stripe_hosted_invoice_url")
+                .select("id, status, upfront_total_amount, recurring_total_amount, currency, created_at, updated_at, stripe_checkout_url")
                 .eq("client_id", relationship.client_id)
                 .order("created_at", { ascending: true }),
         ])

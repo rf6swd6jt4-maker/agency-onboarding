@@ -1,28 +1,14 @@
 import { randomUUID } from "crypto"
-import { createAndSendStripeInvoice, createStripeSubscriptionCheckout, type StripeRecurringInterval } from "@/lib/stripe/api"
-import { assertEmailDeliveryConfigured, emailDeliveryFailureDetails, sendRecurringCheckoutRequest } from "@/lib/email"
+import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
-import { SERVICES } from "@/lib/onboarding/services"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import { normalizeMessageAddress } from "@/lib/client-messages/addresses"
 import { recordAdminActivity } from "@/lib/admin/activity"
-import {
-    legacyPublishedOnboardingConfiguration,
-    loadPublishedOnboardingConfiguration,
-} from "@/lib/onboarding/configuration"
-import {
-    compareOnboardingCompositions,
-    getOnboardingRuntimeMode,
-    resolveDealOnboardingComposition,
-    versionedServiceDefinitionForDeal,
-} from "@/lib/onboarding/runtime-mode"
+import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
+import { versionedServiceDefinitionForDeal } from "@/lib/onboarding/runtime-mode"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { relationshipFulfilmentServiceDefinition } from "@/lib/onboarding/service-display"
-import {
-    createPrivateUploadSignedUrl,
-    createServiceThumbnailPublicUrl,
-} from "@/lib/onboarding/uploads"
 
 type WorkflowRole = "task" | "lifecycle_stage" | "service_group" | "review" | "automation"
 type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
@@ -531,14 +517,10 @@ function isMissingInvoiceFreezeRpc(error: { code?: string; message?: string } | 
     return error?.code === "42883" || error?.code === "PGRST202" || message.includes("freeze_client_sale_configuration") && (message.includes("schema cache") || message.includes("does not exist"))
 }
 
-function isMissingInvoiceSnapshotColumn(error: { code?: string; message?: string } | null | undefined) {
-    const message = error?.message?.toLowerCase() ?? ""
-    return error?.code === "42703" || error?.code === "PGRST204" || message.includes("snapshot_frozen_at") && message.includes("schema cache")
-}
-
 type RelationshipInvoiceService = {
     service_key: string
-    price_cents: number | null
+    upfront_price_cents: number | null
+    recurring_price_cents: number | null
     currency: string | null
     service_id?: string | null
     service_revision_id?: string | null
@@ -557,7 +539,7 @@ function versionedInvoiceConfigurationIssue(
         configuration.completion.status !== "published" ||
         !configuration.completion.revisionId
     ) {
-        return "Publish the mandatory onboarding configuration, welcome, and completion before sending the invoice"
+        return "Publish the mandatory onboarding configuration, welcome, and completion before selling the client"
     }
     for (const [index, selected] of selectedServices.entries()) {
         const definition = serviceDefinitions[index]
@@ -568,7 +550,7 @@ function versionedInvoiceConfigurationIssue(
             !selected.service_revision_id ||
             definition.revisionId !== selected.service_revision_id
         ) {
-            return `Choose a current Active service revision for ${selected.service_key} before sending the invoice`
+            return `Choose a current Active service revision for ${selected.service_key} before selling the client`
         }
         for (const assignment of definition.modules) {
             const moduleDefinition = configuration.modules.find(
@@ -579,29 +561,26 @@ function versionedInvoiceConfigurationIssue(
                 moduleDefinition.status !== "published" ||
                 !moduleDefinition.revisionId
             ) {
-                return `Publish every onboarding module used by ${definition.name} before sending the invoice`
+                return `Publish every onboarding module used by ${definition.name} before selling the client`
             }
         }
     }
     return null
 }
 
-async function preflightRelationshipInvoice(input: {
+async function preflightRelationshipSale(input: {
     workspaceId: string
     whatsappPhone: string
     services: RelationshipInvoiceService[]
-    resumesFrozenVersionedSale?: boolean
 }) {
     const configuration = await loadPublishedOnboardingConfiguration(input.workspaceId)
-    const runtimeMode = getOnboardingRuntimeMode()
-    const legacyConfiguration = legacyPublishedOnboardingConfiguration()
     const normalizedPhone = normalizeMessageAddress(input.whatsappPhone)
-    if (!normalizedPhone || normalizedPhone.replace(/\D/g, "").length < 8) throw new Error("Add a usable client WhatsApp number before sending the invoice")
+    if (!normalizedPhone || normalizedPhone.replace(/\D/g, "").length < 8) throw new Error("Add a usable client WhatsApp number before selling the client")
     if (configuration.schemaReady && !configuration.help.whatsappVerified) {
-        throw new Error("Verify the workspace WhatsApp connection before sending the invoice")
+        throw new Error("Verify the workspace WhatsApp connection before selling the client")
     }
     const currencies = new Set(input.services.map((service) => (service.currency ?? "usd").toUpperCase()))
-    if (currencies.size !== 1) throw new Error("Every selected service must use the same invoice currency")
+    if (currencies.size !== 1) throw new Error("Every selected service must use the same currency")
     const versionedServiceDefinitions = input.services.map((selected) =>
         versionedServiceDefinitionForDeal(configuration, selected)
     )
@@ -610,63 +589,17 @@ async function preflightRelationshipInvoice(input: {
         input.services,
         versionedServiceDefinitions
     )
-    if (!input.resumesFrozenVersionedSale && runtimeMode === "versioned" && versionedIssue) {
-        throw new Error(versionedIssue)
-    }
-
-    const legacyServiceDefinitions = input.services.map((selected) =>
-        legacyConfiguration.services.find((service) => service.code === selected.service_key)
-    )
-    if (
-        !input.resumesFrozenVersionedSale &&
-        runtimeMode !== "versioned" &&
-        legacyServiceDefinitions.some((service) => !service)
-    ) {
-        const missingCodes = input.services
-            .filter((_, index) => !legacyServiceDefinitions[index])
-            .map((service) => service.service_key)
-            .join(", ")
-        throw new Error(
-            `Rollback onboarding mode cannot send services without a hard-coded legacy mapping: ${missingCodes}. Switch ONBOARDING_RUNTIME_MODE to versioned or replace those services.`
-        )
-    }
-
-    const serviceDefinitions = input.resumesFrozenVersionedSale || runtimeMode === "versioned"
-        ? versionedServiceDefinitions
-        : legacyServiceDefinitions
-    let shadowComparison = null
-    if (!input.resumesFrozenVersionedSale && runtimeMode === "shadow") {
-        const versionedPlan = resolveDealOnboardingComposition(
-            configuration,
-            input.services,
-            "versioned"
-        )
-        const legacyPlan = resolveDealOnboardingComposition(
-            legacyConfiguration,
-            input.services,
-            "legacy"
-        )
-        shadowComparison = {
-            versioned_ready: configuration.schemaReady && !versionedIssue,
-            ...compareOnboardingCompositions(
-                versionedPlan.composition,
-                legacyPlan.composition
-            ),
-        }
-    }
+    if (versionedIssue) throw new Error(versionedIssue)
     return {
         configuration,
         normalizedPhone,
-        runtimeMode,
-        serviceDefinitions,
-        usesVersionedLive: input.resumesFrozenVersionedSale || runtimeMode === "versioned" && configuration.schemaReady,
-        shadowComparison,
+        serviceDefinitions: versionedServiceDefinitions,
     }
 }
 
-async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipId: string, billingModel: "one_off" | "recurring") {
+async function findResumableFrozenSale(workspaceId: string, relationshipId: string) {
     const result = await supabaseAdmin.from("client_sales")
-        .select("id, correlation_id, billing_model, status, checkout_flow")
+        .select("id, correlation_id, status")
         .eq("workspace_id", workspaceId)
         .eq("relationship_id", relationshipId)
         .in("status", [
@@ -681,266 +614,120 @@ async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipI
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()
-    if (result.error) {
-        const missingBillingModel = result.error.code === "42703" || result.error.code === "PGRST204" || result.error.message.toLowerCase().includes("billing_model")
-        if (missingBillingModel && billingModel === "recurring") {
-            throw new Error("The recurring retainer migration is not applied yet. Apply the latest database migration before creating a recurring Checkout page")
-        }
-        if (missingBillingModel) {
-            const legacy = await supabaseAdmin.from("client_sales")
-                .select("id, correlation_id, status")
-                .eq("workspace_id", workspaceId)
-                .eq("relationship_id", relationshipId)
-                .in("status", ["draft", "sale_confirmation_pending", "sold_confirmation_failed"])
-                .not("snapshot_frozen_at", "is", null)
-                .order("created_at", { ascending: false })
-                .limit(1)
-                .maybeSingle()
-            if (legacy.error) throw new Error(legacy.error.message)
-            return legacy.data
-        }
-        if (isMissingInvoiceSnapshotColumn(result.error)) return null
-        throw new Error(result.error.message)
-    }
-    const storedModel = result.data?.billing_model ?? "one_off"
-    return storedModel === billingModel ? result.data : null
+    if (result.error) throw new Error(result.error.message)
+    return result.data
 }
 
-function billingCadenceLabel(interval: StripeRecurringInterval, count: number) {
-    if (interval === "month" && count === 1) return "per month"
-    if (interval === "month" && count === 3) return "every 3 months"
-    if (interval === "year" && count === 1) return "per year"
-    return `every ${count} ${interval}${count === 1 ? "" : "s"}`
-}
-
-function amountLabel(amount: number, currency: string) {
-    try {
-        return new Intl.NumberFormat("en-IE", { style: "currency", currency: currency.toUpperCase() }).format(amount / 100)
-    } catch {
-        return `${currency.toUpperCase()} ${(amount / 100).toFixed(2)}`
-    }
-}
-
-async function ensureRelationshipInvoiceAsset(input: {
-    workspaceId: string
-    relationshipId: string
-    actorId: string
-    saleId: string
-    invoiceId: string
-    hostedInvoiceUrl: string | null
-    invoicePdf: string | null
-    currency: string
-    totalAmount: number
-}) {
-    const assetId = randomUUID()
-    const asset = {
-        id: assetId,
-        workspace_id: input.workspaceId,
-        title: `Invoice ${input.invoiceId}`,
-        description: "Stripe invoice sent to the client.",
-        asset_kind: "invoice",
-        source_kind: "stripe_invoice",
-        external_url: input.hostedInvoiceUrl ?? input.invoicePdf,
-        native_kind: "client_sale",
-        native_id: input.saleId,
-        metadata: {
-            relationship_id: input.relationshipId,
-            stripe_invoice_id: input.invoiceId,
-            invoice_pdf: input.invoicePdf,
-            currency: input.currency.toUpperCase(),
-            total_amount: input.totalAmount,
-        },
-        created_by: input.actorId,
-    }
-    const inserted = await supabaseAdmin.from("assets").insert(asset).select("id").single()
-    let resolvedId = inserted.data?.id ?? null
-    if (inserted.error?.code === "23505") {
-        const existing = await supabaseAdmin.from("assets").select("id")
-            .eq("workspace_id", input.workspaceId).eq("native_kind", "client_sale").eq("native_id", input.saleId).maybeSingle()
-        resolvedId = existing.data?.id ?? null
-    } else if (inserted.error) {
-        console.error("Could not create the canonical invoice asset", { saleId: input.saleId, code: inserted.error.code })
-        return null
-    }
-    if (!resolvedId) return null
-    const linked = await supabaseAdmin.from("asset_relationships").upsert({
-        workspace_id: input.workspaceId,
-        relationship_id: input.relationshipId,
-        asset_id: resolvedId,
-    }, { onConflict: "asset_id,relationship_id" })
-    if (linked.error) {
-        console.error("Could not link the invoice asset to its relationship", { saleId: input.saleId, code: linked.error.code })
-        return null
-    }
-    return resolvedId
-}
-
-async function ensureRelationshipCheckoutAsset(input: {
-    workspaceId: string
-    relationshipId: string
-    actorId: string
-    saleId: string
-    checkoutSessionId: string
-    checkoutUrl: string
-    currency: string
-    totalAmount: number
-    interval: StripeRecurringInterval
-    intervalCount: number
-}) {
-    const assetId = randomUUID()
-    const asset = {
-        id: assetId,
-        workspace_id: input.workspaceId,
-        title: `Recurring checkout ${input.checkoutSessionId}`,
-        description: "Stripe subscription Checkout page sent to the client.",
-        asset_kind: "invoice",
-        source_kind: "other",
-        external_url: input.checkoutUrl,
-        native_kind: "client_sale",
-        native_id: input.saleId,
-        metadata: {
-            relationship_id: input.relationshipId,
-            stripe_checkout_session_id: input.checkoutSessionId,
-            billing_model: "recurring",
-            billing_interval: input.interval,
-            billing_interval_count: input.intervalCount,
-            currency: input.currency.toUpperCase(),
-            total_amount: input.totalAmount,
-        },
-        created_by: input.actorId,
-    }
-    const inserted = await supabaseAdmin.from("assets").insert(asset).select("id").single()
-    let resolvedId = inserted.data?.id ?? null
-    if (inserted.error?.code === "23505") {
-        const existing = await supabaseAdmin.from("assets").select("id")
-            .eq("workspace_id", input.workspaceId).eq("native_kind", "client_sale").eq("native_id", input.saleId).maybeSingle()
-        resolvedId = existing.data?.id ?? null
-    } else if (inserted.error) {
-        console.error("Could not create the recurring checkout asset", { saleId: input.saleId, code: inserted.error.code })
-        return null
-    }
-    if (!resolvedId) return null
-    const { error } = await supabaseAdmin.from("asset_relationships").upsert({
-        workspace_id: input.workspaceId,
-        relationship_id: input.relationshipId,
-        asset_id: resolvedId,
-    }, { onConflict: "asset_id,relationship_id" })
-    if (error) {
-        console.error("Could not link recurring checkout asset", { saleId: input.saleId, code: error.code })
-        return null
-    }
-    return resolvedId
-}
-
-export async function sendRelationshipInvoice(input: {
+export async function prepareRelationshipSale(input: {
     workspaceId: string
     relationshipId: string
     workItemId: string
     actorId: string
-    billingModel?: "one_off" | "recurring"
     billingInterval?: StripeRecurringInterval
     billingIntervalCount?: number
-    deferPaymentUntilOnboarding?: boolean
 }) {
-    // Stripe accepts Checkout expiries from 30 minutes to 24 hours. Keeping a
-    // one-minute margin avoids crossing its upper bound while the request is in
-    // flight, and gives every private thumbnail the exact same expiry instant.
-    const checkoutExpiresAt = Math.floor(Date.now() / 1_000) + (24 * 60 * 60) - 60
-    const billingModel = input.billingModel ?? "one_off"
-    const billingInterval = input.billingInterval ?? "month"
-    const billingIntervalCount = Math.round(input.billingIntervalCount ?? 1)
-    const maximumIntervalCount = billingInterval === "year" ? 3 : billingInterval === "month" ? 36 : 156
-    if (billingModel === "recurring" && (!(["week", "month", "year"] as string[]).includes(billingInterval) || billingIntervalCount < 1 || billingIntervalCount > maximumIntervalCount)) {
-        throw new Error(`Choose a recurring schedule between 1 and ${maximumIntervalCount} ${billingInterval}s`)
-    }
-    if (billingModel === "recurring" && !input.deferPaymentUntilOnboarding) assertEmailDeliveryConfigured()
-    const [{ data: relationship }, { data: workspace }] = await Promise.all([
-        supabaseAdmin.from("relationships")
-            .select("primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, project_timeframe_days")
-            .eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).single(),
-        supabaseAdmin.from("workspaces").select("name").eq("id", input.workspaceId).single(),
-    ])
+    void input.workItemId
+    const { data: relationship, error: relationshipError } = await supabaseAdmin.from("relationships")
+        .select("primary_person_name, primary_email, whatsapp_phone, business_name, project_timeframe_days")
+        .eq("workspace_id", input.workspaceId)
+        .eq("id", input.relationshipId)
+        .single()
+    if (relationshipError) throw new Error(relationshipError.message)
+
     const serviceResult = await supabaseAdmin.from("relationship_services")
-        .select("service_key, price_cents, currency, service_id, service_revision_id")
-        .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).order("created_at")
-    let selectedServices: RelationshipInvoiceService[]
-    if (serviceResult.error?.code === "42703" || serviceResult.error?.message.toLowerCase().includes("schema cache")) {
-        const legacyServiceResult = await supabaseAdmin.from("relationship_services")
-            .select("service_key, price_cents, currency")
-            .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).order("created_at")
-        if (legacyServiceResult.error) throw new Error(legacyServiceResult.error.message)
-        selectedServices = legacyServiceResult.data ?? []
-    } else {
-        if (serviceResult.error) throw new Error(serviceResult.error.message)
-        selectedServices = serviceResult.data ?? []
+        .select("service_key, upfront_price_cents, recurring_price_cents, currency, service_id, service_revision_id")
+        .eq("workspace_id", input.workspaceId)
+        .eq("relationship_id", input.relationshipId)
+        .order("created_at")
+    if (serviceResult.error) throw new Error(serviceResult.error.message)
+    const selectedServices = (serviceResult.data ?? []) as RelationshipInvoiceService[]
+    if (
+        !relationship?.primary_email ||
+        !relationship.whatsapp_phone ||
+        !selectedServices.length ||
+        selectedServices.some((service) =>
+            Math.max(0, service.upfront_price_cents ?? 0) === 0 &&
+            Math.max(0, service.recurring_price_cents ?? 0) === 0
+        )
+    ) {
+        throw new Error(
+            "Add a billing email, WhatsApp phone, and an upfront or recurring price for every selected service before selling the client"
+        )
     }
-    if (!relationship || !relationship.primary_email || !relationship.whatsapp_phone || !selectedServices.length || selectedServices.some((service) => typeof service.price_cents !== "number" || service.price_cents <= 0)) {
-        throw new Error("Add a billing email, WhatsApp phone, and a positive price for every selected service before sending the invoice")
+
+    const upfrontTotal = selectedServices.reduce(
+        (total, service) => total + Math.max(0, service.upfront_price_cents ?? 0),
+        0,
+    )
+    const recurringTotal = selectedServices.reduce(
+        (total, service) => total + Math.max(0, service.recurring_price_cents ?? 0),
+        0,
+    )
+    const upfrontItemCount = selectedServices.filter((service) => Math.max(0, service.upfront_price_cents ?? 0) > 0).length
+    const recurringItemCount = selectedServices.filter((service) => Math.max(0, service.recurring_price_cents ?? 0) > 0).length
+    if (recurringItemCount > 20 || upfrontItemCount > (recurringItemCount > 0 ? 20 : 100)) {
+        throw new Error("This sale has too many separate Stripe Checkout line items. Combine services before selling the client")
     }
-    const resumableSale = await findResumableFrozenInvoiceSale(input.workspaceId, input.relationshipId, billingModel)
-    const preflight = await preflightRelationshipInvoice({
+    const billingInterval = recurringTotal > 0 ? input.billingInterval ?? "month" : null
+    const billingIntervalCount = recurringTotal > 0 ? Math.round(input.billingIntervalCount ?? 1) : null
+    if (billingInterval && billingIntervalCount) {
+        const maximumIntervalCount =
+            billingInterval === "year" ? 3 : billingInterval === "month" ? 36 : 156
+        if (
+            !(["week", "month", "year"] as string[]).includes(billingInterval) ||
+            billingIntervalCount < 1 ||
+            billingIntervalCount > maximumIntervalCount
+        ) {
+            throw new Error(
+                `Choose a recurring schedule between 1 and ${maximumIntervalCount} ${billingInterval}s`
+            )
+        }
+    }
+
+    const resumableSale = await findResumableFrozenSale(input.workspaceId, input.relationshipId)
+    const preflight = await preflightRelationshipSale({
         workspaceId: input.workspaceId,
         whatsappPhone: relationship.whatsapp_phone,
         services: selectedServices,
-        resumesFrozenVersionedSale: Boolean(resumableSale),
     })
     const currency = (selectedServices[0]?.currency ?? "usd").toLowerCase()
-    const checkoutThumbnailUrl = async (path: string | null | undefined) => {
-        if (!path) return null
 
-        const publicUrl = createServiceThumbnailPublicUrl(path)
-        if (publicUrl || billingModel !== "recurring") return publicUrl
+    // Fail before inserting a retryable-looking sale when Stripe is unavailable.
+    await getWorkspaceProviderConfig(input.workspaceId, "stripe")
 
-        const remainingSeconds = Math.max(
-            1,
-            checkoutExpiresAt - Math.floor(Date.now() / 1_000),
-        )
-        return createPrivateUploadSignedUrl(path, remainingSeconds)
-    }
-    let lineItems = await Promise.all(selectedServices.map(async (service, index) => {
-        const definition = preflight.serviceDefinitions[index]
-        const name = definition?.checkoutDisplayName || definition?.name || SERVICES[service.service_key]?.title || service.service_key
-        return {
-            serviceKey: service.service_key,
-            name,
-            description: definition?.checkoutDescription || definition?.description || name,
-            amount: service.price_cents!,
-            imageUrl: await checkoutThumbnailUrl(definition?.thumbnailPath),
-        }
-    }))
-    // Validate the integration before creating a sale record. This keeps a missing
-    // or disconnected Stripe setup from leaving a retryable-looking draft behind.
-    const config = await getWorkspaceProviderConfig(input.workspaceId, "stripe")
     const correlationId = randomUUID()
     let sale = resumableSale
     if (!sale) {
-        const salePayload = {
+        const insertedSale = await supabaseAdmin.from("client_sales").insert({
             workspace_id: input.workspaceId,
             relationship_id: input.relationshipId,
             client_name: relationship.business_name ?? relationship.primary_person_name,
             client_email: relationship.primary_email,
             client_phone: preflight.normalizedPhone,
-            service_keys: lineItems.map((item) => item.serviceKey),
-            line_items: lineItems,
+            service_keys: selectedServices.map((service) => service.service_key),
             project_timeframe_days: relationship.project_timeframe_days,
             currency,
-            total_amount: lineItems.reduce((total, item) => total + item.amount, 0),
+            upfront_total_amount: upfrontTotal,
+            recurring_total_amount: recurringTotal,
+            // Temporary database-compatibility markers. The application no longer
+            // branches on either legacy field; the latest migration retires their
+            // RPC entry points while the published-session RPC still reads them.
+            billing_model: recurringTotal > 0 ? "recurring" : "one_off",
+            checkout_flow: "onboarding_payment_gate",
+            billing_interval: billingInterval,
+            billing_interval_count: billingIntervalCount,
             status: "draft",
             created_by: input.actorId,
-            ...({
-                billing_model: billingModel,
-                billing_interval: billingInterval,
-                billing_interval_count: billingIntervalCount,
-                ...(input.deferPaymentUntilOnboarding ? { checkout_flow: "onboarding_payment_gate" } : {}),
-            }),
-            ...(preflight.configuration.schemaReady ? { correlation_id: correlationId } : {}),
+            correlation_id: correlationId,
+        }).select("id, correlation_id, status").single()
+        if (insertedSale.error || !insertedSale.data) {
+            throw new Error(insertedSale.error?.message ?? "Could not create the sale")
         }
-        const insertedSale = await supabaseAdmin.from("client_sales").insert(salePayload).select("id, correlation_id, status, checkout_flow").single()
-        if (insertedSale.error || !insertedSale.data) throw new Error(insertedSale.error?.message ?? "Could not create invoice record")
         sale = insertedSale.data
     }
+
     const saleCorrelationId = sale.correlation_id ?? correlationId
-    if (preflight.usesVersionedLive) {
+    if (!resumableSale) {
         const { error: freezeError } = await supabaseAdmin.rpc("freeze_client_sale_configuration", {
             p_workspace_id: input.workspaceId,
             p_relationship_id: input.relationshipId,
@@ -949,224 +736,64 @@ export async function sendRelationshipInvoice(input: {
             p_correlation_id: saleCorrelationId,
         })
         if (freezeError) {
-            if (isMissingInvoiceFreezeRpc(freezeError)) throw new Error("The onboarding invoice migration is incomplete. Apply the latest database migration before sending invoices")
+            if (isMissingInvoiceFreezeRpc(freezeError)) {
+                throw new Error(
+                    "The dual-price sale migration is incomplete. Apply the latest database migration before selling clients"
+                )
+            }
             throw new Error(freezeError.message)
         }
-        const { data: frozenItems, error: frozenItemsError } = await supabaseAdmin.from("client_sale_items")
-            .select("service_code, service_name, service_revision_id, description, amount_cents, currency, sort_order")
-            .eq("workspace_id", input.workspaceId).eq("client_sale_id", sale.id).order("sort_order")
-        if (frozenItemsError || !frozenItems?.length) throw new Error(frozenItemsError?.message ?? "The invoice snapshot contains no services")
-        lineItems = await Promise.all(frozenItems.map(async (item) => {
-            const definition = preflight.configuration.services.find((service) => service.revisionId === item.service_revision_id || service.code === item.service_code)
-            const name = definition?.checkoutDisplayName || item.service_name
-            return {
-                serviceKey: item.service_code,
-                name,
-                description: definition?.checkoutDescription || item.description || item.service_name,
-                amount: item.amount_cents,
-                imageUrl: await checkoutThumbnailUrl(definition?.thumbnailPath),
-            }
-        }))
-    }
-    if (preflight.runtimeMode === "shadow" && preflight.shadowComparison) {
-        await recordAdminActivity({
-            workspaceId: input.workspaceId,
-            category: "onboarding",
-            eventKey: "onboarding.composition.shadow_compared",
-            summary: "Versioned and legacy onboarding compositions compared",
-            entityType: "client_sale",
-            entityId: sale.id,
-            actorUserId: input.actorId,
-            correlationId: saleCorrelationId,
-            idempotencyKey: `onboarding.composition.shadow_compared:${sale.id}`,
-            metadata: {
-                relationship_id: input.relationshipId,
-                sale_id: sale.id,
-                versioned_ready: preflight.shadowComparison.versioned_ready,
-                matches: preflight.shadowComparison.matches,
-                versioned: preflight.shadowComparison.versioned,
-                legacy: preflight.shadowComparison.legacy,
-            },
-        })
-    }
-    const totalAmount = lineItems.reduce((total, item) => total + item.amount, 0)
-    if (input.deferPaymentUntilOnboarding) {
-        const saleStatus = "status" in sale && typeof sale.status === "string" ? sale.status : "draft"
-        const needsPreparation = ["draft", "sale_confirmation_pending", "sold_confirmation_failed"].includes(saleStatus)
-        if (needsPreparation) {
-            const preparedAt = new Date().toISOString()
-            const { error: preparedError } = await supabaseAdmin.from("client_sales").update({
-                status: "sale_confirmation_pending",
-                checkout_flow: "onboarding_payment_gate",
-                billing_model: billingModel,
-                billing_interval: billingInterval,
-                billing_interval_count: billingIntervalCount,
-                updated_at: preparedAt,
-            }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
-            if (preparedError) throw new Error(preparedError.message)
+        for (const service of selectedServices) {
+            const { error: itemPriceError } = await supabaseAdmin.from("client_sale_items").update({
+                upfront_amount_cents: Math.max(0, service.upfront_price_cents ?? 0),
+                recurring_amount_cents: Math.max(0, service.recurring_price_cents ?? 0),
+            }).eq("workspace_id", input.workspaceId)
+                .eq("client_sale_id", sale.id)
+                .eq("service_id", service.service_id)
+            if (itemPriceError) throw new Error(itemPriceError.message)
         }
-        await recordAdminActivity({
-            workspaceId: input.workspaceId,
-            category: "billing",
-            eventKey: "client_sale.confirmation_prepared",
-            summary: "Client sale frozen and prepared for WhatsApp confirmation",
-            entityType: "client_sale",
-            entityId: sale.id,
-            actorUserId: input.actorId,
-            correlationId: saleCorrelationId,
-            idempotencyKey: `client_sale.confirmation_prepared:${sale.id}`,
-            outcome: "succeeded",
-            metadata: { relationship_id: input.relationshipId, billing_model: billingModel, service_count: lineItems.length, total_amount: totalAmount, currency },
-        })
-        return { saleId: sale.id, kind: billingModel, referenceId: sale.id, href: null, assetId: null }
-    }
-    if (billingModel === "recurring") {
-        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/g, "")
-        if (!siteUrl) throw new Error("NEXT_PUBLIC_SITE_URL is required before recurring Checkout pages can be sent")
-        const checkout = await createStripeSubscriptionCheckout({
-            saleId: sale.id,
-            relationshipId: input.relationshipId,
-            workspaceId: input.workspaceId,
-            name: relationship.business_name ?? relationship.primary_person_name,
-            email: relationship.primary_email,
-            phone: relationship.whatsapp_phone,
-            currency,
-            lineItems,
-            serviceKeys: lineItems.map((item) => item.serviceKey),
-            projectTimeframeDays: relationship.project_timeframe_days,
-            interval: billingInterval,
-            intervalCount: billingIntervalCount,
-            successUrl: `${siteUrl}/payment/complete?session_id={CHECKOUT_SESSION_ID}`,
-            cancelUrl: `${siteUrl}/payment/cancelled`,
-            expiresAt: checkoutExpiresAt,
-            secretKey: config.access_token || config.secret_key,
-        })
-        const preparedAt = new Date().toISOString()
-        const { error: preparedError } = await supabaseAdmin.from("client_sales").update({
-            billing_model: "recurring",
-            billing_interval: billingInterval,
-            billing_interval_count: billingIntervalCount,
-            stripe_customer_id: checkout.customerId,
-            stripe_checkout_session_id: checkout.checkoutSessionId,
-            stripe_checkout_status: checkout.checkoutStatus,
-            stripe_checkout_url: checkout.checkoutUrl,
-            stripe_checkout_expires_at: checkout.expiresAt,
-            raw_payload: checkout.rawCheckout,
-            updated_at: preparedAt,
-        }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
-        if (preparedError) throw new Error(preparedError.message)
-        try {
-            await sendRecurringCheckoutRequest({
-                to: relationship.primary_email,
-                clientName: relationship.primary_person_name,
-                workspaceName: workspace?.name ?? "Your agency",
-                checkoutUrl: checkout.checkoutUrl,
-                services: lineItems.map((item) => item.name || item.description),
-                totalLabel: amountLabel(totalAmount, currency),
-                cadenceLabel: billingCadenceLabel(billingInterval, billingIntervalCount),
-            })
-        } catch (error) {
-            const failure = emailDeliveryFailureDetails(error)
-            await recordAdminActivity({
-                workspaceId: input.workspaceId,
-                category: "communications",
-                level: "error",
-                eventKey: "email.recurring_checkout.failed",
-                summary: "Recurring Checkout email could not be sent",
-                entityType: "client_sale",
-                entityId: sale.id,
-                direction: "outbound",
-                actorUserId: input.actorId,
-                correlationId: saleCorrelationId,
-                outcome: "failed",
-                failureFingerprint: `smtp:${failure.kind}:${failure.providerCode ?? "unknown"}`,
-                diagnostics: { delivery_failure_kind: failure.kind, error_code: failure.providerCode },
-                metadata: { relationship_id: input.relationshipId, sale_id: sale.id },
-            })
-            throw error
-        }
-        const sentAt = new Date().toISOString()
-        const [{ error: statusError }, { error: workError }] = await Promise.all([
-            supabaseAdmin.from("client_sales").update({ status: "invoice_sent", checkout_email_sent_at: sentAt, updated_at: sentAt }).eq("workspace_id", input.workspaceId).eq("id", sale.id),
-            completeWorkflowItem(input.workspaceId, input.workItemId),
-        ])
-        if (statusError || workError) throw new Error(statusError?.message ?? workError?.message ?? "Could not record the sent recurring checkout")
-        await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "invoiced" })
-        const assetId = await ensureRelationshipCheckoutAsset({
-            workspaceId: input.workspaceId,
-            relationshipId: input.relationshipId,
-            actorId: input.actorId,
-            saleId: sale.id,
-            checkoutSessionId: checkout.checkoutSessionId,
-            checkoutUrl: checkout.checkoutUrl,
-            currency,
-            totalAmount,
-            interval: billingInterval,
-            intervalCount: billingIntervalCount,
-        })
-        await recordAdminActivity({
-            workspaceId: input.workspaceId,
-            category: "billing",
-            eventKey: "stripe.checkout.subscription_sent",
-            summary: "Recurring Stripe Checkout page sent",
-            entityType: "stripe_checkout_session",
-            entityId: checkout.checkoutSessionId,
-            direction: "outbound",
-            actorUserId: input.actorId,
-            correlationId: saleCorrelationId,
-            idempotencyKey: `stripe.checkout.subscription_sent:${sale.id}`,
-            outcome: "succeeded",
-            metricClassification: "internal_call",
-            metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length, billing_interval: billingInterval, billing_interval_count: billingIntervalCount },
-        })
-        return { saleId: sale.id, kind: "recurring" as const, referenceId: checkout.checkoutSessionId, href: assetId ? null : checkout.checkoutUrl, assetId }
     }
 
-    const invoice = await createAndSendStripeInvoice({
-        saleId: sale.id,
-        name: relationship.business_name ?? relationship.primary_person_name,
-        email: relationship.primary_email,
-        phone: relationship.whatsapp_phone,
-        currency,
-        lineItems,
-        serviceKeys: lineItems.map((item) => item.serviceKey),
-        projectTimeframeDays: relationship.project_timeframe_days,
-        daysUntilDue: 7,
-        secretKey: config.access_token || config.secret_key,
-    })
-    const [{ error: statusError }, { error: workError }] = await Promise.all([
-        supabaseAdmin.from("client_sales").update({ status: "invoice_sent", stripe_customer_id: invoice.customerId, stripe_invoice_id: invoice.invoiceId, stripe_invoice_status: invoice.invoiceStatus, stripe_hosted_invoice_url: invoice.hostedInvoiceUrl, stripe_invoice_pdf: invoice.invoicePdf, raw_payload: invoice.rawInvoice, updated_at: new Date().toISOString() }).eq("workspace_id", input.workspaceId).eq("id", sale.id),
-        completeWorkflowItem(input.workspaceId, input.workItemId),
-    ])
-    if (statusError || workError) throw new Error(statusError?.message ?? workError?.message ?? "Could not record the sent invoice")
-    await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "invoiced" })
-    const assetId = await ensureRelationshipInvoiceAsset({
-        workspaceId: input.workspaceId,
-        relationshipId: input.relationshipId,
-        actorId: input.actorId,
-        saleId: sale.id,
-        invoiceId: invoice.invoiceId,
-        hostedInvoiceUrl: invoice.hostedInvoiceUrl,
-        invoicePdf: invoice.invoicePdf,
-        currency,
-        totalAmount,
-    })
+    const preparedAt = new Date().toISOString()
+    const { error: preparedError } = await supabaseAdmin.from("client_sales").update({
+        status: "sale_confirmation_pending",
+        billing_interval: billingInterval,
+        billing_interval_count: billingIntervalCount,
+        upfront_total_amount: upfrontTotal,
+        recurring_total_amount: recurringTotal,
+        updated_at: preparedAt,
+    }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
+    if (preparedError) throw new Error(preparedError.message)
+
     await recordAdminActivity({
         workspaceId: input.workspaceId,
         category: "billing",
-        eventKey: "stripe.invoice.sent",
-        summary: "Stripe invoice sent",
-        entityType: "stripe_invoice",
-        entityId: invoice.invoiceId,
-        direction: "outbound",
+        eventKey: "client_sale.confirmation_prepared",
+        summary: "Client sale frozen and prepared for WhatsApp confirmation",
+        entityType: "client_sale",
+        entityId: sale.id,
         actorUserId: input.actorId,
         correlationId: saleCorrelationId,
-        idempotencyKey: `stripe.invoice.sent:${sale.id}`,
+        idempotencyKey: `client_sale.confirmation_prepared:${sale.id}`,
         outcome: "succeeded",
-        metricClassification: "internal_call",
-        metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length },
+        metadata: {
+            relationship_id: input.relationshipId,
+            service_count: selectedServices.length,
+            upfront_total_amount: upfrontTotal,
+            recurring_total_amount: recurringTotal,
+            due_at_checkout: upfrontTotal + recurringTotal,
+            currency,
+            billing_interval: billingInterval,
+            billing_interval_count: billingIntervalCount,
+        },
     })
-    return { saleId: sale.id, kind: "one_off" as const, referenceId: invoice.invoiceId, href: assetId ? null : invoice.hostedInvoiceUrl, assetId }
+    return {
+        saleId: sale.id,
+        kind: "checkout" as const,
+        referenceId: sale.id,
+        href: null,
+        assetId: null,
+    }
 }
 
 export async function finalizeRelationshipSaleConfirmation(input: { workspaceId: string; relationshipId: string; workItemId: string; actorId: string; saleId: string }) {

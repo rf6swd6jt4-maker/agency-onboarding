@@ -35,15 +35,15 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
     await ensureCurrentRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: user.id })
     const plan = await getRelationshipGanttPlan(workspace.slug, relationship)
     const planRanges = effectiveGanttRanges(plan.items)
-    const [servicesResult, membershipsResult, onboardingConfiguration, replaceableSaleResult] = await Promise.all([
-        supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id),
+    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult] = await Promise.all([
+        supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id),
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
         supabaseAdmin.from("client_sales")
-            .select("id, status, checkout_flow, billing_model, stripe_invoice_id, stripe_invoice_status, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
+            .select("id, status, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
-            .in("status", ["invoice_sent", "payment_failed", "invoice_inactive", "sale_confirmation_pending", "sold_confirmation_sending", "sold_awaiting_whatsapp_confirm", "sold_confirmation_failed", "onboarding_payment_pending", "onboarding_link_sent", "onboarding_link_failed", "paid"])
+            .in("status", ["sale_confirmation_pending", "sold_confirmation_sending", "sold_awaiting_whatsapp_confirm", "sold_confirmation_failed", "onboarding_payment_pending", "onboarding_link_sent", "onboarding_link_failed", "payment_failed", "paid"])
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -51,15 +51,8 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
     const memberIds = (membershipsResult.data ?? []).map((member) => member.user_id)
     const profilesResult = memberIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", memberIds).order("username") : { data: [] }
     const members = profilesResult.data ?? []
-    let storedServices = servicesResult.data ?? []
-    if (servicesResult.error) {
-        if (servicesResult.error.code !== "42703" && !servicesResult.error.message.toLowerCase().includes("schema cache")) throw new Error(servicesResult.error.message)
-        const legacyServices = await supabaseAdmin.from("relationship_services")
-            .select("service_key, price_cents, currency, assignee_user_id")
-            .eq("workspace_id", workspace.id).eq("relationship_id", relationship.id)
-        if (legacyServices.error) throw new Error(legacyServices.error.message)
-        storedServices = (legacyServices.data ?? []).map((service) => ({ ...service, service_id: null, service_revision_id: null }))
-    }
+    if (servicesResult.error) throw new Error(servicesResult.error.message)
+    const storedServices = servicesResult.data ?? []
     const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, storedServices.map((service) => service.service_revision_id))
     const serviceOptions = buildRelationshipDealServiceOptions({
         schemaReady: onboardingConfiguration.schemaReady,
@@ -67,13 +60,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
         selected: storedServices,
         revisions: serviceRevisions,
     })
-    const currentSale = replaceableSaleResult.data
-    const paymentGateSaleActive = currentSale?.checkout_flow === "onboarding_payment_gate" && currentSale.status !== "invoice_inactive"
-    const replaceableSale = currentSale && currentSale.checkout_flow !== "onboarding_payment_gate" && (
-        currentSale.billing_model === "recurring"
-            ? Boolean(currentSale.stripe_checkout_session_id) && (currentSale.status !== "invoice_inactive" || String(currentSale.stripe_checkout_status ?? "").toLowerCase() === "expired")
-            : Boolean(currentSale.stripe_invoice_id) && (currentSale.status !== "invoice_inactive" || ["void", "voided"].includes(String(currentSale.stripe_invoice_status ?? "").toLowerCase()))
-    ) ? currentSale : null
+    const currentSale = currentSaleResult.data
     const lookedUpCurrentWork = await currentRelationshipWork({ workspaceId: workspace.id, relationshipId: relationship.id, userId: user.id, isManager: role === "owner" || role === "admin" })
     // The Gantt plan is the authoritative rendered view. If the compact current-work
     // query temporarily misses a just-created link, keep the visible assigned stage actionable.
@@ -102,12 +89,14 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             checkoutDisplayName: service.checkoutDisplayName,
             checkoutDescription: service.checkoutDescription,
             thumbnailUrl: service.thumbnailUrl,
-            defaultPriceCents: service.defaultPriceCents,
+            defaultUpfrontPriceCents: service.defaultUpfrontPriceCents,
+            defaultRecurringPriceCents: service.defaultRecurringPriceCents,
             currency: service.currency,
             isTest: service.isTest,
             revisionNumber: service.revisionNumber,
             selected: Boolean(service.selected),
-            selectedPriceCents: Number(service.selected?.price_cents ?? service.defaultPriceCents),
+            selectedUpfrontPriceCents: Number(service.selected?.upfront_price_cents ?? service.defaultUpfrontPriceCents),
+            selectedRecurringPriceCents: Number(service.selected?.recurring_price_cents ?? service.defaultRecurringPriceCents),
             selectedCurrency: String(service.selected?.currency ?? service.currency).toUpperCase(),
             selectedAssigneeId: service.selected?.assignee_user_id ?? null,
             moduleIds: configured?.modules.map((module) => module.moduleId) ?? [],
@@ -160,7 +149,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                 help={onboardingConfiguration.help}
                                 schemaReady={onboardingConfiguration.schemaReady}
                                 whatsappVerified={onboardingConfiguration.help.whatsappVerified}
-                                commercialLocked={paymentGateSaleActive || Boolean(replaceableSale && replaceableSale.status !== "invoice_inactive")}
+                                commercialLocked={Boolean(currentSale)}
                                 plan={plan}
                                 canEdit={role === "owner" || role === "admin"}
                                 currentWork={currentWork}
@@ -175,7 +164,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                             <DetailDangerZone>
                                 <DetailDangerAction
                                     title="Archive relationship"
-                                    description="Removes it from active relationship lists and WhatsApp confirmation matching while preserving its invoices, messages, and other history."
+                                    description="Removes it from active relationship lists and WhatsApp confirmation matching while preserving its billing records, messages, and other history."
                                     control={<ArchiveRelationshipForm
                                         action={archiveRelationship.bind(null, workspace.slug, relationship.id)}
                                         relationshipName={relationship.business_name ?? relationship.primary_person_name}

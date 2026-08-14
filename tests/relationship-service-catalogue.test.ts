@@ -24,7 +24,8 @@ function service(overrides: Partial<OnboardingServiceDefinition> = {}): Onboardi
         state: "active",
         version: 3,
         isTest: true,
-        defaultPriceCents: 125_00,
+        defaultUpfrontPriceCents: 125_00,
+        defaultRecurringPriceCents: 25_00,
         currency: "USD",
         defaultAssigneeId: null,
         displayPriority: 20,
@@ -51,7 +52,11 @@ test("deal catalogue exposes Active services and keeps selected retired revision
         revisionNumber: 1,
         name: "Original purchased name",
         description: "Original revision",
-        defaultPriceCents: 90_00,
+        checkoutDisplayName: "Original purchased name",
+        checkoutDescription: "Original revision",
+        thumbnailPath: null,
+        defaultUpfrontPriceCents: 90_00,
+        defaultRecurringPriceCents: 10_00,
         currency: "EUR",
         isTest: false,
     }
@@ -59,7 +64,8 @@ test("deal catalogue exposes Active services and keeps selected retired revision
         service_key: retired.code,
         service_id: retired.id,
         service_revision_id: frozenRevision.id,
-        price_cents: 85_00,
+        upfront_price_cents: 85_00,
+        recurring_price_cents: 15_00,
         currency: "EUR",
         assignee_user_id: null,
     }]
@@ -73,7 +79,8 @@ test("deal catalogue exposes Active services and keeps selected retired revision
     const retained = options.find((option) => option.code === retired.code)
     assert.equal(retained?.name, "Original purchased name")
     assert.equal(retained?.revisionId, frozenRevision.id)
-    assert.equal(retained?.selected?.price_cents, 85_00)
+    assert.equal(retained?.selected?.upfront_price_cents, 85_00)
+    assert.equal(retained?.selected?.recurring_price_cents, 15_00)
 })
 
 test("deal catalogue excludes unselected Retired services", () => {
@@ -94,7 +101,11 @@ test("deal catalogue advances selected Active services to their current revision
         revisionNumber: 2,
         name: "Old service name",
         description: "Old description",
-        defaultPriceCents: 100_00,
+        checkoutDisplayName: "Old service name",
+        checkoutDescription: "Old description",
+        thumbnailPath: null,
+        defaultUpfrontPriceCents: 100_00,
+        defaultRecurringPriceCents: 0,
         currency: "EUR",
         isTest: false,
     }
@@ -105,7 +116,8 @@ test("deal catalogue advances selected Active services to their current revision
             service_key: active.code,
             service_id: active.id,
             service_revision_id: oldRevision.id,
-            price_cents: 110_00,
+            upfront_price_cents: 110_00,
+            recurring_price_cents: 20_00,
             currency: "EUR",
             assignee_user_id: null,
         }],
@@ -113,7 +125,7 @@ test("deal catalogue advances selected Active services to their current revision
     })
     assert.equal(options[0]?.revisionId, active.revisionId)
     assert.equal(options[0]?.name, active.name)
-    assert.equal(options[0]?.selected?.price_cents, 110_00)
+    assert.equal(options[0]?.selected?.upfront_price_cents, 110_00)
 })
 
 test("schema-unavailable workspaces retain the legacy catalogue fallback", () => {
@@ -128,7 +140,11 @@ test("relationship labels prefer the frozen revision and retain legacy keys", ()
         revisionNumber: 2,
         name: "Frozen service name",
         description: "",
-        defaultPriceCents: 0,
+        checkoutDisplayName: "Frozen service name",
+        checkoutDescription: "",
+        thumbnailPath: null,
+        defaultUpfrontPriceCents: 0,
+        defaultRecurringPriceCents: 0,
         currency: "USD",
         isTest: false,
     }
@@ -151,15 +167,16 @@ test("fulfilment uses immutable revision names while preserving legacy SOPs and 
     }])
 })
 
-test("commercial save persists exact identities, negotiated currency, and sent-sale guards", () => {
+test("commercial save persists exact identities and dual negotiated prices", () => {
     const actions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
     const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")
     assert.match(actions, /service_id: serviceId, service_revision_id: serviceRevisionId/)
     assert.match(actions, /service_currency_/)
-    assert.match(actions, /This sale is already frozen\. Create a replacement sale before changing services or negotiated prices/)
+    assert.match(actions, /upfront_price_cents/)
+    assert.match(actions, /recurring_price_cents/)
+    assert.match(actions, /This sale is already frozen/)
     assert.match(actions, /catalogue\.state !== "active"/)
-    assert.match(actions, /rpc\("save_relationship_commercial_configuration"/)
-    assert.match(actions, /p_services: versionedRows/)
+    assert.match(actions, /rpc\("save_relationship_dual_pricing_configuration"/)
     assert.match(detail, /loadPublishedOnboardingConfiguration/)
     assert.match(detail, /buildRelationshipDealServiceOptions/)
     assert.doesNotMatch(detail, /Object\.entries\(SERVICES\)/)
@@ -186,60 +203,57 @@ test("relationship selling uses the visible details workspace and three-stage re
         "Sell client",
         "Send WA confirmation",
         "WhatsApp confirmation sent",
-        "Recurring retainer",
-        "One-off payment",
+        "Upfront fees",
+        "Recurring total",
+        "Due at Checkout",
     ]) assert.match(workspace, new RegExp(label))
     assert.match(workspace, /<BuilderPreview/)
     assert.doesNotMatch(workspace, /service_assignee_/)
     assert.match(gantt, /onInvoiceRequest\(\)/)
     assert.match(gantt, /currentWork\.action === "sell_client" \? "Sell client"/)
     assert.match(readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8"), /existing\?\.assignee_user_id \?\? service\?\.defaultAssigneeId/)
-    assert.match(workflow, /source_kind: "stripe_invoice"/)
-    assert.match(workflow, /from\("asset_relationships"\)\.upsert/)
-    assert.ok(workflow.indexOf("moveRelationshipToStage") < workflow.lastIndexOf("const assetId = await ensureRelationshipInvoiceAsset"))
+    assert.doesNotMatch(workflow, /createAndSendStripeInvoice|sendRecurringCheckoutRequest/)
+    assert.match(workflow, /kind: "checkout" as const/)
 })
 
-test("legacy sent-unpaid invoices retain backend recovery without a relationship-detail banner", () => {
+test("legacy invoice replacement paths are retired", () => {
     const actions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
     const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")
     const stripe = readFileSync("lib/stripe/api.ts", "utf8")
-    assert.match(actions, /voidAndReopenRelationshipInvoice/)
-    assert.match(actions, /voidStripeInvoice/)
-    assert.match(actions, /rpc\("reopen_voided_client_sale"/)
-    assert.match(actions, /\["invoice_sent", "payment_failed"\]/)
-    assert.match(actions, /alreadyVoided/)
+    assert.doesNotMatch(actions, /voidAndReopenRelationshipInvoice|voidStripeInvoice|reopen_voided_client_sale/)
     assert.doesNotMatch(detail, /VoidInvoiceButton|Sent invoice is frozen|Finish preparing replacement/)
-    assert.match(stripe, /\/void`/)
+    assert.doesNotMatch(stripe, /createAndSendStripeInvoice|voidStripeInvoice/)
 })
 
-test("recurring retainers create personalised Checkout and keep renewals out of onboarding", () => {
+test("mixed Checkout combines upfront fees with recurring service charges", () => {
     const workflow = readFileSync("lib/relationship-workflow.ts", "utf8")
     const stripe = readFileSync("lib/stripe/api.ts", "utf8")
-    const automation = readFileSync("lib/client-sales/automation.ts", "utf8")
+    const checkout = readFileSync("lib/client-sales/onboarding-checkout.ts", "utf8")
     const webhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8")
     const services = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
-    const migration = readFileSync("supabase/migrations/20260814090000_recurring_retainer_checkout.sql", "utf8")
+    const migration = readFileSync("supabase/migrations/20260814170000_dual_component_checkout_reset.sql", "utf8")
 
-    assert.match(stripe, /mode: "subscription"/)
+    assert.match(stripe, /mode: recurring \? "subscription" : "payment"/)
     assert.match(stripe, /client_reference_id: saleId/)
     assert.match(stripe, /subscription_data\[metadata\]\[client_sale_id\]/)
     assert.match(stripe, /product_data\]\[name/)
     assert.match(stripe, /product_data\]\[description/)
     assert.match(stripe, /product_data\]\[images\]\[0/)
-    assert.match(workflow, /sendRecurringCheckoutRequest/)
-    assert.ok(workflow.indexOf("stripe_checkout_session_id: checkout.checkoutSessionId") < workflow.indexOf("await sendRecurringCheckoutRequest"))
-    const paidHandler = automation.slice(automation.indexOf("export async function handlePaidStripeInvoice"))
-    assert.match(paidHandler, /const isLaterRenewal/)
-    assert.ok(paidHandler.indexOf("if (isLaterRenewal)") < paidHandler.indexOf("ensurePaidOnboardingSession(sale)"))
-    assert.match(paidHandler, /stripe\.subscription\.renewal_paid/)
+    assert.match(stripe, /billingComponent === "recurring"/)
+    assert.match(stripe, /billing_component/)
+    assert.match(checkout, /upfront_amount_cents/)
+    assert.match(checkout, /recurring_amount_cents/)
+    assert.match(checkout, /createStripeMixedCheckout/)
     assert.match(webhook, /checkout\.session\.completed/)
     assert.match(webhook, /customer\.subscription\./)
     assert.match(webhook, /stripe\.subscription\.renewal_failed/)
+    assert.match(webhook, /stripe\.retired_sale_event_ignored/)
     assert.match(services, /service-thumbnails\/upload/)
     assert.match(services, /Checkout name/)
     assert.match(services, /Checkout description/)
-    assert.match(migration, /billing_model in \('one_off', 'recurring'\)/)
-    assert.match(migration, /reopen_expired_recurring_checkout/)
+    assert.match(migration, /default_upfront_price_cents/)
+    assert.match(migration, /default_recurring_price_cents/)
+    assert.match(migration, /retired_billing_model/)
 })
 
 test("relationship and onboarding labels resolve versioned service revisions", () => {

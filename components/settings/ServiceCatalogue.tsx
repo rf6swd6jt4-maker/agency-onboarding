@@ -27,7 +27,8 @@ function blankService(): OnboardingServiceDefinition {
         state: "active",
         version: 0,
         isTest: false,
-        defaultPriceCents: 0,
+        defaultUpfrontPriceCents: 0,
+        defaultRecurringPriceCents: 0,
         currency: "USD",
         defaultAssigneeId: null,
         displayPriority: 100,
@@ -46,15 +47,17 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
 }) {
     const router = useRouter()
     const [draft, setDraft] = useState(service)
-    const [price, setPrice] = useState((service.defaultPriceCents / 100).toFixed(2))
+    const [upfrontPrice, setUpfrontPrice] = useState((service.defaultUpfrontPriceCents / 100).toFixed(2))
+    const [recurringPrice, setRecurringPrice] = useState((service.defaultRecurringPriceCents / 100).toFixed(2))
     const [error, setError] = useState<string | null>(null)
     const [pending, startTransition] = useTransition()
     const [uploading, setUploading] = useState(false)
     const [mobileDialog, setMobileDialog] = useState(false)
     const editorRef = useRef<HTMLElement>(null)
     const closeRef = useRef<HTMLButtonElement>(null)
-    const parsedPriceCents = Math.max(0, Math.round((Number(price) || 0) * 100))
-    const effectiveDraft = { ...draft, defaultPriceCents: parsedPriceCents }
+    const parsedUpfrontPriceCents = Math.max(0, Math.round((Number(upfrontPrice) || 0) * 100))
+    const parsedRecurringPriceCents = Math.max(0, Math.round((Number(recurringPrice) || 0) * 100))
+    const effectiveDraft = { ...draft, defaultUpfrontPriceCents: parsedUpfrontPriceCents, defaultRecurringPriceCents: parsedRecurringPriceCents }
     const dirty = JSON.stringify(effectiveDraft) !== JSON.stringify(service)
 
     useEffect(() => {
@@ -175,9 +178,10 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
                 <label className="mt-3 block text-sm text-neutral-300">Checkout name<input value={draft.checkoutDisplayName ?? ""} onChange={(event) => setDraft({ ...draft, checkoutDisplayName: event.target.value })} maxLength={120} placeholder={draft.name || "Service name"} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-white" /></label>
                 <label className="mt-3 block text-sm text-neutral-300">Checkout description<textarea value={draft.checkoutDescription ?? ""} onChange={(event) => setDraft({ ...draft, checkoutDescription: event.target.value })} maxLength={500} rows={3} placeholder={draft.description || "What the client is subscribing to"} className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-white" /></label>
             </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-                <label className="block text-sm text-neutral-300">Default price<div className="mt-2 flex"><span className="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-neutral-700 bg-neutral-900 px-3 text-sm text-neutral-500">{draft.currency}</span><input value={price} onChange={(event) => setPrice(event.target.value)} onBlur={() => { if (price.trim()) setPrice((parsedPriceCents / 100).toFixed(2)) }} type="number" min="0" step="0.01" className="h-11 min-w-0 flex-1 rounded-r-lg border border-neutral-700 bg-black px-3 text-white" /></div></label>
-                <label className="block text-sm text-neutral-300">Currency<input value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value.toUpperCase().slice(0, 3) })} maxLength={3} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 uppercase text-white" /></label>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm text-neutral-300">Default upfront fee<div className="mt-2 flex"><span className="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-neutral-700 bg-neutral-900 px-3 text-sm text-neutral-500">{draft.currency}</span><input value={upfrontPrice} onChange={(event) => setUpfrontPrice(event.target.value)} onBlur={() => { if (upfrontPrice.trim()) setUpfrontPrice((parsedUpfrontPriceCents / 100).toFixed(2)) }} type="number" min="0" step="0.01" className="h-11 min-w-0 flex-1 rounded-r-lg border border-neutral-700 bg-black px-3 text-white" /></div><span className="mt-1 block text-xs leading-5 text-neutral-600">Added to the first recurring period, or charged alone when no recurring fee is set.</span></label>
+                <label className="block text-sm text-neutral-300">Default recurring fee<div className="mt-2 flex"><span className="inline-flex h-11 items-center rounded-l-lg border border-r-0 border-neutral-700 bg-neutral-900 px-3 text-sm text-neutral-500">{draft.currency}</span><input value={recurringPrice} onChange={(event) => setRecurringPrice(event.target.value)} onBlur={() => { if (recurringPrice.trim()) setRecurringPrice((parsedRecurringPriceCents / 100).toFixed(2)) }} type="number" min="0" step="0.01" className="h-11 min-w-0 flex-1 rounded-r-lg border border-neutral-700 bg-black px-3 text-white" /></div><span className="mt-1 block text-xs leading-5 text-neutral-600">Charged at Checkout, then again every relationship billing period.</span></label>
+                <label className="block text-sm text-neutral-300 sm:col-span-2">Currency<input value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value.toUpperCase().slice(0, 3) })} maxLength={3} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 uppercase text-white" /></label>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-sm text-neutral-300">Default assignee<select value={draft.defaultAssigneeId ?? ""} onChange={(event) => setDraft({ ...draft, defaultAssigneeId: event.target.value || null })} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">Unassigned</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}</select></label>
@@ -210,7 +214,7 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
 
     return <div className={`relative grid min-w-0 gap-4 ${selected ? "lg:grid-cols-[minmax(0,1fr)_minmax(21rem,26rem)]" : ""}`}>
         <section className="min-w-0 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
-            <div className="flex items-start justify-between gap-4 border-b border-neutral-800 p-4 sm:p-5"><div><h3 className="font-semibold">Service catalogue</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Prices are defaults. A relationship keeps its negotiated snapshot when the invoice is sent.</p></div><button type="button" onClick={() => setSelectedId("new")} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black">New service</button></div>
+            <div className="flex items-start justify-between gap-4 border-b border-neutral-800 p-4 sm:p-5"><div><h3 className="font-semibold">Service catalogue</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Upfront and recurring prices are defaults. Selling a relationship freezes its negotiated snapshot.</p></div><button type="button" onClick={() => setSelectedId("new")} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black">New service</button></div>
             {!schemaReady ? <p className="border-b border-yellow-500/20 bg-yellow-500/[0.06] px-4 py-3 text-xs text-yellow-200 sm:px-5">Showing compatible hard-coded definitions while the editable catalogue schema is applied.</p> : null}
             <div className="divide-y divide-neutral-800">
                 {services.map((service) => {
@@ -219,7 +223,7 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
                     return <button key={service.id} type="button" onClick={() => setSelectedId(service.id)} className="flex w-full items-center gap-3 bg-black/35 px-4 py-3 text-left transition hover:bg-neutral-800/70 sm:px-5">
                         <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={44} height={44} unoptimized className="h-full w-full object-cover" /> : "Service"}</span>
                         <span className="min-w-0 flex-1"><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate font-medium text-white">{service.name}</span>{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}<Status label={status.label} tone={status.tone} className="ml-auto shrink-0" /></span>
-                        <span className="mt-2 flex min-w-0 items-center gap-2 text-xs text-neutral-500"><span className="shrink-0 tabular-nums">{new Intl.NumberFormat("en-US", { style: "currency", currency: service.currency }).format(service.defaultPriceCents / 100)}</span><span className="truncate">Priority {service.displayPriority}</span><span className="hidden min-w-0 flex-1 gap-1 overflow-hidden sm:flex">{service.modules.slice(0, 3).map((module) => <RoundPill key={module.moduleId}>{module.moduleName}</RoundPill>)}{service.modules.length > 3 ? <span className="self-center">+{service.modules.length - 3}</span> : null}</span>{assignee ? <Assignee name={assignee.name} avatarSrc={assignee.avatarSrc} compact compactSize="md" className="ml-auto" /> : <span className="ml-auto shrink-0">Unassigned</span>}</span></span>
+                        <span className="mt-2 flex min-w-0 items-center gap-2 text-xs text-neutral-500"><span className="shrink-0 tabular-nums">{new Intl.NumberFormat("en-US", { style: "currency", currency: service.currency }).format(service.defaultUpfrontPriceCents / 100)} upfront</span><span className="shrink-0 tabular-nums">· {new Intl.NumberFormat("en-US", { style: "currency", currency: service.currency }).format(service.defaultRecurringPriceCents / 100)} recurring</span><span className="truncate">Priority {service.displayPriority}</span><span className="hidden min-w-0 flex-1 gap-1 overflow-hidden sm:flex">{service.modules.slice(0, 3).map((module) => <RoundPill key={module.moduleId}>{module.moduleName}</RoundPill>)}{service.modules.length > 3 ? <span className="self-center">+{service.modules.length - 3}</span> : null}</span>{assignee ? <Assignee name={assignee.name} avatarSrc={assignee.avatarSrc} compact compactSize="md" className="ml-auto" /> : <span className="ml-auto shrink-0">Unassigned</span>}</span></span>
                     </button>
                 })}
                 {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first catalogue service and assign its onboarding modules.</p></div> : null}

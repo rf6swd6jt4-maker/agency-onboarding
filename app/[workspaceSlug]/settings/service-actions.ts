@@ -20,7 +20,10 @@ export async function saveOnboardingService(slug: string, serviceId: string | nu
             p_workspace_id: workspace.id,
             p_actor_user_id: user.id,
             p_service_id: serviceId || null,
-            p_definition: normalized.definition,
+            p_definition: {
+                ...normalized.definition,
+                defaultPriceCents: normalized.definition.defaultUpfrontPriceCents,
+            },
         })
         if (outcome.ok) revalidateOnboardingConfiguration(slug)
         return outcome

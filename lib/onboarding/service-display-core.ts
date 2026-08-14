@@ -10,7 +10,8 @@ export type StoredRelationshipService = {
     service_key: string
     service_id?: string | null
     service_revision_id?: string | null
-    price_cents?: number | null
+    upfront_price_cents?: number | null
+    recurring_price_cents?: number | null
     currency?: string | null
     assignee_user_id?: string | null
 }
@@ -24,7 +25,8 @@ export type OnboardingServiceRevisionDisplay = {
     checkoutDisplayName: string
     checkoutDescription: string
     thumbnailPath: string | null
-    defaultPriceCents: number
+    defaultUpfrontPriceCents: number
+    defaultRecurringPriceCents: number
     currency: string
     isTest: boolean
 }
@@ -39,7 +41,8 @@ export type RelationshipDealServiceOption = {
     checkoutDescription: string
     thumbnailPath: string | null
     thumbnailUrl: string | null
-    defaultPriceCents: number
+    defaultUpfrontPriceCents: number
+    defaultRecurringPriceCents: number
     currency: string
     defaultAssigneeId: string | null
     isTest: boolean
@@ -96,7 +99,8 @@ export function buildRelationshipDealServiceOptionsCore(input: {
                 checkoutDescription: service.checkoutDescription || service.description,
                 thumbnailPath: service.thumbnailPath ?? null,
                 thumbnailUrl: service.thumbnailUrl ?? null,
-                defaultPriceCents: service.defaultPriceCents,
+                defaultUpfrontPriceCents: service.defaultUpfrontPriceCents,
+                defaultRecurringPriceCents: service.defaultRecurringPriceCents,
                 currency: service.currency.toUpperCase(),
                 defaultAssigneeId: selected?.assignee_user_id ?? service.defaultAssigneeId,
                 isTest: service.isTest,
@@ -118,7 +122,8 @@ export function buildRelationshipDealServiceOptionsCore(input: {
                 checkoutDescription: service.description,
                 thumbnailPath: null,
                 thumbnailUrl: null,
-                defaultPriceCents: 0,
+                defaultUpfrontPriceCents: 0,
+                defaultRecurringPriceCents: 0,
                 currency: (selected?.currency ?? "USD").toUpperCase(),
                 defaultAssigneeId: selected?.assignee_user_id ?? null,
                 isTest: false,
@@ -143,7 +148,8 @@ export function buildRelationshipDealServiceOptionsCore(input: {
             checkoutDescription: revision?.checkoutDescription || current?.checkoutDescription || revision?.description || current?.description || legacyServices[selected.service_key]?.description || "Existing relationship service",
             thumbnailPath: revision?.thumbnailPath ?? current?.thumbnailPath ?? null,
             thumbnailUrl: current?.thumbnailUrl ?? null,
-            defaultPriceCents: revision?.defaultPriceCents ?? current?.defaultPriceCents ?? 0,
+            defaultUpfrontPriceCents: revision?.defaultUpfrontPriceCents ?? current?.defaultUpfrontPriceCents ?? 0,
+            defaultRecurringPriceCents: revision?.defaultRecurringPriceCents ?? current?.defaultRecurringPriceCents ?? 0,
             currency: (revision?.currency ?? current?.currency ?? selected.currency ?? "USD").toUpperCase(),
             defaultAssigneeId: selected.assignee_user_id ?? current?.defaultAssigneeId ?? null,
             isTest: revision?.isTest ?? current?.isTest ?? false,

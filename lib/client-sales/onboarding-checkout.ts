@@ -1,4 +1,4 @@
-import { createStripePaymentCheckout, createStripeSubscriptionCheckout, retrieveStripeCheckoutSession, type StripeInvoiceLineItemInput, type StripeRecurringInterval } from "@/lib/stripe/api"
+import { createStripeMixedCheckout, retrieveStripeCheckoutSession, type StripeCheckoutLineItemInput, type StripeRecurringInterval } from "@/lib/stripe/api"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { createPrivateUploadSignedUrl, createServiceThumbnailPublicUrl } from "@/lib/onboarding/uploads"
@@ -12,10 +12,10 @@ type PaymentContext = {
     sale: {
         id: string
         status: string
-        checkout_flow: string | null
-        billing_model: "one_off" | "recurring"
         billing_interval: StripeRecurringInterval | null
         billing_interval_count: number | null
+        upfront_total_amount: number
+        recurring_total_amount: number
         client_name: string
         client_email: string | null
         client_phone: string
@@ -33,9 +33,9 @@ export async function getOnboardingPaymentContext(token: string): Promise<Paymen
         .eq("session_token", token).in("status", ["active", "completed"]).maybeSingle()
     if (sessionError || !session?.source_sale_id) return null
     const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales")
-        .select("id, status, checkout_flow, billing_model, billing_interval, billing_interval_count, client_name, client_email, client_phone, currency, project_timeframe_days, stripe_checkout_session_id, stripe_checkout_url, stripe_checkout_expires_at")
+        .select("id, status, billing_interval, billing_interval_count, upfront_total_amount, recurring_total_amount, client_name, client_email, client_phone, currency, project_timeframe_days, stripe_checkout_session_id, stripe_checkout_url, stripe_checkout_expires_at")
         .eq("workspace_id", session.workspace_id).eq("id", session.source_sale_id).maybeSingle()
-    if (saleError || !sale || sale.checkout_flow !== "onboarding_payment_gate") return null
+    if (saleError || !sale) return null
     return { sessionId: session.id, workspaceId: session.workspace_id, relationshipId: session.relationship_id, sale: sale as PaymentContext["sale"] }
 }
 
@@ -54,9 +54,9 @@ export async function getFrozenOnboardingPaymentDefinition(context: PaymentConte
     return normalized.ok ? normalized.definition : defaultOnboardingPaymentDefinition()
 }
 
-async function frozenCheckoutLineItems(context: PaymentContext, expiresAt: number): Promise<StripeInvoiceLineItemInput[]> {
+async function frozenCheckoutLineItems(context: PaymentContext, expiresAt: number): Promise<StripeCheckoutLineItemInput[]> {
     const { data: items, error } = await supabaseAdmin.from("client_sale_items")
-        .select("service_code, service_name, service_revision_id, description, amount_cents")
+        .select("service_code, service_name, service_revision_id, description, upfront_amount_cents, recurring_amount_cents")
         .eq("workspace_id", context.workspaceId).eq("client_sale_id", context.sale.id).order("sort_order")
     if (error || !items?.length) throw new Error(error?.message ?? "This sale has no frozen services")
     const revisionIds = items.map((item) => item.service_revision_id).filter((id): id is string => Boolean(id))
@@ -64,15 +64,33 @@ async function frozenCheckoutLineItems(context: PaymentContext, expiresAt: numbe
         ? await supabaseAdmin.from("onboarding_service_revisions").select("id, definition").eq("workspace_id", context.workspaceId).in("id", revisionIds)
         : { data: [] }
     const definitionByRevision = new Map((revisions ?? []).map((revision) => [revision.id, revision.definition && typeof revision.definition === "object" ? revision.definition as Record<string, unknown> : {}]))
-    return Promise.all(items.map(async (item) => {
+    const serviceItems = await Promise.all(items.map(async (item) => {
         const definition = definitionByRevision.get(item.service_revision_id ?? "") ?? {}
         const displayName = String(definition.checkoutDisplayName ?? definition.checkout_display_name ?? item.service_name)
         const description = String(definition.checkoutDescription ?? definition.checkout_description ?? item.description ?? displayName)
         const thumbnailPath = typeof definition.thumbnailPath === "string" ? definition.thumbnailPath : typeof definition.thumbnail_path === "string" ? definition.thumbnail_path : null
         const publicImage = createServiceThumbnailPublicUrl(thumbnailPath)
         const imageUrl = publicImage ?? (thumbnailPath ? await createPrivateUploadSignedUrl(thumbnailPath, Math.max(60, expiresAt - Math.floor(Date.now() / 1_000))) : null)
-        return { serviceKey: item.service_code, name: displayName, description, amount: item.amount_cents, imageUrl }
+        return [
+            item.upfront_amount_cents > 0 ? {
+                serviceKey: item.service_code,
+                name: displayName,
+                description,
+                amount: item.upfront_amount_cents,
+                billingComponent: "upfront" as const,
+                imageUrl,
+            } : null,
+            item.recurring_amount_cents > 0 ? {
+                serviceKey: item.service_code,
+                name: displayName,
+                description,
+                amount: item.recurring_amount_cents,
+                billingComponent: "recurring" as const,
+                imageUrl,
+            } : null,
+        ].filter(Boolean) as StripeCheckoutLineItemInput[]
     }))
+    return serviceItems.flat()
 }
 
 export async function createOrReuseOnboardingCheckout(input: { token: string; origin: string }) {
@@ -105,9 +123,15 @@ export async function createOrReuseOnboardingCheckout(input: { token: string; or
         secretKey: config.access_token || config.secret_key,
         idempotencyKey: `${context.sale.id}:onboarding-checkout:${generation}`,
     }
-    const checkout = context.sale.billing_model === "recurring"
-        ? await createStripeSubscriptionCheckout({ ...shared, interval: context.sale.billing_interval ?? "month", intervalCount: context.sale.billing_interval_count ?? 1 })
-        : await createStripePaymentCheckout(shared)
+    const checkout = await createStripeMixedCheckout({
+        ...shared,
+        interval: context.sale.recurring_total_amount > 0
+            ? context.sale.billing_interval ?? "month"
+            : null,
+        intervalCount: context.sale.recurring_total_amount > 0
+            ? context.sale.billing_interval_count ?? 1
+            : null,
+    })
     const { error: updateError } = await supabaseAdmin.from("client_sales").update({
         stripe_customer_id: checkout.customerId,
         stripe_checkout_session_id: checkout.checkoutSessionId,
