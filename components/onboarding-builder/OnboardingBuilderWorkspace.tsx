@@ -18,11 +18,14 @@ import {
     createOnboardingField,
     createOnboardingStepV2,
     createVideoBlock,
+    ONBOARDING_PAYMENT_BUTTON_ID,
+    ONBOARDING_PAYMENT_DEFINITION_ID,
     bookendV2Definition,
     moduleV2WithLegacyProjection,
     type OnboardingBlock,
     type OnboardingBookendDefinitionV2,
     type OnboardingModuleDefinitionV2,
+    type OnboardingPaymentDefinitionV2,
     type OnboardingStepV2,
     type VideoBlock,
 } from "@/lib/onboarding/block-definition"
@@ -35,6 +38,7 @@ import { ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onb
 type DefinitionGroup =
     | { key: string; kind: "module"; title: string; definition: OnboardingModuleDefinitionV2 }
     | { key: string; kind: "bookend"; title: string; definition: OnboardingBookendDefinitionV2 }
+    | { key: "payment"; kind: "payment"; title: "Payment"; definition: OnboardingPaymentDefinitionV2 }
 
 type Selection = { groupKey: string; stepId: string; blockId: string | null; fieldId?: string | null }
 type LeftTab = "outline" | "blocks" | "modules"
@@ -47,6 +51,7 @@ type ReleaseFingerprint = {
     welcome: string
     completion: string
     theme: string
+    payment: string
 }
 
 function releaseJson(value: unknown) {
@@ -59,6 +64,7 @@ function releaseFingerprint(document: VisualBuilderDocument): ReleaseFingerprint
         welcome: releaseJson(bookendV2Definition(document.welcome)),
         completion: releaseJson(bookendV2Definition(document.completion)),
         theme: releaseJson({ swatches: document.theme.swatches, assignments: document.theme.assignments }),
+        payment: releaseJson(document.payment),
     }
 }
 
@@ -167,7 +173,7 @@ function ChevronIcon({ collapsed }: { collapsed: boolean }) {
     return <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-3.5 w-3.5 fill-none stroke-current stroke-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
 }
 
-function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "checklist" | "form" | "video" | "button" | "field" | "help" }) {
+function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "checklist" | "form" | "video" | "button" | "field" | "help" | "payment" }) {
     const tone = {
         bookend: "bg-indigo-500/15 text-indigo-300",
         module: "bg-blue-500/15 text-blue-300",
@@ -180,6 +186,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         button: "bg-amber-500/15 text-amber-300",
         field: "bg-emerald-500/15 text-emerald-300",
         help: "bg-indigo-500/15 text-indigo-300",
+        payment: "bg-amber-500/15 text-amber-300",
     }[kind]
     const glyph = {
         bookend: <path d="M5 3v14M5 4h9l-2 3 2 3H5" />,
@@ -193,6 +200,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
         field: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="M6 10h5" /></>,
         help: <><circle cx="10" cy="10" r="7" /><path d="M8 8a2 2 0 1 1 3 1.7c-.8.4-1 1-1 1.8M10 14h.01" /></>,
+        payment: <><rect x="3" y="5" width="14" height="10" rx="2" /><path d="M3 8h14M6 12h3" /></>,
     }[kind]
     return <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${tone}`}><svg viewBox="0 0 20 20" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current stroke-[1.6] [stroke-linecap:round] [stroke-linejoin:round]">{glyph}</svg></span>
 }
@@ -246,8 +254,16 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
             const moduleId = group.kind === "module" ? group.definition.id : null
             const shown = moduleId ? visibleModuleIds.has(moduleId) : true
             const groupCollapsed = collapsedGroups.has(group.key)
+            const moduleIndex = groups.slice(0, groupIndex).filter((candidate) => candidate.kind === "module").length
+            if (group.kind === "payment") {
+                const step = group.definition.steps[0]
+                const selected = selection.groupKey === group.key
+                return <section key={group.key} className={`overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20 ${selected ? "bg-neutral-800" : ""}`}>
+                    <button type="button" onClick={() => onSelectStep(group.key, step.id)} className="flex h-9 w-full items-center gap-2 px-2 text-left text-xs text-neutral-300"><span className="h-7 w-7 shrink-0" /><OutlineItemIcon kind="payment" /><span className="min-w-0 flex-1 truncate font-semibold">Payment</span><RoundPill>Fixed</RoundPill></button>
+                </section>
+            }
             return <Fragment key={group.key}>
-                <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: null, moduleIndex: groupIndex }) }} />
+                <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: group.key, stepId: null, moduleIndex }) }} />
                 <section className="overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20">
                 <div title="Drag to reorder module" draggable={editable} onDragStart={(event) => startDrag(event, { type: "module", moduleId: group.definition.id }, group.key, group.title)} onDragEnd={() => setDragging(null)} className={`flex h-9 cursor-grab items-center gap-1 px-1.5 ${dragging?.key === group.key ? "opacity-40" : ""}`}>
                     <button type="button" aria-label={`${groupCollapsed ? "Expand" : "Collapse"} ${group.title}`} aria-expanded={!groupCollapsed} onClick={() => toggleCollapsed(setCollapsedGroups, group.key)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-500 hover:bg-neutral-800 hover:text-white"><ChevronIcon collapsed={groupCollapsed} /></button>
@@ -301,7 +317,7 @@ function OutlineTree({ groups, visibleModuleIds, selection, editable, onSelectSt
                 </section>
             </Fragment>
         })}
-        {groups.length ? <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: groups.at(-1)!.key, stepId: null, moduleIndex: groups.length }) }} /> : null}
+        {groups.length ? <div className="h-2" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.stopPropagation(); onDrop(event, { groupKey: groups.at(-1)!.key, stepId: null, moduleIndex: groups.filter((group) => group.kind === "module").length }) }} /> : null}
         <section className={`overflow-hidden rounded-lg border border-neutral-800/80 bg-black/20 ${selection.blockId === HELP_BLOCK_ID ? "bg-neutral-800" : ""}`}>
             <button type="button" onClick={onSelectHelp} className="flex h-9 w-full items-center gap-2 px-2 text-left text-xs text-neutral-300"><span className="h-7 w-7 shrink-0" /><OutlineItemIcon kind="help" /><span className="min-w-0 flex-1 truncate font-semibold">Client help</span><RoundPill>Fixed</RoundPill></button>
         </section>
@@ -349,7 +365,7 @@ function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, 
     if (!block) return <div data-builder-step-inspector className="space-y-4">
         <label className="block text-xs text-neutral-500">Back button label<input value={step.navigation.backLabel} disabled={!editable} onChange={(event) => updateStep({ ...step, navigation: { ...step.navigation, backLabel: event.target.value } })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Continue button label<input value={step.navigation.continueLabel} disabled={!editable} onChange={(event) => updateStep({ ...step, navigation: { ...step.navigation, continueLabel: event.target.value } })} className={inspectorInputClass} /></label>
-        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete step</button>
+        {currentGroup.kind !== "payment" ? <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete step</button> : <p className="text-xs leading-5 text-neutral-600">Payment is required and always stays before the client’s onboarding modules.</p>}
     </div>
     if (block.kind === "header") return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
@@ -379,6 +395,10 @@ function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, 
         <label className="block text-xs text-neutral-500">Video<span className="mt-1 flex min-h-9 items-center justify-between gap-2 rounded-lg border border-neutral-700 bg-black px-2 text-xs text-neutral-300"><span className="min-w-0 truncate">{block.upload?.name ?? "No video uploaded"}</span><span className="shrink-0 font-medium text-white">{block.upload ? "Replace" : "Upload"}</span></span><input type="file" accept="video/*" disabled={!editable} onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadVideo(file); event.currentTarget.value = "" }} className="sr-only" /></label>
         <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.requirement === "finish"} disabled={!editable} onChange={(event) => updateBlock({ ...block, requirement: event.target.checked ? "finish" : "none" })} />Client must finish this video</label>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete video</button>
+    </div>
+    if (currentGroup.kind === "payment" && block.id === ONBOARDING_PAYMENT_BUTTON_ID) return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Button text<input value={block.kind === "button" ? block.label : ""} disabled={!editable} onChange={(event) => block.kind === "button" && updateBlock({ ...block, label: event.target.value })} className={inspectorInputClass} /></label>
+        <p className="text-xs leading-5 text-neutral-600">This required button creates or reuses the client’s secure Stripe Checkout page. Its destination is assigned automatically and it cannot be moved or removed.</p>
     </div>
     return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
@@ -417,20 +437,32 @@ function StylesPanel({ block, field, theme, updateBlock, updateThemeSwatch, addT
 }
 
 function composeGroups(document: VisualBuilderDocument): DefinitionGroup[] {
-    return document.modules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module }))
+    return [
+        { key: "payment", kind: "payment" as const, title: "Payment" as const, definition: document.payment },
+        ...document.modules.map((module) => ({ key: `module:${module.id}`, kind: "module" as const, title: module.name, definition: module })),
+    ]
 }
 
 function documentDefinition(document: VisualBuilderDocument, groupKey: string) {
+    if (groupKey === "payment") return document.payment
     if (groupKey === "bookend:welcome") return document.welcome
     if (groupKey === "bookend:completion") return document.completion
     return document.modules.find((module) => module.id === groupKey.replace("module:", "")) ?? null
 }
 
 function replaceDocumentDefinition(document: VisualBuilderDocument, groupKey: string, definition: DefinitionGroup["definition"]) {
+    if (groupKey === "payment") return { ...document, payment: definition as OnboardingPaymentDefinitionV2 }
     if (groupKey === "bookend:welcome") return { ...document, welcome: definition as OnboardingBookendDefinitionV2 }
     if (groupKey === "bookend:completion") return { ...document, completion: definition as OnboardingBookendDefinitionV2 }
     const moduleId = groupKey.replace("module:", "")
     return { ...document, modules: document.modules.map((module) => module.id === moduleId ? definition as OnboardingModuleDefinitionV2 : module) }
+}
+
+function definitionWithSteps(definition: DefinitionGroup["definition"], steps: OnboardingStepV2[]): DefinitionGroup["definition"] {
+    if (definition.id === ONBOARDING_PAYMENT_DEFINITION_ID) {
+        return { ...definition, steps: [steps[0] ?? definition.steps[0]] } as OnboardingPaymentDefinitionV2
+    }
+    return { ...definition, steps } as OnboardingModuleDefinitionV2 | OnboardingBookendDefinitionV2
 }
 
 function selectedStep(groups: DefinitionGroup[], selection: Selection) {
@@ -471,7 +503,7 @@ function ModulesPanel({ modules, services, editable, updateModule, removeModule,
 }
 
 export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data, initialBookend }: { workspaceSlug: string; workspaceName: string; data: OnboardingBuilderData; initialBookend?: "welcome" | "completion" | null }) {
-    const initialDocument = useMemo<VisualBuilderDocument>(() => ({ modules: data.visualModules, welcome: data.visualWelcome, completion: data.visualCompletion, theme: data.theme, linkedChangeSets: [] }), [data])
+    const initialDocument = useMemo<VisualBuilderDocument>(() => ({ modules: data.visualModules, welcome: data.visualWelcome, completion: data.visualCompletion, payment: data.visualPayment, theme: data.theme, linkedChangeSets: [] }), [data])
     const collaboration = useCollaborativeOnboardingDocument({ workspaceSlug, initial: initialDocument, collaboration: data.collaboration })
     const [publishedVersion, setPublishedVersion] = useState(data.collaboration.publishedVersion)
     const [publishedBaseline, setPublishedBaseline] = useState<ReleaseFingerprint | null>(() => data.collaboration.version === data.collaboration.publishedVersion
@@ -572,7 +604,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const helpSelected = selection.blockId === HELP_BLOCK_ID
     const selectedBlock = currentStep?.blocks.find((block) => block.id === selection.blockId) ?? null
     const selectedField = selectedBlock?.kind === "form" ? selectedBlock.fields.find((field) => field.id === selection.fieldId) ?? null : null
-    const visibleGroups = groups.filter((group) => group.kind === "bookend" || visibleModuleIds.has(group.definition.id))
+    const visibleGroups = groups.filter((group) => group.kind !== "module" || visibleModuleIds.has(group.definition.id))
     const moduleTitles = visibleGroups.filter((group): group is Extract<DefinitionGroup, { kind: "module" }> => group.kind === "module").map((group) => group.title)
     const roadmapSteps = visibleGroups.flatMap((group) => group.definition.steps.map((step) => ({ key: `${group.key}:${step.id}`, title: visualStepTitle(step), complete: false, current: group.key === selection.groupKey && step.id === selection.stepId, href: null })))
     const draftFingerprint = releaseFingerprint(collaboration.document)
@@ -581,6 +613,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     const welcomeDirty = draftFingerprint.welcome !== (publishedBaseline?.welcome ?? releaseJson(bookendV2Definition(data.visualWelcome)))
     const completionDirty = draftFingerprint.completion !== (publishedBaseline?.completion ?? releaseJson(bookendV2Definition(data.visualCompletion)))
     const themeDirty = draftFingerprint.theme !== (publishedBaseline?.theme ?? releaseJson({ swatches: data.theme.swatches, assignments: data.theme.assignments }))
+    const paymentDirty = draftFingerprint.payment !== (publishedBaseline?.payment ?? releaseJson(data.visualPayment))
     const helpDirty = helpDraft.text.trim() !== savedHelp.text.trim() || helpDraft.whatsappEnabled !== savedHelp.whatsappEnabled
 
     function rememberRail(side: "left" | "right", open: boolean) {
@@ -600,6 +633,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     function updateDefinition(groupKey: string, update: (definition: DefinitionGroup["definition"]) => DefinitionGroup["definition"]) {
         collaboration.updateDocument((document) => {
+            if (groupKey === "payment") return { ...document, payment: update(document.payment) as OnboardingPaymentDefinitionV2 }
             if (groupKey === "bookend:welcome") return { ...document, welcome: update(document.welcome) as OnboardingBookendDefinitionV2 }
             if (groupKey === "bookend:completion") return { ...document, completion: update(document.completion) as OnboardingBookendDefinitionV2 }
             const moduleId = groupKey.replace("module:", "")
@@ -609,11 +643,15 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     function updateCurrentStep(step: OnboardingStepV2) {
         if (!currentGroup) return
-        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: definition.steps.map((item) => item.id === step.id ? step : item) }))
+        if (currentGroup.kind === "payment") {
+            updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: [step] }) as OnboardingPaymentDefinitionV2)
+            return
+        }
+        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: definition.steps.map((item) => item.id === step.id ? step : item) }) as OnboardingModuleDefinitionV2 | OnboardingBookendDefinitionV2)
     }
 
     function updateCurrentRevisionId(revisionId: string) {
-        if (!currentGroup) return
+        if (!currentGroup || currentGroup.kind === "payment") return
         updateDefinition(currentGroup.key, (definition) => ({ ...definition, revisionId }))
     }
 
@@ -638,6 +676,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     }
 
     function moveStep(sourceGroupKey: string, targetGroupKey: string, stepId: string, targetIndex: number, copy: boolean) {
+        if (sourceGroupKey === "payment" || targetGroupKey === "payment") {
+            setError("The Payment step is fixed at the start of onboarding.")
+            return
+        }
         const moved: { step: OnboardingStepV2 | null } = { step: null }
         collaboration.updateDocument((document) => {
             const source = documentDefinition(document, sourceGroupKey)
@@ -655,14 +697,14 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 if (!copy) steps.splice(sourceIndex, 1)
                 const adjustedIndex = !copy && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
                 steps.splice(Math.max(0, Math.min(adjustedIndex, steps.length)), 0, moved.step)
-                return replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps })
+                return replaceDocumentDefinition(document, sourceGroupKey, definitionWithSteps(source, steps))
             }
-            let next = copy ? document : replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps: source.steps.filter((step) => step.id !== stepId) })
+            let next = copy ? document : replaceDocumentDefinition(document, sourceGroupKey, definitionWithSteps(source, source.steps.filter((step) => step.id !== stepId)))
             const nextTarget = documentDefinition(next, targetGroupKey)
             if (!nextTarget) return document
             const targetSteps = [...nextTarget.steps]
             targetSteps.splice(Math.max(0, Math.min(targetIndex, targetSteps.length)), 0, moved.step)
-            next = replaceDocumentDefinition(next, targetGroupKey, { ...nextTarget, steps: targetSteps })
+            next = replaceDocumentDefinition(next, targetGroupKey, definitionWithSteps(nextTarget, targetSteps))
             return linkDefinitions(next, sourceGroupKey, targetGroupKey)
         })
         if (moved.step) setSelection({ groupKey: targetGroupKey, stepId: moved.step.id, blockId: null })
@@ -677,6 +719,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             const targetStep = target?.steps.find((step) => step.id === targetStepId)
             const sourceBlock = sourceStep?.blocks.find((block) => block.id === blockId)
             if (!source || !target || !sourceStep || !targetStep || !sourceBlock || sourceBlock.kind === "header") return document
+            if (sourceBlock.id === ONBOARDING_PAYMENT_BUTTON_ID) {
+                setError("The required Pay button cannot be moved or duplicated.")
+                return document
+            }
             const movingWithinSameStep = !copy && sourceGroupKey === targetGroupKey && sourceStepId === targetStepId
             if (targetStep.blocks.some((block) => block.kind === sourceBlock.kind && !(movingWithinSameStep && block.id === sourceBlock.id))) {
                 setError(`A step can contain only one ${blockName(sourceBlock)} block.`)
@@ -689,16 +735,16 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 if (!copy) blocks.splice(sourceIndex, 1)
                 const adjustedIndex = !copy && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
                 blocks.splice(Math.max(1, Math.min(adjustedIndex, blocks.length)), 0, moved.block)
-                return replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps: source.steps.map((step) => step.id === sourceStepId ? { ...step, blocks } : step) })
+                return replaceDocumentDefinition(document, sourceGroupKey, definitionWithSteps(source, source.steps.map((step) => step.id === sourceStepId ? { ...step, blocks } : step)))
             }
             const sourceSteps = source.steps.map((step) => step.id === sourceStepId && !copy ? { ...step, blocks: step.blocks.filter((block) => block.id !== blockId) } : step)
-            let next = replaceDocumentDefinition(document, sourceGroupKey, { ...source, steps: sourceSteps })
+            let next = replaceDocumentDefinition(document, sourceGroupKey, definitionWithSteps(source, sourceSteps))
             const nextTarget = documentDefinition(next, targetGroupKey)
             if (!nextTarget) return document
             const targetSteps = nextTarget.steps.map((step) => step.id === targetStepId
                 ? { ...step, blocks: [...step.blocks.slice(0, Math.max(1, Math.min(targetIndex, step.blocks.length))), moved.block!, ...step.blocks.slice(Math.max(1, Math.min(targetIndex, step.blocks.length)))] }
                 : step)
-            next = replaceDocumentDefinition(next, targetGroupKey, { ...nextTarget, steps: targetSteps })
+            next = replaceDocumentDefinition(next, targetGroupKey, definitionWithSteps(nextTarget, targetSteps))
             return linkDefinitions(next, sourceGroupKey, targetGroupKey)
         })
         if (moved.block) setSelection({ groupKey: targetGroupKey, stepId: targetStepId, blockId: moved.block.id })
@@ -706,9 +752,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     function moveField(groupKey: string, stepId: string, formBlockId: string, fieldId: string, targetIndex: number, copy: boolean) {
         let movedFieldId: string | null = null
-        updateDefinition(groupKey, (definition) => ({
-            ...definition,
-            steps: definition.steps.map((step) => {
+        updateDefinition(groupKey, (definition) => definitionWithSteps(definition, definition.steps.map((step) => {
                 if (step.id !== stepId) return step
                 return { ...step, blocks: step.blocks.map((block) => {
                     if (block.id !== formBlockId || block.kind !== "form") return block
@@ -723,8 +767,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     fields.splice(Math.max(0, Math.min(adjustedIndex, fields.length)), 0, moved)
                     return { ...block, fields }
                 }) }
-            }),
-        }))
+            })))
         if (movedFieldId) setSelection({ groupKey, stepId, blockId: formBlockId, fieldId: movedFieldId })
     }
 
@@ -757,7 +800,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                     inserted = true
                     const insertionIndex = Math.max(1, Math.min(target.blockIndex ?? targetStep.blocks.length, targetStep.blocks.length))
                     const steps = targetDefinition.steps.map((step) => step.id === target.stepId ? { ...step, blocks: [...step.blocks.slice(0, insertionIndex), block, ...step.blocks.slice(insertionIndex)] } : step)
-                    return replaceDocumentDefinition(document, target.groupKey, { ...targetDefinition, steps })
+                    return replaceDocumentDefinition(document, target.groupKey, definitionWithSteps(targetDefinition, steps))
                 })
                 if (inserted) setSelection({ groupKey: target.groupKey, stepId: target.stepId, blockId: block.id })
             }
@@ -792,6 +835,10 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
     function confirmDeleteSelection() {
         if (!collaboration.editable || !currentGroup || !currentStep) return
+        if (currentGroup.kind === "payment" && (!selectedBlock || selectedBlock.id === ONBOARDING_PAYMENT_BUTTON_ID)) {
+            setError("Payment and its required Pay button cannot be removed.")
+            return
+        }
         const label = selectedField?.label || (selectedBlock ? selectedBlock.kind : visualStepTitle(currentStep))
         if (!window.confirm(`Delete ${label}? This change can be undone with the Builder undo control.`)) return
         if (selectedField && selectedBlock?.kind === "form") {
@@ -837,9 +884,9 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     }
 
     function addStep() {
-        if (!currentGroup) return
+        if (!currentGroup || currentGroup.kind === "payment") return
         const step = createOnboardingStepV2({ bookend: currentGroup.kind === "bookend", title: currentGroup.kind === "bookend" ? `New ${currentGroup.title.toLowerCase()} step` : "Untitled step", showComposedModuleSummary: currentGroup.key === "bookend:welcome" && currentGroup.definition.steps.length === 0 })
-        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: [...definition.steps, step] }))
+        updateDefinition(currentGroup.key, (definition) => definitionWithSteps(definition, [...definition.steps, step]))
         setSelection({ groupKey: currentGroup.key, stepId: step.id, blockId: step.blocks[0].id })
     }
 
@@ -890,19 +937,23 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     }
 
     function removeBlock() {
-        if (!currentStep || !selectedBlock || selectedBlock.kind === "header" || selectedBlock.kind === "estimate") return
+        if (!currentStep || !selectedBlock || selectedBlock.kind === "header" || selectedBlock.kind === "estimate" || selectedBlock.id === ONBOARDING_PAYMENT_BUTTON_ID) return
         updateCurrentStep({ ...currentStep, blocks: currentStep.blocks.filter((block) => block.id !== selectedBlock.id) })
         setSelection({ ...selection, blockId: null, fieldId: null })
     }
 
     function removeCurrentStep() {
         if (!currentGroup || !currentStep) return
+        if (currentGroup.kind === "payment") {
+            setError("The Payment step is fixed at the start of onboarding.")
+            return
+        }
         if (currentGroup.definition.steps.length === 1) {
             setError(currentGroup.kind === "bookend" ? "Each bookend must retain at least one step." : "Each module must retain at least one step.")
             return
         }
         const remaining = currentGroup.definition.steps.filter((step) => step.id !== currentStep.id)
-        updateDefinition(currentGroup.key, (definition) => ({ ...definition, steps: remaining }))
+        updateDefinition(currentGroup.key, (definition) => definitionWithSteps(definition, remaining))
         setSelection({ groupKey: currentGroup.key, stepId: remaining[0].id, blockId: null })
     }
 
@@ -936,11 +987,12 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
             modules: collaboration.document.modules.filter((module) => included.has(module.id) && dirtyModuleIds.includes(module.id)),
             bookends: [included.has("bookend:welcome") && welcomeDirty ? collaboration.document.welcome : null, included.has("bookend:completion") && completionDirty ? collaboration.document.completion : null].filter(Boolean) as OnboardingBookendDefinitionV2[],
             theme: themeDirty ? collaboration.document.theme : null,
+            payment: paymentDirty ? collaboration.document.payment : null,
         }
     }
 
     const publishScope = currentPublishScope()
-    const publishCount = publishScope.modules.length + publishScope.bookends.length + (publishScope.theme ? 1 : 0)
+    const publishCount = publishScope.modules.length + publishScope.bookends.length + (publishScope.theme ? 1 : 0) + (publishScope.payment ? 1 : 0)
     const builderGridColumns = leftOpen
         ? rightOpen
             ? "md:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[18rem_minmax(0,1fr)_18rem]"
@@ -971,7 +1023,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
     }
 
     async function createPreviewLink() {
-        const snapshot = { schemaVersion: 2, workspaceName, serviceIds: [], modules: visibleGroups.filter((group): group is Extract<DefinitionGroup, { kind: "module" }> => group.kind === "module").map((group) => group.definition), welcome: collaboration.document.welcome, completion: collaboration.document.completion, theme: collaboration.document.theme, help: helpDraft }
+        const snapshot = { schemaVersion: 2, workspaceName, serviceIds: [], modules: visibleGroups.filter((group): group is Extract<DefinitionGroup, { kind: "module" }> => group.kind === "module").map((group) => group.definition), welcome: collaboration.document.welcome, completion: collaboration.document.completion, payment: collaboration.document.payment, theme: collaboration.document.theme, help: helpDraft }
         const outcome = await rotateVisualOnboardingPreview(workspaceSlug, snapshot)
         if (!outcome.ok) { setError(outcome.error); return }
         const url = `${window.location.origin}/onboarding/preview/${outcome.data.token}`
@@ -1020,7 +1072,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                         </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag a block into any step. Each block type can appear once per step, or click to append to the selected step.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "checklist", "form", "video", "button"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "checklist" ? "✓" : kind === "form" ? "▤" : kind === "video" ? "▶" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
                         </div>
                     </div>
-                    {leftTab === "outline" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300">Add step</button></div> : leftTab === "modules" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300 disabled:opacity-30">Add module</button></div> : null}
+                    {leftTab === "outline" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || currentGroup.kind === "payment" || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300 disabled:opacity-30">Add step</button></div> : leftTab === "modules" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300 disabled:opacity-30">Add module</button></div> : null}
                 </> : <RailToggleButton side="left" label="Expand left rail" onClick={() => rememberRail("left", true)} />}
             </aside> : null}
 
@@ -1039,6 +1091,6 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
 
         {notice ? <WorkspaceSuccessNotice label={notice} /> : null}
 
-        {publishOpen ? <div role="dialog" aria-modal="true" aria-labelledby="publish-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"><section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 p-5 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><h2 id="publish-title" className="text-lg font-semibold">Review onboarding release</h2><p className="mt-1 text-sm text-neutral-500">One transaction publishes every item below or rolls everything back.</p></div><button type="button" onClick={() => setPublishOpen(false)} className="text-neutral-500">✕</button></div><div className="mt-5 space-y-2">{publishScope.modules.map((module) => <div key={module.id} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} steps · visual module draft</p></div>)}{publishScope.bookends.map((bookend) => <div key={bookend.kind} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium capitalize">{bookend.kind}</p><p className="mt-1 text-xs text-neutral-600">{bookend.steps.length} steps · {bookend.kind === "welcome" ? "future sessions only" : "future and active-incomplete sessions"}</p></div>)}{publishScope.theme ? <div className="rounded-xl border border-yellow-800 bg-yellow-950/40 p-3"><p className="text-sm font-medium text-yellow-100">Global Style</p><p className="mt-1 text-xs leading-5 text-yellow-200/70">Publishing colours immediately updates active and completed onboarding sessions and later client portal surfaces.</p></div> : null}</div><fieldset className="mt-5 space-y-2"><legend className="text-sm font-medium">Client scope</legend><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={!applyToActive} onChange={() => setApplyToActive(false)} />Future sessions only</label><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={applyToActive} onChange={() => setApplyToActive(true)} />Future + all affected active sessions</label></fieldset>{applyToActive ? <label className="mt-4 block text-sm text-neutral-400">Client explanation<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} className="mt-2 w-full rounded-xl border border-neutral-700 bg-black p-3 text-white" /></label> : null}{error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}<div className="mt-5 flex flex-wrap justify-between gap-2"><button type="button" onClick={() => void createPreviewLink()} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm">Copy frozen preview link</button><div className="flex gap-2"><button type="button" onClick={() => setPublishOpen(false)} className="h-10 rounded-lg border border-neutral-700 px-4 text-sm">Cancel</button><button type="button" disabled={pending || !publishCount} onClick={() => startTransition(publishChanges)} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-30">{pending ? "Publishing…" : "Publish release"}</button></div></div></section></div> : null}
+        {publishOpen ? <div role="dialog" aria-modal="true" aria-labelledby="publish-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"><section className="max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 p-5 shadow-2xl"><div className="flex items-start justify-between gap-4"><div><h2 id="publish-title" className="text-lg font-semibold">Review onboarding release</h2><p className="mt-1 text-sm text-neutral-500">One transaction publishes every item below or rolls everything back.</p></div><button type="button" onClick={() => setPublishOpen(false)} className="text-neutral-500">✕</button></div><div className="mt-5 space-y-2">{publishScope.payment ? <div className="rounded-xl border border-sky-800 bg-sky-950/30 p-3"><p className="text-sm font-medium text-sky-100">Payment</p><p className="mt-1 text-xs leading-5 text-sky-200/70">Fixed first step · future confirmed onboarding sessions</p></div> : null}{publishScope.modules.map((module) => <div key={module.id} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} steps · visual module draft</p></div>)}{publishScope.bookends.map((bookend) => <div key={bookend.kind} className="rounded-xl border border-neutral-800 bg-black p-3"><p className="text-sm font-medium capitalize">{bookend.kind}</p><p className="mt-1 text-xs text-neutral-600">{bookend.steps.length} steps · {bookend.kind === "welcome" ? "future sessions only" : "future and active-incomplete sessions"}</p></div>)}{publishScope.theme ? <div className="rounded-xl border border-yellow-800 bg-yellow-950/40 p-3"><p className="text-sm font-medium text-yellow-100">Global Style</p><p className="mt-1 text-xs leading-5 text-yellow-200/70">Publishing colours immediately updates active and completed onboarding sessions and later client portal surfaces.</p></div> : null}</div><fieldset className="mt-5 space-y-2"><legend className="text-sm font-medium">Client scope</legend><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={!applyToActive} onChange={() => setApplyToActive(false)} />Future sessions only</label><label className="flex gap-3 rounded-xl border border-neutral-800 p-3 text-sm"><input type="radio" checked={applyToActive} onChange={() => setApplyToActive(true)} />Future + all affected active sessions</label></fieldset>{applyToActive ? <label className="mt-4 block text-sm text-neutral-400">Client explanation<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} rows={3} className="mt-2 w-full rounded-xl border border-neutral-700 bg-black p-3 text-white" /></label> : null}{error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}<div className="mt-5 flex flex-wrap justify-between gap-2"><button type="button" onClick={() => void createPreviewLink()} className="h-10 rounded-lg border border-neutral-700 px-3 text-sm">Copy frozen preview link</button><div className="flex gap-2"><button type="button" onClick={() => setPublishOpen(false)} className="h-10 rounded-lg border border-neutral-700 px-4 text-sm">Cancel</button><button type="button" disabled={pending || !publishCount} onClick={() => startTransition(publishChanges)} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-30">{pending ? "Publishing…" : "Publish release"}</button></div></div></section></div> : null}
     </div>
 }

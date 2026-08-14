@@ -1,6 +1,10 @@
 import type { ConfiguredOnboardingField, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import {
     DEFAULT_BLOCK_LAYOUT,
+    ONBOARDING_PAYMENT_BUTTON_ID,
+    ONBOARDING_PAYMENT_DEFINITION_ID,
+    ONBOARDING_PAYMENT_PLACEHOLDER_URL,
+    ONBOARDING_PAYMENT_STEP_ID,
     ONBOARDING_BLOCK_SCHEMA_VERSION,
     bookendV2Definition,
     mirrorEstimatedTime,
@@ -9,6 +13,7 @@ import {
     type OnboardingBlock,
     type OnboardingBookendDefinitionV2,
     type OnboardingModuleDefinitionV2,
+    type OnboardingPaymentDefinitionV2,
     type OnboardingStepV2,
 } from "@/lib/onboarding/block-definition"
 import { normalizeHexColour } from "@/lib/onboarding/theme"
@@ -22,6 +27,42 @@ const spacings = new Set(["compact", "normal", "spacious"])
 
 function text(value: unknown, maximum: number) {
     return String(value ?? "").trim().slice(0, maximum)
+}
+
+export function normalizeVisualPaymentGate(payment: OnboardingPaymentDefinitionV2, options: { allowPendingVideo?: boolean } = {}) {
+    try {
+        if (payment.id !== ONBOARDING_PAYMENT_DEFINITION_ID || payment.steps.length !== 1 || payment.steps[0]?.id !== ONBOARDING_PAYMENT_STEP_ID) {
+            throw new Error("The fixed Payment step has damaged internal data. Reload the Builder and try again.")
+        }
+        const blockIds = new Set<string>()
+        const fieldIds = new Set<string>()
+        const step = normalizeStep(payment.steps[0], {
+            bookend: true,
+            firstWelcomeStep: false,
+            blockIds,
+            fieldIds,
+            definitionName: "Payment",
+            stepIndex: 0,
+            allowPendingVideo: Boolean(options.allowPendingVideo),
+        })
+        const button = step.blocks.find((block) => block.id === ONBOARDING_PAYMENT_BUTTON_ID)
+        if (!button || button.kind !== "button") throw new Error("Payment must retain its fixed Pay button.")
+        const normalized: OnboardingPaymentDefinitionV2 = {
+            id: ONBOARDING_PAYMENT_DEFINITION_ID,
+            schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
+            steps: [{
+                ...step,
+                id: ONBOARDING_PAYMENT_STEP_ID,
+                key: "payment",
+                blocks: step.blocks.map((block) => block.id === ONBOARDING_PAYMENT_BUTTON_ID && block.kind === "button"
+                    ? { ...block, label: text(block.label, 120) || "Pay securely", url: ONBOARDING_PAYMENT_PLACEHOLDER_URL, required: true }
+                    : block),
+            }],
+        }
+        return { ok: true as const, definition: normalized, persistedDefinition: normalized }
+    } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : "The Payment step is invalid." }
+    }
 }
 
 function uuid(value: unknown, message: string) {

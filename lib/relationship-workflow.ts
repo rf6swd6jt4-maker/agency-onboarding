@@ -29,14 +29,23 @@ type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
 
 const STAGES: Record<StagePhase, { title: string; action?: string; completionMode?: "manual" | "all_required_children" }> = {
     lead: { title: "Make Contact", action: "move_to_potential_client" },
-    potential_client: { title: "Sell Client", action: "send_invoice" },
+    potential_client: { title: "Sell Client", action: "sell_client" },
+    sold: { title: "Confirm and Pay", action: "await_payment" },
     invoiced: { title: "Collect Payment", action: "await_payment" },
     onboarding: { title: "Onboard Client", action: "await_onboarding", completionMode: "all_required_children" },
     onboarding_review: { title: "Review Onboarding Information", action: "begin_fulfilment", completionMode: "all_required_children" },
     fulfilment: { title: "Fulfil Client", action: "begin_retention", completionMode: "all_required_children" },
     retention: { title: "Retain Client" },
 }
-const STAGE_SEQUENCE: StagePhase[] = ["lead", "potential_client", "invoiced", "onboarding", "onboarding_review", "fulfilment", "retention"]
+const NEXT_STAGE: Partial<Record<StagePhase, StagePhase>> = {
+    lead: "potential_client",
+    potential_client: "sold",
+    sold: "onboarding",
+    invoiced: "onboarding",
+    onboarding: "onboarding_review",
+    onboarding_review: "fulfilment",
+    fulfilment: "retention",
+}
 function today() {
     return new Date().toISOString().slice(0, 10)
 }
@@ -194,7 +203,7 @@ export async function ensureRelationshipStage(input: {
 }
 
 async function ensureNextLifecycleStage(input: { workspaceId: string; relationshipId: string; phase: StagePhase; stageId: string }) {
-    const nextPhase = STAGE_SEQUENCE[STAGE_SEQUENCE.indexOf(input.phase) + 1]
+    const nextPhase = NEXT_STAGE[input.phase]
     if (!nextPhase) return null
     const nextStage = STAGES[nextPhase]
     const nextStageId = await createWorkflowItem({
@@ -251,10 +260,21 @@ export async function ensureSalesStage(input: { workspaceId: string; relationshi
     return ensureRelationshipStage({ ...input, phase: "potential_client", assigneeId: input.sellerId })
 }
 
-export async function completePaymentStage(input: { workspaceId: string; relationshipId: string }) {
-    const stageId = await ensureRelationshipStage({ ...input, phase: "invoiced" })
+export async function completePaymentStage(input: { workspaceId: string; relationshipId: string; phase?: "sold" | "invoiced" }) {
+    const stageId = await ensureRelationshipStage({ ...input, phase: input.phase ?? "invoiced" })
     const { error } = await completeWorkflowItem(input.workspaceId, stageId)
     if (error) throw new Error(error.message)
+}
+
+export async function activateRelationshipOnboardingAfterPayment(input: { workspaceId: string; relationshipId: string }) {
+    await completePaymentStage({ ...input, phase: "sold" })
+    const startedAt = new Date().toISOString()
+    const stageId = await ensureRelationshipStage({ ...input, phase: "onboarding" })
+    const [{ error: relationshipError }, { error: stageError }] = await Promise.all([
+        supabaseAdmin.from("relationships").update({ lifecycle_phase: "onboarding", started_onboarding_at: startedAt, updated_at: startedAt }).eq("workspace_id", input.workspaceId).eq("id", input.relationshipId),
+        supabaseAdmin.from("work_items").update({ status: "doing", actual_start_at: startedAt, actual_start_has_time: true, updated_at: startedAt }).eq("workspace_id", input.workspaceId).eq("id", stageId),
+    ])
+    if (relationshipError || stageError) throw new Error(relationshipError?.message ?? stageError?.message ?? "Could not unlock onboarding after payment")
 }
 
 async function moveRelationshipToStage(input: {
@@ -646,10 +666,17 @@ async function preflightRelationshipInvoice(input: {
 
 async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipId: string, billingModel: "one_off" | "recurring") {
     const result = await supabaseAdmin.from("client_sales")
-        .select("id, correlation_id, billing_model")
+        .select("id, correlation_id, billing_model, status, checkout_flow")
         .eq("workspace_id", workspaceId)
         .eq("relationship_id", relationshipId)
-        .eq("status", "draft")
+        .in("status", [
+            "draft",
+            "sale_confirmation_pending",
+            "sold_confirmation_sending",
+            "sold_awaiting_whatsapp_confirm",
+            "sold_confirmation_failed",
+            "onboarding_payment_pending",
+        ])
         .not("snapshot_frozen_at", "is", null)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -661,10 +688,10 @@ async function findResumableFrozenInvoiceSale(workspaceId: string, relationshipI
         }
         if (missingBillingModel) {
             const legacy = await supabaseAdmin.from("client_sales")
-                .select("id, correlation_id")
+                .select("id, correlation_id, status")
                 .eq("workspace_id", workspaceId)
                 .eq("relationship_id", relationshipId)
-                .eq("status", "draft")
+                .in("status", ["draft", "sale_confirmation_pending", "sold_confirmation_failed"])
                 .not("snapshot_frozen_at", "is", null)
                 .order("created_at", { ascending: false })
                 .limit(1)
@@ -813,6 +840,7 @@ export async function sendRelationshipInvoice(input: {
     billingModel?: "one_off" | "recurring"
     billingInterval?: StripeRecurringInterval
     billingIntervalCount?: number
+    deferPaymentUntilOnboarding?: boolean
 }) {
     // Stripe accepts Checkout expiries from 30 minutes to 24 hours. Keeping a
     // one-minute margin avoids crossing its upper bound while the request is in
@@ -825,7 +853,7 @@ export async function sendRelationshipInvoice(input: {
     if (billingModel === "recurring" && (!(["week", "month", "year"] as string[]).includes(billingInterval) || billingIntervalCount < 1 || billingIntervalCount > maximumIntervalCount)) {
         throw new Error(`Choose a recurring schedule between 1 and ${maximumIntervalCount} ${billingInterval}s`)
     }
-    if (billingModel === "recurring") assertEmailDeliveryConfigured()
+    if (billingModel === "recurring" && !input.deferPaymentUntilOnboarding) assertEmailDeliveryConfigured()
     const [{ data: relationship }, { data: workspace }] = await Promise.all([
         supabaseAdmin.from("relationships")
             .select("primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, project_timeframe_days")
@@ -899,14 +927,15 @@ export async function sendRelationshipInvoice(input: {
             total_amount: lineItems.reduce((total, item) => total + item.amount, 0),
             status: "draft",
             created_by: input.actorId,
-            ...(billingModel === "recurring" ? {
+            ...({
                 billing_model: billingModel,
                 billing_interval: billingInterval,
                 billing_interval_count: billingIntervalCount,
-            } : {}),
+                ...(input.deferPaymentUntilOnboarding ? { checkout_flow: "onboarding_payment_gate" } : {}),
+            }),
             ...(preflight.configuration.schemaReady ? { correlation_id: correlationId } : {}),
         }
-        const insertedSale = await supabaseAdmin.from("client_sales").insert(salePayload).select("id, correlation_id").single()
+        const insertedSale = await supabaseAdmin.from("client_sales").insert(salePayload).select("id, correlation_id, status, checkout_flow").single()
         if (insertedSale.error || !insertedSale.data) throw new Error(insertedSale.error?.message ?? "Could not create invoice record")
         sale = insertedSale.data
     }
@@ -961,6 +990,36 @@ export async function sendRelationshipInvoice(input: {
         })
     }
     const totalAmount = lineItems.reduce((total, item) => total + item.amount, 0)
+    if (input.deferPaymentUntilOnboarding) {
+        const saleStatus = "status" in sale && typeof sale.status === "string" ? sale.status : "draft"
+        const needsPreparation = ["draft", "sale_confirmation_pending", "sold_confirmation_failed"].includes(saleStatus)
+        if (needsPreparation) {
+            const preparedAt = new Date().toISOString()
+            const { error: preparedError } = await supabaseAdmin.from("client_sales").update({
+                status: "sale_confirmation_pending",
+                checkout_flow: "onboarding_payment_gate",
+                billing_model: billingModel,
+                billing_interval: billingInterval,
+                billing_interval_count: billingIntervalCount,
+                updated_at: preparedAt,
+            }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
+            if (preparedError) throw new Error(preparedError.message)
+        }
+        await recordAdminActivity({
+            workspaceId: input.workspaceId,
+            category: "billing",
+            eventKey: "client_sale.confirmation_prepared",
+            summary: "Client sale frozen and prepared for WhatsApp confirmation",
+            entityType: "client_sale",
+            entityId: sale.id,
+            actorUserId: input.actorId,
+            correlationId: saleCorrelationId,
+            idempotencyKey: `client_sale.confirmation_prepared:${sale.id}`,
+            outcome: "succeeded",
+            metadata: { relationship_id: input.relationshipId, billing_model: billingModel, service_count: lineItems.length, total_amount: totalAmount, currency },
+        })
+        return { saleId: sale.id, kind: billingModel, referenceId: sale.id, href: null, assetId: null }
+    }
     if (billingModel === "recurring") {
         const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/g, "")
         if (!siteUrl) throw new Error("NEXT_PUBLIC_SITE_URL is required before recurring Checkout pages can be sent")
@@ -1108,6 +1167,15 @@ export async function sendRelationshipInvoice(input: {
         metadata: { relationship_id: input.relationshipId, sale_id: sale.id, service_count: lineItems.length },
     })
     return { saleId: sale.id, kind: "one_off" as const, referenceId: invoice.invoiceId, href: assetId ? null : invoice.hostedInvoiceUrl, assetId }
+}
+
+export async function finalizeRelationshipSaleConfirmation(input: { workspaceId: string; relationshipId: string; workItemId: string; actorId: string; saleId: string }) {
+    const [{ error: workError }, { error: saleError }] = await Promise.all([
+        completeWorkflowItem(input.workspaceId, input.workItemId),
+        supabaseAdmin.from("client_sales").update({ updated_at: new Date().toISOString() }).eq("workspace_id", input.workspaceId).eq("id", input.saleId),
+    ])
+    if (workError || saleError) throw new Error(workError?.message ?? saleError?.message ?? "Could not finalize the sold relationship")
+    await moveRelationshipToStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: "sold", assigneeId: input.actorId })
 }
 
 export async function advanceRelationshipWorkflow(input: { workspaceId: string; relationshipId: string; workItemId: string; action: string | null; actorId: string }) {

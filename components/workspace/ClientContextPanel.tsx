@@ -17,6 +17,7 @@ type RelationshipPhase =
     | "lead"
     | "nurturing"
     | "potential_client"
+    | "sold"
     | "invoiced"
     | "onboarding"
     | "onboarding_review"

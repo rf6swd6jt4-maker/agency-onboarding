@@ -2,8 +2,8 @@
 
 import { createHash, randomBytes, randomUUID } from "crypto"
 import { revalidatePath } from "next/cache"
-import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
-import { normalizeThemeDraft, normalizeVisualBookend, normalizeVisualModule } from "@/lib/onboarding/block-validation"
+import type { OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2, OnboardingPaymentDefinitionV2 } from "@/lib/onboarding/block-definition"
+import { normalizeThemeDraft, normalizeVisualBookend, normalizeVisualModule, normalizeVisualPaymentGate } from "@/lib/onboarding/block-validation"
 import type { ConfigurationActionResult, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
@@ -13,7 +13,7 @@ import { createSignedBuilderMediaUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
-function visualVideoPaths(module: OnboardingModuleDefinitionV2) {
+function visualVideoPaths(module: { steps: OnboardingModuleDefinitionV2["steps"] }) {
     return module.steps.flatMap((step) => step.blocks.flatMap((block) => block.kind === "video" && block.upload ? [block.upload.path] : []))
 }
 
@@ -49,6 +49,7 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
     modules: OnboardingModuleDefinitionV2[]
     bookends: OnboardingBookendDefinitionV2[]
     theme: OnboardingThemeDefinition | null
+    payment: OnboardingPaymentDefinitionV2 | null
     expectedDocumentVersion: number
     applyToActive: boolean
     explanation: string
@@ -61,6 +62,8 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
         const normalizedBookends = input.bookends.map((bookend) => normalizeVisualBookend(bookend))
         const bookendError = normalizedBookends.find((result) => !result.ok)
         if (bookendError && !bookendError.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: bookendError.error })
+        const normalizedPayment = input.payment ? normalizeVisualPaymentGate(input.payment) : null
+        if (normalizedPayment && !normalizedPayment.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: normalizedPayment.error })
 
         for (const result of normalizedModules) {
             if (!result.ok) continue
@@ -76,6 +79,12 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
                 return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: `The video in “${definitionName}” belongs to an older draft. Open that Video block, upload the video again, then publish.` })
             }
         }
+        if (normalizedPayment?.ok) {
+            const paths = visualVideoPaths(normalizedPayment.definition)
+            if (!pathsBelongToDraft(paths, workspace.id, "payment-gate", normalizedPayment.definition.id)) {
+                return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: "The video in Payment belongs to an older draft. Open that Video block, upload it again, then publish." })
+            }
+        }
         let normalizedTheme: ReturnType<typeof normalizeThemeDraft> | null = null
         if (input.theme) {
             normalizedTheme = normalizeThemeDraft(input.theme)
@@ -83,13 +92,14 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
         }
 
         const releaseId = randomUUID()
-        const outcome = await configurationRpc<{ release_id: string; results: unknown[] }>("publish_visual_onboarding_release", {
+        const outcome = await configurationRpc<{ release_id: string; results: unknown[] }>("publish_visual_onboarding_release_v3", {
             p_workspace_id: workspace.id,
             p_actor_user_id: user.id,
             p_expected_document_version: input.expectedDocumentVersion,
             p_modules: normalizedModules.flatMap((result) => result.ok ? [{ id: result.definition.id, definition: result.persistedDefinition }] : []),
             p_bookends: normalizedBookends.flatMap((result) => result.ok ? [{ kind: result.definition.kind, definition: result.persistedDefinition }] : []),
             p_theme: normalizedTheme?.ok ? normalizedTheme.definition : null,
+            p_payment_gate: normalizedPayment?.ok ? normalizedPayment.persistedDefinition : null,
             p_apply_to_active: input.applyToActive,
             p_explanation: input.explanation.trim().slice(0, 2_000),
             p_release_id: releaseId,
@@ -108,7 +118,8 @@ export async function publishVisualOnboardingRelease(slug: string, input: {
 
 export async function prepareVisualBuilderVideoUpload(slug: string, target: (
     { kind: "module"; definition: OnboardingModuleDefinitionV2 }
-    | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 }
+    | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 | OnboardingPaymentDefinitionV2 }
+    | { kind: "payment"; definition: OnboardingPaymentDefinitionV2 }
 ), file: { name: string; size: number; type: string }): Promise<ConfigurationActionResult<{
     uploadUrl: string
     previewUrl: string
@@ -132,6 +143,11 @@ export async function prepareVisualBuilderVideoUpload(slug: string, target: (
             if (!saved.data?.draft_revision_id) return { ok: false, error: "Betelgeze could not prepare this module draft for upload. The failure was recorded for an administrator." }
             entityId = normalized.definition.id
             draftRevisionId = saved.data.draft_revision_id
+        } else if (target.kind === "payment" || !("kind" in target.definition)) {
+            const normalized = normalizeVisualPaymentGate(target.definition as OnboardingPaymentDefinitionV2, { allowPendingVideo: true })
+            if (!normalized.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: normalized.error })
+            entityId = "payment-gate"
+            draftRevisionId = normalized.definition.id
         } else {
             const normalized = normalizeVisualBookend(target.definition, { allowPendingVideo: true })
             if (!normalized.ok) return rejectVisualRelease({ workspaceId: workspace.id, workspaceSlug: slug, actorUserId: user.id, error: normalized.error })

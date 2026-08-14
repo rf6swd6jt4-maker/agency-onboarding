@@ -12,7 +12,6 @@ import type { OnboardingHelpSettings, OnboardingModuleDefinition, OnboardingThem
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import type { RelationshipGanttPlan } from "@/lib/relationship-gantt"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
-import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
 import { proceedRelationshipCurrentWork, saveRelationshipDealDetails, type RelationshipDealDetailsInput } from "../actions"
 import { RelationshipGantt } from "./RelationshipGantt"
 
@@ -155,7 +154,7 @@ export function RelationshipDealWorkspace({
     const [invoiceStep, setInvoiceStep] = useState(0)
     const [previewModule, setPreviewModule] = useState<OnboardingModuleDefinition | null>(null)
     const [error, setError] = useState<string | null>(null)
-    const [notice, setNotice] = useState<{ label: string; href: string | null; actionLabel: string } | null>(null)
+    const [notice, setNotice] = useState<{ label: string } | null>(null)
     const [pending, startTransition] = useTransition()
     const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
     const selectedServices = services.filter((service) => draft.selectedCodes.includes(service.code))
@@ -164,7 +163,7 @@ export function RelationshipDealWorkspace({
         ...selectedServices.flatMap((service) => service.moduleIds),
     ])
     const assignedModules = modules.filter((module) => selectedModuleIds.has(module.id)).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
-    const invoiced = ["invoiced", "onboarding", "onboarding_review", "fulfilment", "retention", "completed_lost"].includes(details.lifecyclePhase)
+    const invoiced = ["sold", "invoiced", "onboarding", "onboarding_review", "fulfilment", "retention", "completed_lost"].includes(details.lifecyclePhase)
     const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
     const relationshipIssues = [
         missingText(draft.primaryPersonName, "Client name required"),
@@ -254,8 +253,8 @@ export function RelationshipDealWorkspace({
     }
 
     function invoiceClient() {
-        if (!currentWork || currentWork.action !== "send_invoice") {
-            setError("This relationship is no longer waiting to be invoiced. Reload and review its current stage.")
+        if (!currentWork || !["sell_client", "send_invoice"].includes(currentWork.action ?? "")) {
+            setError("This relationship is no longer waiting to be sold. Reload and review its current stage.")
             return
         }
         if (pricingIssues.length) {
@@ -276,20 +275,12 @@ export function RelationshipDealWorkspace({
                 }
                 setInvoiceOpen(false)
                 setNotice({
-                    label: outcome.invoice?.kind === "recurring" ? "Recurring checkout sent" : "Invoice sent",
-                    href: outcome.invoice?.href ?? null,
-                    actionLabel: outcome.invoice?.kind === "recurring" ? "Open checkout" : "Open invoice",
+                    label: "WhatsApp confirmation sent",
                 })
                 router.refresh()
                 postGanttSync(workspaceSlug)
-            })().catch(() => setError("The invoice could not be sent. Please try again."))
+            })().catch(() => setError("The WhatsApp confirmation could not be sent. Please try again."))
         })
-    }
-
-    function navigateToInvoice() {
-        if (!notice?.href) return
-        const tabId = new URLSearchParams(window.location.search).get(WORKSPACE_TAB_FRAME_PARAM)
-        window.location.assign(tabId ? workspaceTabFrameUrl(notice.href, tabId, window.location.origin) : notice.href)
     }
 
     const detailsPanel = <div data-relationship-details>
@@ -298,8 +289,8 @@ export function RelationshipDealWorkspace({
             <DetailField label="Company" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} value={draft.businessName} onChange={(event) => update("businessName", event.target.value)} placeholder="No company" className={inputClass} /></DetailField>
             <DetailField label="Role" icon="identity"><input disabled={!canEdit} value={draft.primaryContactRole} onChange={(event) => update("primaryContactRole", event.target.value)} placeholder="Not set" className={inputClass} /></DetailField>
             <DetailField label="SMS number" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="tel" value={draft.primaryPhone} onChange={(event) => update("primaryPhone", event.target.value)} placeholder="Not set" className={inputClass} /></DetailField>
-            <DetailField label="WhatsApp" icon="contact"><input disabled={!canEdit} type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} placeholder="Required before invoicing" className={inputClass} /></DetailField>
-            <DetailField label="Email" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} placeholder="Required before invoicing" className={inputClass} /></DetailField>
+            <DetailField label="WhatsApp" icon="contact"><input disabled={!canEdit} type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} placeholder="Required before selling" className={inputClass} /></DetailField>
+            <DetailField label="Email" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} placeholder="Required before selling" className={inputClass} /></DetailField>
             <DetailField label="Seller" icon="person"><select disabled={!canEdit} value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className={inputClass}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label="Fulfilment manager" icon="person" className="lg:border-l lg:border-neutral-900 lg:pl-8"><select disabled={!canEdit} value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className={inputClass}><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label={invoiced ? "Project timeline" : "Planned project timeline"} icon="timeline" className="lg:col-span-2"><div className="flex items-center gap-2"><input disabled={!canEdit} type="number" min="1" value={draft.projectTimeframeDays ?? ""} onChange={(event) => update("projectTimeframeDays", event.target.value ? Number(event.target.value) : null)} placeholder="Not set" className={`${inputClass} max-w-24`} />{draft.projectTimeframeDays ? <span className="text-neutral-500">days</span> : null}</div></DetailField>
@@ -320,7 +311,7 @@ export function RelationshipDealWorkspace({
     const modal = invoiceOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 text-white backdrop-blur-sm">
         <section role="dialog" aria-modal="true" aria-labelledby="invoice-review-title" className="flex max-h-[min(92dvh,56rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <header className="shrink-0 border-b border-neutral-800 px-4 py-4 sm:px-6">
-                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">Invoice client</p><h2 id="invoice-review-title" className="mt-1 text-xl font-semibold">{invoiceStep === 0 ? "Review Relationship Information" : invoiceStep === 1 ? "Review Onboarding" : "Pricing"}</h2><p className="mt-1 text-sm text-neutral-500">{invoiceStep === 0 ? "Double-check the client's details and the services they are buying." : invoiceStep === 1 ? "Confirm the published onboarding this client will receive." : "Review the invoice total and adjust any negotiated prices."}</p></div><button type="button" aria-label="Close invoice review" onClick={() => { setInvoiceOpen(false); setError(null) }} className="text-neutral-500 hover:text-white">✕</button></div>
+                <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">Sell client</p><h2 id="invoice-review-title" className="mt-1 text-xl font-semibold">{invoiceStep === 0 ? "Review Relationship Information" : invoiceStep === 1 ? "Review Onboarding" : "Pricing"}</h2><p className="mt-1 text-sm text-neutral-500">{invoiceStep === 0 ? "Double-check the client's details and the services they are buying." : invoiceStep === 1 ? "Confirm the published onboarding this client will receive." : "Choose one-off or recurring payment and review the agreed prices."}</p></div><button type="button" aria-label="Close sale review" onClick={() => { setInvoiceOpen(false); setError(null) }} className="text-neutral-500 hover:text-white">✕</button></div>
                 <div className="mt-4 grid grid-cols-3 gap-2" aria-label={`Step ${invoiceStep + 1} of 3`}>{["Relationship", "Onboarding", "Pricing"].map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= invoiceStep ? "bg-white" : "bg-neutral-800"}`} /><p className={`mt-1.5 text-[11px] ${index === invoiceStep ? "text-white" : "text-neutral-600"}`}>{index + 1}. {label}</p></div>)}</div>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
@@ -341,12 +332,12 @@ export function RelationshipDealWorkspace({
                 {invoiceStep === 2 ? <div className="space-y-4">
                     <div className="grid gap-2 sm:grid-cols-2">
                         <button type="button" onClick={() => update("billingModel", "one_off")} className={`rounded-xl border p-3 text-left transition ${draft.billingModel === "one_off" ? "border-sky-400/60 bg-sky-500/10" : "border-neutral-800 bg-black hover:border-neutral-700"}`}>
-                            <span className="block text-sm font-medium text-neutral-100">One-off invoice</span>
-                            <span className="mt-1 block text-xs leading-5 text-neutral-500">Stripe emails a hosted invoice for one payment.</span>
+                            <span className="block text-sm font-medium text-neutral-100">One-off payment</span>
+                            <span className="mt-1 block text-xs leading-5 text-neutral-500">The onboarding Pay button opens Stripe Checkout for one payment.</span>
                         </button>
                         <button type="button" onClick={() => update("billingModel", "recurring")} className={`rounded-xl border p-3 text-left transition ${draft.billingModel === "recurring" ? "border-teal-400/60 bg-teal-500/10" : "border-neutral-800 bg-black hover:border-neutral-700"}`}>
                             <span className="block text-sm font-medium text-neutral-100">Recurring retainer</span>
-                            <span className="mt-1 block text-xs leading-5 text-neutral-500">Betelgeze emails a personalised Stripe Checkout page and Stripe charges the saved method on schedule.</span>
+                            <span className="mt-1 block text-xs leading-5 text-neutral-500">The same hosted Checkout collects the first payment, then Stripe charges the saved method on schedule.</span>
                         </button>
                     </div>
                     <div className="flex flex-col justify-between gap-3 rounded-xl border border-neutral-800 bg-black p-3 sm:flex-row sm:items-end">
@@ -354,7 +345,7 @@ export function RelationshipDealWorkspace({
                         {draft.billingModel === "recurring" ? <div className="flex gap-2">
                             <label className="text-xs text-neutral-500">Repeat every<input type="number" min="1" max={intervalCountMaximum(draft.billingInterval)} value={draft.billingIntervalCount} onChange={(event) => update("billingIntervalCount", Math.max(1, Math.min(intervalCountMaximum(draft.billingInterval), Math.round(Number(event.target.value) || 1))))} className="mt-1.5 h-9 w-20 rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
                             <label className="text-xs text-neutral-500">Period<select value={draft.billingInterval} onChange={(event) => { const interval = event.target.value as Draft["billingInterval"]; setDraft((current) => ({ ...current, billingInterval: interval, billingIntervalCount: Math.min(current.billingIntervalCount, intervalCountMaximum(interval)) })) }} className="mt-1.5 h-9 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white"><option value="week">Week(s)</option><option value="month">Month(s)</option><option value="year">Year(s)</option></select></label>
-                        </div> : <p className="max-w-md text-xs leading-5 text-neutral-600">Payment is due once. Existing invoice and WhatsApp onboarding automation stays unchanged.</p>}
+                        </div> : <p className="max-w-md text-xs leading-5 text-neutral-600">Payment is due once through the required first onboarding step.</p>}
                     </div>
                     <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className="grid gap-3 px-3 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_9rem] sm:items-center">
                         <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={48} height={48} unoptimized className="h-full w-full object-cover" /> : "Service"}</div>
@@ -362,15 +353,15 @@ export function RelationshipDealWorkspace({
                         <label className="text-xs text-neutral-500">Price<input type="number" min="0" step="0.01" value={(draft.prices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, prices: { ...current.prices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
                         <p className="text-right text-sm font-medium text-neutral-200">{priceLabel(draft.prices[service.code] ?? 0, draft.currency)}{draft.billingModel === "recurring" ? <span className="mt-0.5 block text-[10px] font-normal text-neutral-600">each period</span> : null}</p>
                     </div>)}</div>
-                    <div className="flex items-end justify-between gap-4 border-t border-neutral-800 pt-4"><div><p className="text-xs text-neutral-500">{draft.billingModel === "recurring" ? "Retainer total per period" : "Invoice total"}</p><p className="mt-1 text-2xl font-semibold">{priceLabel(totalCents, draft.currency)}</p></div><p className="max-w-sm text-right text-xs leading-5 text-neutral-600">Sending freezes these services, prices and the published onboarding shown in the previous step.</p></div>
+                    <div className="flex items-end justify-between gap-4 border-t border-neutral-800 pt-4"><div><p className="text-xs text-neutral-500">{draft.billingModel === "recurring" ? "Retainer total per period" : "Payment total"}</p><p className="mt-1 text-2xl font-semibold">{priceLabel(totalCents, draft.currency)}</p></div><p className="max-w-sm text-right text-xs leading-5 text-neutral-600">Sending the WhatsApp confirmation freezes these services, prices and the onboarding shown in the previous step.</p></div>
                 </div> : null}
                 {error ? <p role="alert" className="mt-4 rounded-lg border border-red-500/20 bg-red-950/20 px-3 py-2.5 text-sm text-red-300">{error}</p> : null}
             </div>
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? draft.billingModel === "recurring" ? "Creating checkout…" : "Sending invoice…" : draft.billingModel === "recurring" ? "Send retainer checkout" : "Invoice Client"}</button>}</footer>
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? "Sending confirmation…" : "Send WA confirmation"}</button>}</footer>
         </section>
     </div>, parentDocument.body) : null
 
-    const preview = previewModule && parentDocument ? createPortal(<div className="fixed inset-0 z-[150] flex flex-col bg-black text-white"><header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-800 bg-black px-4"><div><p className="text-sm font-medium">{previewModule.name}</p><p className="text-[11px] text-neutral-500">Client preview · nothing is saved</p></div><button type="button" onClick={() => setPreviewModule(null)} className="h-9 rounded-lg border border-neutral-700 px-3 text-xs">Back to invoice review</button></header><div className="min-h-0 flex-1"><BuilderPreview module={previewModule} theme={theme} help={help} workspaceName={workspaceName} /></div></div>, parentDocument.body) : null
+    const preview = previewModule && parentDocument ? createPortal(<div className="fixed inset-0 z-[150] flex flex-col bg-black text-white"><header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-800 bg-black px-4"><div><p className="text-sm font-medium">{previewModule.name}</p><p className="text-[11px] text-neutral-500">Client preview · nothing is saved</p></div><button type="button" onClick={() => setPreviewModule(null)} className="h-9 rounded-lg border border-neutral-700 px-3 text-xs">Back to sale review</button></header><div className="min-h-0 flex-1"><BuilderPreview module={previewModule} theme={theme} help={help} workspaceName={workspaceName} /></div></div>, parentDocument.body) : null
 
     return <>
         {detailsPanel}
@@ -378,6 +369,6 @@ export function RelationshipDealWorkspace({
         <div className="mt-5"><RelationshipGantt workspaceSlug={workspaceSlug} relationshipId={relationshipId} plan={plan} canEdit={canEdit} currentWork={currentWork} onInvoiceRequest={openInvoiceReview} /></div>
         {modal}
         {preview}
-        {notice ? <WorkspaceSuccessNotice label={notice.label} actionLabel={notice.href ? notice.actionLabel : undefined} onAction={notice.href ? navigateToInvoice : undefined} /> : null}
+        {notice ? <WorkspaceSuccessNotice label={notice.label} /> : null}
     </>
 }

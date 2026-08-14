@@ -4,7 +4,7 @@ import {
     StripeWebhookEvent,
     verifyStripeWebhookSignature,
 } from "@/lib/stripe/api"
-import { handlePaidStripeInvoice } from "@/lib/client-sales/automation"
+import { handleCompletedStripeCheckout, handlePaidStripeInvoice } from "@/lib/client-sales/automation"
 import { disconnectWorkspaceIntegration, getStripeWebhookCandidates, getWorkspaceIdForConnectedAccount, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { recordAdminActivity } from "@/lib/admin/activity"
@@ -22,6 +22,7 @@ function isResumableAutomationEvent(type: string) {
     return isPaidInvoiceEvent(type)
         || type === "account.application.deauthorized"
         || type === "checkout.session.completed"
+        || type === "checkout.session.async_payment_succeeded"
         || type.startsWith("customer.subscription.")
         || ["invoice.payment_failed", "invoice.payment_action_required", "invoice.voided", "invoice.marked_uncollectible"].includes(type)
 }
@@ -118,7 +119,7 @@ export async function POST(request: NextRequest) {
     const invoice = event.data?.object
     const saleId = stripeObjectSaleId(invoice)
     const { data: sale } = saleId
-        ? await supabaseAdmin.from("client_sales").select("workspace_id, billing_model, initial_payment_received_at, status, stripe_subscription_id").eq("id", saleId).maybeSingle()
+        ? await supabaseAdmin.from("client_sales").select("workspace_id, billing_model, initial_payment_received_at, status, stripe_subscription_id, checkout_flow").eq("id", saleId).maybeSingle()
         : { data: null }
     const externalAccountId = event.account ?? event.context ?? null
     const connectedWorkspaceId = matchedCandidate.shared && externalAccountId
@@ -178,7 +179,7 @@ export async function POST(request: NextRequest) {
             outcome: "succeeded",
             metadata: { stripe_event_id: event.id, account_id: externalAccountId },
         })
-    } else if (event.type === "checkout.session.completed") {
+    } else if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
         const checkout = event.data?.object
         if (saleId && checkout) {
             const checkoutId = stripeObjectId(checkout.id)
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest) {
                 stripe_checkout_session_id: checkoutId,
                 stripe_checkout_status: typeof checkout.status === "string" ? checkout.status : "complete",
                 stripe_subscription_id: subscriptionId,
-                stripe_subscription_status: "active",
+                stripe_subscription_status: subscriptionId ? "active" : null,
                 stripe_customer_id: stripeObjectId(checkout.customer),
                 raw_payload: event,
                 updated_at: new Date().toISOString(),
@@ -196,7 +197,14 @@ export async function POST(request: NextRequest) {
                 await reportStripeAutomationFailure(workspaceId, event.id, "record_checkout_completion", error.message)
                 return Response.json({ error: "Could not record Checkout completion" }, { status: 500 })
             }
-            await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.checkout.completed", summary: "Recurring Checkout completed", entityType: "stripe_checkout_session", entityId: checkoutId ?? event.id, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.checkout.completed:${event.id}`, outcome: "succeeded", metadata: { sale_id: saleId, subscription_id: subscriptionId } })
+            if (sale?.checkout_flow === "onboarding_payment_gate") {
+                const result = await handleCompletedStripeCheckout(checkout, workspaceId)
+                if (!result.ok) {
+                    await reportStripeAutomationFailure(workspaceId, event.id, "checkout_payment_automation", result.error ?? "Could not unlock onboarding")
+                    return Response.json({ error: result.error ?? "Could not unlock onboarding" }, { status: 500 })
+                }
+            }
+            await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.checkout.completed", summary: "Stripe Checkout completed", entityType: "stripe_checkout_session", entityId: checkoutId ?? event.id, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.checkout.completed:${event.id}`, outcome: "succeeded", metadata: { sale_id: saleId, subscription_id: subscriptionId } })
         }
     } else if (event.type.startsWith("customer.subscription.")) {
         const subscription = event.data?.object

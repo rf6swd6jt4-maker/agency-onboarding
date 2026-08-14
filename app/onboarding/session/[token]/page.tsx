@@ -10,17 +10,19 @@ import { headers } from "next/headers"
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { OnboardingSessionNotice } from "@/components/onboarding/OnboardingSessionNotice"
+import { getFrozenOnboardingPaymentDefinition, getOnboardingPaymentContext, onboardingPaymentPending } from "@/lib/client-sales/onboarding-checkout"
+import { ONBOARDING_PAYMENT_BUTTON_ID, stepEstimate, stepHeader } from "@/lib/onboarding/block-definition"
 
 export const dynamic = "force-dynamic"
 
 type PageProps = {
     params: Promise<{ token: string }>
-    searchParams: Promise<{ step?: string }>
+    searchParams: Promise<{ step?: string; payment?: string; reason?: string }>
 }
 
 export default async function CanonicalSessionPage({ params, searchParams }: PageProps) {
     const { token } = await params
-    const { step: requestedStepKey } = await searchParams
+    const { step: requestedStepKey, payment: paymentResult, reason: paymentReason } = await searchParams
     const requestHeaders = await headers()
     const customOnboardingDomain = requestHeaders.get("x-betelgeze-custom-onboarding-domain")
     const resolved = await getCanonicalSessionByToken(token)
@@ -34,6 +36,33 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     }
 
     const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds } = resolved
+    const paymentContext = await getOnboardingPaymentContext(token)
+    if (onboardingPaymentPending(paymentContext) && paymentContext) {
+        const paymentDefinition = await getFrozenOnboardingPaymentDefinition(paymentContext)
+        const paymentStep = paymentDefinition.steps[0]
+        const header = stepHeader(paymentStep)
+        const resolvedBlocks = await Promise.all(paymentStep.blocks.map(async (block) => {
+            if (block.kind === "video" && block.upload?.path) return { ...block, upload: { ...block.upload, resolvedUrl: await createPrivateUploadSignedUrl(block.upload.path) } }
+            if (block.id === ONBOARDING_PAYMENT_BUTTON_ID && block.kind === "button") return { ...block, url: `/api/onboarding/session/${token}/checkout`, required: true, openInSameTab: true }
+            return block
+        }))
+        const roadmapSteps = [
+            { key: "payment", title: "Payment", complete: false, current: true, href: null },
+            ...steps.map((step) => ({ key: step.key, title: step.title, complete: false, current: false, href: null })),
+        ]
+        return <OnboardingThemeProvider theme={theme}><OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={workspace.name} help={help}>
+            <OnboardingSessionRenderer
+                step={{ key: "payment", kind: "video", title: header.title, description: header.description, moduleTitle: "Payment", estimatedTime: stepEstimate(paymentStep)?.estimatedTime ?? header.estimatedTime, why: "", blocks: resolvedBlocks, navigation: paymentStep.navigation }}
+                moduleTitles={moduleTitles}
+                token={token}
+                locked={false}
+                preview={false}
+                allowEditRequest={false}
+                satisfiedBlockIds={[]}
+                notice={paymentResult === "pending" ? <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Stripe is still confirming the payment. This page will unlock as soon as payment succeeds.</div> : paymentResult === "unavailable" ? <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">{paymentReason || "Payment could not be opened. Please try again or contact the team for help."}</div> : null}
+            />
+        </OnboardingLayout></OnboardingThemeProvider>
+    }
     const linearCurrentStep = completableSteps.find((step) => !completedKeys.has(step.key)) ?? steps[steps.length - 1]
     const requestedCandidate = steps.find((step) => step.key === requestedStepKey)
     const requestedStep = requestedCandidate && (session.status === "completed" || completedKeys.has(requestedCandidate.key) || requestedCandidate.key === linearCurrentStep.key)
@@ -44,7 +73,9 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     const stepIsLocked = session.status === "completed" || completedKeys.has(currentStep.key)
     const currentStepIndex = steps.findIndex((step) => step.key === currentStep.key)
     const previousStep = currentStepIndex > 0 ? steps[currentStepIndex - 1] : null
-    const roadmapSteps = steps.map((step) => ({
+    const roadmapSteps = [
+        ...(paymentContext ? [{ key: "payment", title: "Payment", complete: true, current: false, href: null }] : []),
+        ...steps.map((step) => ({
         key: step.key,
         title: step.title,
         complete: step.kind === "final" ? linearCurrentStep.kind === "final" : completedKeys.has(step.key),
@@ -54,7 +85,8 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                 ? `/${token}?step=${step.key}`
                 : `/onboarding/session/${token}?step=${step.key}`
             : null,
-    }))
+        })),
+    ]
     const currentForm = currentStep.kind === "form" ? currentStep.form ?? getOnboardingForm(currentStep.formKey) : null
     const [submittedResponse, draft, storedVideoUrl, resolvedBlocks] = await Promise.all([
         currentStep.kind === "form" ? getFormResponseAsset(session.id, currentStep) : undefined,

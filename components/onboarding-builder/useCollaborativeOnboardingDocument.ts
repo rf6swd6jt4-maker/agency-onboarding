@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Y from "yjs"
-import { upgradeBookendToV2, upgradeModuleToV2, type OnboardingBookendDefinitionV2, type OnboardingModuleDefinitionV2 } from "@/lib/onboarding/block-definition"
+import { defaultOnboardingPaymentDefinition, upgradeBookendToV2, upgradeModuleToV2, type OnboardingBookendDefinitionV2, type OnboardingModuleDefinitionV2, type OnboardingPaymentDefinitionV2 } from "@/lib/onboarding/block-definition"
 import { visibleBuilderPresence, type BuilderPresence } from "@/lib/onboarding/builder-presence"
 import { persistBuilderUpdate, refreshBuilderUpdates } from "@/lib/onboarding/builder-sync-client"
 import type { OnboardingBuilderData, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
@@ -12,6 +12,7 @@ export type VisualBuilderDocument = {
     modules: OnboardingModuleDefinitionV2[]
     welcome: OnboardingBookendDefinitionV2
     completion: OnboardingBookendDefinitionV2
+    payment: OnboardingPaymentDefinitionV2
     theme: OnboardingThemeDefinition
     linkedChangeSets: Array<{ id: string; definitionIds: string[]; createdVersion?: number }>
 }
@@ -206,7 +207,7 @@ function writeDocument(root: Y.Map<unknown>, document: VisualBuilderDocument) {
         if (existing instanceof Y.Map) reconcileMap(existing, moduleDefinition as unknown as Record<string, unknown>)
         else root.set(key, toYValue(moduleDefinition))
     }
-    for (const [key, value] of [["welcome", document.welcome], ["completion", document.completion], ["theme", document.theme], ["linkedChangeSets", document.linkedChangeSets]] as const) {
+    for (const [key, value] of [["welcome", document.welcome], ["completion", document.completion], ["payment", document.payment], ["theme", document.theme], ["linkedChangeSets", document.linkedChangeSets]] as const) {
         const existing = root.get(key)
         if (Array.isArray(value) && existing instanceof Y.Map && existing.get("__kind") === KEYED_ARRAY_KIND) reconcileKeyedArray(existing, value)
         else if (Array.isArray(value) && existing instanceof Y.Array) reconcileArray(existing, value)
@@ -235,6 +236,7 @@ function readDocument(root: Y.Map<unknown>, fallback: VisualBuilderDocument): Vi
         modules: orderedModules.length ? orderedModules : fallback.modules.map(upgradeModuleToV2),
         welcome: upgradeBookendToV2((plain(root.get("welcome")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.welcome),
         completion: upgradeBookendToV2((plain(root.get("completion")) as OnboardingBookendDefinitionV2 | undefined) ?? fallback.completion),
+        payment: (plain(root.get("payment")) as OnboardingPaymentDefinitionV2 | undefined) ?? fallback.payment ?? defaultOnboardingPaymentDefinition(),
         theme: (plain(root.get("theme")) as OnboardingThemeDefinition | undefined) ?? fallback.theme,
         linkedChangeSets: (plain(root.get("linkedChangeSets")) as VisualBuilderDocument["linkedChangeSets"] | undefined) ?? [],
     }
@@ -256,6 +258,7 @@ function changedDefinitions(before: VisualBuilderDocument, after: VisualBuilderD
     for (const moduleDefinition of after.modules) if (JSON.stringify(moduleDefinition) !== beforeModules.get(moduleDefinition.id)) changed.add(moduleDefinition.id)
     if (JSON.stringify(before.welcome) !== JSON.stringify(after.welcome)) changed.add("bookend:welcome")
     if (JSON.stringify(before.completion) !== JSON.stringify(after.completion)) changed.add("bookend:completion")
+    if (JSON.stringify(before.payment) !== JSON.stringify(after.payment)) changed.add("payment")
     if (JSON.stringify(before.theme) !== JSON.stringify(after.theme)) changed.add("theme")
     return changed
 }

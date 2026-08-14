@@ -156,7 +156,7 @@ test("commercial save persists exact identities, negotiated currency, and sent-s
     const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")
     assert.match(actions, /service_id: serviceId, service_revision_id: serviceRevisionId/)
     assert.match(actions, /service_currency_/)
-    assert.match(actions, /Void and replace the sent invoice before changing services or negotiated prices/)
+    assert.match(actions, /This sale is already frozen\. Create a replacement sale before changing services or negotiated prices/)
     assert.match(actions, /catalogue\.state !== "active"/)
     assert.match(actions, /rpc\("save_relationship_commercial_configuration"/)
     assert.match(actions, /p_services: versionedRows/)
@@ -165,7 +165,7 @@ test("commercial save persists exact identities, negotiated currency, and sent-s
     assert.doesNotMatch(detail, /Object\.entries\(SERVICES\)/)
 })
 
-test("relationship invoicing uses the visible details workspace and three-stage review", () => {
+test("relationship selling uses the visible details workspace and three-stage review", () => {
     const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")
     const workspace = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/RelationshipDealWorkspace.tsx", "utf8")
     const gantt = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/RelationshipGantt.tsx", "utf8")
@@ -183,15 +183,16 @@ test("relationship invoicing uses the visible details workspace and three-stage 
         "Review Relationship Information",
         "Review Onboarding",
         "Pricing",
-        "Invoice Client",
-        "Invoice sent",
-        "Open invoice",
+        "Sell client",
+        "Send WA confirmation",
+        "WhatsApp confirmation sent",
         "Recurring retainer",
-        "Send retainer checkout",
+        "One-off payment",
     ]) assert.match(workspace, new RegExp(label))
     assert.match(workspace, /<BuilderPreview/)
     assert.doesNotMatch(workspace, /service_assignee_/)
     assert.match(gantt, /onInvoiceRequest\(\)/)
+    assert.match(gantt, /currentWork\.action === "sell_client" \? "Sell client"/)
     assert.match(readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8"), /existing\?\.assignee_user_id \?\? service\?\.defaultAssigneeId/)
     assert.match(workflow, /source_kind: "stripe_invoice"/)
     assert.match(workflow, /from\("asset_relationships"\)\.upsert/)

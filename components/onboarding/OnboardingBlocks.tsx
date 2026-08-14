@@ -128,7 +128,7 @@ export function OnboardingBlocks({
             }
             const requirementId = block.sessionBlockId ?? block.id
             return <BlockFrame key={block.id} block={block}>
-                <a href={block.url} target="_blank" rel="noopener noreferrer" onClick={() => void satisfy(block, "button_opened")} className={block.appearance === "secondary" ? "inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 py-3 font-medium text-[var(--onboarding-primary)]" : "inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white"}>{block.label}</a>
+                <a href={block.url} target={block.openInSameTab ? undefined : "_blank"} rel={block.openInSameTab ? undefined : "noopener noreferrer"} onClick={() => void satisfy(block, "button_opened")} className={block.appearance === "secondary" ? "inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 py-3 font-medium text-[var(--onboarding-primary)]" : "inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white"}>{block.label}</a>
                 {block.required && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">{satisfied.has(requirementId) ? "✓ Opened" : "Open this link to continue."}</p> : null}
             </BlockFrame>
         })}

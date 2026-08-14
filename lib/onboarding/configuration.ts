@@ -23,11 +23,13 @@ import { DEFAULT_ONBOARDING_THEME } from "@/lib/onboarding/theme"
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { modulePublishDiff } from "@/lib/onboarding/publish-impact"
 import {
+    defaultOnboardingPaymentDefinition,
     upgradeBookendToV2,
     upgradeModuleToV2,
     type OnboardingBlock,
     type OnboardingBookendDefinitionV2,
     type OnboardingModuleDefinitionV2,
+    type OnboardingPaymentDefinitionV2,
     type OnboardingStepV2,
     type VideoBlock,
 } from "@/lib/onboarding/block-definition"
@@ -176,6 +178,32 @@ export function legacyPublishedOnboardingConfiguration(): PublishedOnboardingCon
         completion: defaultBookend("completion"),
         theme: defaultTheme(),
         help: mapHelp([], false, null, false),
+        payment: defaultOnboardingPaymentDefinition(),
+    }
+}
+
+function mapPayment(rows: UnknownRow[], preferDraft = true): OnboardingPaymentDefinitionV2 {
+    const typed = rows.filter((row) => ["mandatory_modules", "mandatory"].includes(text(row.configuration_type, row.kind, row.type) ?? ""))
+    const ordered = [...typed].sort((left, right) => integer(right.revision_number, right.version) - integer(left.revision_number, left.version))
+    const draft = ordered.find((row) => text(row.state, row.status) === "draft")
+    const published = ordered.find((row) => text(row.state, row.status) === "published" || Boolean(row.published_at))
+    const definition = record((preferDraft ? draft ?? published : published)?.definition)
+    const raw = record(definition.payment_gate)
+    const fallback = defaultOnboardingPaymentDefinition()
+    return raw.schemaVersion === 2 && Array.isArray(raw.steps)
+        ? { id: text(raw.id) ?? fallback.id, schemaVersion: 2, steps: raw.steps as unknown as [OnboardingStepV2] }
+        : fallback
+}
+
+async function hydrateVisualPayment(definition: OnboardingPaymentDefinitionV2) {
+    return {
+        ...definition,
+        steps: await Promise.all(definition.steps.map(async (step) => ({
+            ...step,
+            blocks: await Promise.all(step.blocks.map(async (block) => block.kind === "video" && block.upload?.path
+                ? { ...block, upload: { ...block.upload, resolvedUrl: await createPrivateUploadSignedUrl(block.upload.path) } } as VideoBlock
+                : block)),
+        }))) as [OnboardingStepV2],
     }
 }
 
@@ -812,6 +840,7 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
         supabaseAdmin.from("onboarding_theme_revisions").select("definition").eq("workspace_id", workspaceId).eq("status", "draft").maybeSingle(),
         loadBuilderCollaborators(workspaceId),
     ])
+    const visualPayment = await hydrateVisualPayment(mapPayment(raw.configurations))
     const builderTheme = mapThemeDraftDefinition(themeDraftResult.data?.definition) ?? mapTheme(raw.themes[0], raw.swatches)
     const whatsappHint = record(raw.whatsapp?.config_hint)
     const whatsappVerified = whatsappIntegrationVerified(raw.whatsapp)
@@ -832,6 +861,7 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
         visualModules,
         visualWelcome,
         visualCompletion,
+        visualPayment,
         collaboration: {
             visualEnabled: documentResult.data?.visual_enabled !== false,
             version: integer(documentResult.data?.version),
@@ -895,5 +925,6 @@ export async function loadPublishedOnboardingConfiguration(workspaceId: string):
         completion: mapBookend(raw.configurations, "completion", false),
         theme: mapTheme(raw.themes[0], raw.swatches),
         help: mapHelp(raw.configurations, whatsappVerified, text(whatsappHint.phone_number, whatsappHint.display_phone_number) ?? null, false),
+        payment: await hydrateVisualPayment(mapPayment(raw.configurations, false)),
     }
 }

@@ -166,7 +166,7 @@ function isRelationshipColumnDrift(error: QueryError) {
 
 export function normalizeRelationshipPhase(value: unknown, fallback: RelationshipPhase = "lead"): RelationshipPhase {
     if (value === "found" || value === "qualified") return "lead"
-    if (value === "contacted" || value === "sold") return "potential_client"
+    if (value === "contacted") return "potential_client"
     return RELATIONSHIP_PHASES.some((phase) => phase.key === value)
         ? value as RelationshipPhase
         : fallback
@@ -589,8 +589,8 @@ export async function listRelationshipTimelineItems(workspaceSlug: string, relat
                 id: `sale-${sale.id}`,
                 workspace_id: relationship.workspace_id,
                 relationship_id: relationship.id,
-                title: paid ? "Invoice paid" : "Invoice in progress",
-                description: `Invoice state: ${sale.status}`,
+                title: paid ? "Payment complete" : "Payment in progress",
+                description: "Payment activity tracked by Betelgeze.",
                 lifecycle_phase: "invoiced",
                 status: paid ? "done" : "doing",
                 priority: paid ? 3 : 1,

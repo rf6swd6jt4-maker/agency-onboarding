@@ -1,5 +1,5 @@
 import type { FileAccept, FormFieldType } from "@/lib/onboarding/forms"
-import type { OnboardingBlock, OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2, OnboardingStepV2 } from "@/lib/onboarding/block-definition"
+import type { OnboardingBlock, OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2, OnboardingPaymentDefinitionV2, OnboardingStepV2 } from "@/lib/onboarding/block-definition"
 
 export type OnboardingDefinitionStatus = "draft" | "published" | "archived"
 export type OnboardingServiceState = "active" | "retired" | "archived"
@@ -183,6 +183,7 @@ export type OnboardingBuilderData = {
     visualModules: OnboardingModuleDefinitionV2[]
     visualWelcome: OnboardingBookendDefinitionV2
     visualCompletion: OnboardingBookendDefinitionV2
+    visualPayment: OnboardingPaymentDefinitionV2
     collaboration: {
         visualEnabled: boolean
         version: number
@@ -220,6 +221,7 @@ export type PublishedOnboardingConfiguration = {
     completion: OnboardingBookendDefinition
     theme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
+    payment: OnboardingPaymentDefinitionV2
 }
 
 export type ConfigurationActionResult<T = undefined> =

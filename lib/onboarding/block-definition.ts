@@ -73,6 +73,7 @@ export type ButtonBlock = BlockBase & {
     url: string
     required: boolean
     appearance: "primary" | "secondary"
+    openInSameTab?: boolean
 }
 
 export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock
@@ -96,6 +97,19 @@ export type OnboardingBookendDefinitionV2 = Omit<OnboardingBookendDefinition, "t
     schemaVersion: typeof ONBOARDING_BLOCK_SCHEMA_VERSION
     steps: OnboardingStepV2[]
 }
+
+export type OnboardingPaymentDefinitionV2 = {
+    id: string
+    schemaVersion: typeof ONBOARDING_BLOCK_SCHEMA_VERSION
+    steps: [OnboardingStepV2]
+}
+
+export const ONBOARDING_PAYMENT_DEFINITION_ID = "00000000-0000-4000-8000-000000000100"
+export const ONBOARDING_PAYMENT_STEP_ID = "00000000-0000-4000-8000-000000000101"
+export const ONBOARDING_PAYMENT_HEADER_ID = "00000000-0000-4000-8000-000000000102"
+export const ONBOARDING_PAYMENT_ESTIMATE_ID = "00000000-0000-4000-8000-000000000103"
+export const ONBOARDING_PAYMENT_BUTTON_ID = "00000000-0000-4000-8000-000000000104"
+export const ONBOARDING_PAYMENT_PLACEHOLDER_URL = "https://checkout.stripe.com/"
 
 export const DEFAULT_BLOCK_LAYOUT: OnboardingBlockLayout = {
     width: "standard",
@@ -161,6 +175,37 @@ export function createVideoBlock(): VideoBlock {
 
 export function createButtonBlock(): ButtonBlock {
     return { id: stableUuid(), name: "Button", kind: "button", label: "Open link", url: "", required: false, appearance: "primary", layout: DEFAULT_BLOCK_LAYOUT }
+}
+
+export function defaultOnboardingPaymentDefinition(): OnboardingPaymentDefinitionV2 {
+    return {
+        id: ONBOARDING_PAYMENT_DEFINITION_ID,
+        schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
+        steps: [{
+            id: ONBOARDING_PAYMENT_STEP_ID,
+            key: "payment",
+            blocks: [
+                createHeaderBlock({
+                    id: ONBOARDING_PAYMENT_HEADER_ID,
+                    title: "Payment",
+                    description: "Complete payment securely with Stripe to begin your onboarding.",
+                    estimatedTime: "2 minutes",
+                }),
+                createEstimateBlock("2 minutes", ONBOARDING_PAYMENT_ESTIMATE_ID),
+                {
+                    id: ONBOARDING_PAYMENT_BUTTON_ID,
+                    name: "Pay button",
+                    kind: "button",
+                    label: "Pay securely",
+                    url: ONBOARDING_PAYMENT_PLACEHOLDER_URL,
+                    required: true,
+                    appearance: "primary",
+                    layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
+                },
+            ],
+            navigation: { backLabel: "Back", continueLabel: "Continue" },
+        }],
+    }
 }
 
 export function createOnboardingField(): ConfiguredOnboardingField {

@@ -6,6 +6,7 @@ export const relationshipPhaseTones: Record<RelationshipPhase, PillTone> = {
     lead: "sky",
     nurturing: "violet",
     potential_client: "amber",
+    sold: "emerald",
     invoiced: "yellow",
     onboarding: "violet",
     onboarding_review: "emerald",

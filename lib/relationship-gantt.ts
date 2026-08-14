@@ -176,7 +176,7 @@ export async function getRelationshipGanttPlan(_workspaceSlug: string, relations
         { id: `relationship-started-${relationship.id}`, title: "Relationship Started", occurredAt: relationship.created_at, kind: "relationship_started", href: null },
     ]
     const soldStage = rawItems.find((item) => item.native_key === `${relationship.id}:potential_client` && item.actual_completed_at)
-    if (soldStage?.actual_completed_at) milestones.push({ id: `client-invoiced-${relationship.id}`, title: "Client Invoiced", occurredAt: soldStage.actual_completed_at, kind: "client_invoiced", href: null })
+    if (soldStage?.actual_completed_at) milestones.push({ id: `client-sold-${relationship.id}`, title: "Client Sold", occurredAt: soldStage.actual_completed_at, kind: "client_invoiced", href: null })
     for (const session of sessionsResult.data ?? []) {
         if (session.status === "completed" && session.completed_at) milestones.push({ id: `onboarding-complete-${session.id}`, title: "Onboarding Completed", occurredAt: session.completed_at, kind: "onboarding_completed", href: null })
     }

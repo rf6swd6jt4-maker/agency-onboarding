@@ -88,7 +88,7 @@ The silhouette is a rectangle with half of a Betelgeze diamond attached to each 
 
 Relationship stages are categorical labels, not operational statuses. Their stage-specific colours therefore do not expand or alter the four-colour `Status` meanings. Pass the lifecycle phase itself so the component owns both its canonical wording and colour.
 
-The lifecycle palette assigns distinct tones to the active parent stages: Lead `sky`, Potential Client `amber`, Invoiced `yellow`, Onboarding `violet`, Onboarding Review `emerald`, Fulfilment `red`, and Retention `neutral`. These are categorical Gantt colours, not status meanings.
+The lifecycle palette assigns distinct tones to the active parent stages: Lead `sky`, Potential Client `amber`, Sold `emerald`, legacy Invoiced `yellow`, Onboarding `violet`, Onboarding Review `emerald`, Fulfilment `red`, and Retention `neutral`. These are categorical Gantt colours, not status meanings.
 
 ```tsx
 <RelationshipStage phase="onboarding" />

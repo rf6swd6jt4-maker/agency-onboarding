@@ -12,21 +12,22 @@ import type {
     OnboardingBlock,
     OnboardingBookendDefinitionV2,
     OnboardingModuleDefinitionV2,
+    OnboardingPaymentDefinitionV2,
     OnboardingStepV2,
     VideoBlock,
 } from "@/lib/onboarding/block-definition"
-import { stepEstimate } from "@/lib/onboarding/block-definition"
+import { ONBOARDING_PAYMENT_BUTTON_ID, stepEstimate } from "@/lib/onboarding/block-definition"
 import { onboardingBlockLayoutClasses } from "@/lib/onboarding/block-layout"
 import type { OnboardingHelpSettings, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { getFileAcceptValue } from "@/lib/onboarding/forms"
 
-type DefinitionTarget = { kind: "module"; definition: OnboardingModuleDefinitionV2 } | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 }
+type DefinitionTarget = { kind: "module"; definition: OnboardingModuleDefinitionV2 } | { kind: "bookend"; definition: OnboardingBookendDefinitionV2 | OnboardingPaymentDefinitionV2 } | { kind: "payment"; definition: OnboardingPaymentDefinitionV2 }
 
 function duplicateModifier(event: { metaKey: boolean; ctrlKey: boolean }) {
     return event.metaKey || event.ctrlKey
 }
 
-function AuthorFrame({ block, selected, collaboratorColours, select, children, onDragStart, onDrop, suppressHover = false }: {
+function AuthorFrame({ block, selected, collaboratorColours, select, children, onDragStart, onDrop, suppressHover = false, fixed = false }: {
     block: OnboardingBlock
     selected: boolean
     collaboratorColours?: string[]
@@ -35,10 +36,11 @@ function AuthorFrame({ block, selected, collaboratorColours, select, children, o
     onDragStart: (event: DragEvent<HTMLDivElement>) => void
     onDrop: (event: DragEvent<HTMLDivElement>) => void
     suppressHover?: boolean
+    fixed?: boolean
 }) {
     return <div
         data-builder-block={block.id}
-        draggable={block.kind !== "header"}
+        draggable={block.kind !== "header" && !fixed}
         onDragStart={onDragStart}
         onDragOver={(event) => event.preventDefault()}
         onDrop={onDrop}
@@ -46,7 +48,7 @@ function AuthorFrame({ block, selected, collaboratorColours, select, children, o
         className={`group relative ${onboardingBlockLayoutClasses(block.layout)} rounded-2xl outline-offset-4 transition ${selected ? "outline-2 outline-[var(--onboarding-accent)]" : suppressHover ? "outline-transparent" : "outline-transparent hover:outline hover:outline-1 hover:outline-black/15"}`}
         style={collaboratorColours?.length ? { boxShadow: `0 0 0 3px ${collaboratorColours[0]}` } : undefined}
     >
-        {block.kind !== "header" ? <button type="button" aria-label="Drag block" className={`absolute -left-10 top-1 hidden h-8 w-8 cursor-grab items-center justify-center rounded-lg border border-black/10 bg-white text-slate-500 shadow-sm md:group-hover:flex ${selected ? "md:flex" : ""}`}>⠿</button> : null}
+        {block.kind !== "header" && !fixed ? <button type="button" aria-label="Drag block" className={`absolute -left-10 top-1 hidden h-8 w-8 cursor-grab items-center justify-center rounded-lg border border-black/10 bg-white text-slate-500 shadow-sm md:group-hover:flex ${selected ? "md:flex" : ""}`}>⠿</button> : null}
         {children}
     </div>
 }
@@ -148,7 +150,7 @@ export function VisualBuilderCanvas({
         event.stopPropagation()
         const sourceIndex = step.blocks.findIndex((block) => block.id === sourceId)
         const targetIndex = step.blocks.findIndex((block) => block.id === targetId)
-        if (sourceIndex <= 0 || targetIndex <= 0) return
+        if (sourceIndex <= 0 || targetIndex <= 0 || sourceId === ONBOARDING_PAYMENT_BUTTON_ID || targetId === ONBOARDING_PAYMENT_BUTTON_ID) return
         const copy = duplicateModifier(event)
         if (step.blocks[sourceIndex]?.kind === "estimate" && copy) return
         const blocks = [...step.blocks]
@@ -178,6 +180,7 @@ export function VisualBuilderCanvas({
     const header = step.blocks[0] as HeaderBlock
     const collaboratorColoursFor = (blockId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}`).map((presence) => presence.color)
     const collaboratorColoursForField = (blockId: string, fieldId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}:${fieldId}`).map((presence) => presence.color)
+    const sectionTitle = target.kind === "module" ? target.definition.name : target.kind === "payment" || !("kind" in target.definition) ? "Payment" : target.definition.kind
 
     if (readOnly) {
         const hasForm = step.blocks.some((block) => block.kind === "form")
@@ -188,7 +191,7 @@ export function VisualBuilderCanvas({
             <OnboardingThemeProvider theme={theme} className="h-full">
                 <OnboardingLayout embedded={!fullScreen} forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Preview · nothing is saved" onRoadmapSelect={selectRoadmapStep}>
                     <OnboardingSessionRenderer
-                        step={{ key: step.id, kind: "video", title: header.title, description: header.description, moduleTitle: target.kind === "module" ? target.definition.name : target.definition.kind, estimatedTime: stepEstimate(step)?.estimatedTime ?? header.estimatedTime, why: "", blocks: step.blocks, navigation: step.navigation }}
+                        step={{ key: step.id, kind: "video", title: header.title, description: header.description, moduleTitle: sectionTitle, estimatedTime: stepEstimate(step)?.estimatedTime ?? header.estimatedTime, why: "", blocks: step.blocks, navigation: step.navigation }}
                         moduleTitles={moduleTitles}
                         showModuleSummary
                         preview
@@ -208,11 +211,11 @@ export function VisualBuilderCanvas({
             <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} helpSelected={helpSelected} onHelpSelect={selectHelp} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectRoadmapStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
                 <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface)] p-6 shadow-sm ${viewport === "mobile" ? "" : "sm:p-8"}`} onClick={() => selectBlock(null)}>
                     <AuthorFrame block={header} selected={selectedBlockId === header.id} collaboratorColours={collaboratorColoursFor(header.id)} select={() => selectBlock(header.id)} onDragStart={() => undefined} onDrop={() => undefined}>
-                        <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">{target.kind === "module" ? target.definition.name : target.definition.kind}</p>
+                        <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">{sectionTitle}</p>
                         <InlineText value={header.title} update={(title) => replaceBlock({ ...header, title })} className="mt-3 text-3xl font-semibold tracking-tight text-[var(--onboarding-text)]" placeholder="Untitled step" />
                         <InlineText value={header.description} update={(description) => replaceBlock({ ...header, description })} className="mt-4 text-lg leading-7 text-[var(--onboarding-muted)]" multiline placeholder="Add a description…" />
                     </AuthorFrame>
-                    {step.blocks.slice(1).map((block) => <Fragment key={block.id}><AuthorFrame block={block} selected={selectedBlockId === block.id && !selectedFieldId} suppressHover={block.kind === "form"} collaboratorColours={collaboratorColoursFor(block.id)} select={() => selectBlock(block.id)} onDragStart={(event) => { const copy = duplicateModifier(event); event.dataTransfer.setData("application/x-betelgeze-block", block.id); event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "block", groupKey, stepId: step.id, blockId: block.id, copy })); event.dataTransfer.effectAllowed = copy ? "copy" : "move" }} onDrop={(event) => dropBlock(event, block.id)}>
+                    {step.blocks.slice(1).map((block) => <Fragment key={block.id}><AuthorFrame block={block} fixed={block.id === ONBOARDING_PAYMENT_BUTTON_ID} selected={selectedBlockId === block.id && !selectedFieldId} suppressHover={block.kind === "form"} collaboratorColours={collaboratorColoursFor(block.id)} select={() => selectBlock(block.id)} onDragStart={(event) => { const copy = duplicateModifier(event); event.dataTransfer.setData("application/x-betelgeze-block", block.id); event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "block", groupKey, stepId: step.id, blockId: block.id, copy })); event.dataTransfer.effectAllowed = copy ? "copy" : "move" }} onDrop={(event) => dropBlock(event, block.id)}>
                         {block.kind === "estimate" ? <div className="inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent)_14%,var(--onboarding-surface))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary)]">Estimated time: <InlineText value={block.estimatedTime} update={(estimatedTime) => replaceBlock({ ...block, estimatedTime })} className="ml-1 w-auto min-w-20 text-sm font-medium text-[var(--onboarding-primary)]" placeholder="2–3 minutes" /></div> : block.kind === "checklist" ? <div className="rounded-2xl bg-[var(--onboarding-page)] p-5"><InlineText value={block.title} update={(title) => replaceBlock({ ...block, title })} className="font-semibold text-[var(--onboarding-text)]" /> <ul className="mt-4 space-y-2 text-sm leading-6">{(block.source === "modules" ? moduleTitles : block.items).map((item, index) => <li key={index} className="flex gap-2"><span className="font-semibold text-[var(--onboarding-primary)]">✓</span>{block.source === "modules" ? <span>{item}</span> : <InlineText value={item} update={(value) => replaceBlock({ ...block, items: block.items.map((current, itemIndex) => itemIndex === index ? value : current) })} className="min-w-0 flex-1" />}</li>)}</ul>{block.footer ? <InlineText value={block.footer} update={(footer) => replaceBlock({ ...block, footer })} multiline className="mt-4 text-sm leading-6 text-[var(--onboarding-muted)]" /> : null}</div> : block.kind === "form" ? <FormPreview block={block} update={replaceBlock} selectedFieldId={selectedFieldId} selectField={(fieldId) => selectField(block.id, fieldId)} collaboratorColoursForField={(fieldId) => collaboratorColoursForField(block.id, fieldId)} /> : block.kind === "video" ? <div>{block.upload?.resolvedUrl || block.upload?.path ? <video src={block.upload?.resolvedUrl ?? block.upload?.path} controls className="aspect-video w-full rounded-2xl bg-black" /> : <div className="aspect-video rounded-2xl border border-dashed border-black/20 bg-[var(--onboarding-page)] p-8 text-center text-sm text-[var(--onboarding-muted)]">Upload a video to show it here.</div>}{selectedBlockId === block.id ? <label className="mt-3 inline-flex cursor-pointer rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm">{uploadingId === block.id ? "Uploading…" : block.upload ? "Replace video" : "Upload video"}<input type="file" accept="video/*" disabled={uploadingId === block.id} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadVideo(block, file) }} className="sr-only" /></label> : null}{block.legacyEmbedUrl ? <p className="mt-2 text-xs text-red-700">Replace this legacy embed with an upload before publishing.</p> : null}</div> : block.kind === "button" ? <InlineText value={block.label} update={(label) => replaceBlock({ ...block, label })} className={`${block.appearance === "secondary" ? "border border-[var(--onboarding-primary)] text-[var(--onboarding-primary)]" : "bg-[var(--onboarding-primary)] text-white"} inline-flex min-h-12 w-auto rounded-xl px-5 py-3 font-medium`} /> : null}
                     </AuthorFrame></Fragment>)}
                     {uploadError ? <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{uploadError}</p> : null}

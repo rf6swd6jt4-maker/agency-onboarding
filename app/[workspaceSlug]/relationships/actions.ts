@@ -16,7 +16,8 @@ import {
 } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
-import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, sendRelationshipInvoice } from "@/lib/relationship-workflow"
+import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, finalizeRelationshipSaleConfirmation, sendRelationshipInvoice } from "@/lib/relationship-workflow"
+import { sendSaleConsentTemplate } from "@/lib/client-sales/automation"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { expireStripeCheckoutSession, voidStripeInvoice, type StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
@@ -25,6 +26,7 @@ const creatablePhases = new Set<RelationshipPhase>([
     "lead",
     "nurturing",
     "potential_client",
+    "sold",
     "invoiced",
     "onboarding",
     "onboarding_review",
@@ -89,7 +91,8 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
     const { workspace, user } = await requireWorkspace(slug, "admin")
     const primaryPersonName = formString(formData, "primary_person_name")
     const businessName = nullableFormString(formData, "business_name")
-    const phase = normalizeRelationshipPhase(formString(formData, "lifecycle_phase"))
+    const requestedPhase = formString(formData, "lifecycle_phase")
+    const phase = normalizeRelationshipPhase(requestedPhase, "potential_client")
     const isTest = formData.get("is_test") === "on"
 
     if (!primaryPersonName || !creatablePhases.has(phase)) {
@@ -191,6 +194,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
         supabaseAdmin.from("client_sales").select("id, status").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId).in("status", [
             "invoice_sent", "payment_failed", "paid", "test_paid", "paid_consent_template_sending", "paid_awaiting_whatsapp_confirm",
             "paid_consent_template_failed", "whatsapp_confirmed", "onboarding_created", "onboarding_link_sent", "onboarding_link_failed",
+            "sale_confirmation_pending", "sold_confirmation_sending", "sold_awaiting_whatsapp_confirm", "sold_confirmation_failed", "onboarding_payment_pending",
         ]).limit(1),
         loadPublishedOnboardingConfiguration(workspace.id),
     ])
@@ -226,7 +230,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
         existingPrices.get(serviceKey) !== submittedPrices.get(serviceKey)
         || existingCurrencies.get(serviceKey) !== submittedCurrencies.get(serviceKey)
     ))
-    if (frozenSales?.length && commercialChanged) throw new Error("Void and replace the sent invoice before changing services or negotiated prices")
+    if (frozenSales?.length && commercialChanged) throw new Error("This sale is already frozen. Create a replacement sale before changing services or negotiated prices")
 
     for (const serviceKey of serviceKeys) {
         const existing = existingByKey.get(serviceKey)
@@ -517,7 +521,7 @@ export async function proceedRelationshipCurrentWork(
                 .select("user_id").eq("workspace_id", workspace.id).eq("work_item_id", workItemId).eq("user_id", user.id).maybeSingle()
             if (!assignment) throw new Error("This work item is not assigned to you")
         }
-        if (workflowAction === "send_invoice") {
+        if (workflowAction === "send_invoice" || workflowAction === "sell_client") {
             invoice = await sendRelationshipInvoice({
                 workspaceId: workspace.id,
                 relationshipId,
@@ -526,7 +530,15 @@ export async function proceedRelationshipCurrentWork(
                 billingModel: payment?.billingModel ?? "one_off",
                 billingInterval: payment?.billingInterval,
                 billingIntervalCount: payment?.billingIntervalCount,
+                deferPaymentUntilOnboarding: workflowAction === "sell_client",
             })
+            if (workflowAction === "sell_client") {
+                const consent = await sendSaleConsentTemplate(invoice.saleId, workspace.id)
+                if (!consent.ok) throw new Error(consent.error ?? "The WhatsApp confirmation could not be sent")
+                if (!("inProgress" in consent && consent.inProgress)) {
+                    await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: invoice.saleId })
+                }
+            }
         } else {
             if (workflowAction === "await_payment" || workflowAction === "await_onboarding") throw new Error("This stage advances automatically when the external step completes")
             await advanceRelationshipWorkflow({ workspaceId: workspace.id, relationshipId, workItemId, action: workflowAction, actorId: user.id })
@@ -542,7 +554,7 @@ export async function proceedRelationshipCurrentWork(
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : "Could not proceed with this work item"
-        const invoiceValidationMessage = workflowAction === "send_invoice" && [
+        const invoiceValidationMessage = (workflowAction === "send_invoice" || workflowAction === "sell_client") && [
             "Add a billing",
             "Add a usable client WhatsApp",
             "Verify and enable",
@@ -562,8 +574,8 @@ export async function proceedRelationshipCurrentWork(
         ].some((prefix) => message.startsWith(prefix))
         const safeMessage = invoiceValidationMessage || message.endsWith("is not connected for this workspace.") || message === "Work item not found" || message === "Work item does not belong to this relationship" || message === "This work item is not assigned to you" || message === "This stage advances automatically when the external step completes" || message === "Choose a fulfilment manager before completing onboarding review" || message === "Complete every required review work item before moving to fulfilment"
             ? message
-            : workflowAction === "send_invoice"
-                ? "Could not send the invoice. Check the Stripe connection and commercial details, then try again."
+            : workflowAction === "send_invoice" || workflowAction === "sell_client"
+                ? workflowAction === "sell_client" ? "Could not send the WhatsApp confirmation. Check the connection and commercial details, then try again." : "Could not send the invoice. Check the Stripe connection and commercial details, then try again."
                 : "Could not proceed with this work item. Please try again."
         return { ok: false as const, error: safeMessage }
     }

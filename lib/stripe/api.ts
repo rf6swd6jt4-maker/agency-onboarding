@@ -37,6 +37,11 @@ export type CreateStripeSubscriptionCheckoutInput = {
     cancelUrl: string
     expiresAt: number
     secretKey?: string
+    idempotencyKey?: string
+}
+
+export type CreateStripePaymentCheckoutInput = Omit<CreateStripeSubscriptionCheckoutInput, "interval" | "intervalCount"> & {
+    idempotencyKey?: string
 }
 
 export type CreateStripeInvoiceInput = {
@@ -209,9 +214,9 @@ function getInvoiceFields(invoice: unknown) {
     }
 }
 
-function getCheckoutFields(checkout: unknown) {
+export function getCheckoutFields(checkout: unknown) {
     const value = checkout && typeof checkout === "object" && !Array.isArray(checkout)
-        ? checkout as { id?: unknown; status?: unknown; url?: unknown; expires_at?: unknown }
+        ? checkout as { id?: unknown; status?: unknown; payment_status?: unknown; url?: unknown; expires_at?: unknown; customer?: unknown; subscription?: unknown; metadata?: unknown }
         : {}
     return {
         checkoutSessionId: typeof value.id === "string" && value.id.trim() ? value.id : null,
@@ -220,6 +225,10 @@ function getCheckoutFields(checkout: unknown) {
         expiresAt: typeof value.expires_at === "number"
             ? new Date(value.expires_at * 1_000).toISOString()
             : null,
+        paymentStatus: typeof value.payment_status === "string" ? value.payment_status : null,
+        customerId: typeof value.customer === "string" ? value.customer : null,
+        subscriptionId: typeof value.subscription === "string" ? value.subscription : null,
+        metadata: value.metadata && typeof value.metadata === "object" && !Array.isArray(value.metadata) ? value.metadata as Record<string, unknown> : {},
     }
 }
 
@@ -348,6 +357,7 @@ export async function createStripeSubscriptionCheckout({
     cancelUrl,
     expiresAt,
     secretKey,
+    idempotencyKey,
 }: CreateStripeSubscriptionCheckoutInput): Promise<StripeSubscriptionCheckoutResult> {
     const key = secretKey ?? getStripeSecretKey()
     const customer = await stripeRequest("/customers", {
@@ -397,7 +407,7 @@ export async function createStripeSubscriptionCheckout({
     }
 
     const checkout = await stripeRequest("/checkout/sessions", {
-        idempotencyKey: `${saleId}:subscription-checkout`,
+        idempotencyKey: idempotencyKey ?? `${saleId}:subscription-checkout`,
         params,
     }, key)
     const fields = getCheckoutFields(checkout)
@@ -412,6 +422,70 @@ export async function createStripeSubscriptionCheckout({
         expiresAt: fields.expiresAt,
         rawCheckout: checkout,
     }
+}
+
+export async function createStripePaymentCheckout({
+    saleId, relationshipId, workspaceId, name, email, phone, currency, lineItems,
+    serviceKeys, projectTimeframeDays, successUrl, cancelUrl, expiresAt, secretKey,
+    idempotencyKey,
+}: CreateStripePaymentCheckoutInput): Promise<StripeSubscriptionCheckoutResult> {
+    const key = secretKey ?? getStripeSecretKey()
+    const customer = await stripeRequest("/customers", {
+        idempotencyKey: `${saleId}:customer`,
+        params: {
+            name,
+            email,
+            phone: getStripeCustomerPhone(phone),
+            "metadata[client_sale_id]": saleId,
+            "metadata[relationship_id]": relationshipId,
+            "metadata[workspace_id]": workspaceId,
+        },
+    }, key)
+    const customerId = asStripeId(customer, "customer")
+    const params: Record<string, string | number | boolean | null | undefined> = {
+        mode: "payment",
+        customer: customerId,
+        client_reference_id: saleId,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        expires_at: expiresAt,
+        billing_address_collection: "required",
+        "phone_number_collection[enabled]": true,
+        submit_type: "pay",
+        "invoice_creation[enabled]": true,
+        "invoice_creation[invoice_data][metadata][client_sale_id]": saleId,
+        "invoice_creation[invoice_data][metadata][relationship_id]": relationshipId,
+        "invoice_creation[invoice_data][metadata][workspace_id]": workspaceId,
+        "metadata[client_sale_id]": saleId,
+        "metadata[relationship_id]": relationshipId,
+        "metadata[workspace_id]": workspaceId,
+        "payment_intent_data[metadata][client_sale_id]": saleId,
+        "payment_intent_data[metadata][relationship_id]": relationshipId,
+        "payment_intent_data[metadata][workspace_id]": workspaceId,
+        "payment_intent_data[metadata][service_keys]": serviceKeys.join(","),
+        "payment_intent_data[metadata][project_timeframe_days]": projectTimeframeDays ?? undefined,
+    }
+    for (const [index, item] of lineItems.entries()) {
+        const base = `line_items[${index}]`
+        params[`${base}[quantity]`] = 1
+        params[`${base}[price_data][currency]`] = currency
+        params[`${base}[price_data][unit_amount]`] = item.amount
+        params[`${base}[price_data][product_data][name]`] = item.name || item.description
+        params[`${base}[price_data][product_data][description]`] = item.description
+        params[`${base}[price_data][product_data][metadata][service_key]`] = item.serviceKey
+        if (item.imageUrl) params[`${base}[price_data][product_data][images][0]`] = item.imageUrl
+    }
+    const checkout = await stripeRequest("/checkout/sessions", {
+        idempotencyKey: idempotencyKey ?? `${saleId}:payment-checkout`,
+        params,
+    }, key)
+    const fields = getCheckoutFields(checkout)
+    if (!fields.checkoutSessionId || !fields.checkoutUrl) throw new Error("Stripe did not return a usable Checkout page")
+    return { customerId, checkoutSessionId: fields.checkoutSessionId, checkoutStatus: fields.checkoutStatus, checkoutUrl: fields.checkoutUrl, expiresAt: fields.expiresAt, rawCheckout: checkout }
+}
+
+export async function retrieveStripeCheckoutSession(input: { checkoutSessionId: string; secretKey?: string }) {
+    return stripeRequest(`/checkout/sessions/${encodeURIComponent(input.checkoutSessionId)}`, { method: "GET" }, input.secretKey ?? getStripeSecretKey())
 }
 
 export async function voidStripeInvoice(input: {

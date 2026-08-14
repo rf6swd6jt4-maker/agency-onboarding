@@ -135,7 +135,8 @@ test("Builder defaults expose bookends and mandatory modules with expanded modul
     assert.match(builderUi, /data\.mandatory\.draftModuleIds\.length \? data\.mandatory\.draftModuleIds : data\.mandatory\.publishedModuleIds/)
     assert.match(builderUi, /const \[collapsedGroups, setCollapsedGroups\] = useState<Set<string>>\(\(\) => new Set\(\)\)/)
     assert.match(builderUi, /groups\.flatMap\(\(group\) => group\.definition\.steps\.map/)
-    assert.match(builderUi, /group\.kind === "bookend" \|\| visibleModuleIds\.has/)
+    assert.match(builderUi, /group\.kind !== "module" \|\| visibleModuleIds\.has/)
+    assert.match(builderUi, /<span className="min-w-0 flex-1 truncate font-semibold">Payment<\/span><RoundPill>Fixed<\/RoundPill>/)
 })
 
 test("module ordering is shared by Outline, Modules, persistence, and runtime composition", () => {

@@ -41,10 +41,10 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
         supabaseAdmin.from("client_sales")
-            .select("id, status, billing_model, stripe_invoice_id, stripe_invoice_status, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
+            .select("id, status, checkout_flow, billing_model, stripe_invoice_id, stripe_invoice_status, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
-            .in("status", ["invoice_sent", "payment_failed", "invoice_inactive"])
+            .in("status", ["invoice_sent", "payment_failed", "invoice_inactive", "sale_confirmation_pending", "sold_confirmation_sending", "sold_awaiting_whatsapp_confirm", "sold_confirmation_failed", "onboarding_payment_pending", "onboarding_link_sent", "onboarding_link_failed", "paid"])
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
@@ -68,11 +68,13 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
         selected: storedServices,
         revisions: serviceRevisions,
     })
-    const replaceableSale = replaceableSaleResult.data && (
-        replaceableSaleResult.data.billing_model === "recurring"
-            ? Boolean(replaceableSaleResult.data.stripe_checkout_session_id) && (replaceableSaleResult.data.status !== "invoice_inactive" || String(replaceableSaleResult.data.stripe_checkout_status ?? "").toLowerCase() === "expired")
-            : Boolean(replaceableSaleResult.data.stripe_invoice_id) && (replaceableSaleResult.data.status !== "invoice_inactive" || ["void", "voided"].includes(String(replaceableSaleResult.data.stripe_invoice_status ?? "").toLowerCase()))
-    ) ? replaceableSaleResult.data : null
+    const currentSale = replaceableSaleResult.data
+    const paymentGateSaleActive = currentSale?.checkout_flow === "onboarding_payment_gate" && currentSale.status !== "invoice_inactive"
+    const replaceableSale = currentSale && currentSale.checkout_flow !== "onboarding_payment_gate" && (
+        currentSale.billing_model === "recurring"
+            ? Boolean(currentSale.stripe_checkout_session_id) && (currentSale.status !== "invoice_inactive" || String(currentSale.stripe_checkout_status ?? "").toLowerCase() === "expired")
+            : Boolean(currentSale.stripe_invoice_id) && (currentSale.status !== "invoice_inactive" || ["void", "voided"].includes(String(currentSale.stripe_invoice_status ?? "").toLowerCase()))
+    ) ? currentSale : null
     const lookedUpCurrentWork = await currentRelationshipWork({ workspaceId: workspace.id, relationshipId: relationship.id, userId: user.id, isManager: role === "owner" || role === "admin" })
     // The Gantt plan is the authoritative rendered view. If the compact current-work
     // query temporarily misses a just-created link, keep the visible assigned stage actionable.
@@ -159,7 +161,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                 help={onboardingConfiguration.help}
                                 schemaReady={onboardingConfiguration.schemaReady}
                                 whatsappVerified={onboardingConfiguration.help.whatsappVerified}
-                                commercialLocked={Boolean(replaceableSale && replaceableSale.status !== "invoice_inactive")}
+                                commercialLocked={paymentGateSaleActive || Boolean(replaceableSale && replaceableSale.status !== "invoice_inactive")}
                                 plan={plan}
                                 canEdit={role === "owner" || role === "admin"}
                                 currentWork={currentWork}

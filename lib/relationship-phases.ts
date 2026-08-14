@@ -2,6 +2,7 @@ export const RELATIONSHIP_PHASES = [
     { key: "lead", label: "Lead" },
     { key: "nurturing", label: "Nurturing" },
     { key: "potential_client", label: "Potential Client" },
+    { key: "sold", label: "Sold" },
     { key: "invoiced", label: "Invoiced" },
     { key: "onboarding", label: "Onboarding" },
     { key: "onboarding_review", label: "Onboarding Review" },
