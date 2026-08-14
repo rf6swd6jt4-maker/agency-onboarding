@@ -215,7 +215,14 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const submittedCurrencies = new Map(serviceKeys.map((serviceKey) => [serviceKey, currencyCode(formString(formData, `service_currency_${serviceKey}`) || catalogueByCode.get(serviceKey)?.currency || existingByKey.get(serviceKey)?.currency || "USD")]))
     const existingPrices = new Map((existingServices ?? []).map((service) => [service.service_key, Number(service.price_cents) || 0]))
     const existingCurrencies = new Map((existingServices ?? []).map((service) => [service.service_key, String(service.currency ?? "USD").toUpperCase()]))
-    const commercialChanged = serviceKeys.length !== existingPrices.size || serviceKeys.some((serviceKey) => (
+    const serviceIdentityChanged = configuration.schemaReady && serviceKeys.some((serviceKey) => {
+        const existing = existingByKey.get(serviceKey)
+        const current = catalogueByCode.get(serviceKey)
+        return current?.state === "active" && Boolean(current.revisionId) && (
+            existing?.service_id !== current.id || existing?.service_revision_id !== current.revisionId
+        )
+    })
+    const commercialChanged = serviceIdentityChanged || serviceKeys.length !== existingPrices.size || serviceKeys.some((serviceKey) => (
         existingPrices.get(serviceKey) !== submittedPrices.get(serviceKey)
         || existingCurrencies.get(serviceKey) !== submittedCurrencies.get(serviceKey)
     ))
@@ -229,8 +236,9 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
         }
         const postedServiceId = nullableFormString(formData, `service_id_${serviceKey}`)
         const postedRevisionId = nullableFormString(formData, `service_revision_id_${serviceKey}`)
-        const expectedServiceId = existing?.service_id ?? catalogue?.id ?? null
-        const expectedRevisionId = existing?.service_revision_id ?? catalogue?.revisionId ?? null
+        const currentActive = catalogue?.state === "active" && catalogue.revisionId ? catalogue : null
+        const expectedServiceId = currentActive?.id ?? existing?.service_id ?? catalogue?.id ?? null
+        const expectedRevisionId = currentActive?.revisionId ?? existing?.service_revision_id ?? null
         if (configuration.schemaReady && (
             (postedServiceId && postedServiceId !== expectedServiceId)
             || (postedRevisionId && postedRevisionId !== expectedRevisionId)
@@ -239,8 +247,9 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const versionedRows = serviceKeys.map((serviceKey) => {
         const existing = existingByKey.get(serviceKey)
         const service = catalogueByCode.get(serviceKey)
-        const serviceId = existing?.service_id ?? service?.id ?? null
-        const serviceRevisionId = existing?.service_revision_id ?? service?.revisionId ?? null
+        const currentActive = service?.state === "active" && service.revisionId ? service : null
+        const serviceId = currentActive?.id ?? existing?.service_id ?? service?.id ?? null
+        const serviceRevisionId = currentActive?.revisionId ?? existing?.service_revision_id ?? null
         return {
             workspace_id: workspace.id,
             relationship_id: relationshipId,
@@ -545,6 +554,7 @@ export async function proceedRelationshipCurrentWork(
             "The onboarding invoice migration is incomplete",
             "The recurring retainer migration is not applied yet",
             "Choose a recurring schedule",
+            "Email delivery",
             "Missing SMTP_",
             "NEXT_PUBLIC_SITE_URL is required",
             "INVOICE_",

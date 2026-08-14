@@ -1,5 +1,18 @@
 import nodemailer from "nodemailer"
 
+export type EmailDeliveryFailureKind = "authentication" | "connection" | "tls" | "sender" | "recipient" | "configuration" | "unknown"
+
+export class EmailDeliveryError extends Error {
+    constructor(
+        message: string,
+        readonly kind: EmailDeliveryFailureKind,
+        readonly providerCode: string | null = null,
+    ) {
+        super(message)
+        this.name = "EmailDeliveryError"
+    }
+}
+
 function getSmtpEnv(name: string) {
     const value = process.env[name]?.trim()
     if (!value) throw new Error(`Missing ${name}`)
@@ -7,12 +20,61 @@ function getSmtpEnv(name: string) {
 }
 
 function smtpTransporter() {
+    const port = Number(process.env.SMTP_PORT ?? "587")
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new EmailDeliveryError("Email delivery is misconfigured. SMTP_PORT must be a valid port number.", "configuration", "SMTP_PORT")
+    }
+    const secure = process.env.SMTP_SECURE?.trim().toLowerCase() === "true"
     return nodemailer.createTransport({
         host: getSmtpEnv("SMTP_HOST"),
-        port: Number(process.env.SMTP_PORT ?? "587"),
-        secure: process.env.SMTP_SECURE === "true",
+        port,
+        secure,
+        requireTLS: port === 587 && !secure,
         auth: { user: getSmtpEnv("SMTP_USER"), pass: getSmtpEnv("SMTP_PASSWORD") },
     })
+}
+
+type MailProviderError = Error & {
+    code?: string
+    command?: string
+    responseCode?: number
+}
+
+function classifiedEmailError(error: unknown) {
+    if (error instanceof EmailDeliveryError) return error
+    const provider = error instanceof Error ? error as MailProviderError : null
+    const code = provider?.code?.toUpperCase() ?? null
+    const responseCode = provider?.responseCode ?? null
+    const providerCode = code ?? (responseCode ? String(responseCode) : null)
+    if (code === "EAUTH" || responseCode === 530 || responseCode === 534 || responseCode === 535) {
+        return new EmailDeliveryError("Email delivery authentication failed. Check SMTP_USER and SMTP_PASSWORD in Vercel, then redeploy.", "authentication", providerCode)
+    }
+    if (["ECONNECTION", "ECONNREFUSED", "ETIMEDOUT", "EDNS"].includes(code ?? "")) {
+        return new EmailDeliveryError("Betelgeze could not reach the email server. Check SMTP_HOST, SMTP_PORT and SMTP_SECURE in Vercel, then redeploy.", "connection", providerCode)
+    }
+    if (code === "ESOCKET" || provider?.message.toLowerCase().includes("tls") || provider?.message.toLowerCase().includes("certificate")) {
+        return new EmailDeliveryError("The email server rejected the secure connection. Use SMTP_PORT 587 with SMTP_SECURE=false, or port 465 with SMTP_SECURE=true.", "tls", providerCode)
+    }
+    if (provider?.command === "MAIL FROM" || responseCode === 553) {
+        return new EmailDeliveryError("The email server rejected Betelgeze's sender address. Check SMTP_FROM and make sure it uses the authenticated mailbox.", "sender", providerCode)
+    }
+    if (provider?.command === "RCPT TO" || responseCode === 550 || responseCode === 551) {
+        return new EmailDeliveryError("The email server rejected the recipient address. Check the client's billing email and try again.", "recipient", providerCode)
+    }
+    return new EmailDeliveryError(`Email delivery failed${providerCode ? ` (${providerCode})` : ""}. Check the SMTP connection in Vercel and try again.`, "unknown", providerCode)
+}
+
+async function deliverEmail(message: Parameters<ReturnType<typeof smtpTransporter>["sendMail"]>[0]) {
+    try {
+        return await smtpTransporter().sendMail(message)
+    } catch (error) {
+        throw classifiedEmailError(error)
+    }
+}
+
+export function emailDeliveryFailureDetails(error: unknown) {
+    const classified = classifiedEmailError(error)
+    return { message: classified.message, kind: classified.kind, providerCode: classified.providerCode }
 }
 
 function escapeHtml(value: string) {
@@ -29,7 +91,7 @@ export function assertEmailDeliveryConfigured() {
 }
 
 export async function sendWorkspaceInvitation({ to, workspaceName, inviteUrl }: { to: string; workspaceName: string; inviteUrl: string }) {
-    await smtpTransporter().sendMail({
+    await deliverEmail({
         from: process.env.SMTP_FROM ?? "Betelgeze <noreply@betelgeze.com>",
         to,
         subject: `You’re invited to ${workspaceName} on Betelgeze`,
@@ -48,7 +110,7 @@ export async function sendRecurringCheckoutRequest(input: {
     cadenceLabel: string
 }) {
     const serviceText = input.services.join(", ")
-    await smtpTransporter().sendMail({
+    await deliverEmail({
         from: process.env.SMTP_FROM ?? "Betelgeze <noreply@betelgeze.com>",
         to: input.to,
         subject: `${input.workspaceName} recurring service checkout`,

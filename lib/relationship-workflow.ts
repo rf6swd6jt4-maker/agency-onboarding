@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto"
 import { createAndSendStripeInvoice, createStripeSubscriptionCheckout, type StripeRecurringInterval } from "@/lib/stripe/api"
-import { assertEmailDeliveryConfigured, sendRecurringCheckoutRequest } from "@/lib/email"
+import { assertEmailDeliveryConfigured, emailDeliveryFailureDetails, sendRecurringCheckoutRequest } from "@/lib/email"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { SERVICES } from "@/lib/onboarding/services"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -996,15 +996,36 @@ export async function sendRelationshipInvoice(input: {
             updated_at: preparedAt,
         }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
         if (preparedError) throw new Error(preparedError.message)
-        await sendRecurringCheckoutRequest({
-            to: relationship.primary_email,
-            clientName: relationship.primary_person_name,
-            workspaceName: workspace?.name ?? "Your agency",
-            checkoutUrl: checkout.checkoutUrl,
-            services: lineItems.map((item) => item.name || item.description),
-            totalLabel: amountLabel(totalAmount, currency),
-            cadenceLabel: billingCadenceLabel(billingInterval, billingIntervalCount),
-        })
+        try {
+            await sendRecurringCheckoutRequest({
+                to: relationship.primary_email,
+                clientName: relationship.primary_person_name,
+                workspaceName: workspace?.name ?? "Your agency",
+                checkoutUrl: checkout.checkoutUrl,
+                services: lineItems.map((item) => item.name || item.description),
+                totalLabel: amountLabel(totalAmount, currency),
+                cadenceLabel: billingCadenceLabel(billingInterval, billingIntervalCount),
+            })
+        } catch (error) {
+            const failure = emailDeliveryFailureDetails(error)
+            await recordAdminActivity({
+                workspaceId: input.workspaceId,
+                category: "communications",
+                level: "error",
+                eventKey: "email.recurring_checkout.failed",
+                summary: "Recurring Checkout email could not be sent",
+                entityType: "client_sale",
+                entityId: sale.id,
+                direction: "outbound",
+                actorUserId: input.actorId,
+                correlationId: saleCorrelationId,
+                outcome: "failed",
+                failureFingerprint: `smtp:${failure.kind}:${failure.providerCode ?? "unknown"}`,
+                diagnostics: { delivery_failure_kind: failure.kind, error_code: failure.providerCode },
+                metadata: { relationship_id: input.relationshipId, sale_id: sale.id },
+            })
+            throw error
+        }
         const sentAt = new Date().toISOString()
         const [{ error: statusError }, { error: workError }] = await Promise.all([
             supabaseAdmin.from("client_sales").update({ status: "invoice_sent", checkout_email_sent_at: sentAt, updated_at: sentAt }).eq("workspace_id", input.workspaceId).eq("id", sale.id),

@@ -86,6 +86,36 @@ test("deal catalogue excludes unselected Retired services", () => {
     assert.deepEqual(options, [])
 })
 
+test("deal catalogue advances selected Active services to their current revision", () => {
+    const active = service()
+    const oldRevision: OnboardingServiceRevisionDisplay = {
+        id: "88888888-8888-4888-8888-888888888888",
+        serviceId: active.id,
+        revisionNumber: 2,
+        name: "Old service name",
+        description: "Old description",
+        defaultPriceCents: 100_00,
+        currency: "EUR",
+        isTest: false,
+    }
+    const options = buildRelationshipDealServiceOptions({
+        schemaReady: true,
+        services: [active],
+        selected: [{
+            service_key: active.code,
+            service_id: active.id,
+            service_revision_id: oldRevision.id,
+            price_cents: 110_00,
+            currency: "EUR",
+            assignee_user_id: null,
+        }],
+        revisions: new Map([[oldRevision.id, oldRevision]]),
+    })
+    assert.equal(options[0]?.revisionId, active.revisionId)
+    assert.equal(options[0]?.name, active.name)
+    assert.equal(options[0]?.selected?.price_cents, 110_00)
+})
+
 test("schema-unavailable workspaces retain the legacy catalogue fallback", () => {
     const options = buildRelationshipDealServiceOptions({ schemaReady: false, services: [], selected: [], revisions: new Map() })
     assert.ok(options.some((option) => option.code === "google-ads" && option.state === "legacy"))

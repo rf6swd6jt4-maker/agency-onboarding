@@ -86,23 +86,22 @@ export function buildRelationshipDealServiceOptionsCore(input: {
     if (input.schemaReady) {
         for (const service of input.services.filter((candidate) => candidate.state === "active")) {
             const selected = selectedByServiceId.get(service.id) ?? selectedByCode.get(service.code) ?? null
-            const selectedRevision = selected?.service_revision_id ? input.revisions.get(selected.service_revision_id) : null
             options.set(service.code, {
                 code: service.code,
-                serviceId: selected?.service_id ?? service.id,
-                revisionId: selected?.service_revision_id ?? service.revisionId,
-                name: selectedRevision?.name ?? service.name,
-                description: selectedRevision?.description ?? service.description,
-                checkoutDisplayName: selectedRevision?.checkoutDisplayName || service.checkoutDisplayName || selectedRevision?.name || service.name,
-                checkoutDescription: selectedRevision?.checkoutDescription || service.checkoutDescription || selectedRevision?.description || service.description,
-                thumbnailPath: selectedRevision?.thumbnailPath ?? service.thumbnailPath ?? null,
+                serviceId: service.id,
+                revisionId: service.revisionId,
+                name: service.name,
+                description: service.description,
+                checkoutDisplayName: service.checkoutDisplayName || service.name,
+                checkoutDescription: service.checkoutDescription || service.description,
+                thumbnailPath: service.thumbnailPath ?? null,
                 thumbnailUrl: service.thumbnailUrl ?? null,
-                defaultPriceCents: selectedRevision?.defaultPriceCents ?? service.defaultPriceCents,
-                currency: (selectedRevision?.currency ?? service.currency).toUpperCase(),
+                defaultPriceCents: service.defaultPriceCents,
+                currency: service.currency.toUpperCase(),
                 defaultAssigneeId: selected?.assignee_user_id ?? service.defaultAssigneeId,
-                isTest: selectedRevision?.isTest ?? service.isTest,
+                isTest: service.isTest,
                 state: service.state,
-                revisionNumber: selectedRevision?.revisionNumber ?? service.version,
+                revisionNumber: service.version,
                 selected,
             })
         }
