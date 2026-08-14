@@ -55,6 +55,36 @@ as $$
     );
 $$;
 
+-- Published assignments remain immutable after creation. The foundation
+-- trigger originally allowed only service_role to perform the initial insert,
+-- but migration backfills execute as the database owner (postgres). Permit
+-- that equally trusted owner to create a new published revision's assignment
+-- snapshot without permitting either role to change or remove it afterwards.
+create or replace function public.prevent_published_onboarding_configuration_assignment_mutation()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+    v_revision_id uuid := case when tg_op = 'DELETE' then old.configuration_revision_id else new.configuration_revision_id end;
+    v_workspace_id uuid := case when tg_op = 'DELETE' then old.workspace_id else new.workspace_id end;
+    v_status text;
+begin
+    select status into v_status
+    from public.onboarding_configuration_revisions
+    where workspace_id = v_workspace_id and id = v_revision_id;
+    if tg_op = 'DELETE' and (
+        not exists (select 1 from public.workspaces where id = v_workspace_id)
+        or v_status is null
+    ) then return old; end if;
+    if v_status = 'published' then
+        if tg_op = 'INSERT' and current_user in ('service_role', 'postgres') then return new; end if;
+        raise exception 'Published onboarding configuration assignments are immutable';
+    end if;
+    return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
 do $$
 declare
     v_previous public.onboarding_configuration_revisions%rowtype;

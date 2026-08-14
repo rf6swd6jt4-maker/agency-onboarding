@@ -67,6 +67,8 @@ test("confirmed sales expose one fixed Payment step that creates hosted Stripe C
     assert.match(stripeWebhook, /checkout\.session\.expired/u)
     assert.match(stripeWebhook, /stripe_checkout_url: null/u)
     assert.match(salePaymentGateMigration, /create or replace function public\.prepare_confirmed_onboarding_session/u)
+    assert.match(salePaymentGateMigration, /current_user in \('service_role', 'postgres'\)/u)
+    assert.match(salePaymentGateMigration, /Published onboarding configuration assignments are immutable/u)
     assert.match(salePaymentGateMigration, /set status = 'onboarding_payment_pending'/u)
     assert.match(salePaymentGateMigration, /set lifecycle_phase = 'sold'/u)
 })
