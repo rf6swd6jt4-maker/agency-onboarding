@@ -4,11 +4,17 @@ import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { createPrivateUploadSignedUrl, createServiceThumbnailPublicUrl } from "@/lib/onboarding/uploads"
 import { defaultOnboardingPaymentDefinition, type OnboardingPaymentDefinitionV2 } from "@/lib/onboarding/block-definition"
 import { normalizeVisualPaymentGate } from "@/lib/onboarding/block-validation"
+import { getOnboardingUrl } from "@/lib/onboarding/custom-domain"
 
 type PaymentContext = {
     sessionId: string
     workspaceId: string
     relationshipId: string
+    workspace: {
+        slug: string
+        custom_onboarding_domain: string | null
+        custom_onboarding_domain_status: string | null
+    }
     sale: {
         id: string
         status: string
@@ -32,11 +38,35 @@ export async function getOnboardingPaymentContext(token: string): Promise<Paymen
         .select("id, workspace_id, relationship_id, source_sale_id")
         .eq("session_token", token).in("status", ["active", "completed"]).maybeSingle()
     if (sessionError || !session?.source_sale_id) return null
+    const { data: workspace, error: workspaceError } = await supabaseAdmin.from("workspaces")
+        .select("slug, custom_onboarding_domain, custom_onboarding_domain_status")
+        .eq("id", session.workspace_id).maybeSingle()
+    if (workspaceError || !workspace) return null
     const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales")
         .select("id, status, billing_interval, billing_interval_count, upfront_total_amount, recurring_total_amount, client_name, client_email, client_phone, currency, project_timeframe_days, stripe_checkout_session_id, stripe_checkout_url, stripe_checkout_expires_at")
         .eq("workspace_id", session.workspace_id).eq("id", session.source_sale_id).maybeSingle()
     if (saleError || !sale) return null
-    return { sessionId: session.id, workspaceId: session.workspace_id, relationshipId: session.relationship_id, sale: sale as PaymentContext["sale"] }
+    return {
+        sessionId: session.id,
+        workspaceId: session.workspace_id,
+        relationshipId: session.relationship_id,
+        workspace,
+        sale: sale as PaymentContext["sale"],
+    }
+}
+
+export function onboardingPaymentReturnUrl(context: PaymentContext, token: string) {
+    return getOnboardingUrl({
+        workspaceSlug: context.workspace.slug,
+        sessionToken: token,
+        customDomain: context.workspace.custom_onboarding_domain,
+        customDomainVerified: context.workspace.custom_onboarding_domain_status === "verified",
+    })
+}
+
+export async function getOnboardingPaymentReturnUrl(token: string) {
+    const context = await getOnboardingPaymentContext(token)
+    return context ? onboardingPaymentReturnUrl(context, token) : null
 }
 
 export function onboardingPaymentPending(context: PaymentContext | null) {
@@ -96,10 +126,11 @@ async function frozenCheckoutLineItems(context: PaymentContext, expiresAt: numbe
 export async function createOrReuseOnboardingCheckout(input: { token: string; origin: string }) {
     const context = await getOnboardingPaymentContext(input.token)
     if (!context) throw new Error("Payment is not available for this onboarding link")
-    if (!onboardingPaymentPending(context)) return { paid: true as const, checkoutUrl: null }
+    const returnUrl = onboardingPaymentReturnUrl(context, input.token)
+    if (!onboardingPaymentPending(context)) return { paid: true as const, checkoutUrl: null, returnUrl }
     const existingExpiry = Date.parse(context.sale.stripe_checkout_expires_at ?? "")
     if (context.sale.stripe_checkout_url && Number.isFinite(existingExpiry) && existingExpiry > Date.now() + 60_000) {
-        return { paid: false as const, checkoutUrl: context.sale.stripe_checkout_url }
+        return { paid: false as const, checkoutUrl: context.sale.stripe_checkout_url, returnUrl }
     }
     if (!context.sale.client_email) throw new Error("A billing email is required before payment can begin")
     const expiresAt = Math.floor(Date.now() / 1_000) + 24 * 60 * 60 - 60
@@ -118,7 +149,7 @@ export async function createOrReuseOnboardingCheckout(input: { token: string; or
         serviceKeys: lineItems.map((item) => item.serviceKey),
         projectTimeframeDays: context.sale.project_timeframe_days,
         successUrl: `${input.origin}/api/onboarding/session/${input.token}/payment-return?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${input.origin}/onboarding/session/${input.token}?payment=cancelled`,
+        cancelUrl: `${returnUrl}?payment=cancelled`,
         expiresAt,
         secretKey: config.access_token || config.secret_key,
         idempotencyKey: `${context.sale.id}:onboarding-checkout:${generation}`,
@@ -141,7 +172,7 @@ export async function createOrReuseOnboardingCheckout(input: { token: string; or
         updated_at: new Date().toISOString(),
     }).eq("workspace_id", context.workspaceId).eq("id", context.sale.id)
     if (updateError) throw new Error(updateError.message)
-    return { paid: false as const, checkoutUrl: checkout.checkoutUrl }
+    return { paid: false as const, checkoutUrl: checkout.checkoutUrl, returnUrl }
 }
 
 export async function retrieveOnboardingCheckout(input: { token: string; checkoutSessionId: string }) {

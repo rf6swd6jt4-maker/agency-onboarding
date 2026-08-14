@@ -225,10 +225,18 @@ export async function proxy(request: NextRequest) {
         const workspace = await getCustomDomainWorkspace(domain)
         if (workspace) {
             const customToken = path.match(/^\/([a-f0-9]{64})$/i)
+            const platformSessionToken = path.match(/^\/onboarding\/session\/([a-f0-9]{64})$/i)
             const isDomainProbe = request.nextUrl.searchParams.has("__betelgeze_domain_probe")
-            if ((!isDomainProbe && workspace.status !== "verified") || !customToken) {
+            if (!isDomainProbe && workspace.status !== "verified") {
                 return new NextResponse("Not Found", { status: 404 })
             }
+            // Checkout sessions created before custom-domain return URLs were
+            // canonicalized still point here. Preserve their query string and
+            // move the browser to the public token route instead of 404ing.
+            if (platformSessionToken) {
+                return withSession(withRedirect(request, `/${platformSessionToken[1]}`))
+            }
+            if (!customToken) return new NextResponse("Not Found", { status: 404 })
             const headers = new Headers(request.headers)
             headers.set("x-betelgeze-workspace-slug", workspace.slug)
             headers.set("x-betelgeze-custom-onboarding-domain", domain)

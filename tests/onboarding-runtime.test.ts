@@ -40,6 +40,7 @@ const salePaymentGateMigration = readFileSync("supabase/migrations/2026081414000
 const environmentExample = readFileSync(".env.example", "utf8")
 const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
+const proxy = readFileSync("proxy.ts", "utf8")
 
 test("sale confirmation prepares the immutable session and payment reuses it before unlock", () => {
     assert.match(saleAutomation, /rpc\("prepare_confirmed_onboarding_session"/u)
@@ -65,9 +66,15 @@ test("confirmed sales expose one fixed Payment step that creates hosted Stripe C
     assert.match(onboardingCheckout, /billingComponent: "upfront"/u)
     assert.match(onboardingCheckout, /billingComponent: "recurring"/u)
     assert.match(onboardingCheckout, /successUrl: `\$\{input\.origin\}\/api\/onboarding\/session\/\$\{input\.token\}\/payment-return/u)
+    assert.match(onboardingCheckout, /cancelUrl: `\$\{returnUrl\}\?payment=cancelled`/u)
+    assert.match(onboardingCheckout, /customDomainVerified: context\.workspace\.custom_onboarding_domain_status === "verified"/u)
     assert.match(onboardingCheckoutRoute, /new URL\(result\.checkoutUrl!\)/u)
+    assert.match(onboardingCheckoutRoute, /result\.paid \? new URL\(result\.returnUrl\)/u)
     assert.match(onboardingCheckoutRoute, /Response\.redirect\(destination, 303\)/u)
     assert.match(onboardingPaymentReturnRoute, /handleCompletedStripeCheckout/u)
+    assert.match(onboardingPaymentReturnRoute, /onboardingPaymentReturnUrl\(context, token\)/u)
+    assert.match(proxy, /platformSessionToken = path\.match\(\/\^\\\/onboarding\\\/session/u)
+    assert.match(proxy, /withRedirect\(request, `\/\$\{platformSessionToken\[1\]\}`\)/u)
     assert.match(stripeWebhook, /checkout\.session\.completed/u)
     assert.match(stripeWebhook, /checkout\.session\.async_payment_succeeded/u)
     assert.match(stripeWebhook, /checkout\.session\.async_payment_failed/u)
