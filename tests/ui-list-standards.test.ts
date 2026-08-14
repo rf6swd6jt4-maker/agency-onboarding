@@ -32,15 +32,17 @@ test("Communications uses its dedicated responsive conversation workspace instea
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
     ])
 
-    assert.match(page, /<PanelTabHeader/)
-    assert.match(page, /<PanelTabs/)
+    assert.doesNotMatch(page, /WorkspaceBanner|PanelTabHeader|PanelTabs/)
     assert.match(page, /<CommunicationsWorkspace/)
     assert.doesNotMatch(page, /<List ariaLabel=/)
-    assert.match(workspace, /lg:sticky/)
+    assert.match(page, /h-dvh overflow-hidden/)
+    assert.match(workspace, /h-dvh min-h-0/)
     assert.match(workspace, /overflow-y-auto/)
     assert.match(workspace, /lg:hidden/)
     assert.match(workspace, /Back to client chats/)
-    assert.match(workspace, /activeArea !== "clients"/)
+    assert.doesNotMatch(workspace, /activeArea|Team chat|Calendar/)
+    assert.match(workspace, /selectConversation\(conversation\.id\)/)
+    assert.doesNotMatch(workspace, /href=\{href\}/)
     assert.doesNotMatch(workspace, /@\/lib\/relationships/, "the client workspace must not import the server-only relationships module")
 })
 

@@ -752,6 +752,25 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             const frame = iframeRefs.current.get(message.tabId)
             if (!frame || event.source !== frame.contentWindow) return
 
+            if (message.type === "location-replace" && message.url) {
+                const url = normalizeWorkspaceUrl(message.url)
+                readyTabIdsRef.current.add(message.tabId)
+                pendingNavigationRef.current.delete(message.tabId)
+                if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
+                setTabs((existingTabs) => {
+                    const updatedTabs = existingTabs.map((tab) => {
+                        if (tab.id !== message.tabId) return tab
+                        const history = [...tab.history]
+                        history[tab.historyIndex] = url
+                        return { ...tab, url, title: titleForUrl(url), history }
+                    })
+                    tabsRef.current = updatedTabs
+                    saveTabsState(updatedTabs, activeTabIdRef.current)
+                    return updatedTabs
+                })
+                return
+            }
+
             if (message.type === "location" && message.url) {
                 const url = normalizeWorkspaceUrl(message.url)
                 const pendingUrl = pendingNavigationRef.current.get(message.tabId)

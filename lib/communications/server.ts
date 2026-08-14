@@ -1,0 +1,152 @@
+import { profileAvatarUrl } from "@/lib/profile-avatar"
+import { supabaseAdmin } from "@/lib/supabase/admin"
+import type {
+    CommunicationMessage,
+    CommunicationPerson,
+    CommunicationReadCursor,
+    CommunicationSenderKind,
+} from "@/lib/communications/types"
+
+export const COMMUNICATION_MESSAGE_COLUMNS = "id, client_request_id, relationship_id, body, direction, provider, status, error, sender_kind, sender_user_id, automation_kind, automation_label, created_at, sent_at, delivered_at, read_at, failed_at"
+const legacyMessageColumns = "id, relationship_id, body, direction, provider, status, error, created_at, raw_payload"
+
+function record(value: unknown) {
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function text(value: unknown) {
+    return typeof value === "string" && value ? value : null
+}
+
+function bodyText(value: unknown) {
+    return typeof value === "string" ? value : null
+}
+
+function legacySenderKind(row: Record<string, unknown>): CommunicationSenderKind {
+    if (row.direction === "inbound") return "client"
+    if (row.provider === "clickup" || row.provider === "clickup_chat") return "legacy"
+    const raw = record(row.raw_payload)
+    if (raw.outbox_id || raw.template_name || raw.onboarding_url || raw.client_sale_id) return "automation"
+    return "legacy"
+}
+
+function legacyAutomationLabel(row: Record<string, unknown>) {
+    const raw = record(row.raw_payload)
+    if (raw.kind === "module_update") return "Onboarding update"
+    if (raw.template_name) return "Consent request"
+    if (raw.outbox_id || raw.onboarding_url) return "Onboarding link"
+    return null
+}
+
+function inferredTimestamp(status: string, createdAt: string, states: string[]) {
+    return states.includes(status) ? createdAt : null
+}
+
+export function communicationMessageFromRow(value: unknown): CommunicationMessage | null {
+    const row = record(value)
+    const id = text(row.id)
+    const relationshipId = text(row.relationship_id)
+    const body = bodyText(row.body)
+    const direction = row.direction === "inbound" ? "inbound" : row.direction === "outbound" ? "outbound" : null
+    const createdAt = text(row.created_at)
+    if (!id || !relationshipId || body === null || !direction || !createdAt) return null
+    const status = text(row.status) ?? (direction === "inbound" ? "received" : "sent")
+    const senderKind = (["client", "staff", "automation", "legacy"] as const).includes(row.sender_kind as CommunicationSenderKind)
+        ? row.sender_kind as CommunicationSenderKind
+        : legacySenderKind(row)
+    return {
+        id,
+        clientRequestId: text(row.client_request_id),
+        relationshipId,
+        body,
+        direction,
+        provider: text(row.provider) ?? "meta_whatsapp",
+        status,
+        error: text(row.error),
+        senderKind,
+        senderUserId: text(row.sender_user_id),
+        automationKind: text(row.automation_kind) ?? text(record(row.raw_payload).kind),
+        automationLabel: text(row.automation_label) ?? legacyAutomationLabel(row),
+        createdAt,
+        sentAt: text(row.sent_at) ?? inferredTimestamp(status, createdAt, ["sent", "delivered", "read", "whatsapp_sent", "whatsapp_delivered", "whatsapp_read"]),
+        deliveredAt: text(row.delivered_at) ?? inferredTimestamp(status, createdAt, ["delivered", "read", "whatsapp_delivered", "whatsapp_read"]),
+        readAt: text(row.read_at) ?? inferredTimestamp(status, createdAt, ["read", "whatsapp_read"]),
+        failedAt: text(row.failed_at) ?? inferredTimestamp(status, createdAt, ["failed", "send_failed", "delivery_failed"]),
+    }
+}
+
+function missingCommunicationsSchema(error: { code?: string; message?: string } | null | undefined) {
+    const message = error?.message?.toLowerCase() ?? ""
+    return error?.code === "42703" || error?.code === "42P01" || error?.code === "PGRST204"
+        || message.includes("sender_kind") || message.includes("communication_read_cursors")
+}
+
+export async function loadCommunicationMessages({
+    workspaceId,
+    relationshipId,
+    limit = 2_000,
+}: {
+    workspaceId: string
+    relationshipId?: string
+    limit?: number
+}): Promise<{ messages: CommunicationMessage[]; schemaReady: boolean }> {
+    let query = supabaseAdmin.from("client_messages").select(COMMUNICATION_MESSAGE_COLUMNS).eq("workspace_id", workspaceId)
+    if (relationshipId) query = query.eq("relationship_id", relationshipId)
+    const current = await query.order("created_at", { ascending: false }).limit(limit)
+    if (!current.error) return {
+        messages: (current.data ?? []).flatMap((row) => communicationMessageFromRow(row) ?? []).reverse(),
+        schemaReady: true,
+    }
+    if (!missingCommunicationsSchema(current.error)) throw new Error(`Could not load communications: ${current.error.message}`)
+
+    let legacyQuery = supabaseAdmin.from("client_messages").select(legacyMessageColumns).eq("workspace_id", workspaceId)
+    if (relationshipId) legacyQuery = legacyQuery.eq("relationship_id", relationshipId)
+    const legacy = await legacyQuery.order("created_at", { ascending: false }).limit(limit)
+    if (legacy.error) throw new Error(`Could not load communications: ${legacy.error.message}`)
+    return {
+        messages: (legacy.data ?? []).flatMap((row) => communicationMessageFromRow(row) ?? []).reverse(),
+        schemaReady: false,
+    }
+}
+
+export async function loadCommunicationPeople(workspaceId: string, currentUserId: string): Promise<{ currentUser: CommunicationPerson; people: CommunicationPerson[] }> {
+    const { data: memberships, error: membershipError } = await supabaseAdmin
+        .from("workspace_memberships")
+        .select("user_id")
+        .eq("workspace_id", workspaceId)
+        .order("created_at")
+    if (membershipError) throw new Error(`Could not load communication members: ${membershipError.message}`)
+    const userIds = (memberships ?? []).map((membership) => membership.user_id)
+    const { data: profiles, error: profileError } = userIds.length
+        ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", userIds)
+        : { data: [], error: null }
+    if (profileError) throw new Error(`Could not load communication profiles: ${profileError.message}`)
+    const profileById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]))
+    const people = userIds.map((id) => {
+        const profile = profileById.get(id)
+        const name = profile?.username ?? (id === currentUserId ? "You" : "Team member")
+        return { id, name, avatarSrc: profile?.avatar_path ? profileAvatarUrl(name, profile.avatar_path) : null }
+    })
+    return {
+        people,
+        currentUser: people.find((person) => person.id === currentUserId) ?? { id: currentUserId, name: "You", avatarSrc: null },
+    }
+}
+
+export async function loadCommunicationReadCursors(workspaceId: string): Promise<{ cursors: CommunicationReadCursor[]; schemaReady: boolean }> {
+    const { data, error } = await supabaseAdmin
+        .from("communication_read_cursors")
+        .select("relationship_id, user_id, last_read_message_id, last_read_at")
+        .eq("workspace_id", workspaceId)
+    if (!error) return {
+        cursors: (data ?? []).map((cursor) => ({
+            relationshipId: cursor.relationship_id,
+            userId: cursor.user_id,
+            lastReadMessageId: cursor.last_read_message_id,
+            lastReadAt: cursor.last_read_at,
+        })),
+        schemaReady: true,
+    }
+    if (missingCommunicationsSchema(error)) return { cursors: [], schemaReady: false }
+    throw new Error(`Could not load communication read cursors: ${error.message}`)
+}

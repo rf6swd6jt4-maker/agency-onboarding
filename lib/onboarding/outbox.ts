@@ -1,5 +1,5 @@
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
-import { sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
+import { metaWhatsAppFailureIsUncertain, sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { deleteOnboardingUploads } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -197,7 +197,7 @@ async function existingDeliveryMessage(row: DeliveryOutboxRow, sentOnly: boolean
         .contains("raw_payload", { outbox_id: row.id })
         .order("created_at", { ascending: false })
         .limit(1)
-    if (sentOnly) query = query.eq("status", "sent")
+    if (sentOnly) query = query.in("status", ["sent", "send_uncertain", "whatsapp_sent", "whatsapp_delivered", "whatsapp_read"])
     return query.maybeSingle()
 }
 
@@ -238,6 +238,9 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
                 body,
                 status: "sending",
                 error: null,
+                sender_kind: "automation",
+                automation_kind: row.kind,
+                automation_label: row.kind === "module_update" ? "Onboarding update" : "Onboarding link",
                 raw_payload: messageMetadata,
             }).eq("workspace_id", row.workspace_id).eq("id", messageLogId)
             if (error) throw error
@@ -251,21 +254,25 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
                 to_address: row.destination,
                 body,
                 status: "sending",
+                sender_kind: "automation",
+                automation_kind: row.kind,
+                automation_label: row.kind === "module_update" ? "Onboarding update" : "Onboarding link",
                 raw_payload: messageMetadata,
             }).select("id").single()
             if (error || !messageLog) throw error ?? new Error("Could not create onboarding delivery message log")
             messageLogId = messageLog.id
         }
 
-        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: row.workspace_id, to: row.destination, body })
+        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: row.workspace_id, to: row.destination, body, callbackData: messageLogId })
         providerSent = true
         sentProviderId = providerMessageId(providerResponse)
         const messageUpdate = await supabaseAdmin.from("client_messages").update({
-            status: "sent",
+            status: "whatsapp_sent",
             provider_message_id: sentProviderId,
             whatsapp_message_id: sentProviderId,
+            sent_at: new Date().toISOString(),
             error: null,
-        }).eq("workspace_id", row.workspace_id).eq("id", messageLogId)
+        }).eq("workspace_id", row.workspace_id).eq("id", messageLogId).in("status", ["sending", "send_uncertain", "send_failed", "sent", "whatsapp_sent"])
         const finished = await finishDelivery(row, true, sentProviderId, null, null)
         if (messageUpdate.error) {
             await reportOutboxFailure({
@@ -286,6 +293,14 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
         if (finished.error) throw finished.error
         return true
     } catch (error) {
+        if (!providerSent && messageLogId && metaWhatsAppFailureIsUncertain(error)) {
+            await supabaseAdmin.from("client_messages").update({
+                status: "send_uncertain",
+                error: "Meta did not return a response. Betelgeze will wait for the provider callback instead of risking a duplicate message.",
+            }).eq("workspace_id", row.workspace_id).eq("id", messageLogId).in("status", ["sending", "send_uncertain", "send_failed"])
+            const finished = await finishDelivery(row, true, null, null, null)
+            if (!finished.error) return true
+        }
         const reported = await reportOutboxFailure({
             workspaceId: row.workspace_id,
             relationshipId: row.relationship_id,

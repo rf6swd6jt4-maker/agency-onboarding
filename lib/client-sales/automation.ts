@@ -6,6 +6,7 @@ import { getEquivalentMessageAddresses } from "@/lib/client-messages/addresses"
 import {
     sendMetaWhatsAppMessage,
     sendMetaWhatsAppTemplate,
+    metaWhatsAppFailureIsUncertain,
 } from "@/lib/client-messages/meta-whatsapp"
 import { isConsentConfirmationText } from "@/lib/client-sales/consent"
 import { activateRelationshipOnboardingAfterPayment } from "@/lib/relationship-workflow"
@@ -294,7 +295,9 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
             return { ok: false, error: "Could not verify the previous WhatsApp consent send" }
         }
 
-        if (previousMessage?.status === "sent") {
+        const previousWasSent = previousMessage?.status === "sent"
+            || ["whatsapp_sent", "whatsapp_delivered", "whatsapp_read"].includes(previousMessage?.status ?? "")
+        if (previousMessage && previousWasSent) {
             const messageId = previousMessage.provider_message_id ?? previousMessage.whatsapp_message_id
             const reconciledAt = new Date().toISOString()
             const { error: reconcileError } = await supabaseAdmin
@@ -316,7 +319,8 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
             return { ok: true, skipped: true, reconciled: true, whatsappMessageId: messageId }
         }
 
-        if (previousMessage?.status === "sending") {
+        const previousWasUncertain = previousMessage?.status === "sending" || previousMessage?.status === "send_uncertain"
+        if (previousWasUncertain) {
             const message = "The previous WhatsApp consent send has an unknown provider outcome and needs review before retrying"
             await reportSaleAutomationFailure(sale, "recover_consent_send", message)
             return { ok: false, error: message }
@@ -378,6 +382,9 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
             to_address: sale.client_phone,
             body: "[WhatsApp consent template]",
             status: "sending",
+            sender_kind: "automation",
+            automation_kind: "consent_template",
+            automation_label: "Consent request",
             raw_payload: {
                 client_sale_id: saleId,
                 template_name: templateName,
@@ -425,38 +432,41 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
             to: sale.client_phone,
             templateName,
             languageCode,
+            callbackData: messageLog.id,
         })
     } catch (error) {
         const errorMessage =
             error instanceof Error
                 ? error.message
                 : "Unknown Meta WhatsApp template error"
+        const uncertain = metaWhatsAppFailureIsUncertain(error)
+        const transitionAt = new Date().toISOString()
 
         await Promise.all([
             supabaseAdmin
                 .from("client_messages")
                 .update({
-                    status: "send_failed",
-                    error: errorMessage,
+                    status: uncertain ? "send_uncertain" : "send_failed",
+                    error: uncertain ? "Meta did not return a response. Betelgeze will wait for the provider callback instead of risking a duplicate message." : errorMessage,
                 })
                 .eq("id", messageLog.id)
-                .eq("workspace_id", sale.workspace_id),
+                .eq("workspace_id", sale.workspace_id)
+                .in("status", ["sending", "send_uncertain", "send_failed"]),
             supabaseAdmin
                 .from("client_sales")
-                .update({
-                    status: failedStatus,
-                    updated_at: new Date().toISOString(),
-                })
+                .update(uncertain
+                    ? { status: awaitingStatus, consent_template_sent_at: transitionAt, updated_at: transitionAt }
+                    : { status: failedStatus, updated_at: transitionAt })
                 .eq("id", saleId)
                 .eq("workspace_id", sale.workspace_id)
                 .eq("status", sendingStatus)
                 .eq("updated_at", claimStartedAt),
         ])
 
-        await reportSaleAutomationFailure(sale, "send_consent_template", errorMessage)
+        if (!uncertain) await reportSaleAutomationFailure(sale, "send_consent_template", errorMessage)
 
         return {
-            ok: false,
+            ok: uncertain,
             error: errorMessage,
         }
     }
@@ -466,9 +476,10 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
     const { error: messageUpdateError } = await supabaseAdmin
         .from("client_messages")
         .update({
-            status: "sent",
+            status: "whatsapp_sent",
             provider_message_id: whatsappMessageId,
             whatsapp_message_id: whatsappMessageId,
+            sent_at: sentAt,
             raw_payload: {
                 client_sale_id: saleId,
                 template_name: templateName,
@@ -479,6 +490,7 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
         })
         .eq("id", messageLog.id)
         .eq("workspace_id", sale.workspace_id)
+        .in("status", ["sending", "send_uncertain", "send_failed", "sent", "whatsapp_sent"])
 
     const { data: finalizedSale, error: finalizeError } = await supabaseAdmin
         .from("client_sales")
@@ -684,6 +696,9 @@ async function sendLegacyOnboardingLink(input: {
             to_address: input.destination,
             body: outboundBody,
             status: "sending",
+            sender_kind: "automation",
+            automation_kind: "onboarding_link",
+            automation_label: "Onboarding link",
             raw_payload: {
                 client_sale_id: input.sale.id,
                 onboarding_url: input.onboardingUrl,
@@ -698,19 +713,21 @@ async function sendLegacyOnboardingLink(input: {
     }
 
     try {
-        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: outboundBody })
+        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: outboundBody, callbackData: messageLog.id })
         const whatsappMessageId = getWhatsAppMessageId(message)
+        const sentAt = new Date().toISOString()
         const [messageUpdate, saleUpdate] = await Promise.all([
             supabaseAdmin.from("client_messages").update({
-                status: "sent",
+                status: "whatsapp_sent",
                 provider_message_id: whatsappMessageId,
                 whatsapp_message_id: whatsappMessageId,
-            }).eq("id", messageLog.id).eq("workspace_id", input.sale.workspace_id),
+                sent_at: sentAt,
+            }).eq("id", messageLog.id).eq("workspace_id", input.sale.workspace_id).in("status", ["sending", "send_uncertain", "send_failed", "sent", "whatsapp_sent"]),
             supabaseAdmin.from("client_sales").update({
                 status: "onboarding_link_sent",
-                onboarding_link_sent_at: new Date().toISOString(),
+                onboarding_link_sent_at: sentAt,
                 onboarding_link_message_id: whatsappMessageId,
-                updated_at: new Date().toISOString(),
+                updated_at: sentAt,
             }).eq("id", input.sale.id).eq("workspace_id", input.sale.workspace_id),
         ])
         if (saleUpdate.error) {
@@ -721,11 +738,13 @@ async function sendLegacyOnboardingLink(input: {
         return { handled: true as const, ok: true as const, legacyDelivery: true as const }
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown onboarding link send error"
+        const uncertain = metaWhatsAppFailureIsUncertain(error)
+        const transitionAt = new Date().toISOString()
         await Promise.all([
-            supabaseAdmin.from("client_messages").update({ status: "send_failed", error: errorMessage }).eq("id", messageLog.id).eq("workspace_id", input.sale.workspace_id),
-            supabaseAdmin.from("client_sales").update({ status: "onboarding_link_failed", updated_at: new Date().toISOString() }).eq("id", input.sale.id).eq("workspace_id", input.sale.workspace_id),
+            supabaseAdmin.from("client_messages").update({ status: uncertain ? "send_uncertain" : "send_failed", error: uncertain ? "Meta did not return a response. Betelgeze will wait for the provider callback instead of risking a duplicate message." : errorMessage }).eq("id", messageLog.id).eq("workspace_id", input.sale.workspace_id).in("status", ["sending", "send_uncertain", "send_failed"]),
+            supabaseAdmin.from("client_sales").update({ status: uncertain ? "onboarding_link_sent" : "onboarding_link_failed", ...(uncertain ? { onboarding_link_sent_at: transitionAt } : {}), updated_at: transitionAt }).eq("id", input.sale.id).eq("workspace_id", input.sale.workspace_id),
         ])
-        return { handled: true as const, ok: false as const, error: errorMessage, legacyDelivery: true as const }
+        return { handled: true as const, ok: uncertain, error: errorMessage, legacyDelivery: true as const }
     }
 }
 
@@ -925,6 +944,7 @@ export async function handleSaleConsentConfirmation({
         from_address: fromAddress,
         body,
         status: "whatsapp_consent_confirmed",
+        sender_kind: "client",
         raw_payload: rawPayload,
     })
     if (inboundMessageError && flow !== "manual_migration") {

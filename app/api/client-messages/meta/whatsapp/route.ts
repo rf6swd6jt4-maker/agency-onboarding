@@ -71,6 +71,7 @@ type WhatsAppChangeValue = {
 
 type WhatsAppStatus = {
     id?: string
+    biz_opaque_callback_data?: string
     status?: string
     timestamp?: string
     recipient_id?: string
@@ -320,26 +321,48 @@ async function handleStatusUpdate({
 
     const messageStatus = status.status ?? "status_update"
     const errorMessage = getStatusError(status)
+    const callbackId = status.biz_opaque_callback_data
+    const callbackFilter = callbackId && /^[0-9a-f-]{36}$/i.test(callbackId) ? `,id.eq.${callbackId}` : ""
     const { data: message } = await supabaseAdmin
         .from("client_messages")
-        .select("id, client_id, raw_payload")
+        .select("id, client_id, status, sent_at, delivered_at, read_at, raw_payload")
         .eq("workspace_id", workspaceId)
         .or(
-            `provider_message_id.eq.${messageId},whatsapp_message_id.eq.${messageId}`
+            `provider_message_id.eq.${messageId},whatsapp_message_id.eq.${messageId}${callbackFilter}`
         )
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()
 
     if (message) {
+        const statusOrder: Record<string, number> = {
+            sending: 0,
+            send_uncertain: 0,
+            sent: 1,
+            whatsapp_sent: 1,
+            delivered: 2,
+            whatsapp_delivered: 2,
+            read: 3,
+            whatsapp_read: 3,
+        }
+        const nextStatus = messageStatus === "failed" ? "delivery_failed" : `whatsapp_${messageStatus}`
+        const shouldAdvance = messageStatus === "failed"
+            ? (statusOrder[message.status] ?? 0) < 2
+            : (statusOrder[nextStatus] ?? 0) >= (statusOrder[message.status] ?? 0)
+        const eventAt = Number.isFinite(Number(status.timestamp))
+            ? new Date(Number(status.timestamp) * 1_000).toISOString()
+            : new Date().toISOString()
         await supabaseAdmin
             .from("client_messages")
             .update({
-                status:
-                    messageStatus === "failed"
-                        ? "delivery_failed"
-                        : `whatsapp_${messageStatus}`,
-                error: errorMessage,
+                ...(shouldAdvance ? { status: nextStatus } : {}),
+                provider_message_id: messageId,
+                whatsapp_message_id: messageId,
+                sent_at: message.sent_at ?? (["sent", "delivered", "read"].includes(messageStatus) ? eventAt : null),
+                delivered_at: message.delivered_at ?? (["delivered", "read"].includes(messageStatus) ? eventAt : null),
+                read_at: message.read_at ?? (messageStatus === "read" ? eventAt : null),
+                failed_at: shouldAdvance && messageStatus === "failed" ? eventAt : null,
+                error: shouldAdvance ? errorMessage : null,
                 raw_payload: {
                     ...(message.raw_payload &&
                     typeof message.raw_payload === "object" &&
@@ -637,6 +660,7 @@ async function handleInboundMessage({
             to_address: to,
             body: unmatchedBody,
             status: "unmatched",
+            sender_kind: "client",
             raw_payload: payload,
         })
 
@@ -673,6 +697,7 @@ async function handleInboundMessage({
             to_address: to,
             body: initialBody,
             status: "received",
+            sender_kind: "client",
             raw_payload: payload,
         })
         .select("id")
@@ -794,33 +819,22 @@ export async function POST(request: NextRequest) {
                 getMessageTimestampMs(right.message)
         )
 
+        const statusUpdates =
+            payload.entry
+                ?.flatMap((entry) => entry.changes ?? [])
+                .flatMap((change) => change.value?.statuses ?? []) ?? []
+
+        for (const status of statusUpdates) {
+            await handleStatusUpdate({ workspaceId, status, payload })
+        }
+
         if (inboundMessages.length === 0) {
-            const statusUpdates =
-                payload.entry
-                    ?.flatMap((entry) => entry.changes ?? [])
-                    .flatMap((change) => change.value?.statuses ?? []) ?? []
-
-            for (const status of statusUpdates) {
-                await handleStatusUpdate({
-                    workspaceId,
-                    status,
-                    payload,
-                })
-            }
-
             const changeFields =
                 payload.entry
                     ?.flatMap((entry) => entry.changes ?? [])
                     .map((change) => change.field ?? "unknown")
                     .join(", ") || "none"
-            const statusCount =
-                payload.entry
-                    ?.flatMap((entry) => entry.changes ?? [])
-                    .reduce(
-                        (total, change) =>
-                            total + (change.value?.statuses?.length ?? 0),
-                        0
-                    ) ?? 0
+            const statusCount = statusUpdates.length
             const notice =
                 statusCount > 0
                     ? `[Webhook received status update, not a client message: ${changeFields}]`

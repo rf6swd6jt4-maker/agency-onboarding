@@ -8,6 +8,7 @@ type SendMetaWhatsAppMessageInput = {
     to: string
     body: string
     replyToMessageId?: string | null
+    callbackData?: string | null
 }
 
 type SendMetaWhatsAppTemplateInput = {
@@ -16,6 +17,25 @@ type SendMetaWhatsAppTemplateInput = {
     templateName: string
     languageCode: string
     components?: unknown[]
+    callbackData?: string | null
+}
+
+export class MetaWhatsAppSendError extends Error {
+    safeToRetry: boolean
+
+    constructor(message: string, safeToRetry: boolean) {
+        super(message)
+        this.name = "MetaWhatsAppSendError"
+        this.safeToRetry = safeToRetry
+    }
+}
+
+export function metaWhatsAppFailureIsSafeToRetry(error: unknown) {
+    return error instanceof MetaWhatsAppSendError && error.safeToRetry
+}
+
+export function metaWhatsAppFailureIsUncertain(error: unknown) {
+    return error instanceof MetaWhatsAppSendError && !error.safeToRetry
 }
 
 export function hasMetaWhatsAppConfig() {
@@ -38,14 +58,22 @@ export async function sendMetaWhatsAppMessage({
     to,
     body,
     replyToMessageId,
+    callbackData,
 }: SendMetaWhatsAppMessageInput) {
-    const config = await metaConfig(workspaceId)
+    let config: Awaited<ReturnType<typeof metaConfig>>
+    try {
+        config = await metaConfig(workspaceId)
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "WhatsApp is not configured", true)
+    }
     const phoneNumberId = config.phone_number_id
     const accessToken = config.access_token
 
-    const response = await fetch(
-        `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
-        {
+    let response: Response
+    try {
+        response = await fetch(
+            `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
+            {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -55,6 +83,7 @@ export async function sendMetaWhatsAppMessage({
                 messaging_product: "whatsapp",
                 recipient_type: "individual",
                 to: toMetaWhatsAppRecipient(to),
+                biz_opaque_callback_data: callbackData || undefined,
                 context: replyToMessageId
                     ? {
                           message_id: replyToMessageId,
@@ -66,18 +95,22 @@ export async function sendMetaWhatsAppMessage({
                     body,
                 },
             }),
-        }
-    )
+            }
+        )
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "Meta WhatsApp request did not return a response", false)
+    }
 
     const responseBody = await response.text()
 
     if (!response.ok) {
-        throw new Error(
+        throw new MetaWhatsAppSendError(
             formatMetaWhatsAppApiError({
                 action: "Meta WhatsApp message",
                 status: response.status,
                 responseBody,
-            })
+            }),
+            true
         )
     }
 
@@ -90,14 +123,22 @@ export async function sendMetaWhatsAppTemplate({
     templateName,
     languageCode,
     components,
+    callbackData,
 }: SendMetaWhatsAppTemplateInput) {
-    const config = await metaConfig(workspaceId)
+    let config: Awaited<ReturnType<typeof metaConfig>>
+    try {
+        config = await metaConfig(workspaceId)
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "WhatsApp is not configured", true)
+    }
     const phoneNumberId = config.phone_number_id
     const accessToken = config.access_token
 
-    const response = await fetch(
-        `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
-        {
+    let response: Response
+    try {
+        response = await fetch(
+            `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
+            {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -107,6 +148,7 @@ export async function sendMetaWhatsAppTemplate({
                 messaging_product: "whatsapp",
                 recipient_type: "individual",
                 to: toMetaWhatsAppRecipient(to),
+                biz_opaque_callback_data: callbackData || undefined,
                 type: "template",
                 template: {
                     name: templateName,
@@ -119,18 +161,22 @@ export async function sendMetaWhatsAppTemplate({
                             : undefined,
                 },
             }),
-        }
-    )
+            }
+        )
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "Meta WhatsApp template request did not return a response", false)
+    }
 
     const responseBody = await response.text()
 
     if (!response.ok) {
-        throw new Error(
+        throw new MetaWhatsAppSendError(
             formatMetaWhatsAppApiError({
                 action: "Meta WhatsApp template message",
                 status: response.status,
                 responseBody,
-            })
+            }),
+            true
         )
     }
 
