@@ -9,7 +9,6 @@ const canonicalListPages = [
     "app/[workspaceSlug]/onboarding/page.tsx",
     "app/[workspaceSlug]/work/page.tsx",
     "app/[workspaceSlug]/work-items/page.tsx",
-    "app/[workspaceSlug]/communications/page.tsx",
     "app/[workspaceSlug]/admin/maintenance/page.tsx",
     "app/[workspaceSlug]/admin/activity/page.tsx",
 ]
@@ -25,6 +24,23 @@ test("canonical platform lists use the shared header and two-row list primitives
         assert.match(page.source, /<ListSecondaryRow>/, `${page.path} must use ListSecondaryRow`)
         assert.match(page.source, /<MobileListActionSurface/, `${page.path} must use the mobile whole-item action surface`)
     }
+})
+
+test("Communications uses its dedicated responsive conversation workspace instead of canonical List", async () => {
+    const [page, workspace] = await Promise.all([
+        readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+    ])
+
+    assert.match(page, /<PanelTabHeader/)
+    assert.match(page, /<PanelTabs/)
+    assert.match(page, /<CommunicationsWorkspace/)
+    assert.doesNotMatch(page, /<List ariaLabel=/)
+    assert.match(workspace, /lg:sticky/)
+    assert.match(workspace, /overflow-y-auto/)
+    assert.match(workspace, /lg:hidden/)
+    assert.match(workspace, /Back to client chats/)
+    assert.match(workspace, /activeArea !== "clients"/)
 })
 
 test("the Admin work queue uses the same canonical row anatomy", async () => {
