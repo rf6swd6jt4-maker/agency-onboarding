@@ -254,12 +254,10 @@ export async function createStripeMixedCheckout({
 
     for (const [index, item] of lineItems.entries()) {
         const base = `line_items[${index}]`
-        const componentLabel = item.billingComponent === "upfront" ? "Upfront" : "Recurring"
         params[`${base}[quantity]`] = 1
         params[`${base}[price_data][currency]`] = currency
         params[`${base}[price_data][unit_amount]`] = item.amount
-        params[`${base}[price_data][product_data][name]`] =
-            `${item.name || item.description} — ${componentLabel}`
+        params[`${base}[price_data][product_data][name]`] = item.name || item.description
         params[`${base}[price_data][product_data][description]`] = item.description
         params[`${base}[price_data][product_data][metadata][service_key]`] = item.serviceKey
         params[`${base}[price_data][product_data][metadata][billing_component]`] =

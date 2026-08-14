@@ -96,24 +96,26 @@ async function frozenCheckoutLineItems(context: PaymentContext, expiresAt: numbe
     const definitionByRevision = new Map((revisions ?? []).map((revision) => [revision.id, revision.definition && typeof revision.definition === "object" ? revision.definition as Record<string, unknown> : {}]))
     const serviceItems = await Promise.all(items.map(async (item) => {
         const definition = definitionByRevision.get(item.service_revision_id ?? "") ?? {}
-        const displayName = String(definition.checkoutDisplayName ?? definition.checkout_display_name ?? item.service_name)
-        const description = String(definition.checkoutDescription ?? definition.checkout_description ?? item.description ?? displayName)
+        const upfrontName = item.service_name
+        const upfrontDescription = String(item.description ?? upfrontName)
+        const recurringName = String(definition.recurringName ?? definition.recurring_name ?? definition.checkoutDisplayName ?? definition.checkout_display_name ?? upfrontName)
+        const recurringDescription = String(definition.recurringDescription ?? definition.recurring_description ?? definition.checkoutDescription ?? definition.checkout_description ?? item.description ?? recurringName)
         const thumbnailPath = typeof definition.thumbnailPath === "string" ? definition.thumbnailPath : typeof definition.thumbnail_path === "string" ? definition.thumbnail_path : null
         const publicImage = createServiceThumbnailPublicUrl(thumbnailPath)
         const imageUrl = publicImage ?? (thumbnailPath ? await createPrivateUploadSignedUrl(thumbnailPath, Math.max(60, expiresAt - Math.floor(Date.now() / 1_000))) : null)
         return [
             item.upfront_amount_cents > 0 ? {
                 serviceKey: item.service_code,
-                name: displayName,
-                description,
+                name: upfrontName,
+                description: upfrontDescription,
                 amount: item.upfront_amount_cents,
                 billingComponent: "upfront" as const,
                 imageUrl,
             } : null,
             item.recurring_amount_cents > 0 ? {
                 serviceKey: item.service_code,
-                name: displayName,
-                description,
+                name: recurringName,
+                description: recurringDescription,
                 amount: item.recurring_amount_cents,
                 billingComponent: "recurring" as const,
                 imageUrl,

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import type { OnboardingServiceDefinition } from "../lib/onboarding/configuration-types.ts"
 import { SERVICES } from "../lib/onboarding/services.ts"
+import { normalizeServiceDefinition } from "../lib/onboarding/configuration-validation.ts"
 import {
     buildRelationshipDealServiceOptionsCore,
     relationshipFulfilmentServiceDefinitionCore,
@@ -21,6 +22,11 @@ function service(overrides: Partial<OnboardingServiceDefinition> = {}): Onboardi
         code: "custom-service",
         name: "Current custom service",
         description: "Current description",
+        serviceType: "retainer",
+        recurringName: "Current recurring service",
+        recurringDescription: "Current recurring description",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
         state: "active",
         version: 3,
         isTest: true,
@@ -35,6 +41,50 @@ function service(overrides: Partial<OnboardingServiceDefinition> = {}): Onboardi
         ...overrides,
     }
 }
+
+test("service definitions default to one-time and require complete retainer defaults", () => {
+    const oneTime = normalizeServiceDefinition({
+        name: "Brand strategy",
+        description: "Positioning and direction",
+        serviceType: "one_time",
+        defaultUpfrontPriceCents: 250_00,
+        defaultRecurringPriceCents: 99_00,
+        currency: "EUR",
+    })
+    assert.equal(oneTime.ok, true)
+    if (oneTime.ok) {
+        assert.equal(oneTime.definition.serviceType, "one_time")
+        assert.equal(oneTime.definition.defaultRecurringPriceCents, 0)
+    }
+
+    const incompleteRetainer = normalizeServiceDefinition({
+        name: "SEO setup",
+        serviceType: "retainer",
+        recurringName: "",
+        defaultUpfrontPriceCents: 150_00,
+        defaultRecurringPriceCents: 75_00,
+        currency: "EUR",
+    })
+    assert.deepEqual(incompleteRetainer, { ok: false, error: "Give the recurring service a name before saving." })
+
+    const retainer = normalizeServiceDefinition({
+        name: "SEO setup",
+        description: "Initial setup",
+        serviceType: "retainer",
+        recurringName: "SEO maintenance",
+        recurringDescription: "Ongoing optimisation",
+        defaultUpfrontPriceCents: 150_00,
+        defaultRecurringPriceCents: 75_00,
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 3,
+        currency: "EUR",
+    })
+    assert.equal(retainer.ok, true)
+    if (retainer.ok) {
+        assert.equal(retainer.definition.recurringName, "SEO maintenance")
+        assert.equal(retainer.definition.defaultBillingIntervalCount, 3)
+    }
+})
 
 test("deal catalogue exposes Active services and keeps selected retired revisions", () => {
     const active = service()
@@ -52,6 +102,11 @@ test("deal catalogue exposes Active services and keeps selected retired revision
         revisionNumber: 1,
         name: "Original purchased name",
         description: "Original revision",
+        serviceType: "retainer",
+        recurringName: "Original recurring name",
+        recurringDescription: "Original recurring description",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
         checkoutDisplayName: "Original purchased name",
         checkoutDescription: "Original revision",
         thumbnailPath: null,
@@ -101,6 +156,11 @@ test("deal catalogue advances selected Active services to their current revision
         revisionNumber: 2,
         name: "Old service name",
         description: "Old description",
+        serviceType: "one_time",
+        recurringName: "",
+        recurringDescription: "",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
         checkoutDisplayName: "Old service name",
         checkoutDescription: "Old description",
         thumbnailPath: null,
@@ -140,6 +200,11 @@ test("relationship labels prefer the frozen revision and retain legacy keys", ()
         revisionNumber: 2,
         name: "Frozen service name",
         description: "",
+        serviceType: "one_time",
+        recurringName: "",
+        recurringDescription: "",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
         checkoutDisplayName: "Frozen service name",
         checkoutDescription: "",
         thumbnailPath: null,
@@ -226,11 +291,11 @@ test("legacy invoice replacement paths are retired", () => {
 })
 
 test("mixed Checkout combines upfront fees with recurring service charges", () => {
-    const workflow = readFileSync("lib/relationship-workflow.ts", "utf8")
     const stripe = readFileSync("lib/stripe/api.ts", "utf8")
     const checkout = readFileSync("lib/client-sales/onboarding-checkout.ts", "utf8")
     const webhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8")
     const services = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
+    const serviceValidation = readFileSync("lib/onboarding/configuration-validation.ts", "utf8")
     const migration = readFileSync("supabase/migrations/20260814170000_dual_component_checkout_reset.sql", "utf8")
 
     assert.match(stripe, /mode: recurring \? "subscription" : "payment"/)
@@ -241,6 +306,7 @@ test("mixed Checkout combines upfront fees with recurring service charges", () =
     assert.match(stripe, /product_data\]\[images\]\[0/)
     assert.match(stripe, /billingComponent === "recurring"/)
     assert.match(stripe, /billing_component/)
+    assert.doesNotMatch(stripe, /componentLabel|— \$\{componentLabel\}/)
     assert.match(checkout, /upfront_amount_cents/)
     assert.match(checkout, /recurring_amount_cents/)
     assert.match(checkout, /createStripeMixedCheckout/)
@@ -249,8 +315,19 @@ test("mixed Checkout combines upfront fees with recurring service charges", () =
     assert.match(webhook, /stripe\.subscription\.renewal_failed/)
     assert.match(webhook, /stripe\.retired_sale_event_ignored/)
     assert.match(services, /service-thumbnails\/upload/)
-    assert.match(services, /Checkout name/)
-    assert.match(services, /Checkout description/)
+    assert.match(services, /createPortal/)
+    assert.match(services, /window\.parent\.document\.body/)
+    assert.match(services, /One-time/)
+    assert.match(services, /Retainer/)
+    assert.match(services, /Upfront name/)
+    assert.match(services, /Recurring name/)
+    assert.match(services, /defaultBillingInterval/)
+    assert.doesNotMatch(services, /Checkout name|Checkout description/)
+    assert.match(serviceValidation, /serviceType === "retainer"/)
+    assert.match(serviceValidation, /Give the recurring service a name/)
+    assert.match(checkout, /name: upfrontName/)
+    assert.match(checkout, /name: recurringName/)
+    assert.match(checkout, /definition\.recurringDescription/)
     assert.match(migration, /default_upfront_price_cents/)
     assert.match(migration, /default_recurring_price_cents/)
     assert.doesNotMatch(migration, /update public\.onboarding_service_revisions\s+set default_upfront_price_cents/)

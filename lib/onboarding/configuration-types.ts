@@ -3,6 +3,8 @@ import type { OnboardingBlock, OnboardingBookendDefinitionV2, OnboardingModuleDe
 
 export type OnboardingDefinitionStatus = "draft" | "published" | "archived"
 export type OnboardingServiceState = "active" | "retired" | "archived"
+export type OnboardingServiceType = "one_time" | "retainer"
+export type OnboardingBillingInterval = "week" | "month" | "year"
 export type OnboardingBookendKind = "welcome" | "completion"
 export type OnboardingStepKind = "form" | "video"
 
@@ -73,7 +75,14 @@ export type OnboardingServiceDefinition = {
     code: string
     name: string
     description: string
+    serviceType: OnboardingServiceType
+    recurringName: string
+    recurringDescription: string
+    defaultBillingInterval: OnboardingBillingInterval
+    defaultBillingIntervalCount: number
+    /** Legacy read compatibility. New revisions use name and description directly. */
     checkoutDisplayName?: string
+    /** Legacy read compatibility. New revisions use name and description directly. */
     checkoutDescription?: string
     thumbnailPath?: string | null
     thumbnailUrl?: string | null

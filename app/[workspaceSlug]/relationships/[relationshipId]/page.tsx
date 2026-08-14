@@ -86,8 +86,11 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             revisionId: service.revisionId,
             name: service.name,
             description: service.description,
-            checkoutDisplayName: service.checkoutDisplayName,
-            checkoutDescription: service.checkoutDescription,
+            serviceType: service.serviceType,
+            recurringName: service.recurringName,
+            recurringDescription: service.recurringDescription,
+            defaultBillingInterval: service.defaultBillingInterval,
+            defaultBillingIntervalCount: service.defaultBillingIntervalCount,
             thumbnailUrl: service.thumbnailUrl,
             defaultUpfrontPriceCents: service.defaultUpfrontPriceCents,
             defaultRecurringPriceCents: service.defaultRecurringPriceCents,
@@ -98,7 +101,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             selectedUpfrontPriceCents: Number(service.selected?.upfront_price_cents ?? service.defaultUpfrontPriceCents),
             selectedRecurringPriceCents: Number(service.selected?.recurring_price_cents ?? service.defaultRecurringPriceCents),
             selectedCurrency: String(service.selected?.currency ?? service.currency).toUpperCase(),
-            selectedAssigneeId: service.selected?.assignee_user_id ?? null,
+            selectedAssigneeId: service.selected?.assignee_user_id ?? service.defaultAssigneeId,
             moduleIds: configured?.modules.map((module) => module.moduleId) ?? [],
         }
     })

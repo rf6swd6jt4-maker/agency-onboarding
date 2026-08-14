@@ -136,9 +136,19 @@ export function normalizeServiceDefinition(input: unknown) {
     const name = cleanText(value.name, 120)
     if (!name) return { ok: false as const, error: "Give this service a name before saving." }
     const defaultUpfrontPriceCents = Number(value.defaultUpfrontPriceCents)
-    const defaultRecurringPriceCents = Number(value.defaultRecurringPriceCents)
+    const requestedRecurringPriceCents = Number(value.defaultRecurringPriceCents)
     if (!Number.isSafeInteger(defaultUpfrontPriceCents) || defaultUpfrontPriceCents < 0) return { ok: false as const, error: "Enter a valid default upfront price." }
-    if (!Number.isSafeInteger(defaultRecurringPriceCents) || defaultRecurringPriceCents < 0) return { ok: false as const, error: "Enter a valid default recurring price." }
+    if (!Number.isSafeInteger(requestedRecurringPriceCents) || requestedRecurringPriceCents < 0) return { ok: false as const, error: "Enter a valid default recurring price." }
+    const serviceType = value.serviceType === "retainer" ? "retainer" : "one_time"
+    const recurringName = serviceType === "retainer" ? cleanText(value.recurringName, 120) : ""
+    const recurringDescription = serviceType === "retainer" ? cleanText(value.recurringDescription, 4_000) : ""
+    const defaultRecurringPriceCents = serviceType === "retainer" ? requestedRecurringPriceCents : 0
+    if (serviceType === "retainer" && !recurringName) return { ok: false as const, error: "Give the recurring service a name before saving." }
+    if (serviceType === "retainer" && defaultRecurringPriceCents < 1) return { ok: false as const, error: "Enter a recurring price for this retainer service." }
+    const defaultBillingInterval = serviceType === "retainer" && (value.defaultBillingInterval === "week" || value.defaultBillingInterval === "year") ? value.defaultBillingInterval : "month"
+    const defaultBillingIntervalCount = serviceType === "retainer" ? Math.round(Number(value.defaultBillingIntervalCount) || 1) : 1
+    const maximumIntervalCount = defaultBillingInterval === "year" ? 3 : defaultBillingInterval === "month" ? 36 : 156
+    if (serviceType === "retainer" && (defaultBillingIntervalCount < 1 || defaultBillingIntervalCount > maximumIntervalCount)) return { ok: false as const, error: `Choose a default retainer period between 1 and ${maximumIntervalCount} ${defaultBillingInterval}s.` }
     const currency = cleanText(value.currency, 3).toUpperCase()
     if (!/^[A-Z]{3}$/.test(currency)) return { ok: false as const, error: "Use a three-letter currency code, such as USD." }
     const moduleIds = (Array.isArray(value.modules) ? value.modules : []).map((module) => String(module.moduleId ?? "")).filter(Boolean)
@@ -148,8 +158,11 @@ export function normalizeServiceDefinition(input: unknown) {
         definition: {
             name,
             description: cleanText(value.description, 4_000),
-            checkoutDisplayName: cleanText(value.checkoutDisplayName, 120),
-            checkoutDescription: cleanText(value.checkoutDescription, 500),
+            serviceType,
+            recurringName,
+            recurringDescription,
+            defaultBillingInterval,
+            defaultBillingIntervalCount,
             thumbnailPath: cleanText(value.thumbnailPath, 2_000) || null,
             defaultUpfrontPriceCents,
             defaultRecurringPriceCents,

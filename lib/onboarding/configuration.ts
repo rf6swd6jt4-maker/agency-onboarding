@@ -117,6 +117,11 @@ function fallbackServices(modules: OnboardingModuleDefinition[]) {
         code: service.key,
         name: service.title,
         description: service.description,
+        serviceType: "one_time",
+        recurringName: "",
+        recurringDescription: "",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
         checkoutDisplayName: service.title,
         checkoutDescription: service.description,
         thumbnailPath: null,
@@ -614,12 +619,24 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
         const hasExplicitRecurringDefault = typeof definition.defaultRecurringPriceCents === "number"
             || typeof definition.default_recurring_price_cents === "number"
         const storedUpfrontDefault = integer(revision.default_upfront_price_cents)
+        const defaultRecurringPriceCents = Math.max(0, hasExplicitRecurringDefault
+            ? integer(definition.defaultRecurringPriceCents, definition.default_recurring_price_cents)
+            : integer(revision.default_recurring_price_cents))
+        const storedServiceType = text(definition.serviceType, definition.service_type)
+        const serviceType = storedServiceType === "retainer" || defaultRecurringPriceCents > 0 ? "retainer" : "one_time"
+        const storedInterval = text(definition.defaultBillingInterval, definition.default_billing_interval)
+        const defaultBillingInterval = storedInterval === "week" || storedInterval === "year" ? storedInterval : "month"
         return {
             id: text(row.id) ?? stableLegacyId("service", code),
             revisionId: revisionId ?? null,
             code,
             name: text(revision.name, revision.title, definition.name, row.name, row.title) ?? code,
             description: text(revision.description, definition.description, row.description) ?? "",
+            serviceType,
+            recurringName: serviceType === "retainer" ? text(definition.recurringName, definition.recurring_name, definition.checkoutDisplayName, definition.checkout_display_name, revision.name) ?? code : "",
+            recurringDescription: serviceType === "retainer" ? text(definition.recurringDescription, definition.recurring_description, definition.checkoutDescription, definition.checkout_description, revision.description) ?? "" : "",
+            defaultBillingInterval,
+            defaultBillingIntervalCount: Math.max(1, integer(definition.defaultBillingIntervalCount, definition.default_billing_interval_count) || 1),
             checkoutDisplayName: text(definition.checkoutDisplayName, definition.checkout_display_name) ?? "",
             checkoutDescription: text(definition.checkoutDescription, definition.checkout_description) ?? "",
             thumbnailPath: text(definition.thumbnailPath, definition.thumbnail_path) ?? null,
@@ -630,9 +647,7 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
             defaultUpfrontPriceCents: Math.max(0, hasExplicitUpfrontDefault
                 ? integer(definition.defaultUpfrontPriceCents, definition.default_upfront_price_cents)
                 : storedUpfrontDefault > 0 ? storedUpfrontDefault : integer(revision.default_price_cents)),
-            defaultRecurringPriceCents: Math.max(0, hasExplicitRecurringDefault
-                ? integer(definition.defaultRecurringPriceCents, definition.default_recurring_price_cents)
-                : integer(revision.default_recurring_price_cents)),
+            defaultRecurringPriceCents,
             currency: (text(revision.currency, definition.currency, row.currency) ?? "USD").toUpperCase(),
             defaultAssigneeId: text(revision.default_assignee_user_id, revision.default_assignee_id, definition.default_assignee_user_id, definition.default_assignee_id, row.default_assignee_id) ?? null,
             displayPriority: integer(revision.display_priority, definition.display_priority, row.display_priority) || rowIndex + 1,

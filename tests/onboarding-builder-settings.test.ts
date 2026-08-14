@@ -267,13 +267,15 @@ test("module configuration has moved out of Settings and into the Builder", () =
     assert.match(builderUi, /Linked services/)
 })
 
-test("service authoring explains priority, exposes an accessible mobile sheet, and permits reviewed Retired reactivation", () => {
+test("service authoring explains priority, portals an accessible full-shell dialog, and permits reviewed Retired reactivation", () => {
     assert.match(servicesUi, /Higher numbers compose earlier in onboarding/)
-    assert.match(servicesUi, /role=\{mobileDialog \? "dialog"/)
-    assert.match(servicesUi, /aria-modal=\{mobileDialog \? true/)
+    assert.match(servicesUi, /createPortal/)
+    assert.match(servicesUi, /window\.parent\.document\.body/)
+    assert.match(servicesUi, /role="dialog"/)
+    assert.match(servicesUi, /aria-modal="true"/)
     assert.match(servicesUi, /event\.key === "Escape"/)
     assert.match(servicesUi, /service\.state === "active" && !dirty/)
-    assert.match(servicesUi, /service\.state === "retired" \? "Save revision and reactivate"/)
+    assert.match(servicesUi, /service\.state === "retired" \? "Save and reactivate"/)
 })
 
 test("configuration actions keep business rules truthful while sanitizing and routing platform failures", () => {

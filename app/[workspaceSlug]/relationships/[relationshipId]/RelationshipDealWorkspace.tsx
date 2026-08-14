@@ -22,8 +22,11 @@ type DealService = {
     revisionId: string | null
     name: string
     description: string
-    checkoutDisplayName: string
-    checkoutDescription: string
+    serviceType: "one_time" | "retainer"
+    recurringName: string
+    recurringDescription: string
+    defaultBillingInterval: "week" | "month" | "year"
+    defaultBillingIntervalCount: number
     thumbnailUrl: string | null
     defaultUpfrontPriceCents: number
     defaultRecurringPriceCents: number
@@ -89,6 +92,8 @@ function intervalCountMaximum(interval: Draft["billingInterval"]) {
 
 function buildInitialDraft(details: RelationshipDetails, services: DealService[]): Draft {
     const selected = services.filter((service) => service.selected)
+    const defaultRetainer = selected.find((service) => service.serviceType === "retainer")
+        ?? services.find((service) => service.serviceType === "retainer")
     return {
         primaryPersonName: details.primaryPersonName,
         businessName: details.businessName,
@@ -102,10 +107,10 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
         description: details.description,
         selectedCodes: selected.map((service) => service.code),
         upfrontPrices: Object.fromEntries(services.map((service) => [service.code, service.selected ? service.selectedUpfrontPriceCents : service.defaultUpfrontPriceCents])),
-        recurringPrices: Object.fromEntries(services.map((service) => [service.code, service.selected ? service.selectedRecurringPriceCents : service.defaultRecurringPriceCents])),
+        recurringPrices: Object.fromEntries(services.map((service) => [service.code, service.serviceType === "retainer" ? (service.selected ? service.selectedRecurringPriceCents : service.defaultRecurringPriceCents) : 0])),
         currency: selected[0]?.selectedCurrency ?? services[0]?.currency ?? "USD",
-        billingInterval: "month",
-        billingIntervalCount: 1,
+        billingInterval: defaultRetainer?.defaultBillingInterval ?? "month",
+        billingIntervalCount: defaultRetainer?.defaultBillingIntervalCount ?? 1,
     }
 }
 
@@ -178,11 +183,11 @@ export function RelationshipDealWorkspace({
     ].filter((issue): issue is string => Boolean(issue))
     const pricingIssues = [
         /^[A-Z]{3}$/.test(draft.currency.toUpperCase()) ? null : "Use a three-letter currency code",
-        selectedServices.some((service) => (draft.recurringPrices[service.code] ?? 0) > 0) && (draft.billingIntervalCount < 1 || draft.billingIntervalCount > intervalCountMaximum(draft.billingInterval)) ? `Use a recurring interval between 1 and ${intervalCountMaximum(draft.billingInterval)}` : null,
+        selectedServices.some((service) => service.serviceType === "retainer" && (draft.recurringPrices[service.code] ?? 0) > 0) && (draft.billingIntervalCount < 1 || draft.billingIntervalCount > intervalCountMaximum(draft.billingInterval)) ? `Use a recurring interval between 1 and ${intervalCountMaximum(draft.billingInterval)}` : null,
         ...selectedServices.flatMap((service) => (draft.upfrontPrices[service.code] ?? 0) > 0 || (draft.recurringPrices[service.code] ?? 0) > 0 ? [] : [`Add an upfront or recurring price for ${service.name}`]),
     ].filter((issue): issue is string => Boolean(issue))
     const upfrontTotalCents = selectedServices.reduce((total, service) => total + (draft.upfrontPrices[service.code] ?? 0), 0)
-    const recurringTotalCents = selectedServices.reduce((total, service) => total + (draft.recurringPrices[service.code] ?? 0), 0)
+    const recurringTotalCents = selectedServices.reduce((total, service) => total + (service.serviceType === "retainer" ? draft.recurringPrices[service.code] ?? 0 : 0), 0)
     const dueTodayCents = upfrontTotalCents + recurringTotalCents
 
     useEffect(() => {
@@ -196,12 +201,19 @@ export function RelationshipDealWorkspace({
     }
 
     function toggleService(code: string) {
-        setDraft((current) => ({
-            ...current,
-            selectedCodes: current.selectedCodes.includes(code)
-                ? current.selectedCodes.filter((item) => item !== code)
-                : [...current.selectedCodes, code],
-        }))
+        setDraft((current) => {
+            const removing = current.selectedCodes.includes(code)
+            const service = services.find((candidate) => candidate.code === code)
+            const hasSelectedRetainer = services.some((candidate) => current.selectedCodes.includes(candidate.code) && candidate.serviceType === "retainer")
+            return {
+                ...current,
+                selectedCodes: removing ? current.selectedCodes.filter((item) => item !== code) : [...current.selectedCodes, code],
+                ...(!removing && service?.serviceType === "retainer" && !hasSelectedRetainer ? {
+                    billingInterval: service.defaultBillingInterval,
+                    billingIntervalCount: service.defaultBillingIntervalCount,
+                } : {}),
+            }
+        })
     }
 
     function dealInput(): RelationshipDealDetailsInput {
@@ -221,7 +233,7 @@ export function RelationshipDealWorkspace({
                 serviceId: service.serviceId,
                 revisionId: service.revisionId,
                 upfrontPriceCents: Math.max(0, Math.round(draft.upfrontPrices[service.code] ?? 0)),
-                recurringPriceCents: Math.max(0, Math.round(draft.recurringPrices[service.code] ?? 0)),
+                recurringPriceCents: service.serviceType === "retainer" ? Math.max(0, Math.round(draft.recurringPrices[service.code] ?? 0)) : 0,
                 currency: draft.currency.toUpperCase(),
                 assigneeUserId: service.selectedAssigneeId,
             })),
@@ -339,11 +351,11 @@ export function RelationshipDealWorkspace({
                             <label className="text-xs text-neutral-500">Period<select value={draft.billingInterval} onChange={(event) => { const interval = event.target.value as Draft["billingInterval"]; setDraft((current) => ({ ...current, billingInterval: interval, billingIntervalCount: Math.min(current.billingIntervalCount, intervalCountMaximum(interval)) })) }} className="mt-1.5 h-9 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white"><option value="week">Week(s)</option><option value="month">Month(s)</option><option value="year">Year(s)</option></select></label>
                         </div> : <p className="max-w-md text-xs leading-5 text-neutral-600">No recurring charges are currently included. Checkout will collect the upfront total once.</p>}
                     </div>
-                    <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className="grid gap-3 px-3 py-3 sm:grid-cols-[3rem_minmax(0,1fr)_8rem_8rem] sm:items-center">
+                    <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{selectedServices.map((service) => <div key={service.code} className={`grid gap-3 px-3 py-3 sm:items-center ${service.serviceType === "retainer" ? "sm:grid-cols-[3rem_minmax(0,1fr)_8rem_8rem]" : "sm:grid-cols-[3rem_minmax(0,1fr)_8rem]"}`}>
                         <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={48} height={48} unoptimized className="h-full w-full object-cover" /> : "Service"}</div>
-                        <div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-100">{service.checkoutDisplayName || service.name}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">{service.checkoutDescription || service.description || "Client-facing service"}</p></div>
-                        <label className="text-xs text-neutral-500">Upfront<input type="number" min="0" step="0.01" value={(draft.upfrontPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, upfrontPrices: { ...current.upfrontPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
-                        <label className="text-xs text-neutral-500">Recurring<input type="number" min="0" step="0.01" value={(draft.recurringPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, recurringPrices: { ...current.recurringPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
+                        <div className="min-w-0"><p className="truncate text-sm font-medium text-neutral-100">{service.name}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-neutral-600">{service.description || "Client-facing service"}</p>{service.serviceType === "retainer" ? <p className="mt-1 truncate text-xs text-neutral-400">Recurring: {service.recurringName}</p> : null}</div>
+                        <label className="text-xs text-neutral-500">{service.serviceType === "retainer" ? "Upfront" : "One-time"}<input type="number" min="0" step="0.01" value={(draft.upfrontPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, upfrontPrices: { ...current.upfrontPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label>
+                        {service.serviceType === "retainer" ? <label className="text-xs text-neutral-500">Recurring<input type="number" min="0" step="0.01" value={(draft.recurringPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, recurringPrices: { ...current.recurringPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label> : null}
                     </div>)}</div>
                     <div className="grid gap-3 border-t border-neutral-800 pt-4 sm:grid-cols-3"><div><p className="text-xs text-neutral-500">Upfront fees</p><p className="mt-1 text-lg font-semibold">{priceLabel(upfrontTotalCents, draft.currency)}</p></div><div><p className="text-xs text-neutral-500">Recurring total</p><p className="mt-1 text-lg font-semibold">{priceLabel(recurringTotalCents, draft.currency)}</p></div><div className="sm:text-right"><p className="text-xs text-neutral-500">Due at Checkout</p><p className="mt-1 text-2xl font-semibold">{priceLabel(dueTodayCents, draft.currency)}</p></div></div>
                     <p className="text-right text-xs leading-5 text-neutral-600">Due at Checkout includes the upfront fees and the first recurring period. Sending the WhatsApp confirmation freezes these services, prices and onboarding.</p>

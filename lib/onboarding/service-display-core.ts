@@ -1,4 +1,4 @@
-import type { OnboardingServiceDefinition, OnboardingServiceState } from "./configuration-types"
+import type { OnboardingBillingInterval, OnboardingServiceDefinition, OnboardingServiceState, OnboardingServiceType } from "./configuration-types"
 
 export type LegacyServiceDefinition = {
     title: string
@@ -22,6 +22,11 @@ export type OnboardingServiceRevisionDisplay = {
     revisionNumber: number
     name: string
     description: string
+    serviceType: OnboardingServiceType
+    recurringName: string
+    recurringDescription: string
+    defaultBillingInterval: OnboardingBillingInterval
+    defaultBillingIntervalCount: number
     checkoutDisplayName: string
     checkoutDescription: string
     thumbnailPath: string | null
@@ -37,6 +42,11 @@ export type RelationshipDealServiceOption = {
     revisionId: string | null
     name: string
     description: string
+    serviceType: OnboardingServiceType
+    recurringName: string
+    recurringDescription: string
+    defaultBillingInterval: OnboardingBillingInterval
+    defaultBillingIntervalCount: number
     checkoutDisplayName: string
     checkoutDescription: string
     thumbnailPath: string | null
@@ -95,8 +105,13 @@ export function buildRelationshipDealServiceOptionsCore(input: {
                 revisionId: service.revisionId,
                 name: service.name,
                 description: service.description,
-                checkoutDisplayName: service.checkoutDisplayName || service.name,
-                checkoutDescription: service.checkoutDescription || service.description,
+                serviceType: service.serviceType,
+                recurringName: service.recurringName,
+                recurringDescription: service.recurringDescription,
+                defaultBillingInterval: service.defaultBillingInterval,
+                defaultBillingIntervalCount: service.defaultBillingIntervalCount,
+                checkoutDisplayName: service.name,
+                checkoutDescription: service.description,
                 thumbnailPath: service.thumbnailPath ?? null,
                 thumbnailUrl: service.thumbnailUrl ?? null,
                 defaultUpfrontPriceCents: service.defaultUpfrontPriceCents,
@@ -118,6 +133,11 @@ export function buildRelationshipDealServiceOptionsCore(input: {
                 revisionId: selected?.service_revision_id ?? null,
                 name: service.title,
                 description: service.description,
+                serviceType: "one_time",
+                recurringName: "",
+                recurringDescription: "",
+                defaultBillingInterval: "month",
+                defaultBillingIntervalCount: 1,
                 checkoutDisplayName: service.title,
                 checkoutDescription: service.description,
                 thumbnailPath: null,
@@ -144,8 +164,13 @@ export function buildRelationshipDealServiceOptionsCore(input: {
             revisionId: selected.service_revision_id ?? current?.revisionId ?? null,
             name: revision?.name ?? current?.name ?? legacyServices[selected.service_key]?.title ?? selected.service_key,
             description: revision?.description ?? current?.description ?? legacyServices[selected.service_key]?.description ?? "Existing relationship service",
-            checkoutDisplayName: revision?.checkoutDisplayName || current?.checkoutDisplayName || revision?.name || current?.name || legacyServices[selected.service_key]?.title || selected.service_key,
-            checkoutDescription: revision?.checkoutDescription || current?.checkoutDescription || revision?.description || current?.description || legacyServices[selected.service_key]?.description || "Existing relationship service",
+            serviceType: revision?.serviceType ?? current?.serviceType ?? "one_time",
+            recurringName: revision?.recurringName ?? current?.recurringName ?? "",
+            recurringDescription: revision?.recurringDescription ?? current?.recurringDescription ?? "",
+            defaultBillingInterval: revision?.defaultBillingInterval ?? current?.defaultBillingInterval ?? "month",
+            defaultBillingIntervalCount: revision?.defaultBillingIntervalCount ?? current?.defaultBillingIntervalCount ?? 1,
+            checkoutDisplayName: revision?.name || current?.name || legacyServices[selected.service_key]?.title || selected.service_key,
+            checkoutDescription: revision?.description || current?.description || legacyServices[selected.service_key]?.description || "Existing relationship service",
             thumbnailPath: revision?.thumbnailPath ?? current?.thumbnailPath ?? null,
             thumbnailUrl: current?.thumbnailUrl ?? null,
             defaultUpfrontPriceCents: revision?.defaultUpfrontPriceCents ?? current?.defaultUpfrontPriceCents ?? 0,
