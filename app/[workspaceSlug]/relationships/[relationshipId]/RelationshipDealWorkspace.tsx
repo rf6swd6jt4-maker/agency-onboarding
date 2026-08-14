@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useTransition, type ReactNode } from "react"
+import { useEffect, useState, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
@@ -127,7 +127,6 @@ export function RelationshipDealWorkspace({
     plan,
     canEdit,
     currentWork,
-    frozenInvoiceNotice,
 }: {
     workspaceSlug: string
     workspaceName: string
@@ -144,7 +143,6 @@ export function RelationshipDealWorkspace({
     plan: RelationshipGanttPlan
     canEdit: boolean
     currentWork: CurrentWork | null
-    frozenInvoiceNotice?: ReactNode
 }) {
     const router = useRouter()
     const [draft, setDraft] = useState(() => buildInitialDraft(details, services))
@@ -365,7 +363,6 @@ export function RelationshipDealWorkspace({
 
     return <>
         {detailsPanel}
-        {frozenInvoiceNotice}
         <div className="mt-5"><RelationshipGantt workspaceSlug={workspaceSlug} relationshipId={relationshipId} plan={plan} canEdit={canEdit} currentWork={currentWork} onInvoiceRequest={openInvoiceReview} /></div>
         {modal}
         {preview}

@@ -199,7 +199,7 @@ test("relationship selling uses the visible details workspace and three-stage re
     assert.ok(workflow.indexOf("moveRelationshipToStage") < workflow.lastIndexOf("const assetId = await ensureRelationshipInvoiceAsset"))
 })
 
-test("sent-unpaid invoices can be voided and reopened without mutating their frozen snapshot", () => {
+test("legacy sent-unpaid invoices retain backend recovery without a relationship-detail banner", () => {
     const actions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
     const detail = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx", "utf8")
     const stripe = readFileSync("lib/stripe/api.ts", "utf8")
@@ -208,8 +208,7 @@ test("sent-unpaid invoices can be voided and reopened without mutating their fro
     assert.match(actions, /rpc\("reopen_voided_client_sale"/)
     assert.match(actions, /\["invoice_sent", "payment_failed"\]/)
     assert.match(actions, /alreadyVoided/)
-    assert.match(detail, /"invoice_inactive"/)
-    assert.match(detail, /VoidInvoiceButton/)
+    assert.doesNotMatch(detail, /VoidInvoiceButton|Sent invoice is frozen|Finish preparing replacement/)
     assert.match(stripe, /\/void`/)
 })
 
