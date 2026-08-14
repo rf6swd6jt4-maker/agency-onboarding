@@ -29,12 +29,14 @@ async function scopedRelationship(workspaceId: string, relationshipId: string) {
 }
 
 async function destinationForRelationship(workspaceId: string, relationship: { id: string; client_id: string | null; primary_phone: string | null; whatsapp_phone: string | null }) {
-    if (!relationship.client_id) return null
-    const { data: existing, error } = await supabaseAdmin.from("client_communication_channels").select("id, external_address").eq("workspace_id", workspaceId).eq("client_id", relationship.client_id).eq("provider", "meta_whatsapp").eq("is_active", true).maybeSingle()
-    if (error) throw new Error(error.message)
-    if (existing) return existing
+    if (relationship.client_id) {
+        const { data: existing, error } = await supabaseAdmin.from("client_communication_channels").select("id, external_address").eq("workspace_id", workspaceId).eq("client_id", relationship.client_id).eq("provider", "meta_whatsapp").eq("is_active", true).maybeSingle()
+        if (error) throw new Error(error.message)
+        if (existing) return existing
+    }
     const address = normalizeMessageAddress(relationship.whatsapp_phone ?? relationship.primary_phone ?? "")
     if (!address) return null
+    if (!relationship.client_id) return { id: null, external_address: address }
     const { data: channel, error: insertError } = await supabaseAdmin.from("client_communication_channels").upsert({
         workspace_id: workspaceId,
         client_id: relationship.client_id,
@@ -68,7 +70,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     const body = typeof input?.body === "string" ? input.body.trim() : ""
     if (!UUID_PATTERN.test(relationshipId) || !UUID_PATTERN.test(clientRequestId) || !body || body.length > 4_000) return Response.json({ error: "A valid conversation, request ID, and message of up to 4,000 characters are required." }, { status: 400 })
     const relationship = await scopedRelationship(workspace.id, relationshipId)
-    if (!relationship?.client_id) return Response.json({ error: "Conversation not found" }, { status: 404 })
+    if (!relationship) return Response.json({ error: "Conversation not found" }, { status: 404 })
     const channel = await destinationForRelationship(workspace.id, relationship)
     if (!channel) return Response.json({ error: "This client has no WhatsApp destination." }, { status: 409 })
 
@@ -110,7 +112,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
         const { data, error } = current
         if (error) throw error
         const message = communicationMessageFromRow(data)
-        await recordClientAdminActivity({ clientId: relationship.client_id, category: "communications", eventKey: "whatsapp.message.sent_by_staff", summary: "WhatsApp message sent by staff", entityType: "client_message", entityId: messageId, actorUserId: user.id, actorKind: "staff", direction: "outbound", metadata: { provider_message_id: externalId } })
+        if (relationship.client_id) await recordClientAdminActivity({ clientId: relationship.client_id, category: "communications", eventKey: "whatsapp.message.sent_by_staff", summary: "WhatsApp message sent by staff", entityType: "client_message", entityId: messageId, actorUserId: user.id, actorKind: "staff", direction: "outbound", metadata: { provider_message_id: externalId } })
         return Response.json({ message })
     } catch (error) {
         const safeToRetry = metaWhatsAppFailureIsSafeToRetry(error)

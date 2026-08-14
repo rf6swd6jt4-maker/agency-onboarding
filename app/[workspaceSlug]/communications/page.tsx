@@ -16,7 +16,7 @@ type PageProps = {
 export default async function CommunicationsPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
     const { workspace, user } = await requireWorkspace(workspaceSlug)
-    const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => relationship.status !== "archived" && relationship.client_id)
+    const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => relationship.status !== "archived")
     const clientIds = relationships.flatMap((relationship) => relationship.client_id ? [relationship.client_id] : [])
     const [messageResult, cursorResult, peopleResult, channelResult] = await Promise.all([
         loadCommunicationMessages({ workspaceId: workspace.id }),
@@ -38,7 +38,7 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
         clientId: relationship.client_id,
         title: relationship.business_name ? `${relationship.primary_person_name} – ${relationship.business_name}` : relationship.primary_person_name,
         subtitle: relationship.whatsapp_phone ?? relationship.primary_phone ?? relationship.primary_email,
-        canSend: Boolean(relationship.client_id && (channelClientIds.has(relationship.client_id) || relationship.whatsapp_phone || relationship.primary_phone)),
+        canSend: Boolean((relationship.client_id && channelClientIds.has(relationship.client_id)) || relationship.whatsapp_phone || relationship.primary_phone),
         messages: messagesByRelationship.get(relationship.id) ?? [],
     })).sort((left, right) => {
         const leftDate = left.messages.at(-1)?.createdAt ?? ""
