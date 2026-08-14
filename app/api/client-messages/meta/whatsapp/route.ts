@@ -113,6 +113,12 @@ type ClientCommunicationChannel = {
     external_address: string
 }
 
+type InboundDestination = {
+    channel: ClientCommunicationChannel | null
+    clientId: string | null
+    relationshipId: string | null
+}
+
 function logDiagnosticInsertError(context: string, error: unknown) {
     console.warn(
         `Meta WhatsApp bridge diagnostic failed: ${context}`,
@@ -120,8 +126,88 @@ function logDiagnosticInsertError(context: string, error: unknown) {
     )
 }
 
-async function resolveInboundChannel(fromAddress: string, workspaceId: string) {
+async function resolveInboundDestination(
+    fromAddress: string,
+    workspaceId: string
+): Promise<InboundDestination | null> {
     const equivalentAddresses = getEquivalentMessageAddresses(fromAddress)
+    const relationshipAddresses = [...new Set(equivalentAddresses.flatMap((address) => [
+        address,
+        address.replace(/^whatsapp:/iu, ""),
+    ]))]
+    const [whatsAppRelationships, primaryRelationships] = await Promise.all([
+        supabaseAdmin
+            .from("relationships")
+            .select("id, client_id, created_at")
+            .eq("workspace_id", workspaceId)
+            .neq("status", "archived")
+            .in("whatsapp_phone", relationshipAddresses),
+        supabaseAdmin
+            .from("relationships")
+            .select("id, client_id, created_at")
+            .eq("workspace_id", workspaceId)
+            .neq("status", "archived")
+            .in("primary_phone", relationshipAddresses),
+    ])
+
+    if (whatsAppRelationships.error) {
+        throw new Error(
+            `Could not look up relationship by WhatsApp phone: ${whatsAppRelationships.error.message}`
+        )
+    }
+    if (primaryRelationships.error) {
+        throw new Error(
+            `Could not look up relationship by primary phone: ${primaryRelationships.error.message}`
+        )
+    }
+
+    const matchingRelationships = new Map(
+        [...(whatsAppRelationships.data ?? []), ...(primaryRelationships.data ?? [])]
+            .map((relationship) => [relationship.id, relationship] as const)
+    )
+    const relationship = [...matchingRelationships.values()].sort((left, right) =>
+        right.created_at.localeCompare(left.created_at)
+    )[0]
+
+    if (relationship) {
+        if (!relationship.client_id) {
+            return {
+                channel: null,
+                clientId: null,
+                relationshipId: relationship.id,
+            }
+        }
+
+        const { data: relationshipChannel, error: relationshipChannelError } =
+            await supabaseAdmin
+                .from("client_communication_channels")
+                .select("id, client_id, external_address")
+                .eq("workspace_id", workspaceId)
+                .eq("client_id", relationship.client_id)
+                .eq("provider", "meta_whatsapp")
+                .eq("is_active", true)
+                .maybeSingle()
+
+        if (relationshipChannelError) {
+            throw new Error(
+                `Could not look up relationship WhatsApp channel: ${relationshipChannelError.message}`
+            )
+        }
+
+        const repairedChannel = relationshipChannel
+            ? await repairChannelAddress(
+                  relationshipChannel as ClientCommunicationChannel,
+                  fromAddress
+              )
+            : null
+
+        return {
+            channel: repairedChannel,
+            clientId: relationship.client_id,
+            relationshipId: relationship.id,
+        }
+    }
+
     const { data: exactChannel, error: exactChannelError } = await supabaseAdmin
         .from("client_communication_channels")
         .select("id, client_id, external_address")
@@ -138,10 +224,15 @@ async function resolveInboundChannel(fromAddress: string, workspaceId: string) {
     }
 
     if (exactChannel) {
-        return await repairChannelAddress(
+        const channel = await repairChannelAddress(
             exactChannel as ClientCommunicationChannel,
             fromAddress
         )
+        return {
+            channel,
+            clientId: channel.client_id,
+            relationshipId: null,
+        }
     }
 
     const { data: client, error: clientError } = await supabaseAdmin
@@ -174,10 +265,15 @@ async function resolveInboundChannel(fromAddress: string, workspaceId: string) {
 
     if (!clientChannel) return null
 
-    return await repairChannelAddress(
+    const channel = await repairChannelAddress(
         clientChannel as ClientCommunicationChannel,
         fromAddress
     )
+    return {
+        channel,
+        clientId: channel.client_id,
+        relationshipId: null,
+    }
 }
 
 async function repairChannelAddress(
@@ -522,11 +618,13 @@ function formatMediaMessageForLog({
 
 async function getInboundMessageContent({
     clientId,
+    relationshipId,
     workspaceId,
     message,
     appBaseUrl,
 }: {
-    clientId: string
+    clientId: string | null
+    relationshipId: string | null
     workspaceId: string
     message: WhatsAppMessage
     appBaseUrl: string
@@ -567,6 +665,7 @@ async function getInboundMessageContent({
         `whatsapp-${mediaPayload.type}-${mediaPayload.media.id}.${getExtensionFromMimeType(contentType)}`
     const storedMedia = await storeClientMessageMedia({
         clientId,
+        relationshipId,
         workspaceId,
         mediaId: mediaPayload.media.id,
         fileName,
@@ -642,9 +741,9 @@ async function handleInboundMessage({
 
     if (pendingSaleConfirmation.handled) return
 
-    const channel = await resolveInboundChannel(from, workspaceId)
+    const destination = await resolveInboundDestination(from, workspaceId)
 
-    if (!channel) {
+    if (!destination) {
         const unmatchedBody =
             getInboundText(message) ||
             `[Unsupported ${message.type ?? "message"}]`
@@ -673,21 +772,25 @@ async function handleInboundMessage({
         return
     }
 
-    const { data: client } = await supabaseAdmin
-        .from("clients")
-        .select("name, workspace_id, relationship_id")
-        .eq("id", channel.client_id)
-        .eq("workspace_id", workspaceId)
-        .single()
+    const { data: client } = destination.clientId
+        ? await supabaseAdmin
+              .from("clients")
+              .select("name, workspace_id, relationship_id")
+              .eq("id", destination.clientId)
+              .eq("workspace_id", workspaceId)
+              .single()
+        : { data: null }
+    const relationshipId =
+        destination.relationshipId ?? client?.relationship_id ?? null
     const initialBody =
         getInboundText(message) || `[${titleCase(message.type ?? "message")}]`
     const { data: insertedMessage, error: insertError } = await supabaseAdmin
         .from("client_messages")
         .insert({
             workspace_id: workspaceId,
-            client_id: channel.client_id,
-            relationship_id: client?.relationship_id ?? null,
-            communication_channel_id: channel.id,
+            client_id: destination.clientId,
+            relationship_id: relationshipId,
+            communication_channel_id: destination.channel?.id ?? null,
             direction: "inbound",
             provider: "meta_whatsapp",
             provider_message_id: messageId,
@@ -711,14 +814,17 @@ async function handleInboundMessage({
         )
     }
 
-    await recordClientAdminActivity({ clientId: channel.client_id, category: "communications", eventKey: "whatsapp.webhook.received", summary: "WhatsApp message received", entityType: "client_message", entityId: insertedMessage.id, direction: "inbound", metadata: { provider_message_id: messageId, message_type: message.type ?? "unknown" } })
+    if (destination.clientId) {
+        await recordClientAdminActivity({ clientId: destination.clientId, category: "communications", eventKey: "whatsapp.webhook.received", summary: "WhatsApp message received", entityType: "client_message", entityId: insertedMessage.id, direction: "inbound", metadata: { provider_message_id: messageId, message_type: message.type ?? "unknown" } })
+    }
 
     let content: InboundMessageContent | null = null
 
     try {
         content = await getInboundMessageContent({
-            clientId: channel.client_id,
-            workspaceId: client?.workspace_id ?? "",
+            clientId: destination.clientId,
+            relationshipId,
+            workspaceId,
             message,
             appBaseUrl,
         })

@@ -465,6 +465,7 @@ export async function deleteOnboardingUploads(paths: string[]) {
 
 export async function storeClientMessageMedia({
     clientId,
+    relationshipId,
     workspaceId,
     mediaId,
     fileName,
@@ -472,7 +473,8 @@ export async function storeClientMessageMedia({
     body,
     appBaseUrl,
 }: {
-    clientId: string
+    clientId: string | null
+    relationshipId?: string | null
     workspaceId?: string
     mediaId: string
     fileName: string
@@ -481,7 +483,8 @@ export async function storeClientMessageMedia({
     appBaseUrl?: string
 }) {
     const safeFileName = sanitizeFileName(fileName) || "whatsapp-media"
-    const path = `${workspaceId ? `${workspaceId}/` : ""}${clientId}/client-messages/${randomUUID()}-${mediaId}-${safeFileName}`
+    const ownerPath = clientId ?? (relationshipId ? `relationships/${relationshipId}` : "unmatched")
+    const path = `${workspaceId ? `${workspaceId}/` : ""}${ownerPath}/client-messages/${randomUUID()}-${mediaId}-${safeFileName}`
 
     await getR2Client().send(
         new PutObjectCommand({
@@ -492,7 +495,7 @@ export async function storeClientMessageMedia({
         })
     )
 
-    if (workspaceId) await recordAdminActivity({ workspaceId, category: "communications", eventKey: "r2.media.stored", summary: "Client message media stored in R2", entityType: "client_message_media", entityId: mediaId, direction: "outbound", metadata: { client_id: clientId, content_type: contentType } })
+    if (workspaceId) await recordAdminActivity({ workspaceId, category: "communications", eventKey: "r2.media.stored", summary: "Client message media stored in R2", entityType: "client_message_media", entityId: mediaId, direction: "outbound", metadata: { client_id: clientId, relationship_id: relationshipId ?? null, content_type: contentType } })
 
     return {
         path,
