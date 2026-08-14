@@ -8,7 +8,7 @@ export async function loadOnboardingServiceRevisionDisplays(workspaceId: string,
     if (!ids.length) return new Map<string, OnboardingServiceRevisionDisplay>()
     const { data, error } = await supabaseAdmin
         .from("onboarding_service_revisions")
-        .select("id, service_id, revision_number, name, description, default_upfront_price_cents, default_recurring_price_cents, currency, is_test, definition")
+        .select("id, service_id, revision_number, name, description, default_price_cents, default_upfront_price_cents, default_recurring_price_cents, currency, is_test, definition")
         .eq("workspace_id", workspaceId)
         .in("id", ids)
     if (error) return new Map<string, OnboardingServiceRevisionDisplay>()
@@ -16,6 +16,11 @@ export async function loadOnboardingServiceRevisionDisplays(workspaceId: string,
         const definition = revision.definition && typeof revision.definition === "object" && !Array.isArray(revision.definition)
             ? revision.definition as Record<string, unknown>
             : {}
+        const hasExplicitUpfrontDefault = typeof definition.defaultUpfrontPriceCents === "number"
+            || typeof definition.default_upfront_price_cents === "number"
+        const hasExplicitRecurringDefault = typeof definition.defaultRecurringPriceCents === "number"
+            || typeof definition.default_recurring_price_cents === "number"
+        const storedUpfrontDefault = Number(revision.default_upfront_price_cents) || 0
         return [revision.id, {
         id: revision.id,
         serviceId: revision.service_id,
@@ -25,8 +30,12 @@ export async function loadOnboardingServiceRevisionDisplays(workspaceId: string,
         checkoutDisplayName: typeof definition.checkoutDisplayName === "string" ? definition.checkoutDisplayName : "",
         checkoutDescription: typeof definition.checkoutDescription === "string" ? definition.checkoutDescription : "",
         thumbnailPath: typeof definition.thumbnailPath === "string" ? definition.thumbnailPath : null,
-        defaultUpfrontPriceCents: Number(revision.default_upfront_price_cents) || 0,
-        defaultRecurringPriceCents: Number(revision.default_recurring_price_cents) || 0,
+        defaultUpfrontPriceCents: hasExplicitUpfrontDefault
+            ? Number(definition.defaultUpfrontPriceCents ?? definition.default_upfront_price_cents) || 0
+            : storedUpfrontDefault > 0 ? storedUpfrontDefault : Number(revision.default_price_cents) || 0,
+        defaultRecurringPriceCents: hasExplicitRecurringDefault
+            ? Number(definition.defaultRecurringPriceCents ?? definition.default_recurring_price_cents) || 0
+            : Number(revision.default_recurring_price_cents) || 0,
         currency: String(revision.currency ?? "USD").toUpperCase(),
         isTest: Boolean(revision.is_test),
     }]

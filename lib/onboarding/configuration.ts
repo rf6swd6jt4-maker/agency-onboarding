@@ -609,6 +609,11 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
             : embeddedModuleIds
         const status = text(row.state, row.status)
         const code = text(row.internal_code, row.code, row.key) ?? text(row.id) ?? `service-${rowIndex + 1}`
+        const hasExplicitUpfrontDefault = typeof definition.defaultUpfrontPriceCents === "number"
+            || typeof definition.default_upfront_price_cents === "number"
+        const hasExplicitRecurringDefault = typeof definition.defaultRecurringPriceCents === "number"
+            || typeof definition.default_recurring_price_cents === "number"
+        const storedUpfrontDefault = integer(revision.default_upfront_price_cents)
         return {
             id: text(row.id) ?? stableLegacyId("service", code),
             revisionId: revisionId ?? null,
@@ -622,8 +627,12 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
             state: status === "archived" || row.archived_at ? "archived" : status === "retired" || row.retired_at ? "retired" : "active",
             version: Math.max(1, integer(revision.version, revision.revision_number, row.version)),
             isTest: bool(revision.is_test, definition.isTest, definition.is_test, row.is_test),
-            defaultUpfrontPriceCents: Math.max(0, integer(revision.default_upfront_price_cents, definition.defaultUpfrontPriceCents, definition.default_upfront_price_cents)),
-            defaultRecurringPriceCents: Math.max(0, integer(revision.default_recurring_price_cents, definition.defaultRecurringPriceCents, definition.default_recurring_price_cents)),
+            defaultUpfrontPriceCents: Math.max(0, hasExplicitUpfrontDefault
+                ? integer(definition.defaultUpfrontPriceCents, definition.default_upfront_price_cents)
+                : storedUpfrontDefault > 0 ? storedUpfrontDefault : integer(revision.default_price_cents)),
+            defaultRecurringPriceCents: Math.max(0, hasExplicitRecurringDefault
+                ? integer(definition.defaultRecurringPriceCents, definition.default_recurring_price_cents)
+                : integer(revision.default_recurring_price_cents)),
             currency: (text(revision.currency, definition.currency, row.currency) ?? "USD").toUpperCase(),
             defaultAssigneeId: text(revision.default_assignee_user_id, revision.default_assignee_id, definition.default_assignee_user_id, definition.default_assignee_id, row.default_assignee_id) ?? null,
             displayPriority: integer(revision.display_priority, definition.display_priority, row.display_priority) || rowIndex + 1,

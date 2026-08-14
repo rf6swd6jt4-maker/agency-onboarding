@@ -253,6 +253,8 @@ test("mixed Checkout combines upfront fees with recurring service charges", () =
     assert.match(services, /Checkout description/)
     assert.match(migration, /default_upfront_price_cents/)
     assert.match(migration, /default_recurring_price_cents/)
+    assert.doesNotMatch(migration, /update public\.onboarding_service_revisions\s+set default_upfront_price_cents/)
+    assert.match(readFileSync("lib/onboarding/configuration.ts", "utf8"), /integer\(revision\.default_price_cents\)/)
     assert.match(migration, /retired_billing_model/)
 })
 

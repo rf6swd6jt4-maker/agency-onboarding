@@ -51,9 +51,10 @@ where item.workspace_id = affected.workspace_id
 alter table public.onboarding_service_revisions
     add column if not exists default_upfront_price_cents integer not null default 0 check (default_upfront_price_cents >= 0),
     add column if not exists default_recurring_price_cents integer not null default 0 check (default_recurring_price_cents >= 0);
-update public.onboarding_service_revisions
-set default_upfront_price_cents = default_price_cents
-where default_upfront_price_cents = 0 and default_price_cents > 0;
+
+-- Existing service revisions are immutable. Their legacy default_price_cents
+-- remains the read-time upfront fallback; only newly inserted revisions receive
+-- physical dual-price values through the trigger below.
 
 create or replace function public.set_onboarding_service_revision_dual_prices()
 returns trigger
