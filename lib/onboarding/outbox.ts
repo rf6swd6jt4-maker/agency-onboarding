@@ -1,5 +1,6 @@
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
 import { metaWhatsAppFailureIsUncertain, sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
+import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-attribution"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { deleteOnboardingUploads } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -263,7 +264,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
             messageLogId = messageLog.id
         }
 
-        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: row.workspace_id, to: row.destination, body, callbackData: messageLogId })
+        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: row.workspace_id, to: row.destination, body: formatWhatsAppAttributedMessage("Scaylup", body), callbackData: messageLogId })
         providerSent = true
         sentProviderId = providerMessageId(providerResponse)
         const messageUpdate = await supabaseAdmin.from("client_messages").update({

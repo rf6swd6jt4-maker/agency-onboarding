@@ -52,9 +52,12 @@ test("direct WhatsApp sending is durable and idempotent", async () => {
 })
 
 test("automated onboarding messages are attributed and reuse their durable message log", async () => {
-    const [outbox, automation] = await Promise.all([
+    const [outbox, automation, directMessages, profiles, migration] = await Promise.all([
         readFile("lib/onboarding/outbox.ts", "utf8"),
         readFile("lib/client-sales/automation.ts", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/messages/route.ts", "utf8"),
+        readFile("lib/communications/server.ts", "utf8"),
+        readFile("supabase/migrations/20260815001000_user_profile_display_names.sql", "utf8"),
     ])
     assert.match(outbox, /contains\("raw_payload", \{ outbox_id: row\.id \}\)/)
     assert.match(outbox, /sender_kind: "automation"/)
@@ -62,4 +65,11 @@ test("automated onboarding messages are attributed and reuse their durable messa
     assert.match(automation, /automation_label: "Consent request"/)
     assert.match(automation, /automation_label: "Onboarding link"/)
     assert.match(automation, /callbackData: messageLog\.id/)
+    assert.match(outbox, /formatWhatsAppAttributedMessage\("Scaylup", body\)/)
+    assert.match(automation, /formatWhatsAppAttributedMessage\("Scaylup", outboundBody\)/)
+    assert.match(directMessages, /select\("display_name, username"\)/)
+    assert.match(directMessages, /body: providerBody/)
+    assert.match(profiles, /profile\?\.display_name \?\? profile\?\.username/)
+    assert.match(migration, /add column if not exists display_name text/)
+    assert.doesNotMatch(migration, /display_name text unique/)
 })

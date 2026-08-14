@@ -5,17 +5,20 @@ import { redirectToLogin } from "@/lib/auth/server-redirects"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { getCurrentUser, normalizeWorkspaceRole } from "@/lib/workspaces"
 import { deleteOnboardingUploads, storeProfileAvatar } from "@/lib/onboarding/uploads"
+import { normalizeChatDisplayName } from "@/lib/client-messages/whatsapp-attribution"
 
 const usernamePattern = /^[a-z0-9][a-z0-9-]{1,27}[a-z0-9]$/
 
-export async function updateUsername(_: { error?: string; username?: string }, formData: FormData) {
+export async function updateProfile(_: { error?: string; username?: string; displayName?: string }, formData: FormData) {
     const user = await getCurrentUser()
     if (!user) return await redirectToLogin()
     const username = String(formData.get("username") ?? "").trim().toLowerCase()
+    const displayName = normalizeChatDisplayName(formData.get("displayName"))
     if (!usernamePattern.test(username)) return { error: "Use 3–30 lowercase letters, numbers, or hyphens." }
-    const { error } = await supabaseAdmin.from("user_profiles").update({ username }).eq("user_id", user.id)
-    if (error) return { error: error.code === "23505" ? "That username is already taken." : "We could not update your username. Please try again." }
-    return { username }
+    if (!displayName) return { error: "Use a display name between 1 and 50 characters." }
+    const { error } = await supabaseAdmin.from("user_profiles").update({ username, display_name: displayName }).eq("user_id", user.id)
+    if (error) return { error: error.code === "23505" ? "That username is already taken." : "We could not update your profile. Please try again." }
+    return { username, displayName }
 }
 
 export async function createWorkspace(username: string, formData: FormData) {

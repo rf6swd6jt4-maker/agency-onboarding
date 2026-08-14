@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
+import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-attribution"
 import { shouldIgnoreClickUpMessage } from "@/lib/client-messages/clickup-message-filters"
 import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
 import { recordClientAdminActivity } from "@/lib/admin/activity"
@@ -236,7 +237,7 @@ export async function sendLoggedClickUpMessageToWhatsApp({
         const whatsappMessage = await sendMetaWhatsAppMessage({
             workspaceId,
             to: channel.external_address,
-            body,
+            body: formatWhatsAppAttributedMessage("Scaylup", body),
             replyToMessageId: replyToWhatsAppMessageId,
         })
         const whatsappMessageId = whatsappMessage?.messages?.[0]?.id
@@ -343,7 +344,7 @@ export async function sendClickUpMessageEditToWhatsApp({
         const whatsappMessage = await sendMetaWhatsAppMessage({
             workspaceId,
             to: channel.external_address,
-            body: `${body} *`,
+            body: formatWhatsAppAttributedMessage("Scaylup", `${body} *`),
             replyToMessageId: existingMessage.whatsapp_message_id,
         })
         const editWhatsAppMessageId = whatsappMessage?.messages?.[0]?.id ?? null

@@ -118,14 +118,14 @@ export async function loadCommunicationPeople(workspaceId: string, currentUserId
     if (membershipError) throw new Error(`Could not load communication members: ${membershipError.message}`)
     const userIds = (memberships ?? []).map((membership) => membership.user_id)
     const { data: profiles, error: profileError } = userIds.length
-        ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", userIds)
+        ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name, avatar_path").in("user_id", userIds)
         : { data: [], error: null }
     if (profileError) throw new Error(`Could not load communication profiles: ${profileError.message}`)
     const profileById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]))
     const people = userIds.map((id) => {
         const profile = profileById.get(id)
-        const name = profile?.username ?? (id === currentUserId ? "You" : "Team member")
-        return { id, name, avatarSrc: profile?.avatar_path ? profileAvatarUrl(name, profile.avatar_path) : null }
+        const name = profile?.display_name ?? profile?.username ?? (id === currentUserId ? "You" : "Team member")
+        return { id, name, avatarSrc: profile?.avatar_path && profile?.username ? profileAvatarUrl(profile.username, profile.avatar_path) : null }
     })
     return {
         people,

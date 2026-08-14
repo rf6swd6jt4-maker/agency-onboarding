@@ -17,7 +17,7 @@ export default async function UserAccountPage({ params }: PageProps) {
 
     const { data: profile } = await supabaseAdmin
         .from("user_profiles")
-        .select("username, avatar_path")
+        .select("username, display_name, avatar_path")
         .eq("user_id", user.id)
         .maybeSingle()
 
@@ -56,8 +56,9 @@ export default async function UserAccountPage({ params }: PageProps) {
                 </div>
 
                 <section className="mt-2 flex flex-col items-center text-center">
-                    <Avatar src={avatarSrc} name={profile.username} className="h-24 w-24 border-2 border-neutral-700" />
-                    <h1 className="mt-4 text-3xl font-semibold">@{profile.username}</h1>
+                    <Avatar src={avatarSrc} name={profile.display_name} className="h-24 w-24 border-2 border-neutral-700" />
+                    <h1 className="mt-4 text-3xl font-semibold">{profile.display_name}</h1>
+                    <p className="mt-1 text-sm text-neutral-500">@{profile.username}</p>
                     <p className="mt-2 text-sm text-neutral-400">{user.email}</p>
                     <Link href={`/users/${profile.username}/edit`} className="mt-5 rounded-lg border border-neutral-600 px-4 py-2 text-sm font-medium hover:border-neutral-400">
                         Edit profile

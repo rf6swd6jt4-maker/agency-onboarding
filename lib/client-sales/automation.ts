@@ -8,6 +8,7 @@ import {
     sendMetaWhatsAppTemplate,
     metaWhatsAppFailureIsUncertain,
 } from "@/lib/client-messages/meta-whatsapp"
+import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-attribution"
 import { isConsentConfirmationText } from "@/lib/client-sales/consent"
 import { activateRelationshipOnboardingAfterPayment } from "@/lib/relationship-workflow"
 import { recordAdminActivity } from "@/lib/admin/activity"
@@ -713,7 +714,7 @@ async function sendLegacyOnboardingLink(input: {
     }
 
     try {
-        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: outboundBody, callbackData: messageLog.id })
+        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: formatWhatsAppAttributedMessage("Scaylup", outboundBody), callbackData: messageLog.id })
         const whatsappMessageId = getWhatsAppMessageId(message)
         const sentAt = new Date().toISOString()
         const [messageUpdate, saleUpdate] = await Promise.all([

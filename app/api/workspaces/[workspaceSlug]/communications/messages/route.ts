@@ -6,6 +6,7 @@ import { metaWhatsAppFailureIsSafeToRetry, sendMetaWhatsAppMessage } from "@/lib
 import { COMMUNICATION_MESSAGE_COLUMNS, communicationMessageFromRow, loadCommunicationMessages } from "@/lib/communications/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
+import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-attribution"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -73,6 +74,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     if (!relationship) return Response.json({ error: "Conversation not found" }, { status: 404 })
     const channel = await destinationForRelationship(workspace.id, relationship)
     if (!channel) return Response.json({ error: "This client has no WhatsApp destination." }, { status: 409 })
+    const { data: profile, error: profileError } = await supabaseAdmin
+        .from("user_profiles")
+        .select("display_name, username")
+        .eq("user_id", user.id)
+        .maybeSingle()
+    if (profileError) return Response.json({ error: "Could not load your chat display name." }, { status: 503 })
+    const providerBody = formatWhatsAppAttributedMessage(profile?.display_name ?? profile?.username, body)
 
     const existingResult = await supabaseAdmin.from("client_messages").select(COMMUNICATION_MESSAGE_COLUMNS).eq("workspace_id", workspace.id).eq("client_request_id", clientRequestId).maybeSingle()
     if (existingResult.error) return Response.json({ error: existingResult.error.message }, { status: 503 })
@@ -103,7 +111,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     }
 
     try {
-        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: workspace.id, to: channel.external_address, body, callbackData: messageId })
+        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: workspace.id, to: channel.external_address, body: providerBody, callbackData: messageId })
         const externalId = providerMessageId(providerResponse)
         const sentAt = new Date().toISOString()
         const finalized = await supabaseAdmin.from("client_messages").update({ status: "whatsapp_sent", provider_message_id: externalId, whatsapp_message_id: externalId, sent_at: sentAt, error: null }).eq("workspace_id", workspace.id).eq("id", messageId).in("status", ["sending", "send_uncertain", "send_failed", "sent", "whatsapp_sent"]).select(COMMUNICATION_MESSAGE_COLUMNS).maybeSingle()
