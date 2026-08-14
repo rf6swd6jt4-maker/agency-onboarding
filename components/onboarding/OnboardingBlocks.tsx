@@ -3,8 +3,9 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { satisfyBlockRequirement } from "@/app/onboarding/session/[token]/actions"
 import { OnboardingForm } from "@/components/onboarding/OnboardingForm"
+import { StripePaymentButtonLabel } from "@/components/onboarding/StripePaymentButtonLabel"
 import { WhyWeAskCard } from "@/components/onboarding/WhyWeAskCard"
-import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
+import { ONBOARDING_PAYMENT_BUTTON_ID, type OnboardingBlock } from "@/lib/onboarding/block-definition"
 import { onboardingBlockLayoutClasses } from "@/lib/onboarding/block-layout"
 import type { FormResponse } from "@/lib/onboarding/forms"
 
@@ -127,8 +128,9 @@ export function OnboardingBlocks({
                 </BlockFrame>
             }
             const requirementId = block.sessionBlockId ?? block.id
+            const paymentButton = block.id === ONBOARDING_PAYMENT_BUTTON_ID
             return <BlockFrame key={block.id} block={block}>
-                <a href={block.url} target={block.openInSameTab ? undefined : "_blank"} rel={block.openInSameTab ? undefined : "noopener noreferrer"} onClick={() => void satisfy(block, "button_opened")} className={block.appearance === "secondary" ? "inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 py-3 font-medium text-[var(--onboarding-primary)]" : "inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white"}>{block.label}</a>
+                <a href={block.url} target={block.openInSameTab ? undefined : "_blank"} rel={block.openInSameTab ? undefined : "noopener noreferrer"} onClick={() => void satisfy(block, "button_opened")} className={paymentButton ? "inline-flex min-h-12 items-center justify-center rounded-xl bg-[#635bff] px-5 py-3 font-medium text-white shadow-sm transition hover:bg-[#5851e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#635bff]/40 focus-visible:ring-offset-2" : block.appearance === "secondary" ? "inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 py-3 font-medium text-[var(--onboarding-primary)]" : "inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white"}>{paymentButton ? <StripePaymentButtonLabel /> : block.label}</a>
                 {block.required && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">{satisfied.has(requirementId) ? "✓ Opened" : "Open this link to continue."}</p> : null}
             </BlockFrame>
         })}

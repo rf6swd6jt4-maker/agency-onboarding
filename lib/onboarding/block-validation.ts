@@ -55,7 +55,7 @@ export function normalizeVisualPaymentGate(payment: OnboardingPaymentDefinitionV
                 id: ONBOARDING_PAYMENT_STEP_ID,
                 key: "payment",
                 blocks: step.blocks.map((block) => block.id === ONBOARDING_PAYMENT_BUTTON_ID && block.kind === "button"
-                    ? { ...block, label: text(block.label, 120) || "Pay securely", url: ONBOARDING_PAYMENT_PLACEHOLDER_URL, required: true }
+                    ? { ...block, label: "Pay with Stripe", url: ONBOARDING_PAYMENT_PLACEHOLDER_URL, required: true }
                     : block),
             }],
         }

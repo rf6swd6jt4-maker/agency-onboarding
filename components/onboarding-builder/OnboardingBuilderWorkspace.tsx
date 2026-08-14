@@ -397,7 +397,7 @@ function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, 
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete video</button>
     </div>
     if (currentGroup.kind === "payment" && block.id === ONBOARDING_PAYMENT_BUTTON_ID) return <div className="space-y-4">
-        <label className="block text-xs text-neutral-500">Button text<input value={block.kind === "button" ? block.label : ""} disabled={!editable} onChange={(event) => block.kind === "button" && updateBlock({ ...block, label: event.target.value })} className={inspectorInputClass} /></label>
+        <p className="text-xs leading-5 text-neutral-400">The button label and Stripe branding are fixed so clients can immediately recognise the secure payment action.</p>
         <p className="text-xs leading-5 text-neutral-600">This required button creates or reuses the client’s secure Stripe Checkout page. Its destination is assigned automatically and it cannot be moved or removed.</p>
     </div>
     return <div className="space-y-4">

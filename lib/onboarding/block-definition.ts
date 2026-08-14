@@ -196,7 +196,7 @@ export function defaultOnboardingPaymentDefinition(): OnboardingPaymentDefinitio
                     id: ONBOARDING_PAYMENT_BUTTON_ID,
                     name: "Pay button",
                     kind: "button",
-                    label: "Pay securely",
+                    label: "Pay with Stripe",
                     url: ONBOARDING_PAYMENT_PLACEHOLDER_URL,
                     required: true,
                     appearance: "primary",
