@@ -23,6 +23,8 @@ function isResumableAutomationEvent(type: string) {
         || type === "account.application.deauthorized"
         || type === "checkout.session.completed"
         || type === "checkout.session.async_payment_succeeded"
+        || type === "checkout.session.async_payment_failed"
+        || type === "checkout.session.expired"
         || type.startsWith("customer.subscription.")
         || ["invoice.payment_failed", "invoice.payment_action_required", "invoice.voided", "invoice.marked_uncollectible"].includes(type)
 }
@@ -205,6 +207,26 @@ export async function POST(request: NextRequest) {
                 }
             }
             await recordAdminActivity({ workspaceId, category: "billing", eventKey: "stripe.checkout.completed", summary: "Stripe Checkout completed", entityType: "stripe_checkout_session", entityId: checkoutId ?? event.id, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.checkout.completed:${event.id}`, outcome: "succeeded", metadata: { sale_id: saleId, subscription_id: subscriptionId } })
+        }
+    } else if (event.type === "checkout.session.async_payment_failed" || event.type === "checkout.session.expired") {
+        const checkout = event.data?.object
+        const checkoutId = stripeObjectId(checkout?.id)
+        if (saleId && checkoutId) {
+            const { error } = await supabaseAdmin.from("client_sales").update({
+                status: "payment_failed",
+                stripe_checkout_status: event.type === "checkout.session.expired" ? "expired" : "async_payment_failed",
+                stripe_checkout_url: null,
+                stripe_checkout_expires_at: null,
+                raw_payload: event,
+                updated_at: new Date().toISOString(),
+            }).eq("workspace_id", workspaceId).eq("id", saleId)
+                .eq("stripe_checkout_session_id", checkoutId)
+                .in("status", ["onboarding_payment_pending", "onboarding_link_sent", "onboarding_link_failed", "payment_failed"])
+            if (error) {
+                await reportStripeAutomationFailure(workspaceId, event.id, "release_onboarding_checkout", error.message)
+                return Response.json({ error: "Could not release the unavailable Checkout page" }, { status: 500 })
+            }
+            await recordAdminActivity({ workspaceId, category: "billing", level: "warning", eventKey: event.type === "checkout.session.expired" ? "stripe.checkout.expired" : "stripe.checkout.payment_failed", summary: event.type === "checkout.session.expired" ? "Stripe Checkout expired" : "Stripe Checkout payment failed", entityType: "stripe_checkout_session", entityId: checkoutId, actorKind: "automation", correlationId: event.id, idempotencyKey: `stripe.checkout.unavailable:${event.id}`, outcome: "succeeded", metadata: { sale_id: saleId, event_type: event.type } })
         }
     } else if (event.type.startsWith("customer.subscription.")) {
         const subscription = event.data?.object
