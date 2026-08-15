@@ -5,6 +5,8 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Avatar } from "@/components/account/Avatar"
+import { ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import type { CommunicationAttachment, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -160,12 +162,12 @@ function messagePreview(message: CommunicationMessage) {
     return message.body || "Message"
 }
 
-function MessageAttachment({ attachment }: { attachment: CommunicationAttachment }) {
+function MessageAttachment({ attachment, onOpenImage }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void }) {
     if (attachment.kind === "sticker") {
         return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
     }
     if (attachment.kind === "image") {
-        return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 block overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} className="max-h-80 h-auto w-full object-contain" /></a>
+        return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} className="max-h-80 h-auto w-full object-contain" /></button>
     }
     if (attachment.kind === "video") {
         return <video src={attachment.url} controls preload="metadata" className="mb-2 max-h-80 w-full rounded-xl bg-black" />
@@ -182,7 +184,7 @@ function ReactionTray({ currentEmoji, onReact, onReply, side }: {
     const [expanded, setExpanded] = useState(false)
     const [customEmoji, setCustomEmoji] = useState("")
     return <div className="relative z-20 flex items-center rounded-full border border-neutral-800 bg-neutral-950 p-1 shadow-xl">
-        <button type="button" onClick={onReply} aria-label="Reply" className="flex h-8 w-8 items-center justify-center rounded-full text-sm text-neutral-400 hover:bg-neutral-800 hover:text-white">↩</button>
+        <button type="button" onClick={onReply} aria-label="Reply" className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-800 hover:text-white"><ReplyIcon /></button>
         {QUICK_REACTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => onReact(currentEmoji === emoji ? "" : emoji)} aria-label={`React with ${emoji}`} className={`flex h-8 w-8 items-center justify-center rounded-full text-base hover:bg-neutral-800 ${currentEmoji === emoji ? "bg-neutral-800" : ""}`}>{emoji}</button>)}
         <button type="button" onClick={() => setExpanded((current) => !current)} aria-label="More emoji reactions" className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-neutral-400 hover:bg-neutral-800 hover:text-white">+</button>
         {expanded ? <div className={`absolute bottom-11 w-72 rounded-2xl border border-neutral-800 bg-neutral-950 p-3 shadow-2xl ${side === "right" ? "right-0" : "left-0"}`}>
@@ -243,6 +245,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const [savingStickerMessageId, setSavingStickerMessageId] = useState<string | null>(null)
     const [interactionError, setInteractionError] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
+    const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
@@ -263,6 +266,16 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     useEffect(() => {
         attachmentRef.current = attachment
     }, [attachment])
+
+    useEffect(() => {
+        if (!actionMessageId) return
+        const dismiss = (event: PointerEvent) => {
+            const interaction = event.target instanceof Element ? event.target.closest("[data-message-interaction]") : null
+            if (interaction?.getAttribute("data-message-interaction") !== actionMessageId) setActionMessageId(null)
+        }
+        document.addEventListener("pointerdown", dismiss)
+        return () => document.removeEventListener("pointerdown", dismiss)
+    }, [actionMessageId])
 
     const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[]) => {
         setConversations((current) => current.map((conversation) => conversation.id === relationshipId
@@ -653,8 +666,9 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.lastReadMessageId === message.id).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                             return <Fragment key={message.id}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
-                                <div className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                                    <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 42), transform: `scale(${0.7 + Math.min(0.3, swipeOffset / 180)})` }} className="absolute left-1 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-800 text-sm text-white transition-transform">↩</span>
+                                <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
+                                    <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
+                                    <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 38), transform: `scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-3 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                     {message.direction === "outbound" && showActions ? <div className="absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                     <article
                                         role="button"
@@ -683,14 +697,14 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                             }
                                             if (deltaX > 0) {
                                                 event.preventDefault()
-                                                setSwipePosition({ id: message.id, offset: Math.min(72, deltaX), active: true })
+                                                setSwipePosition({ id: message.id, offset: Math.min(82, deltaX * 0.78), active: true })
                                             }
                                         }}
                                         onTouchEnd={(event) => {
                                             const start = swipeStartRef.current
                                             const touch = event.changedTouches[0]
                                             swipeStartRef.current = null
-                                            const completed = Boolean(start && !start.cancelled && touch && touch.clientX - start.x > 54 && Math.abs(touch.clientY - start.y) < 42 && message.providerMessageId)
+                                            const completed = Boolean(start && !start.cancelled && touch && touch.clientX - start.x > 58 && Math.abs(touch.clientY - start.y) < 42 && message.providerMessageId)
                                             setSwipePosition({ id: message.id, offset: 0, active: false })
                                             window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 180)
                                             if (completed) {
@@ -698,12 +712,12 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                                 beginReply(message)
                                             }
                                         }}
-                                        style={{ transform: `translateX(${swipeOffset}px)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 180ms cubic-bezier(.2,.8,.2,1)" }}
+                                        style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
                                         className={`${isSticker ? "max-w-52 bg-transparent p-0 shadow-none" : `max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
                                     >
                                         <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : "mb-1 text-neutral-500"} text-[10px] font-semibold`}>{sender}</p>
                                         {message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
-                                        {message.attachment ? <MessageAttachment attachment={message.attachment} /> : null}
+                                        {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} /> : null}
                                         {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
                                         <div className={`mt-1.5 flex items-center justify-end gap-1.5 text-[10px] ${isSticker ? "ml-auto w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
@@ -741,5 +755,6 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950 text-xl">◌</div><h2 className="mt-4 text-sm font-semibold">Select a client chat</h2><p className="mt-2 text-xs text-neutral-600">Messages update here without reloading the panel.</p></div></div>}
             </div>
         </div>
+        <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
     </section>
 }

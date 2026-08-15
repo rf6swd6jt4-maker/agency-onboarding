@@ -1,5 +1,5 @@
 import { nativeAttachmentFromInput, nativeMessageFromRow, assertNativeConversationAccess } from "@/lib/teams/server"
-import { verifyNativeMessageUpload } from "@/lib/onboarding/uploads"
+import { deleteOnboardingUploads, verifyNativeMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -48,4 +48,25 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const { data, error } = await supabaseAdmin.from("workspace_native_messages").insert({ workspace_id: workspace.id, conversation_id: conversationId, sender_user_id: user.id, client_request_id: clientRequestId, body, reply_to_message_id: replyToMessageId || null, attachment: storedAttachment }).select(COLUMNS).single()
     if (error) return Response.json({ error: error.message }, { status: 503 })
     return Response.json({ message: nativeMessageFromRow(data) })
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
+    const { workspaceSlug } = await context.params
+    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const url = new URL(request.url)
+    const conversationId = url.searchParams.get("conversationId") ?? ""
+    const messageId = url.searchParams.get("messageId") ?? ""
+    if (!UUID_PATTERN.test(conversationId) || !UUID_PATTERN.test(messageId)) return Response.json({ error: "A valid message is required." }, { status: 400 })
+    if (!await assertNativeConversationAccess(conversationId, user.id, "write")) return Response.json({ error: "Conversation is unavailable or read-only." }, { status: 403 })
+
+    const { data: message, error: lookupError } = await supabaseAdmin.from("workspace_native_messages").select("id, sender_user_id, attachment").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).maybeSingle()
+    if (lookupError) return Response.json({ error: lookupError.message }, { status: 503 })
+    if (!message) return Response.json({ deleted: true })
+    if (message.sender_user_id !== user.id) return Response.json({ error: "You can only delete messages you sent." }, { status: 403 })
+
+    const { error } = await supabaseAdmin.from("workspace_native_messages").delete().eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).eq("sender_user_id", user.id)
+    if (error) return Response.json({ error: error.message }, { status: 503 })
+    const attachment = nativeAttachmentFromInput(message.attachment)
+    if (attachment?.storagePath) await deleteOnboardingUploads([attachment.storagePath]).catch(() => undefined)
+    return Response.json({ deleted: true })
 }

@@ -78,7 +78,7 @@ test("WhatsApp replies remain linked in both directions", async () => {
     assert.match(route, /reply_to_whatsapp_message_id: replyToProviderMessageId/)
     assert.match(meta, /context: replyToMessageId \? \{ message_id: replyToMessageId \} : undefined/)
     assert.match(workspace, /Replying to \{senderName\(replyingTo\)\}/)
-    assert.match(workspace, /touch\.clientX - start\.x > 54/)
+    assert.match(workspace, /touch\.clientX - start\.x > 58/)
     assert.match(workspace, /message\.replyToProviderMessageId/)
 })
 
