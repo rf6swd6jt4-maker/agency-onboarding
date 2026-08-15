@@ -225,7 +225,7 @@ function mergeReaction(current: CommunicationReaction[], incoming: Communication
     return [...current.filter((reaction) => !(reaction.messageId === incoming.messageId && reaction.direction === incoming.direction)), incoming]
 }
 
-export function CommunicationsWorkspace({ bootstrap }: { bootstrap: CommunicationsBootstrap }) {
+export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: CommunicationsBootstrap; onOpenTeam?: () => void }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
     const [conversations, setConversations] = useState(bootstrap.conversations)
     const [selectedId, setSelectedId] = useState(bootstrap.selectedConversationId)
@@ -610,7 +610,7 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                 <div className="shrink-0 border-b border-neutral-800 p-3">
                     <div role="tablist" aria-label="Communication conversations" className="flex items-center gap-1">
                         <button type="button" role="tab" aria-selected="true" className="inline-flex h-8 items-center gap-2 rounded-lg bg-neutral-800 px-3 text-xs font-semibold text-white">Clients<span className="text-[10px] font-medium text-neutral-400">{visibleConversations.length}</span></button>
-                        <button type="button" role="tab" aria-selected="false" disabled title="Team messaging will be added next" className="h-8 rounded-lg px-3 text-xs font-medium text-neutral-600 disabled:cursor-not-allowed">Team</button>
+                        <button type="button" role="tab" aria-selected="false" onClick={onOpenTeam} className="h-8 rounded-lg px-3 text-xs font-medium text-neutral-400 hover:bg-neutral-900 hover:text-white">Team</button>
                     </div>
                     <label className="relative mt-3 block"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600"><SearchIcon /></span><input ref={searchRef} type="search" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search conversations" placeholder="Search conversations" className="h-10 w-full rounded-lg border border-neutral-800 bg-black pl-9 pr-3 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600" /></label>
                 </div>

@@ -12,12 +12,14 @@ import { shortId } from "@/lib/ui/relative-time"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
+import { WorkspaceMemberProfileModal } from "@/components/workspace/WorkspaceMemberProfileModal"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type OnboardingBuilderWindowSignal } from "@/lib/onboarding-builder-window"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
+import { WORKSPACE_MEMBER_PROFILE_EVENT, WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE } from "@/lib/workspace-member-profile"
 import { visibleWorkspacePresence, workspacePresenceRoster, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceRosterMember, type WorkspacePresenceState } from "@/lib/workspace-presence"
 import {
     runWorkspaceMutation,
@@ -141,16 +143,16 @@ function WorkspaceMutationStatus({ state, error }: { state: "idle" | "saving" | 
     return <span aria-live="polite" title={error ?? undefined} className={`hidden shrink-0 text-[11px] md:inline ${state === "error" ? "text-red-300" : "text-neutral-500"}`}>{label}</span>
 }
 
-function WorkspacePresenceAvatars({ members, state, error }: { members: WorkspacePresenceRosterMember[]; state: WorkspacePresenceState; error: string | null }) {
+function WorkspacePresenceAvatars({ members, state, error, onOpenProfile }: { members: WorkspacePresenceRosterMember[]; state: WorkspacePresenceState; error: string | null; onOpenProfile: (userId: string) => void }) {
     if (!members.length) {
         if (state === "live") return null
         const label = state === "connecting" ? "Workspace presence connecting" : state === "reconnecting" ? "Workspace presence reconnecting" : error || "Workspace presence offline"
         return <span aria-label={label} title={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${state === "connecting" || state === "reconnecting" ? "animate-pulse bg-amber-400" : "bg-red-400"}`} />
     }
     return <div aria-label="Workspace team presence" className="flex shrink-0 items-center -space-x-1.5">
-        {members.map((member) => <span key={member.id} title={`${member.name} — ${member.active ? "Connected" : "Disconnected"}`} className="h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900">
+        {members.map((member) => <button type="button" key={member.id} onClick={() => onOpenProfile(member.id)} aria-label={`Open ${member.name} profile`} title={`${member.name} — ${member.active ? "Connected" : "Disconnected"}`} className="h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500">
             <span className={`block h-full w-full ${member.active ? "" : "grayscale opacity-35"}`}><Avatar src={member.avatarSrc} name={member.name} className="h-full w-full" /></span>
-        </span>)}
+        </button>)}
         {state !== "live" ? <span aria-label="Workspace presence reconnecting" title={error || "Workspace presence reconnecting"} className="ml-2 h-2 w-2 animate-pulse rounded-full bg-amber-400" /> : null}
     </div>
 }
@@ -492,9 +494,43 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [createError, setCreateError] = useState<string | null>(null)
     const [uploadLabel, setUploadLabel] = useState<string | null>(null)
     const [creationNotice, setCreationNotice] = useState<CreationNotice | null>(null)
+    const [profileUserId, setProfileUserId] = useState<string | null>(null)
     const [isCreating, startCreateTransition] = useTransition()
     const defaultWorkspaceUrl = `/${workspace.slug}`
     const tabsStorageKey = `betelgeze:workspace-tabs:${workspace.slug}`
+
+    useEffect(() => {
+        const openFromEvent = (event: Event) => {
+            const detail = (event as CustomEvent<{ userId?: string }>).detail
+            if (detail?.userId && workspaceMembers.some((member) => member.id === detail.userId)) setProfileUserId(detail.userId)
+        }
+        const openFromFrame = (event: MessageEvent) => {
+            if (event.origin !== window.location.origin || event.source === window) return
+            const message = event.data as { source?: string; userId?: string } | null
+            if (message?.source === WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE && message.userId && workspaceMembers.some((member) => member.id === message.userId)) setProfileUserId(message.userId)
+        }
+        window.addEventListener(WORKSPACE_MEMBER_PROFILE_EVENT, openFromEvent)
+        window.addEventListener("message", openFromFrame)
+        return () => {
+            window.removeEventListener(WORKSPACE_MEMBER_PROFILE_EVENT, openFromEvent)
+            window.removeEventListener("message", openFromFrame)
+        }
+    }, [workspaceMembers])
+
+    useEffect(() => {
+        if (!presenceSessionIdRef.current) presenceSessionIdRef.current = crypto.randomUUID()
+        const heartbeat = () => void fetch(`/api/workspaces/${encodeURIComponent(workspace.slug)}/activity/presence`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ state: "heartbeat", sessionId: presenceSessionIdRef.current }),
+            keepalive: true,
+        }).catch(() => undefined)
+        heartbeat()
+        const interval = window.setInterval(heartbeat, 60_000)
+        const onVisibility = () => { if (document.visibilityState === "visible") heartbeat() }
+        document.addEventListener("visibilitychange", onVisibility)
+        return () => { window.clearInterval(interval); document.removeEventListener("visibilitychange", onVisibility) }
+    }, [workspace.slug])
 
     const normalizeWorkspaceUrl = useCallback((value: string) => {
         return normalizeWorkspaceRoute(value, workspace.slug, window.location.origin)
@@ -1332,7 +1368,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (canAccessPrivatePanels && (normalized === "new poll" || normalized === "create poll" || normalized === "start poll" || normalized === "run poll")) return `/${workspace.slug}/leadgen/new`
         if (normalized === "communications" || normalized === "communication" || normalized === "messages" || normalized === "client messages" || normalized === "chat") return `/${workspace.slug}/communications`
         if (normalized === "manual relationship" || normalized === "start relationship" || normalized === "new relationship" || normalized === "add relationship" || normalized === "manual client" || normalized === "add manual client" || normalized === "new client" || normalized === "add client") return `/${workspace.slug}/relationships?create=relationship`
-        if (canAccessPrivatePanels && (normalized === "officers" || normalized === "responsible officers" || normalized === "global officer" || normalized === "maintenance routing")) return `/${workspace.slug}/settings#officers`
+        if (canAccessPrivatePanels && (normalized === "teams" || normalized === "fulfilment teams" || normalized === "maintenance team" || normalized === "officers" || normalized === "responsible officers" || normalized === "global officer" || normalized === "maintenance routing")) return `/${workspace.slug}/settings#teams`
         if (canAccessPrivatePanels && (normalized === "lead gen settings" || normalized === "leadgen settings")) return `/${workspace.slug}/settings#leadgen`
         if (canAccessPrivatePanels && (normalized === "poll automation" || normalized === "lead gen automation")) return `/${workspace.slug}/settings#leadgen-automation`
         if (canAccessPrivatePanels && (normalized === "lead gen targeting" || normalized === "target industries" || normalized === "target locations")) return `/${workspace.slug}/settings#leadgen-targeting`
@@ -2002,7 +2038,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         <input ref={desktopSearchInputRef} value={query} onKeyDown={submitSearch} onChange={(event) => { setQuery(event.target.value); openDesktopSearch() }} onFocus={openDesktopSearch} aria-label="Search Betelgeze" placeholder="Search relationships, work, leads..." className="h-9 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 pl-9 pr-16 text-sm text-neutral-300 outline-none transition placeholder:text-neutral-600 focus:border-neutral-600 focus:ring-2 focus:ring-white/10" />
                         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-neutral-800 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500">{searchShortcutLabel}</span>
                     </label>
-                    <WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} />
+                    <WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} onOpenProfile={setProfileUserId} />
                     <WorkspaceMutationStatus state={activeBackgroundSaving ? "saving" : backgroundMutationState} error={backgroundMutationError} />
                     {searchOpen && (
                         <div className="absolute left-[6.5rem] right-0 top-11 z-[70] max-h-[32rem] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
@@ -2071,11 +2107,20 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                             <OkrIcon />
                         </button>}
                     </div>
-                    <div className="md:hidden"><WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} /></div>
+                    <div className="md:hidden"><WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} onOpenProfile={setProfileUserId} /></div>
                     <AccountMenu username={username} email={email} avatarSrc={avatarSrc} workspaceId={workspace.id} workspaceName={workspace.name} leaveAction={leaveAction} buttonClassName="h-9 w-9" />
                 </div>
             </div>
         </header>
+
+        {profileUserId ? <WorkspaceMemberProfileModal
+            key={profileUserId}
+            workspaceSlug={workspace.slug}
+            userId={profileUserId}
+            active={profileUserId === currentUserId || activeWorkspaceUsers.some((member) => member.userId === profileUserId)}
+            onClose={() => setProfileUserId(null)}
+            onMessage={(userId) => { setProfileUserId(null); navigateActiveTab(`/${workspace.slug}/communications?mode=team&dm=${userId}`) }}
+        /> : null}
 
         {createTarget && (
             <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workspace-create-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateTarget(null) }}>

@@ -28,6 +28,7 @@ export type RelationshipRecord = {
     started_onboarding_at: string | null
     seller_user_id: string | null
     fulfilment_manager_user_id: string | null
+    fulfilment_team_id: string | null
     project_timeframe_days: number | null
     lifecycle_phase: RelationshipPhase
     status: RelationshipStatus
@@ -134,7 +135,7 @@ type ClientRow = {
     is_test?: boolean | null
 }
 
-const RELATIONSHIP_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, website_url, industry_value, location_value, address, source_label, primary_contact_role, notes_summary, started_onboarding_at, seller_user_id, fulfilment_manager_user_id, project_timeframe_days, lifecycle_phase, status, source_metadata, created_at, updated_at"
+const RELATIONSHIP_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, website_url, industry_value, location_value, address, source_label, primary_contact_role, notes_summary, started_onboarding_at, seller_user_id, fulfilment_manager_user_id, fulfilment_team_id, project_timeframe_days, lifecycle_phase, status, source_metadata, created_at, updated_at"
 const RELATIONSHIP_LEGACY_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, business_name, website_url, lifecycle_phase, status, source_metadata, created_at, updated_at"
 
 function isMissingRelationshipSchema(error: QueryError) {
@@ -159,6 +160,7 @@ function isRelationshipColumnDrift(error: QueryError) {
         message.includes("whatsapp_phone") ||
         message.includes("seller_user_id") ||
         message.includes("fulfilment_manager_user_id") ||
+        message.includes("fulfilment_team_id") ||
         message.includes("project_timeframe_days") ||
         message.includes("relationship_assets")
     ))
@@ -228,6 +230,7 @@ function fallbackRelationshipFromClient(client: ClientRow): RelationshipRecord {
         started_onboarding_at: client.archived_at ? null : client.created_at,
         seller_user_id: null,
         fulfilment_manager_user_id: null,
+        fulfilment_team_id: null,
         project_timeframe_days: null,
         lifecycle_phase: client.archived_at ? "completed_lost" : "onboarding",
         status: client.archived_at ? "archived" : "active",
@@ -285,6 +288,7 @@ export async function listRelationshipsForWorkspace(workspaceId: string): Promis
         whatsapp_phone: relationship.whatsapp_phone ?? null,
         seller_user_id: relationship.seller_user_id ?? null,
         fulfilment_manager_user_id: relationship.fulfilment_manager_user_id ?? null,
+        fulfilment_team_id: relationship.fulfilment_team_id ?? null,
         project_timeframe_days: relationship.project_timeframe_days ?? null,
     }))
     const wrappedClientIds = new Set(relationships.map((relationship) => relationship.client_id).filter(Boolean))
@@ -325,6 +329,7 @@ export async function getRelationship(workspaceId: string, relationshipId: strin
             whatsapp_phone: relationship.whatsapp_phone ?? null,
             seller_user_id: relationship.seller_user_id ?? null,
             fulfilment_manager_user_id: relationship.fulfilment_manager_user_id ?? null,
+            fulfilment_team_id: relationship.fulfilment_team_id ?? null,
             project_timeframe_days: relationship.project_timeframe_days ?? null,
         }
     }
@@ -353,6 +358,7 @@ export async function getRelationship(workspaceId: string, relationshipId: strin
                 whatsapp_phone: relationship.whatsapp_phone ?? null,
                 seller_user_id: relationship.seller_user_id ?? null,
                 fulfilment_manager_user_id: relationship.fulfilment_manager_user_id ?? null,
+                fulfilment_team_id: relationship.fulfilment_team_id ?? null,
                 project_timeframe_days: relationship.project_timeframe_days ?? null,
             }
         }

@@ -49,6 +49,7 @@ export type RelationshipDealDetailsInput = {
     primaryEmail: string
     sellerUserId: string
     fulfilmentManagerUserId: string
+    fulfilmentTeamId: string
     projectTimeframeDays: number | null
     description: string
     services: Array<{
@@ -181,6 +182,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const serviceKeys = [...new Set(formData.getAll("service_key").map(String).filter(Boolean))]
     let sellerId = nullableFormString(formData, "seller_user_id")
     const managerId = nullableFormString(formData, "fulfilment_manager_user_id")
+    const submittedTeamId = nullableFormString(formData, "fulfilment_team_id")
     const whatsappPhone = nullableFormString(formData, "whatsapp_phone")
     const timeframe = Number(formData.get("project_timeframe_days") ?? 0)
     const includesRelationshipDetails = formData.has("primary_person_name")
@@ -192,7 +194,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const description = nullableFormString(formData, "description")
     if (includesRelationshipDetails && !primaryPersonName) throw new Error("Add the client's name before saving the relationship")
     const [{ data: relationship, error: relationshipError }, existingServicesResult, { data: frozenSales }, configuration] = await Promise.all([
-        supabaseAdmin.from("relationships").select("lifecycle_phase, seller_user_id").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
+        supabaseAdmin.from("relationships").select("lifecycle_phase, seller_user_id, fulfilment_team_id").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId),
         supabaseAdmin.from("client_sales").select("id, status").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId).in("status", [
             "invoice_sent", "payment_failed", "paid", "test_paid", "paid_consent_template_sending", "paid_awaiting_whatsapp_confirm",
@@ -207,6 +209,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
         throw new Error("Only this relationship's seller or a workspace admin can update its commercial details")
     }
     if (!canManageCommercialDetails) sellerId = relationship.seller_user_id
+    const fulfilmentTeamId = formData.has("fulfilment_team_id") ? submittedTeamId : relationship.fulfilment_team_id
     if (existingServicesResult.error) throw new Error(existingServicesResult.error.message)
     const existingServices = existingServicesResult.data ?? []
     const existingByKey = new Map((existingServices ?? []).map((service) => [service.service_key, service]))
@@ -224,7 +227,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             existing?.service_id !== current.id || existing?.service_revision_id !== current.revisionId
         )
     })
-    const commercialChanged = serviceIdentityChanged || serviceKeys.length !== existingUpfrontPrices.size || serviceKeys.some((serviceKey) => (
+    const commercialChanged = fulfilmentTeamId !== relationship.fulfilment_team_id || serviceIdentityChanged || serviceKeys.length !== existingUpfrontPrices.size || serviceKeys.some((serviceKey) => (
         existingUpfrontPrices.get(serviceKey) !== submittedUpfrontPrices.get(serviceKey)
         || existingRecurringPrices.get(serviceKey) !== submittedRecurringPrices.get(serviceKey)
         || existingCurrencies.get(serviceKey) !== submittedCurrencies.get(serviceKey)
@@ -247,6 +250,21 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             || (postedRevisionId && postedRevisionId !== expectedRevisionId)
         )) throw new Error(`The selected revision for ${serviceKey} changed. Reload and review the deal before saving`)
     }
+    const teamAssigneeByService = new Map<string, string>()
+    if (fulfilmentTeamId) {
+        const [{ data: team }, { data: responsibilities, error: responsibilityError }] = await Promise.all([
+            supabaseAdmin.from("workspace_teams").select("id").eq("workspace_id", workspace.id).eq("id", fulfilmentTeamId).eq("kind", "custom").is("archived_at", null).maybeSingle(),
+            supabaseAdmin.from("workspace_team_service_responsibilities").select("service_id, responsible_user_id").eq("workspace_id", workspace.id).eq("team_id", fulfilmentTeamId),
+        ])
+        if (!team || responsibilityError) throw new Error("Choose an active fulfilment team")
+        for (const responsibility of responsibilities ?? []) teamAssigneeByService.set(responsibility.service_id, responsibility.responsible_user_id)
+        for (const serviceKey of serviceKeys) {
+            const existing = existingByKey.get(serviceKey)
+            const catalogue = catalogueByCode.get(serviceKey)
+            const serviceId = catalogue?.state === "active" && catalogue.revisionId ? catalogue.id : existing?.service_id ?? catalogue?.id ?? null
+            if (!serviceId || !teamAssigneeByService.has(serviceId)) throw new Error(`${catalogue?.name ?? serviceKey} is not assigned within the selected fulfilment team`)
+        }
+    }
     const versionedRows = serviceKeys.map((serviceKey) => {
         const existing = existingByKey.get(serviceKey)
         const service = catalogueByCode.get(serviceKey)
@@ -261,7 +279,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             recurring_price_cents: submittedRecurringPrices.get(serviceKey) ?? 0,
             price_cents: (submittedUpfrontPrices.get(serviceKey) ?? 0) + (submittedRecurringPrices.get(serviceKey) ?? 0),
             currency: submittedCurrencies.get(serviceKey) ?? "USD",
-            assignee_user_id: nullableFormString(formData, `service_assignee_${serviceKey}`) ?? existing?.assignee_user_id ?? service?.defaultAssigneeId ?? null,
+            assignee_user_id: fulfilmentTeamId && serviceId ? teamAssigneeByService.get(serviceId) ?? null : nullableFormString(formData, `service_assignee_${serviceKey}`) ?? existing?.assignee_user_id ?? service?.defaultAssigneeId ?? null,
             ...(configuration.schemaReady && serviceId && serviceRevisionId ? { service_id: serviceId, service_revision_id: serviceRevisionId } : {}),
         }
     })
@@ -291,6 +309,8 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             ? "The dual-price sale migration is not applied yet"
             : saveError.message)
     }
+    const { error: teamSaveError } = await supabaseAdmin.from("relationships").update({ fulfilment_team_id: fulfilmentTeamId, updated_at: new Date().toISOString() }).eq("workspace_id", workspace.id).eq("id", relationshipId)
+    if (teamSaveError) throw new Error(teamSaveError.message)
     if (relationship.lifecycle_phase === "potential_client") await ensureSalesStage({ workspaceId: workspace.id, relationshipId, sellerId })
     relationshipRevalidatePaths(slug, relationshipId)
     const { data: savedRelationship, error: versionError } = await supabaseAdmin.from("relationships").select("updated_at").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle()
@@ -308,6 +328,7 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
     formData.set("primary_email", input.primaryEmail)
     formData.set("seller_user_id", input.sellerUserId)
     formData.set("fulfilment_manager_user_id", input.fulfilmentManagerUserId)
+    formData.set("fulfilment_team_id", input.fulfilmentTeamId)
     formData.set("project_timeframe_days", input.projectTimeframeDays ? String(input.projectTimeframeDays) : "")
     formData.set("description", input.description)
     for (const service of input.services) {

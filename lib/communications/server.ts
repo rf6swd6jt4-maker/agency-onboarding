@@ -130,7 +130,7 @@ export async function loadCommunicationPeople(workspaceId: string, currentUserId
     const profileById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]))
     const people = userIds.map((id) => {
         const profile = profileById.get(id)
-        const name = profile?.display_name ?? profile?.username ?? (id === currentUserId ? "You" : "Team member")
+        const name = profile?.display_name?.trim() || profile?.username || (id === currentUserId ? "You" : "Team member")
         return { id, name, avatarSrc: profile?.avatar_path && profile?.username ? profileAvatarUrl(profile.username, profile.avatar_path) : null }
     })
     return {

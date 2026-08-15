@@ -17,6 +17,7 @@ import { proceedRelationshipCurrentWork, saveRelationshipBackgroundDetails, save
 import { RelationshipGantt } from "./RelationshipGantt"
 
 type Member = { id: string; name: string }
+type FulfilmentTeam = { id: string; name: string; responsibilities: Array<{ serviceId: string; userId: string }> }
 type DealService = {
     code: string
     serviceId: string | null
@@ -50,6 +51,7 @@ type RelationshipDetails = {
     primaryEmail: string
     sellerUserId: string
     fulfilmentManagerUserId: string
+    fulfilmentTeamId: string
     projectTimeframeDays: number | null
     description: string
     lifecyclePhase: RelationshipPhase
@@ -104,6 +106,7 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
         primaryEmail: details.primaryEmail,
         sellerUserId: details.sellerUserId,
         fulfilmentManagerUserId: details.fulfilmentManagerUserId,
+        fulfilmentTeamId: details.fulfilmentTeamId,
         projectTimeframeDays: details.projectTimeframeDays,
         description: details.description,
         selectedCodes: selected.map((service) => service.code),
@@ -131,6 +134,7 @@ function commercialDetailsKey(draft: Draft) {
     return JSON.stringify({
         sellerUserId: draft.sellerUserId,
         fulfilmentManagerUserId: draft.fulfilmentManagerUserId,
+        fulfilmentTeamId: draft.fulfilmentTeamId,
         projectTimeframeDays: draft.projectTimeframeDays,
         selectedCodes: draft.selectedCodes,
         upfrontPrices: draft.upfrontPrices,
@@ -152,6 +156,7 @@ export function RelationshipDealWorkspace({
     updatedAt,
     details,
     members,
+    fulfilmentTeams,
     services,
     modules,
     theme,
@@ -169,6 +174,7 @@ export function RelationshipDealWorkspace({
     updatedAt: string
     details: RelationshipDetails
     members: Member[]
+    fulfilmentTeams: FulfilmentTeam[]
     services: DealService[]
     modules: OnboardingModuleDefinition[]
     theme: OnboardingThemeDefinition
@@ -200,6 +206,8 @@ export function RelationshipDealWorkspace({
     const autosavePromiseRef = useRef<Promise<boolean> | null>(null)
     const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
     const selectedServices = services.filter((service) => draft.selectedCodes.includes(service.code))
+    const selectedFulfilmentTeam = fulfilmentTeams.find((team) => team.id === draft.fulfilmentTeamId) ?? null
+    const missingTeamServices = selectedFulfilmentTeam ? selectedServices.filter((service) => !service.serviceId || !selectedFulfilmentTeam.responsibilities.some((responsibility) => responsibility.serviceId === service.serviceId)) : selectedServices
     const selectedModuleIds = new Set([
         ...modules.filter((module) => module.mandatory).map((module) => module.id),
         ...selectedServices.flatMap((service) => service.moduleIds),
@@ -213,6 +221,8 @@ export function RelationshipDealWorkspace({
         emailIssue(draft.primaryEmail),
         whatsappIssue(draft.whatsappPhone),
         draft.selectedCodes.length ? null : "Select at least one service",
+        draft.fulfilmentTeamId ? null : "Choose a fulfilment team",
+        draft.fulfilmentTeamId && missingTeamServices.length ? `${selectedFulfilmentTeam?.name ?? "This team"} does not cover: ${missingTeamServices.map((service) => service.name).join(", ")}` : null,
     ].filter((issue): issue is string => Boolean(issue))
     const onboardingIssues = [
         schemaReady ? null : "The Builder schema is not available",
@@ -352,6 +362,7 @@ export function RelationshipDealWorkspace({
             primaryEmail: source.primaryEmail,
             sellerUserId: source.sellerUserId,
             fulfilmentManagerUserId: source.fulfilmentManagerUserId,
+            fulfilmentTeamId: source.fulfilmentTeamId,
             projectTimeframeDays: source.projectTimeframeDays,
             description: source.description,
             services: sourceServices.map((service) => ({
@@ -361,7 +372,7 @@ export function RelationshipDealWorkspace({
                 upfrontPriceCents: Math.max(0, Math.round(source.upfrontPrices[service.code] ?? 0)),
                 recurringPriceCents: service.serviceType === "retainer" ? Math.max(0, Math.round(source.recurringPrices[service.code] ?? 0)) : 0,
                 currency: source.currency.toUpperCase(),
-                assigneeUserId: service.selectedAssigneeId,
+                assigneeUserId: source.fulfilmentTeamId && service.serviceId ? fulfilmentTeams.find((team) => team.id === source.fulfilmentTeamId)?.responsibilities.find((responsibility) => responsibility.serviceId === service.serviceId)?.userId ?? null : service.selectedAssigneeId,
             })),
         }
     }
@@ -437,6 +448,7 @@ export function RelationshipDealWorkspace({
             <DetailField label="Email" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} onBlur={() => void saveBackground()} placeholder="Required before selling" className={inputClass} /></DetailField>
             <DetailField label="Seller" icon="person"><select disabled={!canEdit} value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className={inputClass}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label="Fulfilment manager" icon="person" className="lg:border-l lg:border-neutral-900 lg:pl-8"><select disabled={!canEdit} value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className={inputClass}><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
+            <DetailField label="Fulfilment team" icon="person" className="lg:col-span-2"><select disabled={!canEdit || commercialLocked} value={draft.fulfilmentTeamId} onChange={(event) => update("fulfilmentTeamId", event.target.value)} className={inputClass}><option value="">Choose fulfilment team</option>{fulfilmentTeams.map((team) => { const missing = selectedServices.filter((service) => !service.serviceId || !team.responsibilities.some((responsibility) => responsibility.serviceId === service.serviceId)); return <option key={team.id} value={team.id} disabled={missing.length > 0}>{team.name}{missing.length ? ` · missing ${missing.map((service) => service.name).join(", ")}` : ""}</option> })}</select>{draft.fulfilmentTeamId && missingTeamServices.length ? <MissingHint message={`${selectedFulfilmentTeam?.name ?? "This team"} does not cover ${missingTeamServices.map((service) => service.name).join(", ")}.`} /> : null}</DetailField>
             <DetailField label={invoiced ? "Project timeline" : "Planned project timeline"} icon="timeline" className="lg:col-span-2"><div className="flex items-center gap-2"><input disabled={!canEdit} type="number" min="1" value={draft.projectTimeframeDays ?? ""} onChange={(event) => update("projectTimeframeDays", event.target.value ? Number(event.target.value) : null)} placeholder="Not set" className={`${inputClass} max-w-24`} />{draft.projectTimeframeDays ? <span className="text-neutral-500">days</span> : null}</div></DetailField>
         <DetailField label="Services" icon="services" className="lg:col-span-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -468,6 +480,7 @@ export function RelationshipDealWorkspace({
                     <label className="text-xs text-neutral-500">Billing email<input type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /><MissingHint message={emailIssue(draft.primaryEmail)} /></label>
                     <label className="text-xs text-neutral-500">Seller<select value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
                     <label className="text-xs text-neutral-500">Fulfilment manager<select value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
+                    <label className="text-xs text-neutral-500">Fulfilment team<select value={draft.fulfilmentTeamId} onChange={(event) => update("fulfilmentTeamId", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="">Choose team</option>{fulfilmentTeams.map((team) => { const missing = selectedServices.filter((service) => !service.serviceId || !team.responsibilities.some((responsibility) => responsibility.serviceId === service.serviceId)); return <option key={team.id} value={team.id} disabled={missing.length > 0}>{team.name}{missing.length ? ` · incomplete` : ""}</option> })}</select><MissingHint message={!draft.fulfilmentTeamId ? "Required" : missingTeamServices.length ? `${selectedFulfilmentTeam?.name ?? "Team"} does not cover every selected service` : null} /></label>
                     <label className="text-xs text-neutral-500">Planned project timeline<div className="mt-1.5 flex h-10 items-center rounded-lg border border-neutral-700 bg-black px-3"><input type="number" min="1" value={draft.projectTimeframeDays ?? ""} onChange={(event) => update("projectTimeframeDays", event.target.value ? Number(event.target.value) : null)} placeholder="Optional" className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none" />{draft.projectTimeframeDays ? <span className="text-xs text-neutral-500">days</span> : null}</div></label>
                     <div className="sm:col-span-2"><p className="text-xs text-neutral-500">Services</p><div className="mt-1.5 grid gap-1.5 rounded-lg border border-neutral-800 bg-black p-2 sm:grid-cols-2">{services.map((service) => <label key={service.code} className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-neutral-900"><input type="checkbox" checked={draft.selectedCodes.includes(service.code)} onChange={() => toggleService(service.code)} className="mt-0.5" /><span className="min-w-0"><span className="flex items-center gap-1.5 text-sm text-neutral-200">{service.name}{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span><span className="mt-0.5 block text-[11px] text-neutral-600">{service.description || `Service ${service.code}`}</span></span></label>)}</div><MissingHint message={draft.selectedCodes.length ? null : "Select at least one service"} /></div>
                     <label className="text-xs text-neutral-500 sm:col-span-2">Description<textarea value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Optional relationship context" className="mt-1.5 min-h-20 w-full resize-none rounded-lg border border-neutral-700 bg-black px-3 py-2 text-sm leading-6 text-white" /></label>

@@ -341,10 +341,18 @@ export async function createOnboardingReviewWork(input: {
 
 async function serviceRows(workspaceId: string, relationshipId: string) {
     const result = await supabaseAdmin.from("relationship_services")
-        .select("service_key, service_revision_id, assignee_user_id")
+        .select("service_key, service_id, service_revision_id, assignee_user_id")
         .eq("workspace_id", workspaceId).eq("relationship_id", relationshipId)
         .order("created_at")
-    if (!result.error) return result.data ?? []
+    if (!result.error) {
+        const rows = result.data ?? []
+        const { data: relationship } = await supabaseAdmin.from("relationships").select("fulfilment_team_id").eq("workspace_id", workspaceId).eq("id", relationshipId).maybeSingle()
+        if (!relationship?.fulfilment_team_id) return rows
+        const { data: responsibilities, error } = await supabaseAdmin.from("workspace_team_service_responsibilities").select("service_id, responsible_user_id").eq("workspace_id", workspaceId).eq("team_id", relationship.fulfilment_team_id)
+        if (error) throw new Error(error.message)
+        const assigneeByService = new Map((responsibilities ?? []).map((item) => [item.service_id, item.responsible_user_id]))
+        return rows.map((service) => ({ ...service, assignee_user_id: service.service_id ? assigneeByService.get(service.service_id) ?? null : null }))
+    }
     if (result.error.code !== "42703" && !result.error.message.toLowerCase().includes("schema cache")) {
         throw new Error(result.error.message)
     }
@@ -353,7 +361,7 @@ async function serviceRows(workspaceId: string, relationshipId: string) {
         .eq("workspace_id", workspaceId).eq("relationship_id", relationshipId)
         .order("created_at")
     if (legacy.error) throw new Error(legacy.error.message)
-    return (legacy.data ?? []).map((service) => ({ ...service, service_revision_id: null }))
+    return (legacy.data ?? []).map((service) => ({ ...service, service_id: null, service_revision_id: null }))
 }
 
 async function setRelationshipFulfilmentPhase(workspaceId: string, relationshipId: string) {

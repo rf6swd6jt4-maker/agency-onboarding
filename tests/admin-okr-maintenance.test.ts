@@ -443,31 +443,25 @@ test("workspace error screens report authenticated incidents to maintenance and 
     assert.match(endpoint, /reportPlatformFailure/)
 })
 
-test("the global Maintenance officer overrides category routes", async () => {
-    const [migration, triggerFix, maintenanceMigration, settings, officerSettings, settingsActions, maintenancePage, adminPage] = await Promise.all([
-        readFile("supabase/migrations/20260804160000_global_maintenance_officer.sql", "utf8"),
-        readFile("supabase/migrations/20260804170000_fix_admin_officer_validation.sql", "utf8"),
-        readFile("supabase/migrations/20260810100000_custom_onboarding_foundation.sql", "utf8"),
+test("Maintenance responsibility is managed through the required workspace team", async () => {
+    const [migration, settings, teamSettings, teamRoute, maintenancePage, adminPage] = await Promise.all([
+        readFile("supabase/migrations/20260815143000_workspace_teams_native_chat.sql", "utf8"),
         readFile("app/[workspaceSlug]/settings/page.tsx", "utf8"),
-        readFile("components/admin/WorkspaceOfficerSettings.tsx", "utf8"),
-        readFile("app/[workspaceSlug]/settings/actions.ts", "utf8"),
+        readFile("components/settings/WorkspaceTeamSettings.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/teams/route.ts", "utf8"),
         readFile("app/[workspaceSlug]/admin/maintenance/page.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
     ])
-    assert.match(migration, /'global'.*'leadgen'/s)
-    assert.match(triggerFix, /to_jsonb\(new\)->>'owner_user_id'/)
-    assert.match(triggerFix, /to_jsonb\(new\)->>'responsible_user_id'/)
-    assert.doesNotMatch(triggerFix, /new\.owner_user_id|new\.responsible_user_id/)
-    assert.match(maintenanceMigration, /order by case when route\.category = 'global' then 0 else 1 end/)
-    assert.match(settings, /id="officers"/)
-    assert.match(settings, /key=\{`\$\{officerRoutes\.get\("global"\)/)
-    assert.match(officerSettings, /The category choices below stay saved and resume automatically/)
-    assert.match(officerSettings, /value=\{globalOfficer\}/)
-    assert.match(officerSettings, /value=\{categoryOfficers\[category\.key\]/)
-    assert.doesNotMatch(officerSettings, /defaultValue=/)
-    assert.match(settingsActions, /MAINTENANCE_ROUTE_KEYS/)
-    assert.match(settingsActions, /reportPlatformFailure/)
-    assert.match(settingsActions, /source: "settings_officers"/)
+    assert.match(migration, /'Maintenance', 'maintenance'/)
+    assert.match(migration, /where route\.category = 'global'/)
+    assert.match(migration, /delete from public\.workspace_maintenance_routing where category = 'global'/)
+    assert.match(migration, /where membership\.role = 'owner'[\s\S]*on conflict \(workspace_id, category\) do nothing/)
+    assert.match(settings, /id="teams"/)
+    assert.match(settings, /<WorkspaceTeamSettings/)
+    assert.doesNotMatch(settings, /WorkspaceOfficerSettings|id="officers"/)
+    assert.match(teamSettings, /Routes platform maintenance categories/)
+    assert.match(teamRoute, /Only the workspace owner can edit Maintenance/)
+    assert.match(teamRoute, /Assign every maintenance category before saving/)
     assert.doesNotMatch(maintenancePage, /Save routing|saveMaintenanceRouting/)
     assert.match(adminPage, /listAdminWorkItems/)
 })
@@ -481,9 +475,9 @@ test("Settings and search expose one Lead Gen section without duplicate group he
     assert.match(settings, /\{ id: "leadgen", label: "Lead Gen"/)
     assert.doesNotMatch(settings, /\{ id: "leadgen-automation", label:/)
     assert.doesNotMatch(settings, /title="Lead Gen Automation"|title="Lead Gen Targeting"|title="Lead Gen Sources"/)
-    assert.match(search, /settings-officers/)
+    assert.match(search, /settings-teams/)
     assert.match(search, /settings-leadgen".*label: "Lead Gen"/)
     assert.match(search, /\$\{settingsPath\} > Lead Gen > Poll Automation/)
-    assert.match(shell, /settings#officers/)
+    assert.match(shell, /settings#teams/)
     assert.match(shell, /settings#leadgen/)
 })

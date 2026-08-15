@@ -1,24 +1,25 @@
-import { CommunicationsWorkspace } from "@/components/communications/CommunicationsWorkspace"
+import { CommunicationsPanel } from "@/components/communications/CommunicationsPanel"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { loadCommunicationMessages, loadCommunicationPeople, loadCommunicationReactions, loadCommunicationReadCursors, loadCommunicationStickers } from "@/lib/communications/server"
 import type { ClientConversation, CommunicationsBootstrap } from "@/lib/communications/types"
 import { listRelationshipsForWorkspace } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
+import { loadNativeCommunications } from "@/lib/teams/server"
 
 export const dynamic = "force-dynamic"
 
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
-    searchParams: Promise<{ conversation?: string }>
+    searchParams: Promise<{ conversation?: string; mode?: string; nativeConversation?: string; dm?: string }>
 }
 
 export default async function CommunicationsPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => relationship.status !== "archived")
     const clientIds = relationships.flatMap((relationship) => relationship.client_id ? [relationship.client_id] : [])
-    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult] = await Promise.all([
+    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult, nativeBootstrap] = await Promise.all([
         loadCommunicationMessages({ workspaceId: workspace.id }),
         loadCommunicationReadCursors(workspace.id),
         loadCommunicationReactions(workspace.id),
@@ -27,6 +28,7 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
         clientIds.length
             ? supabaseAdmin.from("client_communication_channels").select("client_id").eq("workspace_id", workspace.id).eq("provider", "meta_whatsapp").eq("is_active", true).in("client_id", clientIds)
             : Promise.resolve({ data: [], error: null }),
+        loadNativeCommunications({ workspaceId: workspace.id, workspaceSlug: workspace.slug, currentUserId: user.id, role, requestedConversationId: query.nativeConversation, requestedDmUserId: query.dm }),
     ])
     const channelClientIds = new Set((channelResult.data ?? []).map((channel) => channel.client_id))
     const messagesByRelationship = new Map<string, typeof messageResult.messages>()
@@ -63,7 +65,7 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
     return (
         <main className="h-dvh overflow-hidden bg-neutral-950 text-white">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-            <CommunicationsWorkspace bootstrap={bootstrap} />
+            <CommunicationsPanel clientBootstrap={bootstrap} nativeBootstrap={nativeBootstrap} initialMode={query.mode === "team" || Boolean(query.dm) || Boolean(query.nativeConversation) ? "team" : "clients"} />
         </main>
     )
 }

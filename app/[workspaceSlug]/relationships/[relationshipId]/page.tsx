@@ -20,6 +20,7 @@ import { currentRelationshipWork, ensureCurrentRelationshipStage } from "@/lib/r
 import { archiveRelationship } from "../actions"
 import { ArchiveRelationshipForm } from "./ArchiveRelationshipForm"
 import { RelationshipDealWorkspace } from "./RelationshipDealWorkspace"
+import { loadWorkspaceTeams } from "@/lib/teams/server"
 
 export const dynamic = "force-dynamic"
 
@@ -35,7 +36,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
     await ensureCurrentRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: user.id })
     const plan = await getRelationshipGanttPlan(workspace.slug, relationship)
     const planRanges = effectiveGanttRanges(plan.items)
-    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult] = await Promise.all([
+    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult] = await Promise.all([
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id),
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
@@ -47,9 +48,10 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
+        loadWorkspaceTeams(workspace.id),
     ])
     const memberIds = (membershipsResult.data ?? []).map((member) => member.user_id)
-    const profilesResult = memberIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", memberIds).order("username") : { data: [] }
+    const profilesResult = memberIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name").in("user_id", memberIds).order("username") : { data: [] }
     const members = profilesResult.data ?? []
     if (servicesResult.error) throw new Error(servicesResult.error.message)
     const storedServices = servicesResult.data ?? []
@@ -142,11 +144,13 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                     primaryEmail: relationship.primary_email ?? "",
                                     sellerUserId: relationship.seller_user_id ?? user.id,
                                     fulfilmentManagerUserId: relationship.fulfilment_manager_user_id ?? "",
+                                    fulfilmentTeamId: relationship.fulfilment_team_id ?? "",
                                     projectTimeframeDays: relationship.project_timeframe_days,
                                     description: relationship.notes_summary ?? "",
                                     lifecyclePhase: relationship.lifecycle_phase,
                                 }}
-                                members={members.map((member) => ({ id: member.user_id, name: member.username }))}
+                                members={members.map((member) => ({ id: member.user_id, name: member.display_name?.trim() || member.username }))}
+                                fulfilmentTeams={teamResult.teams.filter((team) => team.kind === "custom" && !team.archivedAt).map((team) => ({ id: team.id, name: team.name, responsibilities: team.responsibilities.map((responsibility) => ({ serviceId: responsibility.serviceId, userId: responsibility.userId })) }))}
                                 services={dealServices}
                                 modules={onboardingConfiguration.modules}
                                 theme={onboardingConfiguration.theme}

@@ -27,23 +27,32 @@ test("canonical platform lists use the shared header and two-row list primitives
 })
 
 test("Communications uses its dedicated responsive conversation workspace instead of canonical List", async () => {
-    const [page, workspace] = await Promise.all([
+    const [page, panel, workspace, teamWorkspace] = await Promise.all([
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
+        readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
     ])
 
     assert.doesNotMatch(page, /WorkspaceBanner|PanelTabHeader|PanelTabs/)
-    assert.match(page, /<CommunicationsWorkspace/)
+    assert.match(page, /<CommunicationsPanel/)
+    assert.match(panel, /<CommunicationsWorkspace/)
+    assert.match(panel, /<TeamCommunicationsWorkspace/)
     assert.doesNotMatch(page, /<List ariaLabel=/)
     assert.match(page, /h-dvh overflow-hidden/)
     assert.match(workspace, /h-dvh min-h-0/)
     assert.match(workspace, /overflow-y-auto/)
     assert.match(workspace, /lg:hidden/)
     assert.match(workspace, /Back to client chats/)
-    assert.doesNotMatch(workspace, /activeArea|Team chat|Calendar/)
+    assert.doesNotMatch(workspace, /activeArea|Calendar/)
+    assert.match(workspace, /onOpenTeam/)
     assert.match(workspace, /selectConversation\(conversation\.id\)/)
     assert.doesNotMatch(workspace, /href=\{href\}/)
     assert.doesNotMatch(workspace, /@\/lib\/relationships/, "the client workspace must not import the server-only relationships module")
+    assert.match(teamWorkspace, /h-dvh min-h-0/)
+    assert.match(teamWorkspace, /lg:grid-cols/)
+    assert.match(teamWorkspace, /lg:hidden/)
+    assert.match(teamWorkspace, /selectConversation\(conversation\.id\)/)
 })
 
 test("the Admin work queue uses the same canonical row anatomy", async () => {

@@ -2,7 +2,7 @@ import { WorkspaceIdentityEditor } from "@/components/admin/WorkspaceIdentityEdi
 import { PendingWorkspaceInvitations } from "@/components/admin/PendingWorkspaceInvitations"
 import { WorkspaceConnections } from "@/components/admin/WorkspaceConnections"
 import { WorkspaceOnboardingDomain } from "@/components/admin/WorkspaceOnboardingDomain"
-import { WorkspaceOfficerSettings } from "@/components/admin/WorkspaceOfficerSettings"
+import { WorkspaceTeamSettings } from "@/components/settings/WorkspaceTeamSettings"
 import { AdaptiveTargetingSettings } from "@/components/leadgen/AdaptiveTargetingSettings"
 import { ManualSettingsForm, SettingsSectionActions } from "@/components/leadgen/ManualSettingsForm"
 import { SourceSettingsCard } from "@/components/leadgen/SourceSettingsCard"
@@ -18,7 +18,7 @@ import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
-import { listMaintenanceRouting, MAINTENANCE_CATEGORIES, maintenanceCategoryLabel } from "@/lib/admin/maintenance"
+import { loadWorkspaceTeams, loadWorkspaceMemberProfiles } from "@/lib/teams/server"
 import { INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
@@ -38,7 +38,6 @@ import {
     uploadWorkspaceLogo,
     verifyWorkspaceConnection,
     verifyWorkspaceOnboardingDomain,
-    saveWorkspaceOfficers,
     stageManualWorkspaceConnection,
     verifyPendingWorkspaceConnection,
 } from "./actions"
@@ -53,7 +52,7 @@ const settingsSections = [
     { id: "agency-branding", label: "Agency Branding", detail: "Onboarding and portal colours" },
     { id: "connections", label: "Connections", detail: "Stripe and WhatsApp" },
     { id: "users", label: "Users", detail: "Access and invitations" },
-    { id: "officers", label: "Officers", detail: "Maintenance responsibility" },
+    { id: "teams", label: "Teams", detail: "People and responsibility routing" },
     { id: "leadgen", label: "Lead Gen", detail: "Automation, targeting, and sources" },
 ] satisfies SettingsSectionNavItem[]
 
@@ -96,7 +95,7 @@ function SettingsPlaceholder({
 
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
-    searchParams: Promise<{ officers?: string; service?: string }>
+    searchParams: Promise<{ service?: string }>
 }
 
 export default async function SettingsPage({ params, searchParams }: PageProps) {
@@ -108,8 +107,10 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         membershipsResult,
         integrationResult,
         leadgenSettings,
-        maintenanceRouting,
         onboardingSettings,
+        teamResult,
+        teamPeople,
+        teamConversationResult,
     ] = await Promise.all([
         workspace.banner_path ? createUploadSignedUrl(workspace.banner_path) : null,
         workspace.logo_path ? createUploadSignedUrl(workspace.logo_path) : null,
@@ -120,8 +121,10 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
             .order("created_at"),
         listWorkspaceConnections(workspace.id),
         loadLeadgenSettingsPageData(workspace.id),
-        listMaintenanceRouting(workspace.id),
         loadOnboardingSettingsPageData(workspace.id),
+        loadWorkspaceTeams(workspace.id),
+        loadWorkspaceMemberProfiles(workspace.id),
+        supabaseAdmin.from("workspace_native_conversations").select("id, team_id").eq("workspace_id", workspace.id).eq("kind", "team"),
     ])
 
     const users = await Promise.all((membershipsResult.data ?? []).map(async (membership) => ({
@@ -129,9 +132,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         user: (await supabaseAdmin.auth.admin.getUserById(membership.user_id)).data.user,
     })))
     const isOwner = role === "owner"
-    const officerRoutes = new Map(maintenanceRouting.map((route) => [route.category, route.responsible_user_id]))
-    const officers = users.filter((item) => ["owner", "admin"].includes(normalizeWorkspaceRole(item.role) ?? ""))
-    const officerOptions = officers.flatMap(({ user: officer, role: officerRole }) => officer?.id ? [{ id: officer.id, label: `${officer.email ?? workspaceRoleLabel(officerRole)} · ${workspaceRoleLabel(officerRole)}` }] : [])
+    const teamConversationIds = Object.fromEntries((teamConversationResult.data ?? []).flatMap((conversation) => conversation.team_id ? [[conversation.team_id, conversation.id]] : []))
     const connections = INTEGRATION_PROVIDERS.map((provider) =>
         integrationResult.find((item) => item.provider === provider)
         ?? { provider, enabled: false, mode: "disabled", config_hint: {} }
@@ -296,19 +297,8 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             </div>
                         </UnifiedSection>
 
-                        <UnifiedSection
-                            id="officers"
-                            title="Officers"
-                            description="Choose which owner or admin receives maintenance work when platform automations fail."
-                        >
-                            {query.officers === "save-failed" && <p className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">The officer settings could not be saved. The failure was recorded in Admin Activity and Maintenance.</p>}
-                            <WorkspaceOfficerSettings
-                                key={`${officerRoutes.get("global") ?? ""}|${MAINTENANCE_CATEGORIES.map((category) => `${category}:${officerRoutes.get(category) ?? ""}`).join("|")}`}
-                                globalValue={officerRoutes.get("global") ?? ""}
-                                categories={MAINTENANCE_CATEGORIES.map((category) => ({ key: category, label: maintenanceCategoryLabel(category), value: officerRoutes.get(category) ?? "" }))}
-                                officers={officerOptions}
-                                action={saveWorkspaceOfficers.bind(null, workspace.slug)}
-                            />
+                        <UnifiedSection id="teams" title="Teams" description="Review required teams, maintenance responsibility, and fulfilment collaboration.">
+                            <WorkspaceTeamSettings workspaceSlug={workspace.slug} teams={teamResult.teams} people={teamPeople} conversationIds={teamConversationIds} ownerCanEditMaintenance={isOwner} />
                         </UnifiedSection>
 
                         <UnifiedSection

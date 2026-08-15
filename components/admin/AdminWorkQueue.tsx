@@ -115,7 +115,7 @@ function QueueRow({ item, workspaceSlug, names, avatarUrls }: {
                         <span className="font-mono text-neutral-500">{shortId(item.id)}</span>
                         <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(item.updated_at)}</span>
                         {firstAssigneeName ? <span className="inline-flex shrink-0 items-center gap-1" aria-label={ownerName ? `Owned by ${ownerName}${collaborators.length ? ` with ${collaborators.join(", ")}` : ""}` : `Assigned to ${assignees.join(", ")}`}>
-                            <Assignee name={firstAssigneeName} avatarSrc={firstAssigneeId ? avatarUrls[firstAssigneeId] : null} compact compactSize="md" />
+                            <Assignee userId={firstAssigneeId} name={firstAssigneeName} avatarSrc={firstAssigneeId ? avatarUrls[firstAssigneeId] : null} compact compactSize="md" />
                             {assignees.length > 1 ? <span className="text-xs text-neutral-500">+{assignees.length - 1}</span> : null}
                         </span> : null}
                         <ListActionMenu actions={actions} className="hidden sm:block" />

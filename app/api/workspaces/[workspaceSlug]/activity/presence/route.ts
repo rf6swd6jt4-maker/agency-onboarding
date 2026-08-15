@@ -1,11 +1,12 @@
 import type { NextRequest } from "next/server"
 
 import { recordAdminActivity } from "@/lib/admin/activity"
+import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
 export const dynamic = "force-dynamic"
 
-const STATES = new Set(["reconnecting", "offline", "error"])
+const STATES = new Set(["heartbeat", "reconnecting", "offline", "error"])
 
 function text(value: unknown, maximum: number) {
     return typeof value === "string" ? value.trim().slice(0, maximum) : ""
@@ -19,6 +20,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     const sessionId = text(input?.sessionId, 100)
     const error = text(input?.error, 300)
     if (!STATES.has(state) || !sessionId) return Response.json({ error: "Invalid presence diagnostic" }, { status: 400 })
+
+    if (state === "heartbeat") {
+        const lastSeenAt = new Date().toISOString()
+        const { error: updateError } = await supabaseAdmin.from("workspace_memberships").update({ last_seen_at: lastSeenAt }).eq("workspace_id", workspace.id).eq("user_id", user.id)
+        if (updateError) return Response.json({ error: "Could not update workspace presence." }, { status: 503 })
+        return Response.json({ ok: true, lastSeenAt }, { headers: { "Cache-Control": "no-store" } })
+    }
 
     const minute = new Date().toISOString().slice(0, 16)
     await recordAdminActivity({

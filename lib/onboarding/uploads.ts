@@ -567,6 +567,50 @@ export async function verifyClientMessageUpload(input: {
     return { kind, contentType, size }
 }
 
+export async function createSignedNativeMessageUpload(
+    workspaceId: string,
+    conversationId: string,
+    file: { name: string; size: number; type: string }
+) {
+    const validation = validateCommunicationAttachmentFile(file)
+    if ("error" in validation) throw new Error(validation.error)
+    const fileName = sanitizeFileName(file.name) || "attachment"
+    const contentType = file.type.toLowerCase().split(";", 1)[0].trim()
+    const path = `${workspaceId}/communications/native/${conversationId}/${randomUUID()}-${fileName}`
+    const uploadUrl = await getSignedUrl(
+        getR2Client(),
+        new PutObjectCommand({ Bucket: getR2BucketName(), Key: path, ContentType: contentType, ContentLength: file.size }),
+        { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }
+    )
+    return {
+        uploadUrl,
+        attachment: {
+            kind: validation.kind,
+            fileName: fileName.slice(0, 180),
+            mimeType: contentType,
+            size: file.size,
+            storagePath: path,
+            url: createClientMessageMediaUrl(path) ?? `/api/client-messages/media/${encodeStoragePath(path)}`,
+        },
+    }
+}
+
+export async function verifyNativeMessageUpload(input: {
+    workspaceId: string
+    conversationId: string
+    storagePath: string
+    mimeType: string
+}) {
+    const prefix = `${input.workspaceId}/communications/native/${input.conversationId}/`
+    if (!input.storagePath.startsWith(prefix) || input.storagePath.slice(prefix.length).includes("/")) throw new Error("Invalid native message attachment path")
+    const response = await getR2Client().send(new HeadObjectCommand({ Bucket: getR2BucketName(), Key: input.storagePath }))
+    const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
+    const kind = communicationAttachmentKind(contentType)
+    const size = response.ContentLength ?? 0
+    if (!kind || kind === "sticker" || size <= 0 || size > communicationAttachmentLimit(kind)) throw new Error("The uploaded attachment is missing or unsupported")
+    return { kind, contentType, size }
+}
+
 export async function inspectStoredCommunicationSticker(input: {
     workspaceId: string
     storagePath: string

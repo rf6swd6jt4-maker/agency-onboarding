@@ -1,4 +1,5 @@
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
+import { assertNativeConversationAccess } from "@/lib/teams/server"
 import { getCurrentUser } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 
@@ -31,6 +32,10 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
         .eq("user_id", user.id)
         .maybeSingle()
     if (!membership) return { error: new Response("Media not found", { status: 404 }) }
+    if (path[1] === "communications" && path[2] === "native") {
+        const conversationId = path[3] ?? ""
+        if (!await assertNativeConversationAccess(conversationId, user.id, "read")) return { error: new Response("Media not found", { status: 404 }) }
+    }
 
     try {
         const signedUrl = await createPrivateUploadSignedUrl(storagePath)
