@@ -11,6 +11,8 @@ import { AgencyBrandingEditor } from "@/components/settings/AgencyBrandingEditor
 import { OnboardingSettings } from "@/components/settings/OnboardingSettings"
 import { ServiceCatalogue } from "@/components/settings/ServiceCatalogue"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
+import { WorkspaceAutosaveForm } from "@/components/workspace/WorkspaceAutosaveForm"
+import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
@@ -167,15 +169,12 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Workspace"
                             description="Edit the workspace name shown in the top bar, menus, and account areas."
                         >
-                            <form action={updateWorkspaceName.bind(null, workspace.slug)} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
+                            <WorkspaceAutosaveForm action={updateWorkspaceName.bind(null, workspace.slug)} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                                 <label className="block text-sm text-neutral-300">
                                     Workspace name
                                     <input name="name" required defaultValue={workspace.name} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white" />
                                 </label>
-                                <button className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">
-                                    Save workspace
-                                </button>
-                            </form>
+                            </WorkspaceAutosaveForm>
                         </UnifiedSection>
 
                         <UnifiedSection
@@ -258,13 +257,13 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Users"
                             description="Invite teammates and control workspace access."
                         >
-                            <form action={inviteWorkspaceUser.bind(null, workspace.slug)} className="grid gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:grid-cols-[1fr_auto_auto] sm:p-5">
+                            <form action={inviteWorkspaceUser.bind(null, workspace.slug)} data-workspace-mutation="background" className="grid gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:grid-cols-[1fr_auto_auto] sm:p-5">
                                 <input name="email" type="email" required placeholder="person@business.com" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2" />
                                 <select name="role" defaultValue="staff" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
                                     <option value="staff">Staff</option>
                                     {isOwner && <option value="admin">Admin</option>}
                                 </select>
-                                <button className="rounded-lg bg-white px-4 py-2 font-medium text-black">Invite user</button>
+                                <WorkspaceActionButton pendingLabel="Inviting…" className="rounded-lg bg-white px-4 py-2 font-medium text-black">Invite user</WorkspaceActionButton>
                             </form>
                             <div className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
                                 <PendingWorkspaceInvitations workspaceId={workspace.id} removeAction={removeWorkspaceInvitation.bind(null, workspace.slug)} />
@@ -277,18 +276,18 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                         {normalizeWorkspaceRole(assignedRole) !== "owner" && (
                                             <div className="flex flex-wrap gap-2">
                                                 {isOwner && (
-                                                    <form action={updateWorkspaceUserRole.bind(null, workspace.slug)} className="flex min-w-0 flex-1 gap-2 sm:flex-none">
+                                                    <form action={updateWorkspaceUserRole.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex min-w-0 flex-1 gap-2 sm:flex-none">
                                                         <input type="hidden" name="userId" value={workspaceUser?.id} />
                                                         <select name="role" defaultValue={normalizeWorkspaceRole(assignedRole) ?? "staff"} className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm sm:w-auto">
                                                             <option value="staff">Staff</option>
                                                             <option value="admin">Admin</option>
                                                         </select>
-                                                        <button className="rounded-lg border border-neutral-700 px-3 py-1 text-sm">Save</button>
+                                                        <WorkspaceActionButton pendingLabel="Saving…" className="rounded-lg border border-neutral-700 px-3 py-1 text-sm">Save</WorkspaceActionButton>
                                                     </form>
                                                 )}
-                                                <form action={removeWorkspaceUser.bind(null, workspace.slug)} className="flex-1 sm:flex-none">
+                                                <form action={removeWorkspaceUser.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex-1 sm:flex-none">
                                                     <input type="hidden" name="userId" value={workspaceUser?.id} />
-                                                    <button className="w-full rounded-lg border border-red-900 px-3 py-1 text-sm text-red-300 sm:w-auto">Remove</button>
+                                                    <WorkspaceActionButton pendingLabel="Removing…" confirmMessage={`Remove ${workspaceUser?.email ?? "this user"} from the workspace?`} className="w-full rounded-lg border border-red-900 px-3 py-1 text-sm text-red-300 sm:w-auto">Remove</WorkspaceActionButton>
                                                 </form>
                                             </div>
                                         )}

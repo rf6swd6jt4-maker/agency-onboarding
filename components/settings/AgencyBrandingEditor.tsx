@@ -6,6 +6,7 @@ import { publishVisualThemeDraft } from "@/app/[workspaceSlug]/onboarding-builde
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
 import { ONBOARDING_THEME_SLOTS, type OnboardingBrandSwatch, type OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { normalizeHexColour, ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
+import { runWorkspaceMutation } from "@/lib/workspace-mutations"
 
 function themeKey(theme: OnboardingThemeDefinition) {
     return JSON.stringify({ swatches: theme.swatches, assignments: theme.assignments })
@@ -35,7 +36,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady 
                 if (payloadKey === lastSavedRef.current) return
                 setSaveState("saving")
                 setError(null)
-                const outcome = await saveAgencyBranding(workspaceSlug, payload.swatches, payload.assignments)
+                const outcome = await runWorkspaceMutation(() => saveAgencyBranding(workspaceSlug, payload.swatches, payload.assignments))
                 if (!outcome.ok) {
                     setSaveState("error")
                     setError(outcome.error)

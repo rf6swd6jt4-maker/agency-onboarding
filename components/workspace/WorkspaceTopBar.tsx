@@ -5,6 +5,7 @@ import { leaveWorkspace } from "@/app/users/[username]/actions"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { normalizeWorkspaceRole } from "@/lib/workspaces"
 import { createOkrFromModal } from "@/app/[workspaceSlug]/admin/actions"
+import { profileAvatarUrl } from "@/lib/profile-avatar"
 
 type Product = "client-work" | "leadgen"
 
@@ -32,10 +33,20 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         ? await supabaseAdmin.from("user_profiles").select("user_id, username").in("user_id", adminIds)
         : { data: [] }
     const adminNames = new Map((adminProfiles ?? []).map((item) => [item.user_id, item.username]))
+    const { data: presenceMemberships } = await supabaseAdmin.from("workspace_memberships")
+        .select("user_id").eq("workspace_id", workspace.id).order("created_at")
+    const presenceIds = (presenceMemberships ?? []).map((item) => item.user_id)
+    const { data: presenceProfiles } = presenceIds.length
+        ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name, avatar_path").in("user_id", presenceIds)
+        : { data: [] }
+    const presenceProfilesById = new Map((presenceProfiles ?? []).map((item) => [item.user_id, item]))
     const [avatarSrc, workspaceLogoSrc] = await Promise.all([
         profile?.avatar_path ? createUploadSignedUrl(profile.avatar_path) : null,
         workspace.logo_path ? createUploadSignedUrl(workspace.logo_path) : null,
     ])
+    const okrPeriodStartDate = new Date()
+    const okrPeriodEndDate = new Date(okrPeriodStartDate)
+    okrPeriodEndDate.setUTCDate(okrPeriodEndDate.getUTCDate() + 90)
 
     return <WorkspaceTopBarClient
         workspace={workspace}
@@ -53,5 +64,15 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         workItemOptions={(workItems ?? []).map((item) => ({ id: item.id, title: item.title, status: item.status }))}
         relationshipOptions={(relationships ?? []).map((relationship) => ({ id: relationship.id, label: relationship.business_name ?? relationship.primary_person_name ?? "Relationship" }))}
         okrOwnerOptions={(adminMemberships ?? []).map((item) => ({ id: item.user_id, label: adminNames.get(item.user_id) ?? (item.user_id === userId ? username : item.role), role: item.role }))}
+        workspaceMembers={(presenceMemberships ?? []).map((item) => {
+            const memberProfile = presenceProfilesById.get(item.user_id)
+            return {
+                id: item.user_id,
+                name: memberProfile?.display_name?.trim() || memberProfile?.username || (item.user_id === userId ? username : "Workspace user"),
+                avatarSrc: memberProfile?.avatar_path && memberProfile.username ? profileAvatarUrl(memberProfile.username, memberProfile.avatar_path) : null,
+            }
+        })}
+        okrPeriodStart={okrPeriodStartDate.toISOString().slice(0, 10)}
+        okrPeriodEnd={okrPeriodEndDate.toISOString().slice(0, 10)}
     />
 }

@@ -22,6 +22,7 @@ export function ArchiveRelationshipForm({
         <form
             action={formAction}
             data-global-loading="false"
+            data-workspace-mutation="background"
             onSubmit={(event) => {
                 const confirmed = window.confirm(
                     `Archive ${relationshipName}? It will leave active lists and will no longer claim WhatsApp confirmations. Its history will be preserved.`,

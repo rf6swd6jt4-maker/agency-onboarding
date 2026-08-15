@@ -55,12 +55,23 @@ export async function updateWorkItemSchedule(slug: string, workItemId: string, s
     await refreshScheduleSurfaces(slug, workspace.id, workItemId)
 }
 
-export async function updateWorkItemDescription(slug: string, workItemId: string, description: string) {
-    const { workspace } = await requireWorkItem(slug, workItemId)
+export async function updateWorkItemDescription(slug: string, workItemId: string, description: string, expectedUpdatedAt: string): Promise<{ ok: true; version: string } | { ok: false; error: string; conflict?: boolean; version?: string }> {
+    const { workspace, item } = await requireWorkItem(slug, workItemId)
+    if (expectedUpdatedAt && item.updated_at !== expectedUpdatedAt) {
+        return { ok: false, conflict: true, version: item.updated_at, error: "Another user changed this work item. Refresh to review their version before retrying your description." }
+    }
     const value = description.trim()
-    const { error } = await supabaseAdmin.from("work_items").update({ description: value || null }).eq("workspace_id", workspace.id).eq("id", workItemId)
-    if (error) throw new Error(error.message)
+    const nextVersion = new Date().toISOString()
+    let update = supabaseAdmin.from("work_items").update({ description: value || null, updated_at: nextVersion }).eq("workspace_id", workspace.id).eq("id", workItemId)
+    if (expectedUpdatedAt) update = update.eq("updated_at", expectedUpdatedAt)
+    const { data: saved, error } = await update.select("updated_at").maybeSingle()
+    if (error) return { ok: false, error: `The database rejected this work-item change (${error.code}): ${error.message}` }
+    if (!saved) {
+        const { data: latest } = await supabaseAdmin.from("work_items").select("updated_at").eq("workspace_id", workspace.id).eq("id", workItemId).maybeSingle()
+        return { ok: false, conflict: true, version: latest?.updated_at, error: "Another user changed this work item. Refresh to review their version before retrying your description." }
+    }
     refreshWorkItem(slug, workItemId)
+    return { ok: true, version: saved.updated_at }
 }
 
 export async function updateWorkItemAssignees(slug: string, workItemId: string, assigneeIds: string[], executionOwnerId: string | null) {

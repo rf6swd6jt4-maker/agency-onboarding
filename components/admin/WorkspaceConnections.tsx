@@ -3,6 +3,7 @@
 import { FormEvent, ReactNode, useEffect, useRef, useState, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
+import { runWorkspaceMutation } from "@/lib/workspace-mutations"
 import { Status, type StatusTone } from "@/components/ui"
 import type { IntegrationProvider, WorkspaceConnection } from "@/lib/workspace-integrations"
 import type { WorkspaceConnectionActionResult } from "@/app/[workspaceSlug]/settings/actions"
@@ -136,7 +137,7 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
     function run(action: () => Promise<WorkspaceConnectionActionResult>, close = false) {
         setError(null)
         startTransition(async () => {
-            const result = await action()
+            const result = await runWorkspaceMutation(action, { category: "integrations" })
             if (!result.ok) { setError(result.error); return }
             if (close) setSelected(null)
             router.refresh()
@@ -194,7 +195,7 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
             startTransition(async () => {
                 try {
                     const selectedSession = await session
-                    const result = await completeWhatsAppAction({ code, ...selectedSession, consentTemplateName: templateName, consentTemplateLanguage: templateLanguage })
+                    const result = await runWorkspaceMutation(() => completeWhatsAppAction({ code, ...selectedSession, consentTemplateName: templateName, consentTemplateLanguage: templateLanguage }), { category: "integrations" })
                     if (!result.ok) { setError(result.error); return }
                     setSelected(null)
                     router.refresh()

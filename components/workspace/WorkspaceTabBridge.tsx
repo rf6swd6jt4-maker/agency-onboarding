@@ -15,6 +15,12 @@ import {
 } from "@/lib/workspace-tabs"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { openOnboardingBuilderWindow } from "@/lib/onboarding-builder-window"
+import {
+    flushWorkspaceAutosaves,
+    WORKSPACE_MUTATION_END,
+    WORKSPACE_MUTATION_START,
+    type WorkspaceMutationEventDetail,
+} from "@/lib/workspace-mutations"
 
 type Props = {
     tabId: string
@@ -99,7 +105,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             window.parent.postMessage(message, window.location.origin)
         }
 
-        function preserveFrameNavigation(event: MouseEvent) {
+        async function preserveFrameNavigation(event: MouseEvent) {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
             const target = event.target
             if (!(target instanceof Element)) return
@@ -117,6 +123,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 openOnboardingBuilderWindow(nextUrl, workspaceSlug)
                 window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
                 reportNavigationStart(nextUrl)
+                await flushWorkspaceAutosaves()
                 window.location.assign(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
                 return
             }
@@ -141,10 +148,11 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             // and restore the source page (especially Polls) after a click.
             window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
             reportNavigationStart(nextUrl)
+            await flushWorkspaceAutosaves()
             window.location.assign(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
         }
 
-        function receiveHostMessage(event: MessageEvent<WorkspaceTabParentMessage>) {
+        async function receiveHostMessage(event: MessageEvent<WorkspaceTabParentMessage>) {
             if (event.origin !== window.location.origin) return
             const message = event.data
             if (message?.source !== WORKSPACE_TAB_MESSAGE_SOURCE || message.target !== "frame" || message.tabId !== tabId) return
@@ -154,6 +162,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
                 if (target !== current) {
                     window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
+                    await flushWorkspaceAutosaves()
                     window.location.assign(target)
                 }
             } else if (message.type === "traverse" && message.url) {
@@ -162,6 +171,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
                 if (target !== current) {
                     window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
+                    await flushWorkspaceAutosaves()
                     window.location.replace(target)
                 }
             } else if (message.type === "activate") {
@@ -193,6 +203,30 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
 
         const reportActionStart = () => reportActionState("action-start")
         const reportActionEnd = () => reportActionState("action-end")
+        const reportMutationStart = (event: Event) => {
+            const detail = (event as CustomEvent<WorkspaceMutationEventDetail>).detail
+            const message: WorkspaceTabFrameMessage = {
+                source: WORKSPACE_TAB_MESSAGE_SOURCE,
+                target: "host",
+                tabId,
+                type: "mutation-start",
+                mutationId: detail?.mutationId,
+            }
+            window.parent.postMessage(message, window.location.origin)
+        }
+        const reportMutationEnd = (event: Event) => {
+            const detail = (event as CustomEvent<WorkspaceMutationEventDetail>).detail
+            const message: WorkspaceTabFrameMessage = {
+                source: WORKSPACE_TAB_MESSAGE_SOURCE,
+                target: "host",
+                tabId,
+                type: "mutation-end",
+                mutationId: detail?.mutationId,
+                mutationFailed: detail?.failed === true,
+                mutationError: detail?.error,
+            }
+            window.parent.postMessage(message, window.location.origin)
+        }
 
         function forwardTabShortcut(event: KeyboardEvent) {
             if (!isReopenClosedTabShortcut(event)) return
@@ -213,6 +247,8 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
         window.addEventListener("betelgeze:workspace-mutation", reportPossibleMutation)
         window.addEventListener("betelgeze:workspace-action-start", reportActionStart)
         window.addEventListener("betelgeze:workspace-action-end", reportActionEnd)
+        window.addEventListener(WORKSPACE_MUTATION_START, reportMutationStart)
+        window.addEventListener(WORKSPACE_MUTATION_END, reportMutationEnd)
         const observer = new MutationObserver(updateContextObstruction)
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-work-item-popup", "data-loading-overlay"] })
         updateContextObstruction()
@@ -224,6 +260,8 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             window.removeEventListener("betelgeze:workspace-mutation", reportPossibleMutation)
             window.removeEventListener("betelgeze:workspace-action-start", reportActionStart)
             window.removeEventListener("betelgeze:workspace-action-end", reportActionEnd)
+            window.removeEventListener(WORKSPACE_MUTATION_START, reportMutationStart)
+            window.removeEventListener(WORKSPACE_MUTATION_END, reportMutationEnd)
             observer.disconnect()
             reportContextObstruction(false)
             delete document.body.dataset.workspaceTabActive

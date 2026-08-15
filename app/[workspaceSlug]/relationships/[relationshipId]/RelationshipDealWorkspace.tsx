@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
@@ -12,7 +12,8 @@ import type { OnboardingHelpSettings, OnboardingModuleDefinition, OnboardingThem
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import type { RelationshipGanttPlan } from "@/lib/relationship-gantt"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
-import { proceedRelationshipCurrentWork, saveRelationshipDealDetails, type RelationshipDealDetailsInput } from "../actions"
+import { registerWorkspaceAutosaveFlusher, runWorkspaceMutation } from "@/lib/workspace-mutations"
+import { proceedRelationshipCurrentWork, saveRelationshipBackgroundDetails, saveRelationshipDealDetails, type RelationshipDealDetailsInput } from "../actions"
 import { RelationshipGantt } from "./RelationshipGantt"
 
 type Member = { id: string; name: string }
@@ -114,6 +115,32 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
     }
 }
 
+function backgroundDetailsKey(draft: Draft) {
+    return JSON.stringify({
+        primaryPersonName: draft.primaryPersonName,
+        businessName: draft.businessName,
+        primaryContactRole: draft.primaryContactRole,
+        primaryPhone: draft.primaryPhone,
+        whatsappPhone: draft.whatsappPhone,
+        primaryEmail: draft.primaryEmail,
+        description: draft.description,
+    })
+}
+
+function commercialDetailsKey(draft: Draft) {
+    return JSON.stringify({
+        sellerUserId: draft.sellerUserId,
+        fulfilmentManagerUserId: draft.fulfilmentManagerUserId,
+        projectTimeframeDays: draft.projectTimeframeDays,
+        selectedCodes: draft.selectedCodes,
+        upfrontPrices: draft.upfrontPrices,
+        recurringPrices: draft.recurringPrices,
+        currency: draft.currency,
+        billingInterval: draft.billingInterval,
+        billingIntervalCount: draft.billingIntervalCount,
+    })
+}
+
 function MissingHint({ message }: { message: string | null }) {
     return message ? <span className="mt-1 block text-[11px] text-amber-300">{message}</span> : null
 }
@@ -122,6 +149,7 @@ export function RelationshipDealWorkspace({
     workspaceSlug,
     workspaceName,
     relationshipId,
+    updatedAt,
     details,
     members,
     services,
@@ -138,6 +166,7 @@ export function RelationshipDealWorkspace({
     workspaceSlug: string
     workspaceName: string
     relationshipId: string
+    updatedAt: string
     details: RelationshipDetails
     members: Member[]
     services: DealService[]
@@ -160,7 +189,15 @@ export function RelationshipDealWorkspace({
     const [previewModule, setPreviewModule] = useState<OnboardingModuleDefinition | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [notice, setNotice] = useState<{ label: string } | null>(null)
+    const [autosaveState, setAutosaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle")
     const [pending, startTransition] = useTransition()
+    const latestDraftRef = useRef(draft)
+    const initialBackgroundKey = backgroundDetailsKey(buildInitialDraft(details, services))
+    const [savedBackgroundKey, setSavedBackgroundKey] = useState(initialBackgroundKey)
+    const savedBackgroundKeyRef = useRef(initialBackgroundKey)
+    const backgroundVersionRef = useRef(updatedAt)
+    const autosaveTimerRef = useRef<number | null>(null)
+    const autosavePromiseRef = useRef<Promise<boolean> | null>(null)
     const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
     const selectedServices = services.filter((service) => draft.selectedCodes.includes(service.code))
     const selectedModuleIds = new Set([
@@ -169,7 +206,8 @@ export function RelationshipDealWorkspace({
     ])
     const assignedModules = modules.filter((module) => selectedModuleIds.has(module.id)).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
     const invoiced = ["sold", "invoiced", "onboarding", "onboarding_review", "fulfilment", "retention", "completed_lost"].includes(details.lifecyclePhase)
-    const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
+    const backgroundDirty = backgroundDetailsKey(draft) !== savedBackgroundKey
+    const commercialDirty = commercialDetailsKey(draft) !== commercialDetailsKey(baseline)
     const relationshipIssues = [
         missingText(draft.primaryPersonName, "Client name required"),
         emailIssue(draft.primaryEmail),
@@ -196,7 +234,94 @@ export function RelationshipDealWorkspace({
         return () => window.clearTimeout(timeout)
     }, [notice])
 
+    useEffect(() => {
+        latestDraftRef.current = draft
+    }, [draft])
+
+    const saveBackground = useCallback(async (): Promise<boolean> => {
+        if (!canEdit) return true
+        if (autosaveTimerRef.current) {
+            window.clearTimeout(autosaveTimerRef.current)
+            autosaveTimerRef.current = null
+        }
+        if (autosavePromiseRef.current) return autosavePromiseRef.current
+        const drain = async () => {
+            while (true) {
+                const source = latestDraftRef.current
+                const sourceKey = backgroundDetailsKey(source)
+                if (sourceKey === savedBackgroundKeyRef.current) {
+                    setAutosaveState("saved")
+                    return true
+                }
+                if (!source.primaryPersonName.trim()) {
+                    setAutosaveState("error")
+                    setError("Add the client's name before saving the relationship")
+                    return false
+                }
+                setAutosaveState("saving")
+                setError(null)
+                const outcome = await runWorkspaceMutation(() => saveRelationshipBackgroundDetails(workspaceSlug, relationshipId, {
+                    primaryPersonName: source.primaryPersonName,
+                    businessName: source.businessName,
+                    primaryContactRole: source.primaryContactRole,
+                    primaryPhone: source.primaryPhone,
+                    whatsappPhone: source.whatsappPhone,
+                    primaryEmail: source.primaryEmail,
+                    description: source.description,
+                    expectedUpdatedAt: backgroundVersionRef.current,
+                }), { category: "services" })
+                if (!outcome.ok) {
+                    setAutosaveState("error")
+                    setError(outcome.error)
+                    return false
+                }
+                backgroundVersionRef.current = outcome.version
+                savedBackgroundKeyRef.current = sourceKey
+                setSavedBackgroundKey(sourceKey)
+                setBaseline((current) => ({
+                    ...current,
+                    primaryPersonName: source.primaryPersonName,
+                    businessName: source.businessName,
+                    primaryContactRole: source.primaryContactRole,
+                    primaryPhone: source.primaryPhone,
+                    whatsappPhone: source.whatsappPhone,
+                    primaryEmail: source.primaryEmail,
+                    description: source.description,
+                }))
+                if (backgroundDetailsKey(latestDraftRef.current) === sourceKey) {
+                    setAutosaveState("saved")
+                    return true
+                }
+            }
+        }
+        autosavePromiseRef.current = drain().finally(() => {
+            autosavePromiseRef.current = null
+        })
+        return autosavePromiseRef.current
+    }, [canEdit, relationshipId, workspaceSlug])
+
+    useEffect(() => {
+        const unregister = registerWorkspaceAutosaveFlusher(async () => { await saveBackground() })
+        return () => {
+            unregister()
+            if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
+        }
+    }, [saveBackground])
+
+    useEffect(() => {
+        if (!canEdit || !backgroundDirty) return
+        if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
+        autosaveTimerRef.current = window.setTimeout(() => void saveBackground(), 800)
+        return () => {
+            if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
+        }
+    }, [backgroundDirty, canEdit, draft.primaryPersonName, draft.businessName, draft.primaryContactRole, draft.primaryPhone, draft.whatsappPhone, draft.primaryEmail, draft.description, saveBackground])
+
     function update<K extends keyof Draft>(key: K, value: Draft[K]) {
+        if (["primaryPersonName", "businessName", "primaryContactRole", "primaryPhone", "whatsappPhone", "primaryEmail", "description"].includes(key)) {
+            setAutosaveState("dirty")
+            setError(null)
+        }
         setDraft((current) => ({ ...current, [key]: value }))
     }
 
@@ -216,37 +341,42 @@ export function RelationshipDealWorkspace({
         })
     }
 
-    function dealInput(): RelationshipDealDetailsInput {
+    function dealInput(source: Draft = draft): RelationshipDealDetailsInput {
+        const sourceServices = services.filter((service) => source.selectedCodes.includes(service.code))
         return {
-            primaryPersonName: draft.primaryPersonName,
-            businessName: draft.businessName,
-            primaryContactRole: draft.primaryContactRole,
-            primaryPhone: draft.primaryPhone,
-            whatsappPhone: draft.whatsappPhone,
-            primaryEmail: draft.primaryEmail,
-            sellerUserId: draft.sellerUserId,
-            fulfilmentManagerUserId: draft.fulfilmentManagerUserId,
-            projectTimeframeDays: draft.projectTimeframeDays,
-            description: draft.description,
-            services: selectedServices.map((service) => ({
+            primaryPersonName: source.primaryPersonName,
+            businessName: source.businessName,
+            primaryContactRole: source.primaryContactRole,
+            primaryPhone: source.primaryPhone,
+            whatsappPhone: source.whatsappPhone,
+            primaryEmail: source.primaryEmail,
+            sellerUserId: source.sellerUserId,
+            fulfilmentManagerUserId: source.fulfilmentManagerUserId,
+            projectTimeframeDays: source.projectTimeframeDays,
+            description: source.description,
+            services: sourceServices.map((service) => ({
                 code: service.code,
                 serviceId: service.serviceId,
                 revisionId: service.revisionId,
-                upfrontPriceCents: Math.max(0, Math.round(draft.upfrontPrices[service.code] ?? 0)),
-                recurringPriceCents: service.serviceType === "retainer" ? Math.max(0, Math.round(draft.recurringPrices[service.code] ?? 0)) : 0,
-                currency: draft.currency.toUpperCase(),
+                upfrontPriceCents: Math.max(0, Math.round(source.upfrontPrices[service.code] ?? 0)),
+                recurringPriceCents: service.serviceType === "retainer" ? Math.max(0, Math.round(source.recurringPrices[service.code] ?? 0)) : 0,
+                currency: source.currency.toUpperCase(),
                 assigneeUserId: service.selectedAssigneeId,
             })),
         }
     }
 
     async function saveDetails() {
-        const outcome = await saveRelationshipDealDetails(workspaceSlug, relationshipId, dealInput())
+        if (!await saveBackground()) return false
+        const source = latestDraftRef.current
+        const outcome = await runWorkspaceMutation(() => saveRelationshipDealDetails(workspaceSlug, relationshipId, dealInput(source)), { category: "services" })
         if (!outcome.ok) {
             setError(outcome.error)
             return false
         }
-        setBaseline(draft)
+        backgroundVersionRef.current = outcome.version
+        savedBackgroundKeyRef.current = backgroundDetailsKey(source)
+        setBaseline(source)
         setError(null)
         router.refresh()
         postGanttSync(workspaceSlug)
@@ -279,10 +409,10 @@ export function RelationshipDealWorkspace({
         startTransition(() => {
             void (async () => {
                 if (!await saveDetails()) return
-                const outcome = await proceedRelationshipCurrentWork(workspaceSlug, relationshipId, currentWork.id, {
+                const outcome = await runWorkspaceMutation(() => proceedRelationshipCurrentWork(workspaceSlug, relationshipId, currentWork.id, {
                     billingInterval: draft.billingInterval,
                     billingIntervalCount: draft.billingIntervalCount,
-                })
+                }), { category: "billing" })
                 if (!outcome.ok) {
                     setError(outcome.error)
                     return
@@ -299,12 +429,12 @@ export function RelationshipDealWorkspace({
 
     const detailsPanel = <div data-relationship-details>
         <DetailFields>
-            <DetailField label="Name" icon="identity"><input disabled={!canEdit} value={draft.primaryPersonName} onChange={(event) => update("primaryPersonName", event.target.value)} placeholder="Client name" className={inputClass} /></DetailField>
-            <DetailField label="Company" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} value={draft.businessName} onChange={(event) => update("businessName", event.target.value)} placeholder="No company" className={inputClass} /></DetailField>
-            <DetailField label="Role" icon="identity"><input disabled={!canEdit} value={draft.primaryContactRole} onChange={(event) => update("primaryContactRole", event.target.value)} placeholder="Not set" className={inputClass} /></DetailField>
-            <DetailField label="SMS number" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="tel" value={draft.primaryPhone} onChange={(event) => update("primaryPhone", event.target.value)} placeholder="Not set" className={inputClass} /></DetailField>
-            <DetailField label="WhatsApp" icon="contact"><input disabled={!canEdit} type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} placeholder="Required before selling" className={inputClass} /></DetailField>
-            <DetailField label="Email" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} placeholder="Required before selling" className={inputClass} /></DetailField>
+            <DetailField label="Name" icon="identity"><input disabled={!canEdit} value={draft.primaryPersonName} onChange={(event) => update("primaryPersonName", event.target.value)} onBlur={() => void saveBackground()} placeholder="Client name" className={inputClass} /></DetailField>
+            <DetailField label="Company" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} value={draft.businessName} onChange={(event) => update("businessName", event.target.value)} onBlur={() => void saveBackground()} placeholder="No company" className={inputClass} /></DetailField>
+            <DetailField label="Role" icon="identity"><input disabled={!canEdit} value={draft.primaryContactRole} onChange={(event) => update("primaryContactRole", event.target.value)} onBlur={() => void saveBackground()} placeholder="Not set" className={inputClass} /></DetailField>
+            <DetailField label="SMS number" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="tel" value={draft.primaryPhone} onChange={(event) => update("primaryPhone", event.target.value)} onBlur={() => void saveBackground()} placeholder="Not set" className={inputClass} /></DetailField>
+            <DetailField label="WhatsApp" icon="contact"><input disabled={!canEdit} type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} onBlur={() => void saveBackground()} placeholder="Required before selling" className={inputClass} /></DetailField>
+            <DetailField label="Email" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} onBlur={() => void saveBackground()} placeholder="Required before selling" className={inputClass} /></DetailField>
             <DetailField label="Seller" icon="person"><select disabled={!canEdit} value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className={inputClass}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label="Fulfilment manager" icon="person" className="lg:border-l lg:border-neutral-900 lg:pl-8"><select disabled={!canEdit} value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className={inputClass}><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label={invoiced ? "Project timeline" : "Planned project timeline"} icon="timeline" className="lg:col-span-2"><div className="flex items-center gap-2"><input disabled={!canEdit} type="number" min="1" value={draft.projectTimeframeDays ?? ""} onChange={(event) => update("projectTimeframeDays", event.target.value ? Number(event.target.value) : null)} placeholder="Not set" className={`${inputClass} max-w-24`} />{draft.projectTimeframeDays ? <span className="text-neutral-500">days</span> : null}</div></DetailField>
@@ -316,10 +446,10 @@ export function RelationshipDealWorkspace({
             </div>
             {servicesOpen && !commercialLocked ? <div className="mt-2 grid gap-1.5 rounded-lg border border-neutral-800 bg-neutral-950 p-2 sm:grid-cols-2 lg:grid-cols-3">{services.map((service) => <label key={service.code} className="flex items-start gap-2 rounded-md px-2 py-2 text-sm hover:bg-neutral-900"><input type="checkbox" checked={draft.selectedCodes.includes(service.code)} onChange={() => toggleService(service.code)} className="mt-0.5" /><span className="min-w-0"><span className="flex items-center gap-1.5"><span className="truncate text-neutral-200">{service.name}</span>{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span><span className="mt-0.5 block truncate text-[11px] text-neutral-600">{service.revisionNumber ? `Revision ${service.revisionNumber}` : service.code}</span></span></label>)}</div> : null}
         </DetailField>
-        <DetailField label="Description" icon="description" className="lg:col-span-2"><textarea disabled={!canEdit} value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Add relationship context…" className={`${inputClass} min-h-20 resize-none leading-6`} /></DetailField>
+        <DetailField label="Description" icon="description" className="lg:col-span-2"><textarea disabled={!canEdit} value={draft.description} onChange={(event) => update("description", event.target.value)} onBlur={() => void saveBackground()} rows={3} placeholder="Add relationship context…" className={`${inputClass} min-h-20 resize-none leading-6`} /></DetailField>
         </DetailFields>
         {error && !invoiceOpen ? <p className="border-t border-red-500/20 py-2 text-sm text-red-300">{error}</p> : null}
-        {dirty && canEdit ? <div className="flex justify-end gap-2 border-t border-neutral-900 py-2.5"><button type="button" disabled={pending} onClick={() => { setDraft(baseline); setServicesOpen(false); setError(null) }} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => startTransition(() => { void saveDetails() })} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save changes"}</button></div> : null}
+        {canEdit ? <div className="flex items-center justify-between gap-3 border-t border-neutral-900 py-2.5"><span aria-live="polite" className={`text-xs ${autosaveState === "error" ? "text-red-300" : "text-neutral-500"}`}>{autosaveState === "saving" ? "Saving relationship details…" : autosaveState === "error" ? "Relationship details could not save automatically" : backgroundDirty ? "Relationship details will save automatically" : autosaveState === "saved" ? "Relationship details saved" : "Relationship details save automatically"}</span>{autosaveState === "error" ? <button type="button" onClick={() => void saveBackground()} className="text-xs text-red-200 underline decoration-red-500/50 underline-offset-2 hover:text-white">Retry</button> : commercialDirty ? <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={() => { setDraft((current) => ({ ...baseline, primaryPersonName: current.primaryPersonName, businessName: current.businessName, primaryContactRole: current.primaryContactRole, primaryPhone: current.primaryPhone, whatsappPhone: current.whatsappPhone, primaryEmail: current.primaryEmail, description: current.description })); setServicesOpen(false); setError(null) }} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => startTransition(() => { void saveDetails() })} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save commercial changes"}</button></div> : null}</div> : null}
     </div>
 
     const modal = invoiceOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 text-white backdrop-blur-sm">

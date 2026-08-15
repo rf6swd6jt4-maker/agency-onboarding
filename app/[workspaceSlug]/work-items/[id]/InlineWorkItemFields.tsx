@@ -1,12 +1,13 @@
 "use client"
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { AnchoredPopup, Assignee, RoundPill, Status } from "@/components/ui"
 import { Avatar } from "@/components/account/Avatar"
 import { DetailField, DetailFields } from "@/components/detail"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
 import { workItemPrioritySelectionLabel, workItemPrioritySelectionOptions } from "@/lib/work-item-priority"
+import { registerWorkspaceAutosaveFlusher, runWorkspaceMutation } from "@/lib/workspace-mutations"
 import {
     updateWorkItemAssignees,
     updateWorkItemDependencies,
@@ -35,6 +36,7 @@ type KeyResultEstimate = { keyResultId: string; expectedMovement: string; impact
 type Props = {
     workspaceSlug: string
     workItemId: string
+    updatedAt: string
     status: string
     statusLabel: string
     statusTone: "grey" | "yellow" | "green" | "red"
@@ -165,7 +167,15 @@ export function InlineWorkItemFields(props: Props) {
     const [relationshipIds, setRelationshipIds] = useState(props.relationships.map((relationship) => relationship.id))
     const [keyResultEstimates, setKeyResultEstimates] = useState<KeyResultEstimate[]>(props.keyResults.map((result) => ({ keyResultId: result.id, expectedMovement: result.expected_movement === null ? "" : String(result.expected_movement), impactHypothesis: result.impact_hypothesis ?? "" })))
     const [description, setDescription] = useState(props.description ?? "")
+    const [descriptionBaseline, setDescriptionBaseline] = useState(props.description ?? "")
+    const [descriptionSaveState, setDescriptionSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle")
+    const [descriptionError, setDescriptionError] = useState<string | null>(null)
     const descriptionRef = useRef<HTMLTextAreaElement>(null)
+    const descriptionTimerRef = useRef<number | null>(null)
+    const descriptionPromiseRef = useRef<Promise<boolean> | null>(null)
+    const descriptionVersionRef = useRef(props.updatedAt)
+    const latestDescriptionRef = useRef(description)
+    const descriptionBaselineRef = useRef(descriptionBaseline)
 
     useEffect(() => {
         function close(event: MouseEvent) {
@@ -188,6 +198,65 @@ export function InlineWorkItemFields(props: Props) {
         textarea.style.height = `${Math.max(80, textarea.scrollHeight)}px`
     }, [description])
 
+    useEffect(() => {
+        descriptionVersionRef.current = props.updatedAt
+    }, [props.updatedAt])
+
+    useEffect(() => {
+        latestDescriptionRef.current = description
+    }, [description])
+
+    const saveDescription = useCallback(async (): Promise<boolean> => {
+        if (descriptionTimerRef.current) {
+            window.clearTimeout(descriptionTimerRef.current)
+            descriptionTimerRef.current = null
+        }
+        if (descriptionPromiseRef.current) return descriptionPromiseRef.current
+        const drain = async () => {
+            while (latestDescriptionRef.current !== descriptionBaselineRef.current) {
+                const submitted = latestDescriptionRef.current
+                setDescriptionSaveState("saving")
+                setDescriptionError(null)
+                const outcome = await runWorkspaceMutation(() => updateWorkItemDescription(props.workspaceSlug, props.workItemId, submitted, descriptionVersionRef.current), { category: "gantt" })
+                if (!outcome.ok) {
+                    setDescriptionSaveState("error")
+                    setDescriptionError(outcome.error)
+                    return false
+                }
+                descriptionVersionRef.current = outcome.version
+                descriptionBaselineRef.current = submitted
+                setDescriptionBaseline(submitted)
+                if (latestDescriptionRef.current === submitted) {
+                    setDescriptionSaveState("saved")
+                    postGanttSync(props.workspaceSlug)
+                    return true
+                }
+            }
+            return true
+        }
+        descriptionPromiseRef.current = drain().finally(() => {
+            descriptionPromiseRef.current = null
+        })
+        return descriptionPromiseRef.current
+    }, [props.workItemId, props.workspaceSlug])
+
+    useEffect(() => {
+        const unregister = registerWorkspaceAutosaveFlusher(async () => { await saveDescription() })
+        return () => {
+            unregister()
+            if (descriptionTimerRef.current) window.clearTimeout(descriptionTimerRef.current)
+        }
+    }, [saveDescription])
+
+    useEffect(() => {
+        if (description === descriptionBaseline) return
+        if (descriptionTimerRef.current) window.clearTimeout(descriptionTimerRef.current)
+        descriptionTimerRef.current = window.setTimeout(() => void saveDescription(), 800)
+        return () => {
+            if (descriptionTimerRef.current) window.clearTimeout(descriptionTimerRef.current)
+        }
+    }, [description, descriptionBaseline, saveDescription])
+
     function toggle(name: string, trigger?: HTMLElement) {
         if (trigger) setPopupTrigger(trigger)
         setError(null); setQuery("")
@@ -206,11 +275,16 @@ export function InlineWorkItemFields(props: Props) {
         }
         setOpen((current) => current === name ? null : name)
     }
-    function save(action: () => Promise<void>) {
+    function save(action: () => Promise<unknown>) {
         setError(null)
         setOpen(null)
         startTransition(async () => {
-            try { await action(); router.refresh(); postGanttSync(props.workspaceSlug) }
+            try {
+                if (!await saveDescription()) return
+                await runWorkspaceMutation(action, { category: "gantt" })
+                router.refresh()
+                postGanttSync(props.workspaceSlug)
+            }
             catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save this field") }
         })
     }
@@ -334,8 +408,12 @@ export function InlineWorkItemFields(props: Props) {
                     </div>
                     <DetailField label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
                         <div>
-                            <textarea ref={descriptionRef} value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="Add a description…" className="min-h-20 w-full resize-none overflow-hidden bg-transparent py-0 text-sm leading-6 text-neutral-200 caret-neutral-300 outline-none placeholder:text-neutral-600 selection:bg-neutral-600 selection:text-white" />
-                            {description !== (props.description ?? "") ? <div className="mt-1 flex justify-end gap-1.5"><button type="button" disabled={pending} onClick={() => setDescription(props.description ?? "")} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => save(() => updateWorkItemDescription(props.workspaceSlug, props.workItemId, description))} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div> : null}
+                            <textarea ref={descriptionRef} value={description} onChange={(event) => {
+                                setDescription(event.target.value)
+                                setDescriptionSaveState("dirty")
+                                setDescriptionError(null)
+                            }} onBlur={() => void saveDescription()} rows={3} placeholder="Add a description…" className="min-h-20 w-full resize-none overflow-hidden bg-transparent py-0 text-sm leading-6 text-neutral-200 caret-neutral-300 outline-none placeholder:text-neutral-600 selection:bg-neutral-600 selection:text-white" />
+                            <div className="mt-1 flex items-center justify-end gap-2"><p aria-live="polite" title={descriptionError ?? undefined} className={`text-xs ${descriptionSaveState === "error" ? "text-red-300" : "text-neutral-500"}`}>{descriptionSaveState === "saving" ? "Saving description…" : descriptionSaveState === "error" ? descriptionError || "Description could not save automatically" : description !== descriptionBaseline ? "Description will save automatically" : descriptionSaveState === "saved" ? "Description saved" : "Description saves automatically"}</p>{descriptionSaveState === "error" ? <button type="button" onClick={() => void saveDescription()} className="text-xs text-red-200 underline decoration-red-500/50 underline-offset-2 hover:text-white">Retry</button> : null}</div>
                         </div>
                     </DetailField>
             </DetailFields>

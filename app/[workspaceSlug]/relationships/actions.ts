@@ -62,6 +62,10 @@ export type RelationshipDealDetailsInput = {
     }>
 }
 
+export type RelationshipBackgroundDetailsInput = Pick<RelationshipDealDetailsInput,
+    "primaryPersonName" | "businessName" | "primaryContactRole" | "primaryPhone" | "whatsappPhone" | "primaryEmail" | "description"
+> & { expectedUpdatedAt: string }
+
 function formString(formData: FormData, key: string) {
     return String(formData.get(key) ?? "").trim()
 }
@@ -289,9 +293,12 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     }
     if (relationship.lifecycle_phase === "potential_client") await ensureSalesStage({ workspaceId: workspace.id, relationshipId, sellerId })
     relationshipRevalidatePaths(slug, relationshipId)
+    const { data: savedRelationship, error: versionError } = await supabaseAdmin.from("relationships").select("updated_at").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle()
+    if (versionError || !savedRelationship) throw new Error(versionError?.message ?? "The saved relationship version could not be verified")
+    return savedRelationship.updated_at
 }
 
-export async function saveRelationshipDealDetails(slug: string, relationshipId: string, input: RelationshipDealDetailsInput): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function saveRelationshipDealDetails(slug: string, relationshipId: string, input: RelationshipDealDetailsInput): Promise<{ ok: true; version: string } | { ok: false; error: string }> {
     const formData = new FormData()
     formData.set("primary_person_name", input.primaryPersonName)
     formData.set("business_name", input.businessName)
@@ -313,8 +320,8 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
         if (service.assigneeUserId) formData.set(`service_assignee_${service.code}`, service.assigneeUserId)
     }
     try {
-        await saveRelationshipCommercialDetails(slug, relationshipId, formData)
-        return { ok: true }
+        const version = await saveRelationshipCommercialDetails(slug, relationshipId, formData)
+        return { ok: true, version }
     } catch (error) {
         const message = error instanceof Error ? error.message : "The relationship could not be saved"
         const safe = message.startsWith("Void and replace")
@@ -325,6 +332,42 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
             : "The relationship could not be saved. Review the details and try again."
         return { ok: false, error: safe }
     }
+}
+
+export async function saveRelationshipBackgroundDetails(slug: string, relationshipId: string, input: RelationshipBackgroundDetailsInput): Promise<{ ok: true; version: string } | { ok: false; error: string; conflict?: boolean; version?: string }> {
+    const { workspace, user, role } = await requireWorkspace(slug)
+    const primaryPersonName = input.primaryPersonName.trim()
+    if (!primaryPersonName) return { ok: false, error: "Add the client's name before saving the relationship" }
+    const { data: relationship, error: relationshipError } = await supabaseAdmin.from("relationships")
+        .select("seller_user_id, updated_at").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle()
+    if (relationshipError || !relationship) return { ok: false, error: relationshipError?.message ?? "The relationship could not be found" }
+    if (role !== "owner" && role !== "admin" && relationship.seller_user_id !== user.id) {
+        return { ok: false, error: "Only this relationship's seller or a workspace admin can update its details" }
+    }
+    if (input.expectedUpdatedAt && relationship.updated_at !== input.expectedUpdatedAt) {
+        return { ok: false, conflict: true, version: relationship.updated_at, error: "Another user changed this relationship. Refresh to review their version before retrying your edits." }
+    }
+
+    const nextVersion = new Date().toISOString()
+    let update = supabaseAdmin.from("relationships").update({
+        primary_person_name: primaryPersonName,
+        business_name: input.businessName.trim() || null,
+        primary_contact_role: input.primaryContactRole.trim() || null,
+        primary_phone: input.primaryPhone.trim() || null,
+        whatsapp_phone: input.whatsappPhone.trim() || null,
+        primary_email: input.primaryEmail.trim() || null,
+        notes_summary: input.description.trim() || null,
+        updated_at: nextVersion,
+    }).eq("workspace_id", workspace.id).eq("id", relationshipId)
+    if (input.expectedUpdatedAt) update = update.eq("updated_at", input.expectedUpdatedAt)
+    const { data: saved, error } = await update.select("updated_at").maybeSingle()
+    if (error) return { ok: false, error: `The database rejected this relationship change (${error.code}): ${error.message}` }
+    if (!saved) {
+        const { data: latest } = await supabaseAdmin.from("relationships").select("updated_at").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle()
+        return { ok: false, conflict: true, version: latest?.updated_at, error: "Another user changed this relationship. Refresh to review their version before retrying your edits." }
+    }
+    relationshipRevalidatePaths(slug, relationshipId)
+    return { ok: true, version: saved.updated_at }
 }
 
 type ArchiveRelationshipState = { error?: string }

@@ -12,6 +12,7 @@ import type { OkrKeyResult, OkrMeasurement, WorkspaceOkr } from "@/lib/admin/okr
 import { formatOkrDeadline, okrDisplayStatus, type WorkspaceOkrDisplayStatus } from "@/lib/admin/okr-title"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { workItemPriorityLabel } from "@/lib/work-item-priority"
+import { runWorkspaceMutation } from "@/lib/workspace-mutations"
 import {
     addOkrKeyResult,
     addOkrMeasurement,
@@ -433,7 +434,7 @@ export function OkrWorkspace({ workspaceSlug, currentUserId, okrs, ownerOptions,
         setError(null)
         startTransition(async () => {
             try {
-                await action(formData)
+                await runWorkspaceMutation(() => action(formData), { category: "maintenance" })
                 if (after === "close") setDialog(null)
                 else if (after) setDialog(after)
                 router.refresh()
@@ -447,7 +448,7 @@ export function OkrWorkspace({ workspaceSlug, currentUserId, okrs, ownerOptions,
         setError(null)
         startTransition(async () => {
             try {
-                await action()
+                await runWorkspaceMutation(action, { category: "maintenance" })
                 if (after === "close") setDialog(null)
                 else if (after) setDialog(after)
                 router.refresh()

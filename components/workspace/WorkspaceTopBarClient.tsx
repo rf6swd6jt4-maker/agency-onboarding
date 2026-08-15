@@ -6,6 +6,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useId, useRef, useState, useTransition, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { AccountMenu } from "@/components/account/AccountMenu"
+import { Avatar } from "@/components/account/Avatar"
 import { LoadingOverlay } from "@/components/LoadingOverlay"
 import { shortId } from "@/lib/ui/relative-time"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
@@ -13,9 +14,17 @@ import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type OnboardingBuilderWindowSignal } from "@/lib/onboarding-builder-window"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
+import { visibleWorkspacePresence, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceState } from "@/lib/workspace-presence"
+import {
+    runWorkspaceMutation,
+    WORKSPACE_MUTATION_END,
+    WORKSPACE_MUTATION_START,
+    type WorkspaceMutationEventDetail,
+} from "@/lib/workspace-mutations"
 import {
     appendWorkspaceTabHistory,
     isWorkspaceOnboardingBuilderUrl,
@@ -39,6 +48,7 @@ import {
 } from "@/lib/workspace-tabs"
 
 const sidebarStorageKey = "betelgeze:workspace-sidebar-open"
+type WorkspacePresenceChannel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>
 
 type WorkspaceTab = {
     id: string
@@ -74,6 +84,12 @@ type WorkspaceTabContextStatus = {
     context: WorkspaceTabRelationshipContext | null
 }
 
+type WorkspaceTabNavigationState = {
+    status: "loading" | "error"
+    requestedUrl: string
+    error?: string
+}
+
 type Props = {
     workspace: { id: string; name: string; slug: string }
     currentUserId: string
@@ -90,6 +106,9 @@ type Props = {
     workItemOptions: Array<{ id: string; title: string; status: string }>
     relationshipOptions: Array<{ id: string; label: string }>
     okrOwnerOptions: Array<{ id: string; label: string; role: string }>
+    workspaceMembers: Array<{ id: string; name: string; avatarSrc: string | null }>
+    okrPeriodStart: string
+    okrPeriodEnd: string
 }
 
 type SearchResult = {
@@ -114,6 +133,30 @@ function WorkspaceLogo({ src, name }: { src?: string | null; name: string }) {
     }
 
     return <div aria-label={`${name} logo`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-sm font-semibold text-neutral-200">{name.slice(0, 1).toUpperCase()}</div>
+}
+
+function WorkspaceMutationStatus({ state, error }: { state: "idle" | "saving" | "saved" | "error"; error?: string | null }) {
+    if (state === "idle") return null
+    const label = state === "saving" ? "Saving…" : state === "saved" ? "Saved" : error || "Save failed"
+    return <span aria-live="polite" title={error ?? undefined} className={`hidden shrink-0 text-[11px] md:inline ${state === "error" ? "text-red-300" : "text-neutral-500"}`}>{label}</span>
+}
+
+function WorkspacePresenceAvatars({ members, state, error }: { members: WorkspacePresenceMember[]; state: WorkspacePresenceState; error: string | null }) {
+    const visible = members.slice(0, 4)
+    const hidden = Math.max(0, members.length - visible.length)
+    if (!members.length && state === "live") return null
+    if (!members.length) {
+        const label = state === "connecting" ? "Workspace presence connecting" : state === "reconnecting" ? "Workspace presence reconnecting" : error || "Workspace presence offline"
+        return <span aria-label={label} title={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${state === "connecting" || state === "reconnecting" ? "animate-pulse bg-amber-400" : "bg-red-400"}`} />
+    }
+    return <div aria-label="Active workspace users" className="flex shrink-0 items-center -space-x-1.5">
+        {visible.map((member) => <span key={member.userId} title={`${member.name} · Active now`} className="relative h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900">
+            <Avatar src={member.avatarSrc} name={member.name} className="h-full w-full" />
+            <span aria-hidden="true" className="absolute bottom-0 right-0 h-2 w-2 rounded-full border border-neutral-950 bg-emerald-400" />
+        </span>)}
+        {hidden ? <span title={`${hidden} more active user${hidden === 1 ? "" : "s"}`} className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 border-neutral-950 bg-neutral-800 text-[10px] font-medium text-neutral-200">+{hidden}</span> : null}
+        {state !== "live" ? <span aria-label="Workspace presence reconnecting" title={error || "Workspace presence reconnecting"} className="ml-2 h-2 w-2 animate-pulse rounded-full bg-amber-400" /> : null}
+    </div>
 }
 
 function ArrowLeftIcon() {
@@ -376,7 +419,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions }: Props) {
+function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -399,9 +442,16 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     // shell behind its loading overlay until the user tries again.
     const readyTabIdsRef = useRef(new Set<string>())
     const pendingNavigationRef = useRef(new Map<string, string>())
+    const navigationFallbackRef = useRef(new Map<string, WorkspaceTab>())
+    const navigationTimeoutRef = useRef(new Map<string, number>())
+    const navigationErrorRef = useRef(new Set<string>())
     const closedTabsRef = useRef<ClosedWorkspaceTab[]>([])
     const canAddTabRef = useRef(true)
     const mutationRevisionRef = useRef(0)
+    const mutationIdsByTabRef = useRef(new Map<string, Set<string>>())
+    const presenceSessionIdRef = useRef("")
+    const presenceChannelRef = useRef<WorkspacePresenceChannel | null>(null)
+    const presenceStateRef = useRef<WorkspacePresenceState>("connecting")
     const tabButtonRefs = useRef(new Map<string, HTMLButtonElement>())
     const dragCleanupRef = useRef<(() => void) | null>(null)
     const dragStartedTabIdRef = useRef("")
@@ -419,6 +469,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [tabsHydrated, setTabsHydrated] = useState(false)
     const [loadedTabIds, setLoadedTabIds] = useState<Set<string>>(() => new Set())
     const [tabs, setTabs] = useState<WorkspaceTab[]>([])
+    const [tabFrameOrder, setTabFrameOrder] = useState<string[]>([])
     const [activeTabId, setActiveTabId] = useState("")
     const [canAddTab, setCanAddTab] = useState(true)
     const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
@@ -429,6 +480,13 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [contextStatusByTab, setContextStatusByTab] = useState<Record<string, WorkspaceTabContextStatus>>({})
     const [contextObstructedByTab, setContextObstructedByTab] = useState<Record<string, boolean>>({})
     const [routeLoadingTabId, setRouteLoadingTabId] = useState<string | null>(null)
+    const [navigationStateByTab, setNavigationStateByTab] = useState<Record<string, WorkspaceTabNavigationState>>({})
+    const [backgroundMutationCounts, setBackgroundMutationCounts] = useState<Record<string, number>>({})
+    const [backgroundMutationState, setBackgroundMutationState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+    const [backgroundMutationError, setBackgroundMutationError] = useState<string | null>(null)
+    const [activeWorkspaceUsers, setActiveWorkspaceUsers] = useState<WorkspacePresenceMember[]>([])
+    const [presenceState, setPresenceState] = useState<WorkspacePresenceState>("connecting")
+    const [presenceError, setPresenceError] = useState<string | null>(null)
     const [query, setQuery] = useState("")
     const [searchOpen, setSearchOpen] = useState(false)
     const [searchLoading, setSearchLoading] = useState(false)
@@ -516,6 +574,66 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         })
     }, [saveTabsState, titleForUrl])
 
+    const completeTabNavigation = useCallback((tabId: string) => {
+        const timeout = navigationTimeoutRef.current.get(tabId)
+        if (timeout) window.clearTimeout(timeout)
+        navigationTimeoutRef.current.delete(tabId)
+        navigationFallbackRef.current.delete(tabId)
+        if (navigationErrorRef.current.has(tabId)) return
+        setNavigationStateByTab((current) => {
+            if (!(tabId in current)) return current
+            const next = { ...current }
+            delete next[tabId]
+            return next
+        })
+    }, [])
+
+    const beginTabNavigation = useCallback((tabId: string, url: string) => {
+        navigationErrorRef.current.delete(tabId)
+        const currentTab = tabsRef.current.find((tab) => tab.id === tabId)
+        if (currentTab && !navigationFallbackRef.current.has(tabId)) {
+            navigationFallbackRef.current.set(tabId, { ...currentTab, history: [...currentTab.history] })
+        }
+        const existingTimeout = navigationTimeoutRef.current.get(tabId)
+        if (existingTimeout) window.clearTimeout(existingTimeout)
+        setNavigationStateByTab((current) => ({ ...current, [tabId]: { status: "loading", requestedUrl: url } }))
+        const timeout = window.setTimeout(() => {
+            if (pendingNavigationRef.current.get(tabId) !== url) return
+            pendingNavigationRef.current.delete(tabId)
+            readyTabIdsRef.current.delete(tabId)
+            const fallback = navigationFallbackRef.current.get(tabId)
+            navigationFallbackRef.current.delete(tabId)
+            if (fallback) {
+                setTabs((existingTabs) => {
+                    const restored = existingTabs.map((tab) => tab.id === tabId ? fallback : tab)
+                    tabsRef.current = restored
+                    saveTabsState(restored, activeTabIdRef.current)
+                    return restored
+                })
+                const frame = iframeRefs.current.get(tabId)
+                if (frame?.contentWindow) {
+                    try {
+                        frame.contentWindow.location.replace(workspaceTabFrameUrl(fallback.url, tabId, window.location.origin))
+                    } catch {
+                        frame.src = workspaceTabFrameUrl(fallback.url, tabId, window.location.origin)
+                    }
+                }
+            }
+            navigationTimeoutRef.current.delete(tabId)
+            navigationErrorRef.current.add(tabId)
+            setNavigationStateByTab((current) => ({
+                ...current,
+                [tabId]: { status: "error", requestedUrl: url, error: "This page took too long to load." },
+            }))
+        }, 12_000)
+        navigationTimeoutRef.current.set(tabId, timeout)
+    }, [saveTabsState])
+
+    useEffect(() => () => {
+        for (const timeout of navigationTimeoutRef.current.values()) window.clearTimeout(timeout)
+        navigationTimeoutRef.current.clear()
+    }, [])
+
     const readTabsState = useCallback((currentUrl: string): WorkspaceTabsState => {
         try {
             const stored = sessionStorage.getItem(tabsStorageKey)
@@ -576,6 +694,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         deferNavigationStateUpdate(() => {
             setActiveTabId(stored.activeId)
             setTabs(stored.tabs)
+            setTabFrameOrder(stored.tabs.map((tab) => tab.id))
             setTabsHydrated(true)
         })
     }, [normalizeWorkspaceUrl, pathname, readTabsState, saveTabsState, searchParams])
@@ -668,7 +787,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         const previousTabId = activeTabIdRef.current
         const restoredTab = { ...closed.tab, seenRevision: mutationRevisionRef.current }
-        if (!tabFrameOrderRef.current.includes(restoredTab.id)) tabFrameOrderRef.current.push(restoredTab.id)
+        if (!tabFrameOrderRef.current.includes(restoredTab.id)) {
+            tabFrameOrderRef.current.push(restoredTab.id)
+            setTabFrameOrder([...tabFrameOrderRef.current])
+        }
         loadedTabIdsRef.current.delete(closed.tab.id)
         readyTabIdsRef.current.delete(closed.tab.id)
         pendingNavigationRef.current.delete(closed.tab.id)
@@ -710,7 +832,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 postToTab(previousTabId, { type: "activate", active: false, refresh: false })
                 postToTab(existingTab.id, { type: "activate", active: true, refresh })
                 const desiredUrl = pendingNavigationRef.current.get(existingTab.id) ?? existingTab.url
-                if (ensureTabFrameLocation(existingTab.id, desiredUrl)) setRouteLoadingTabId(existingTab.id)
+                if (ensureTabFrameLocation(existingTab.id, desiredUrl)) beginTabNavigation(existingTab.id, desiredUrl)
             })
             return
         }
@@ -718,6 +840,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (currentTabs.length >= 8) {
             const tabId = activeTabIdRef.current
             if (!tabId) return
+            beginTabNavigation(tabId, url)
             updateTabForShellNavigation(tabId, url)
             pendingNavigationRef.current.set(tabId, url)
             requestTabFrameNavigation(tabId, url)
@@ -734,6 +857,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         }
         const nextTabs = [...currentTabs, tab]
         tabFrameOrderRef.current.push(tab.id)
+        setTabFrameOrder([...tabFrameOrderRef.current])
         tabsRef.current = nextTabs
         activeTabIdRef.current = tab.id
         setTabs(nextTabs)
@@ -742,7 +866,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         setContextOpenByTab((current) => ({ ...current, [tab.id]: true }))
         saveTabsState(nextTabs, tab.id)
         window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
-    }, [ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [beginTabNavigation, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
 
     useEffect(() => {
         function receiveFrameMessage(event: MessageEvent<WorkspaceTabFrameMessage>) {
@@ -756,6 +880,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 const url = normalizeWorkspaceUrl(message.url)
                 readyTabIdsRef.current.add(message.tabId)
                 pendingNavigationRef.current.delete(message.tabId)
+                completeTabNavigation(message.tabId)
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
                 setTabs((existingTabs) => {
                     const updatedTabs = existingTabs.map((tab) => {
@@ -787,6 +912,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                     return
                 }
                 if (pendingUrl === url) pendingNavigationRef.current.delete(message.tabId)
+                completeTabNavigation(message.tabId)
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
                 setTabs((existingTabs) => {
                     const updatedTabs = existingTabs.map((tab) => {
@@ -824,6 +950,30 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
             }
 
+            if (message.type === "mutation-start") {
+                const id = message.mutationId || `mutation-${Date.now()}`
+                const active = mutationIdsByTabRef.current.get(message.tabId) ?? new Set<string>()
+                active.add(id)
+                mutationIdsByTabRef.current.set(message.tabId, active)
+                setBackgroundMutationCounts((current) => ({ ...current, [message.tabId]: active.size }))
+                if (message.tabId === activeTabIdRef.current) {
+                    setBackgroundMutationState("saving")
+                    setBackgroundMutationError(null)
+                }
+            }
+
+            if (message.type === "mutation-end") {
+                const active = mutationIdsByTabRef.current.get(message.tabId) ?? new Set<string>()
+                if (message.mutationId) active.delete(message.mutationId)
+                else active.clear()
+                mutationIdsByTabRef.current.set(message.tabId, active)
+                setBackgroundMutationCounts((current) => ({ ...current, [message.tabId]: active.size }))
+                if (message.tabId === activeTabIdRef.current) {
+                    setBackgroundMutationState(message.mutationFailed ? "error" : active.size ? "saving" : "saved")
+                    setBackgroundMutationError(message.mutationFailed ? message.mutationError || "A workspace change could not be saved." : null)
+                }
+            }
+
             if (message.type === "poll-started" && message.pollId) {
                 showCreationNotice({ label: "Poll started", href: `/${workspace.slug}/leadgen/poll/${message.pollId}` })
             }
@@ -831,11 +981,11 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             if (message.type === "navigation-start") {
                 if (message.url) {
                     const url = normalizeWorkspaceUrl(message.url)
+                    beginTabNavigation(message.tabId, url)
                     pendingNavigationRef.current.set(message.tabId, url)
                     updateTabForShellNavigation(message.tabId, url)
                 }
                 readyTabIdsRef.current.delete(message.tabId)
-                if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(message.tabId)
             }
 
             if (message.type === "open-tab" && message.url) {
@@ -874,7 +1024,44 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         window.addEventListener("message", receiveFrameMessage)
         return () => window.removeEventListener("message", receiveFrameMessage)
-    }, [normalizeWorkspaceUrl, openWorkspaceTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [beginTabNavigation, completeTabNavigation, normalizeWorkspaceUrl, openWorkspaceTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+
+    useEffect(() => {
+        function start(event: Event) {
+            const detail = (event as CustomEvent<WorkspaceMutationEventDetail>).detail
+            const tabId = activeTabIdRef.current
+            if (!tabId || !detail?.mutationId) return
+            const active = mutationIdsByTabRef.current.get(tabId) ?? new Set<string>()
+            active.add(detail.mutationId)
+            mutationIdsByTabRef.current.set(tabId, active)
+            setBackgroundMutationCounts((current) => ({ ...current, [tabId]: active.size }))
+            setBackgroundMutationState("saving")
+            setBackgroundMutationError(null)
+        }
+        function end(event: Event) {
+            const detail = (event as CustomEvent<WorkspaceMutationEventDetail>).detail
+            const tabId = activeTabIdRef.current
+            if (!tabId || !detail?.mutationId) return
+            const active = mutationIdsByTabRef.current.get(tabId) ?? new Set<string>()
+            active.delete(detail.mutationId)
+            mutationIdsByTabRef.current.set(tabId, active)
+            setBackgroundMutationCounts((current) => ({ ...current, [tabId]: active.size }))
+            setBackgroundMutationState(detail.failed ? "error" : active.size ? "saving" : "saved")
+            setBackgroundMutationError(detail.failed ? detail.error || "A workspace change could not be saved." : null)
+        }
+        window.addEventListener(WORKSPACE_MUTATION_START, start)
+        window.addEventListener(WORKSPACE_MUTATION_END, end)
+        return () => {
+            window.removeEventListener(WORKSPACE_MUTATION_START, start)
+            window.removeEventListener(WORKSPACE_MUTATION_END, end)
+        }
+    }, [])
+
+    useEffect(() => {
+        if (backgroundMutationState !== "saved") return
+        const timeout = window.setTimeout(() => setBackgroundMutationState("idle"), 2200)
+        return () => window.clearTimeout(timeout)
+    }, [backgroundMutationState])
 
     useEffect(() => {
         if (!tabsHydrated) return
@@ -1097,7 +1284,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const destination = workspaceTabHistoryStep(tab.history, tab.historyIndex, step)
         if (!destination) return
 
-        setRouteLoadingTabId(tabId)
+        beginTabNavigation(tabId, destination.url)
         const nextTabs = tabs.map((candidate) => candidate.id === tabId
             ? { ...candidate, url: destination.url, title: titleForUrl(destination.url), historyIndex: destination.historyIndex }
             : candidate)
@@ -1116,7 +1303,12 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     }
 
     function reloadWorkspace() {
-        window.location.reload()
+        const tabId = activeTabIdRef.current
+        const tab = tabsRef.current.find((candidate) => candidate.id === tabId)
+        if (!tab) return
+        beginTabNavigation(tabId, tab.url)
+        pendingNavigationRef.current.set(tabId, tab.url)
+        postToTab(tabId, { type: "activate", active: true, refresh: true })
     }
 
     function openDesktopSearch() {
@@ -1211,13 +1403,13 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         }
 
         startCreateTransition(async () => {
-            const result = target === "relationship"
-                ? await createRelationshipAction(formData)
+            const result = await runWorkspaceMutation(() => target === "relationship"
+                ? createRelationshipAction(formData)
                 : target === "work-item"
-                    ? await createWorkItemAction(formData)
+                    ? createWorkItemAction(formData)
                     : target === "asset"
-                        ? await createAssetAction(formData)
-                        : await createOkrAction(formData)
+                        ? createAssetAction(formData)
+                        : createOkrAction(formData), { category: target === "okr" ? "maintenance" : target === "asset" ? "system" : target === "work-item" ? "gantt" : "services" })
             if (!result.ok) {
                 setCreateError(result.error ?? "Could not create this item.")
                 return
@@ -1265,7 +1457,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const isLoaded = loadedTabIdsRef.current.has(tabId)
         const alreadyPending = pendingNavigationRef.current.get(tabId) === url
         if (currentTab?.url === url && isLoaded && !alreadyPending) return
-        if (currentTab?.url !== url || !isLoaded || alreadyPending) setRouteLoadingTabId(tabId)
+        beginTabNavigation(tabId, url)
         if (currentTab?.url !== url) {
             updateTabForShellNavigation(tabId, url)
             if (!routeCanShowRelationshipContext(url)) {
@@ -1310,8 +1502,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const pendingUrl = pendingNavigationRef.current.get(tabId)
         const desiredUrl = pendingUrl ?? expectedUrl
         const repaired = ensureTabFrameLocation(tabId, desiredUrl)
-        if (!pendingUrl && !repaired && tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
-        if (repaired && tabId === activeTabIdRef.current) setRouteLoadingTabId(tabId)
+        if (!pendingUrl && !repaired) completeTabNavigation(tabId)
+        if (repaired) beginTabNavigation(tabId, desiredUrl)
         const active = tabId === activeTabIdRef.current
         window.requestAnimationFrame(() => postToTab(tabId, { type: "activate", active, refresh: false }))
     }
@@ -1332,10 +1524,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             postToTab(tab.id, { type: "activate", active: true, refresh })
             const desiredUrl = pendingNavigationRef.current.get(tab.id) ?? tab.url
             if (ensureTabFrameLocation(tab.id, desiredUrl) && tab.id === activeTabIdRef.current) {
-                setRouteLoadingTabId(tab.id)
+                beginTabNavigation(tab.id, desiredUrl)
             }
         })
-    }, [ensureTabFrameLocation, postToTab, saveTabsState, tabs])
+    }, [beginTabNavigation, ensureTabFrameLocation, postToTab, saveTabsState, tabs])
 
     useEffect(() => {
         function receiveBuilderReturn(event: MessageEvent<OnboardingBuilderWindowSignal>) {
@@ -1490,7 +1682,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
     function handleTabTouchTap(event: ReactPointerEvent<HTMLButtonElement>, tab: WorkspaceTab) {
         if (event.pointerType !== "touch" || dragStartedTabIdRef.current === tab.id) return
-        const now = Date.now()
+        const now = event.timeStamp
         const previous = lastTouchTabTapRef.current
         if (previous.tabId === tab.id && now - previous.time <= 350) {
             lastTouchTabTapRef.current = { tabId: "", time: 0 }
@@ -1515,6 +1707,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             seenRevision: currentTab?.seenRevision ?? mutationRevisionRef.current,
         }
         tabFrameOrderRef.current.push(tab.id)
+        setTabFrameOrder([...tabFrameOrderRef.current])
         const nextTabs = [...tabs, tab]
         activeTabIdRef.current = tab.id
         setTabs(nextTabs)
@@ -1548,8 +1741,26 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         loadedTabIdsRef.current.delete(tabId)
         readyTabIdsRef.current.delete(tabId)
         pendingNavigationRef.current.delete(tabId)
+        const navigationTimeout = navigationTimeoutRef.current.get(tabId)
+        if (navigationTimeout) window.clearTimeout(navigationTimeout)
+        navigationTimeoutRef.current.delete(tabId)
+        navigationFallbackRef.current.delete(tabId)
+        navigationErrorRef.current.delete(tabId)
+        mutationIdsByTabRef.current.delete(tabId)
         setLoadedTabIds(new Set(loadedTabIdsRef.current))
         if (routeLoadingTabId === tabId) setRouteLoadingTabId(null)
+        setNavigationStateByTab((current) => {
+            if (!(tabId in current)) return current
+            const next = { ...current }
+            delete next[tabId]
+            return next
+        })
+        setBackgroundMutationCounts((current) => {
+            if (!(tabId in current)) return current
+            const next = { ...current }
+            delete next[tabId]
+            return next
+        })
         delete contextStatusByTabRef.current[tabId]
         delete contextManualClosedByTabRef.current[tabId]
         delete contextObstructedByTabRef.current[tabId]
@@ -1589,11 +1800,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         standalone: "standalone" in panel && panel.standalone === true,
     }))
     const canCreateOkr = canAccessPrivateWorkspacePanels(workspaceRole)
-    const okrPeriodStart = new Date().toISOString().slice(0, 10)
-    const okrPeriodEnd = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-
     const visibleTabs = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
-    const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrderRef.current)
+    const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrder)
     const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
     const activeTabLoaded = loadedTabIds.has(activeTab.id)
     const canGoBack = activeTabLoaded && activeTab.historyIndex > 0
@@ -1605,6 +1813,161 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const activeRelationshipContext = activeContextOpen && !activeContextObstructed ? activeContextStatus?.context ?? null : null
     const activePathname = new URL(activeTab.url, typeof window === "undefined" ? "http://localhost" : window.location.origin).pathname
     const activeRouteLoading = routeLoadingTabId === activeTabId
+    const activeNavigation = navigationStateByTab[activeTabId]
+    const activeBackgroundSaving = (backgroundMutationCounts[activeTabId] ?? 0) > 0
+    const currentPresenceMember = workspaceMembers.find((member) => member.id === currentUserId) ?? { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null }
+
+    useEffect(() => {
+        if (!presenceSessionIdRef.current) presenceSessionIdRef.current = crypto.randomUUID()
+        const supabase = createSupabaseBrowserClient()
+        let disposed = false
+        let reconnectTimeout: number | null = null
+        let reconnectAttempt = 0
+        let connecting = false
+        let channel: WorkspacePresenceChannel | null = null
+
+        function updateState(state: WorkspacePresenceState, error: string | null = null) {
+            if (disposed) return
+            const previous = presenceStateRef.current
+            presenceStateRef.current = state
+            setPresenceState(state)
+            setPresenceError(error)
+            if (state !== "connecting" && state !== "live" && state !== previous) {
+                void fetch(`/api/workspaces/${encodeURIComponent(workspace.slug)}/activity/presence`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ state, error, sessionId: presenceSessionIdRef.current }),
+                    keepalive: true,
+                }).catch(() => undefined)
+            }
+        }
+
+        async function track(candidate: WorkspacePresenceChannel) {
+            await candidate.track({
+                sessionId: presenceSessionIdRef.current,
+                userId: currentUserId,
+                name: currentPresenceMember.name,
+                avatarSrc: currentPresenceMember.avatarSrc,
+                activePath: tabsRef.current.find((tab) => tab.id === activeTabIdRef.current)?.url ?? null,
+                updatedAt: new Date().toISOString(),
+            } satisfies WorkspacePresencePayload)
+        }
+
+        function scheduleReconnect(message: string) {
+            if (disposed || reconnectTimeout !== null) return
+            reconnectAttempt += 1
+            const delay = [1000, 2000, 5000, 10_000, 30_000][Math.min(reconnectAttempt - 1, 4)]
+            updateState(reconnectAttempt >= 5 ? "error" : "reconnecting", message)
+            reconnectTimeout = window.setTimeout(() => {
+                reconnectTimeout = null
+                void connect()
+            }, delay)
+        }
+
+        async function connect() {
+            if (disposed || connecting) return
+            connecting = true
+            if (reconnectTimeout !== null) {
+                window.clearTimeout(reconnectTimeout)
+                reconnectTimeout = null
+            }
+            updateState(reconnectAttempt ? "reconnecting" : "connecting")
+            try {
+                if (channel) {
+                    const previous = channel
+                    channel = null
+                    presenceChannelRef.current = null
+                    await supabase.removeChannel(previous)
+                }
+                const session = await supabase.auth.getSession()
+                const accessToken = session.data.session?.access_token
+                if (!accessToken) {
+                    updateState("offline", "Sign in again to restore workspace presence.")
+                    return
+                }
+                await supabase.realtime.setAuth(accessToken)
+                if (disposed) return
+                const candidate = supabase.channel(workspacePresenceTopic(workspace.slug), {
+                    config: { private: true, presence: { key: presenceSessionIdRef.current } },
+                })
+                channel = candidate
+                presenceChannelRef.current = candidate
+                candidate
+                    .on("presence", { event: "sync" }, () => {
+                        if (disposed || channel !== candidate) return
+                        setActiveWorkspaceUsers(visibleWorkspacePresence(candidate.presenceState<WorkspacePresencePayload>(), currentUserId, workspaceMembers))
+                    })
+                    .subscribe(async (status) => {
+                        if (disposed || channel !== candidate) return
+                        if (status === "SUBSCRIBED") {
+                            reconnectAttempt = 0
+                            updateState("live")
+                            try {
+                                await track(candidate)
+                            } catch {
+                                scheduleReconnect("Connected, but presence could not be announced.")
+                            }
+                        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+                            scheduleReconnect(`Workspace presence ${status.toLowerCase().replace(/_/g, " ")}.`)
+                        }
+                    })
+            } catch (error) {
+                scheduleReconnect(error instanceof Error ? error.message : "Workspace presence could not connect.")
+            } finally {
+                connecting = false
+            }
+        }
+
+        function reconnectWhenAvailable() {
+            if (document.visibilityState === "visible" && presenceStateRef.current !== "live") void connect()
+        }
+
+        const authSubscription = supabase.auth.onAuthStateChange((_event, session) => {
+            if (!session?.access_token || disposed) return
+            window.setTimeout(() => { void connect() }, 0)
+        })
+        window.addEventListener("online", reconnectWhenAvailable)
+        window.addEventListener("focus", reconnectWhenAvailable)
+        document.addEventListener("visibilitychange", reconnectWhenAvailable)
+        void connect()
+
+        return () => {
+            disposed = true
+            if (reconnectTimeout !== null) window.clearTimeout(reconnectTimeout)
+            authSubscription.data.subscription.unsubscribe()
+            window.removeEventListener("online", reconnectWhenAvailable)
+            window.removeEventListener("focus", reconnectWhenAvailable)
+            document.removeEventListener("visibilitychange", reconnectWhenAvailable)
+            presenceChannelRef.current = null
+            setActiveWorkspaceUsers([])
+            if (channel) void supabase.removeChannel(channel)
+        }
+    }, [currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, workspace.slug, workspaceMembers])
+
+    useEffect(() => {
+        const channel = presenceChannelRef.current
+        if (!channel || presenceState !== "live") return
+        void channel.track({
+            sessionId: presenceSessionIdRef.current,
+            userId: currentUserId,
+            name: currentPresenceMember.name,
+            avatarSrc: currentPresenceMember.avatarSrc,
+            activePath: activeTab.url,
+            updatedAt: new Date().toISOString(),
+        } satisfies WorkspacePresencePayload).catch(() => {
+            presenceStateRef.current = "reconnecting"
+            setPresenceState("reconnecting")
+            setPresenceError("Workspace presence could not update the active page.")
+        })
+    }, [activeTab.url, currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, presenceState])
+
+    function retryActiveNavigation() {
+        if (!activeNavigation) return
+        beginTabNavigation(activeTabId, activeNavigation.requestedUrl)
+        updateTabForShellNavigation(activeTabId, activeNavigation.requestedUrl)
+        pendingNavigationRef.current.set(activeTabId, activeNavigation.requestedUrl)
+        requestTabFrameNavigation(activeTabId, activeNavigation.requestedUrl)
+    }
 
     function viewCreatedRecord() {
         if (!creationNotice) return
@@ -1642,6 +2005,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         <input ref={desktopSearchInputRef} value={query} onKeyDown={submitSearch} onChange={(event) => { setQuery(event.target.value); openDesktopSearch() }} onFocus={openDesktopSearch} aria-label="Search Betelgeze" placeholder="Search relationships, work, leads..." className="h-9 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 pl-9 pr-16 text-sm text-neutral-300 outline-none transition placeholder:text-neutral-600 focus:border-neutral-600 focus:ring-2 focus:ring-white/10" />
                         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-neutral-800 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500">{searchShortcutLabel}</span>
                     </label>
+                    <WorkspacePresenceAvatars members={activeWorkspaceUsers} state={presenceState} error={presenceError} />
+                    <WorkspaceMutationStatus state={activeBackgroundSaving ? "saving" : backgroundMutationState} error={backgroundMutationError} />
                     {searchOpen && (
                         <div className="absolute left-[6.5rem] right-0 top-11 z-[70] max-h-[32rem] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
                             <div className="max-h-[32rem] overflow-y-auto">
@@ -1709,6 +2074,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                             <OkrIcon />
                         </button>}
                     </div>
+                    <div className="md:hidden"><WorkspacePresenceAvatars members={activeWorkspaceUsers} state={presenceState} error={presenceError} /></div>
                     <AccountMenu username={username} email={email} avatarSrc={avatarSrc} workspaceId={workspace.id} workspaceName={workspace.name} leaveAction={leaveAction} buttonClassName="h-9 w-9" />
                 </div>
             </div>
@@ -1819,7 +2185,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                     }}
                                     className={`min-w-0 flex-1 touch-pan-y truncate text-left ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
                                 >
-                                    {displayTitle}
+                                    <span className="flex min-w-0 items-center gap-1.5"><span className="truncate">{displayTitle}</span>{navigationStateByTab[tab.id]?.status === "loading" ? <span aria-label="Loading" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-neutral-400" /> : navigationStateByTab[tab.id]?.status === "error" ? <span aria-label="Navigation failed" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" /> : null}</span>
                                 </button>}
                                 {visibleTabs.length > 1 && (
                                     <button data-icon-button type="button" onClick={() => closeTab(tab.id)} aria-label={`Close ${displayTitle} tab`} className="ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-500 opacity-80 transition hover:bg-neutral-800 hover:text-white group-hover:opacity-100">
@@ -1863,8 +2229,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 <div className="absolute inset-0 z-20 bg-neutral-950" aria-hidden="true" />
             )}
             {tabsHydrated && !loadedTabIds.has(activeTabId) && !activeRouteLoading && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950 text-sm text-neutral-500">Loading tab...</div>
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950 text-sm text-neutral-500">Opening tab…</div>
             )}
+            {tabsHydrated && activeNavigation?.status === "error" ? <div role="alert" className="absolute right-4 top-4 z-20 flex items-center gap-3 rounded-lg border border-red-500/30 bg-neutral-950/95 px-3 py-2 text-xs text-red-200 shadow-xl"><span>{activeNavigation.error}</span><button type="button" onClick={retryActiveNavigation} className="font-medium text-white underline decoration-neutral-600 underline-offset-2">Retry</button></div> : null}
         </div>
 
         {activeRelationshipContext && !activeRouteLoading && (

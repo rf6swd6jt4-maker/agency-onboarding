@@ -1,5 +1,6 @@
 import { BetelgezeStatusMark } from "@/components/brand/BetelgezeStatusMark"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
+import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
 import { leadgenSourceFamilyLabels, sourceHealthMap, sourceMetadataNote, sourceStatusMeta, type LeadgenSourceCatalogRow, type LeadgenSourceHealthRow } from "@/lib/leadgen/source-catalog-ui"
 import { buildSourcePlan, executableLeadgenSources, leadgenSourceOptions, leadgenSourceRuntimeConfigured, seedLeadgenSources, type LeadgenSourceConfig, type LeadgenSourceKey } from "@/lib/leadgen/sources"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
@@ -120,8 +121,8 @@ export default async function NewLeadgenPollPage({ params }: PageProps) {
                         <h2 className="mt-2 text-lg font-semibold">Poll preflight</h2>
                         <p className="mt-1 max-w-2xl text-sm leading-5 text-neutral-500">Checks the selected target, enabled sources, source mappings, runtime configuration, and whether the owner-identity stage has enough real pollable sources before creating work.</p>
                     </div>
-                    <form action={createLeadgenPoll.bind(null, workspace.slug)} className="flex w-full flex-col gap-2 md:w-auto md:min-w-[220px]">
-                        <button disabled={!canRun} className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-400">Start poll</button>
+                    <form action={createLeadgenPoll.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex w-full flex-col gap-2 md:w-auto md:min-w-[220px]">
+                        <WorkspaceActionButton disabled={!canRun} pendingLabel="Starting poll…" className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-400">Start poll</WorkspaceActionButton>
                         <p className="text-xs leading-5 text-neutral-500">{canRun ? `${readySeedSources.length} seed source${readySeedSources.length === 1 ? "" : "s"} ready; ${readySources.length} total source${readySources.length === 1 ? "" : "s"} ready.` : blockingProblems[0]}</p>
                     </form>
                 </div>

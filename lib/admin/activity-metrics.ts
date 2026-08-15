@@ -51,11 +51,14 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
         if (bucketIndex < 0 || bucketIndex >= buckets.length) continue
         const bucket = buckets[bucketIndex]
         const classification = metricClassification(event)
-        if (classification === "audit") continue
-        bucket.requests += 1
+        const mutationRequest = classification === "operational" && event.event_key.startsWith("workspace.mutation.")
+        const internalCall = classification === "internal_call"
+        const externalCall = classification === "external_call"
+        if (!mutationRequest && !internalCall && !externalCall) continue
+        if (mutationRequest) bucket.requests += 1
+        if (internalCall) bucket.internalCalls += 1
+        if (externalCall) bucket.externalCalls += 1
         if (event.outcome === "failed" || event.level === "error") bucket.errors += 1
-        if (classification === "internal_call") bucket.internalCalls += 1
-        if (classification === "external_call") bucket.externalCalls += 1
     }
 
     const metric = (
@@ -71,9 +74,12 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
     }
 
     return [
-        metric("requests", "Requests", "Recorded actions that could generate an error.", "neutral", "count", (bucket) => bucket.requests),
+        metric("requests", "Requests", "Workspace mutation requests.", "neutral", "count", (bucket) => bucket.requests),
         metric("internal_calls", "Internal Calls", "Calls from Betelgeze to another platform.", "neutral", "count", (bucket) => bucket.internalCalls),
         metric("external_calls", "External Calls", "Calls from another platform into Betelgeze.", "neutral", "count", (bucket) => bucket.externalCalls),
-        metric("error_rate", "Error rate", "Errors in the activity log as a share of requests.", "red", "percentage", (bucket) => bucket.requests ? (bucket.errors / bucket.requests) * 100 : 0),
+        metric("error_rate", "Error rate", "Failures across mutation requests, internal calls, and external calls.", "red", "percentage", (bucket) => {
+            const total = bucket.requests + bucket.internalCalls + bucket.externalCalls
+            return total ? (bucket.errors / total) * 100 : 0
+        }),
     ]
 }

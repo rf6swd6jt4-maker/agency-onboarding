@@ -4,6 +4,7 @@ import Link from "next/link"
 import { type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useId, useState } from "react"
 import { AnchoredPopup } from "@/components/ui"
 import type { ListAction } from "./ListActionMenu"
+import { runWorkspaceMutation } from "@/lib/workspace-mutations"
 
 const REMOVE_WARNING = "Remove this item from Betelgeze? This keeps the interface clean, but the action may not be reversible from this screen."
 
@@ -22,6 +23,8 @@ export function MobileCardActionSurface({
 }) {
     const [open, setOpen] = useState(false)
     const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+    const [pendingAction, setPendingAction] = useState<string | null>(null)
+    const [actionError, setActionError] = useState<string | null>(null)
     const menuId = useId()
     const visibleActions = actions.filter((action): action is ListAction => {
         if (!action) return false
@@ -81,6 +84,7 @@ export function MobileCardActionSurface({
         {children}
         {mobileListSurface ? <button type="button" aria-label={label} aria-expanded={open} aria-haspopup="menu" className="absolute inset-0 z-10 sm:hidden" onClick={handleMobileListClick} /> : null}
         {open && <AnchoredPopup anchor={anchor} align="end" role="menu" onDismiss={() => setOpen(false)} className="w-52 rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/60">
+            {actionError ? <p role="alert" className="border-b border-red-500/20 px-3 py-2 text-xs text-red-300">{actionError}</p> : null}
             {visibleActions.map((item) => {
                 const itemClassName = `block min-h-9 w-full px-3 py-2 text-left text-sm ${item.danger ? "text-red-300 hover:bg-red-950/40" : "text-neutral-200 hover:bg-neutral-900"}`
                 if (item.href) {
@@ -106,15 +110,19 @@ export function MobileCardActionSurface({
                         {item.label}
                     </button>
                 }
-                return <form key={item.label} action={item.action}>
-                    <button type="submit" className={itemClassName} role="menuitem" onClick={(event) => {
-                        const warning = item.confirmMessage ?? (item.danger ? REMOVE_WARNING : null)
-                        if (warning && !window.confirm(warning)) {
-                            event.preventDefault()
-                            setOpen(false)
-                        }
-                    }}>
-                        {item.label}
+                return <form key={item.label} onSubmit={(event) => {
+                    event.preventDefault()
+                    if (!item.action || pendingAction) return
+                    const warning = item.confirmMessage ?? (item.danger ? REMOVE_WARNING : null)
+                    if (warning && !window.confirm(warning)) { setOpen(false); return }
+                    setPendingAction(item.label)
+                    setActionError(null)
+                    void runWorkspaceMutation(() => Promise.resolve(item.action!())).then(() => setOpen(false)).catch((error) => {
+                        setActionError(error instanceof Error ? error.message : "This action could not be completed.")
+                    }).finally(() => setPendingAction(null))
+                }}>
+                    <button type="submit" disabled={Boolean(pendingAction)} className={itemClassName} role="menuitem">
+                        {pendingAction === item.label ? `${item.label}…` : item.label}
                     </button>
                 </form>
             })}

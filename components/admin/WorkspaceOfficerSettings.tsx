@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
 
 type OfficerOption = { id: string; label: string }
 type OfficerCategory = { key: string; label: string; value: string }
@@ -21,7 +22,7 @@ export function WorkspaceOfficerSettings({
         Object.fromEntries(categories.map((category) => [category.key, category.value]))
     )
 
-    return <form action={action} className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
+    return <form action={action} data-workspace-mutation="background" className="overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
         <div className="border-b border-neutral-800 p-4 sm:p-5">
             <label className="block text-sm font-medium text-neutral-200">
                 Global officer
@@ -40,7 +41,7 @@ export function WorkspaceOfficerSettings({
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {categories.map((category) => <label key={category.key} className="text-sm text-neutral-300">{category.label}<select name={category.key} value={categoryOfficers[category.key] ?? ""} onChange={(event) => setCategoryOfficers((current) => ({ ...current, [category.key]: event.target.value }))} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-white"><option value="">Workspace owner (fallback)</option>{officers.map((officer) => <option key={officer.id} value={officer.id}>{officer.label}</option>)}</select></label>)}
             </div>
-            <button className="mt-5 inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">Save officers</button>
+            <WorkspaceActionButton pendingLabel="Saving officers…" className="mt-5 inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">Save officers</WorkspaceActionButton>
         </div>
     </form>
 }

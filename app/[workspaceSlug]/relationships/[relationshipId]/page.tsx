@@ -132,6 +132,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                 workspaceSlug={workspace.slug}
                                 workspaceName={workspace.name}
                                 relationshipId={relationship.id}
+                                updatedAt={relationship.updated_at}
                                 details={{
                                     primaryPersonName: relationship.primary_person_name,
                                     businessName: relationship.business_name ?? "",
