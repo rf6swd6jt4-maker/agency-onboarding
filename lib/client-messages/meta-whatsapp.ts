@@ -27,6 +27,7 @@ type SendMetaWhatsAppMediaInput = {
     link: string
     caption?: string | null
     fileName?: string | null
+    replyToMessageId?: string | null
     callbackData?: string | null
 }
 
@@ -134,6 +135,7 @@ export async function sendMetaWhatsAppMedia({
     link,
     caption,
     fileName,
+    replyToMessageId,
     callbackData,
 }: SendMetaWhatsAppMediaInput) {
     let config: Awaited<ReturnType<typeof metaConfig>>
@@ -160,6 +162,7 @@ export async function sendMetaWhatsAppMedia({
                 recipient_type: "individual",
                 to: toMetaWhatsAppRecipient(to),
                 biz_opaque_callback_data: callbackData || undefined,
+                context: replyToMessageId ? { message_id: replyToMessageId } : undefined,
                 type: kind,
                 [kind]: media,
             }),

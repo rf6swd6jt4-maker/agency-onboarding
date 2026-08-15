@@ -23,6 +23,8 @@ export type CommunicationMessage = {
     automationKind: string | null
     automationLabel: string | null
     attachment: CommunicationAttachment | null
+    providerMessageId: string | null
+    replyToProviderMessageId: string | null
     createdAt: string
     sentAt: string | null
     deliveredAt: string | null

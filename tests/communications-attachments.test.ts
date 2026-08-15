@@ -45,6 +45,7 @@ test("Communications uploads to R2 and sends verified media through Meta", async
     assert.match(messageRoute, /verifyClientMessageUpload/)
     assert.match(messageRoute, /sendMetaWhatsAppMedia/)
     assert.match(meta, /\[kind\]: media/)
+    assert.match(meta, /context: replyToMessageId/)
     assert.match(workspace, /Attach image or file/)
     assert.match(workspace, /MessageAttachment/)
     assert.match(mediaRoute, /workspace_memberships/)

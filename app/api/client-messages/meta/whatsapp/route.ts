@@ -402,6 +402,36 @@ function getStatusError(status: WhatsAppStatus) {
         .join(": ")
 }
 
+const STATUS_MESSAGE_COLUMNS = "id, client_id, status, sent_at, delivered_at, read_at, raw_payload"
+
+async function findStatusMessage(workspaceId: string, messageId: string, callbackId?: string) {
+    if (callbackId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(callbackId)) {
+        const callbackMatch = await supabaseAdmin
+            .from("client_messages")
+            .select(STATUS_MESSAGE_COLUMNS)
+            .eq("workspace_id", workspaceId)
+            .eq("id", callbackId)
+            .maybeSingle()
+        if (callbackMatch.error) throw callbackMatch.error
+        if (callbackMatch.data) return callbackMatch.data
+    }
+
+    for (const column of ["provider_message_id", "whatsapp_message_id"] as const) {
+        const providerMatch = await supabaseAdmin
+            .from("client_messages")
+            .select(STATUS_MESSAGE_COLUMNS)
+            .eq("workspace_id", workspaceId)
+            .eq(column, messageId)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        if (providerMatch.error) throw providerMatch.error
+        if (providerMatch.data) return providerMatch.data
+    }
+
+    return null
+}
+
 async function handleStatusUpdate({
     workspaceId,
     status,
@@ -418,17 +448,7 @@ async function handleStatusUpdate({
     const messageStatus = status.status ?? "status_update"
     const errorMessage = getStatusError(status)
     const callbackId = status.biz_opaque_callback_data
-    const callbackFilter = callbackId && /^[0-9a-f-]{36}$/i.test(callbackId) ? `,id.eq.${callbackId}` : ""
-    const { data: message } = await supabaseAdmin
-        .from("client_messages")
-        .select("id, client_id, status, sent_at, delivered_at, read_at, raw_payload")
-        .eq("workspace_id", workspaceId)
-        .or(
-            `provider_message_id.eq.${messageId},whatsapp_message_id.eq.${messageId}${callbackFilter}`
-        )
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
+    const message = await findStatusMessage(workspaceId, messageId, callbackId)
 
     if (message) {
         const statusOrder: Record<string, number> = {

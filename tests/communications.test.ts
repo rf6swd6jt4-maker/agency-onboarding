@@ -39,6 +39,9 @@ test("direct WhatsApp sending is durable and idempotent", async () => {
     assert.match(route, /if \(!relationship\.client_id\) return \{ id: null, external_address: address \}/)
     assert.match(meta, /biz_opaque_callback_data: callbackData/)
     assert.match(webhook, /biz_opaque_callback_data/)
+    assert.match(webhook, /findStatusMessage/)
+    assert.match(webhook, /\.eq\("id", callbackId\)/)
+    assert.doesNotMatch(webhook, /provider_message_id\.eq\.\$\{messageId\}/)
     assert.match(webhook, /statusOrder/)
     assert.match(webhook, /read_at:/)
     assert.match(webhook, /resolveInboundDestination/)
@@ -49,6 +52,24 @@ test("direct WhatsApp sending is durable and idempotent", async () => {
             webhook.indexOf('from("client_communication_channels")'),
         "current relationships must win over legacy channels when a phone number is reused"
     )
+})
+
+test("WhatsApp replies remain linked in both directions", async () => {
+    const [route, meta, webhook, server, workspace] = await Promise.all([
+        readFile("app/api/workspaces/[workspaceSlug]/communications/messages/route.ts", "utf8"),
+        readFile("lib/client-messages/meta-whatsapp.ts", "utf8"),
+        readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
+        readFile("lib/communications/server.ts", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+    ])
+    assert.match(webhook, /reply_to_whatsapp_message_id: replyToWhatsAppMessageId/)
+    assert.match(server, /reply_to_whatsapp_message_id/)
+    assert.match(route, /replyToMessageId/)
+    assert.match(route, /reply_to_whatsapp_message_id: replyToProviderMessageId/)
+    assert.match(meta, /context: replyToMessageId \? \{ message_id: replyToMessageId \} : undefined/)
+    assert.match(workspace, /Replying to \{senderName\(replyingTo\)\}/)
+    assert.match(workspace, /touch\.clientX - start\.x > 54/)
+    assert.match(workspace, /message\.replyToProviderMessageId/)
 })
 
 test("automated onboarding messages are attributed and reuse their durable message log", async () => {

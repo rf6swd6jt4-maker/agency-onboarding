@@ -67,13 +67,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
 export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
     const { workspace, user } = await requireWorkspace(workspaceSlug)
-    const input = await request.json().catch(() => null) as { relationshipId?: unknown; body?: unknown; clientRequestId?: unknown; retry?: unknown; attachment?: unknown } | null
+    const input = await request.json().catch(() => null) as { relationshipId?: unknown; body?: unknown; clientRequestId?: unknown; retry?: unknown; attachment?: unknown; replyToMessageId?: unknown } | null
     const relationshipId = typeof input?.relationshipId === "string" ? input.relationshipId : ""
     const clientRequestId = typeof input?.clientRequestId === "string" ? input.clientRequestId : ""
+    const replyToMessageId = typeof input?.replyToMessageId === "string" ? input.replyToMessageId : ""
     const body = typeof input?.body === "string" ? input.body.trim() : ""
     const inputAttachment = communicationAttachmentFromValue(input?.attachment)
     if (input?.attachment && !inputAttachment) return Response.json({ error: "The attachment metadata is invalid." }, { status: 400 })
-    if (!UUID_PATTERN.test(relationshipId) || !UUID_PATTERN.test(clientRequestId) || (!body && !inputAttachment) || body.length > 4_000) return Response.json({ error: "A valid conversation, request ID, and message or attachment are required." }, { status: 400 })
+    if (!UUID_PATTERN.test(relationshipId) || !UUID_PATTERN.test(clientRequestId) || (replyToMessageId && !UUID_PATTERN.test(replyToMessageId)) || (!body && !inputAttachment) || body.length > 4_000) return Response.json({ error: "A valid conversation, request ID, and message or attachment are required." }, { status: 400 })
     const relationship = await scopedRelationship(workspace.id, relationshipId)
     if (!relationship) return Response.json({ error: "Conversation not found" }, { status: 404 })
     const channel = await destinationForRelationship(workspace.id, relationship)
@@ -89,6 +90,20 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     if (existingResult.error) return Response.json({ error: existingResult.error.message }, { status: 503 })
     const existing = communicationMessageFromRow(existingResult.data)
     if (existing && !(input?.retry === true && existing.status === "send_failed")) return Response.json({ message: existing, reused: true })
+    let replyToProviderMessageId = existing?.replyToProviderMessageId ?? null
+    if (!replyToProviderMessageId && replyToMessageId) {
+        const replyTarget = await supabaseAdmin
+            .from("client_messages")
+            .select("provider_message_id, whatsapp_message_id")
+            .eq("workspace_id", workspace.id)
+            .eq("relationship_id", relationship.id)
+            .eq("id", replyToMessageId)
+            .maybeSingle()
+        if (replyTarget.error) return Response.json({ error: replyTarget.error.message }, { status: 503 })
+        if (!replyTarget.data) return Response.json({ error: "The message being replied to was not found." }, { status: 404 })
+        replyToProviderMessageId = replyTarget.data.whatsapp_message_id ?? replyTarget.data.provider_message_id
+        if (!replyToProviderMessageId) return Response.json({ error: "That message has not reached WhatsApp yet." }, { status: 409 })
+    }
     let attachment = existing?.attachment ?? inputAttachment
     if (attachment && body.length > MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH) {
         return Response.json({ error: `Attachment captions can be up to ${MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH} characters.` }, { status: 400 })
@@ -127,6 +142,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
             sender_kind: "staff",
             sender_user_id: user.id,
             client_request_id: clientRequestId,
+            reply_to_whatsapp_message_id: replyToProviderMessageId,
             raw_payload: attachment ? { bridge_media: attachment } : {},
         }).select("id").single()
         if (error || !data) return Response.json({ error: error?.message ?? "Could not create message" }, { status: 503 })
@@ -143,10 +159,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
                 link: await createPrivateUploadSignedUrl(attachment.storagePath),
                 caption: providerBody,
                 fileName: attachment.fileName,
+                replyToMessageId: replyToProviderMessageId,
                 callbackData: messageId,
             })
         } else {
-            providerResponse = await sendMetaWhatsAppMessage({ workspaceId: workspace.id, to: channel.external_address, body: providerBody, callbackData: messageId })
+            providerResponse = await sendMetaWhatsAppMessage({ workspaceId: workspace.id, to: channel.external_address, body: providerBody, replyToMessageId: replyToProviderMessageId, callbackData: messageId })
         }
         const externalId = providerMessageId(providerResponse)
         const sentAt = new Date().toISOString()

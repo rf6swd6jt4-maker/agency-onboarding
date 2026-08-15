@@ -8,8 +8,8 @@ import type {
 } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 
-export const COMMUNICATION_MESSAGE_COLUMNS = "id, client_request_id, relationship_id, body, direction, provider, status, error, sender_kind, sender_user_id, automation_kind, automation_label, created_at, sent_at, delivered_at, read_at, failed_at, raw_payload"
-const legacyMessageColumns = "id, relationship_id, body, direction, provider, status, error, created_at, raw_payload"
+export const COMMUNICATION_MESSAGE_COLUMNS = "id, client_request_id, relationship_id, body, direction, provider, provider_message_id, whatsapp_message_id, reply_to_whatsapp_message_id, status, error, sender_kind, sender_user_id, automation_kind, automation_label, created_at, sent_at, delivered_at, read_at, failed_at, raw_payload"
+const legacyMessageColumns = "id, relationship_id, body, direction, provider, provider_message_id, whatsapp_message_id, reply_to_whatsapp_message_id, status, error, created_at, raw_payload"
 
 function record(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -69,6 +69,8 @@ export function communicationMessageFromRow(value: unknown): CommunicationMessag
         automationKind: text(row.automation_kind) ?? text(record(row.raw_payload).kind),
         automationLabel: text(row.automation_label) ?? legacyAutomationLabel(row),
         attachment: communicationAttachmentFromRawPayload(row.raw_payload),
+        providerMessageId: text(row.whatsapp_message_id) ?? text(row.provider_message_id),
+        replyToProviderMessageId: text(row.reply_to_whatsapp_message_id),
         createdAt,
         sentAt: text(row.sent_at) ?? inferredTimestamp(status, createdAt, ["sent", "delivered", "read", "whatsapp_sent", "whatsapp_delivered", "whatsapp_read"]),
         deliveredAt: text(row.delivered_at) ?? inferredTimestamp(status, createdAt, ["delivered", "read", "whatsapp_delivered", "whatsapp_read"]),
