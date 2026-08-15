@@ -76,7 +76,6 @@ export type ClientConversation = {
 export type CommunicationsBootstrap = {
     workspaceId: string
     workspaceSlug: string
-    workspaceName: string
     currentUser: CommunicationPerson
     people: CommunicationPerson[]
     conversations: ClientConversation[]

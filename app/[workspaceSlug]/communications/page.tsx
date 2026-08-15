@@ -50,7 +50,6 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
     const bootstrap: CommunicationsBootstrap = {
         workspaceId: workspace.id,
         workspaceSlug: workspace.slug,
-        workspaceName: workspace.name,
         currentUser: peopleResult.currentUser,
         people: peopleResult.people,
         conversations,

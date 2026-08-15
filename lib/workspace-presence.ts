@@ -10,6 +10,12 @@ export type WorkspacePresencePayload = {
 export type WorkspacePresenceMember = WorkspacePresencePayload
 export type WorkspacePresenceState = "connecting" | "live" | "reconnecting" | "offline" | "error"
 
+export type WorkspacePresenceRosterMember = TrustedWorkspaceMember & {
+    active: boolean
+    activePath: string | null
+    updatedAt: string | null
+}
+
 export type TrustedWorkspaceMember = {
     id: string
     name: string
@@ -35,4 +41,23 @@ export function visibleWorkspacePresence(
         if (!existing || Date.parse(candidate.updatedAt) > Date.parse(existing.updatedAt)) byUser.set(presence.userId, candidate)
     }
     return [...byUser.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+export function workspacePresenceRoster(
+    trustedMembers: TrustedWorkspaceMember[],
+    activeMembers: WorkspacePresenceMember[],
+    currentUserId: string,
+) {
+    const activeById = new Map(activeMembers.map((member) => [member.userId, member]))
+    return trustedMembers
+        .filter((member) => member.id !== currentUserId)
+        .map((member): WorkspacePresenceRosterMember => {
+            const activeMember = activeById.get(member.id)
+            return {
+                ...member,
+                active: Boolean(activeMember),
+                activePath: activeMember?.activePath ?? null,
+                updatedAt: activeMember?.updatedAt ?? null,
+            }
+        })
 }

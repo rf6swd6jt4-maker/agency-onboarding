@@ -18,7 +18,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type OnboardingBuilderWindowSignal } from "@/lib/onboarding-builder-window"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
-import { visibleWorkspacePresence, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceState } from "@/lib/workspace-presence"
+import { visibleWorkspacePresence, workspacePresenceRoster, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceRosterMember, type WorkspacePresenceState } from "@/lib/workspace-presence"
 import {
     runWorkspaceMutation,
     WORKSPACE_MUTATION_END,
@@ -141,20 +141,16 @@ function WorkspaceMutationStatus({ state, error }: { state: "idle" | "saving" | 
     return <span aria-live="polite" title={error ?? undefined} className={`hidden shrink-0 text-[11px] md:inline ${state === "error" ? "text-red-300" : "text-neutral-500"}`}>{label}</span>
 }
 
-function WorkspacePresenceAvatars({ members, state, error }: { members: WorkspacePresenceMember[]; state: WorkspacePresenceState; error: string | null }) {
-    const visible = members.slice(0, 4)
-    const hidden = Math.max(0, members.length - visible.length)
-    if (!members.length && state === "live") return null
+function WorkspacePresenceAvatars({ members, state, error }: { members: WorkspacePresenceRosterMember[]; state: WorkspacePresenceState; error: string | null }) {
     if (!members.length) {
+        if (state === "live") return null
         const label = state === "connecting" ? "Workspace presence connecting" : state === "reconnecting" ? "Workspace presence reconnecting" : error || "Workspace presence offline"
         return <span aria-label={label} title={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${state === "connecting" || state === "reconnecting" ? "animate-pulse bg-amber-400" : "bg-red-400"}`} />
     }
-    return <div aria-label="Active workspace users" className="flex shrink-0 items-center -space-x-1.5">
-        {visible.map((member) => <span key={member.userId} title={`${member.name} · Active now`} className="relative h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900">
-            <Avatar src={member.avatarSrc} name={member.name} className="h-full w-full" />
-            <span aria-hidden="true" className="absolute bottom-0 right-0 h-2 w-2 rounded-full border border-neutral-950 bg-emerald-400" />
+    return <div aria-label="Workspace team presence" className="flex shrink-0 items-center -space-x-1.5">
+        {members.map((member) => <span key={member.id} title={`${member.name} — ${member.active ? "Connected" : "Disconnected"}`} className="h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900">
+            <span className={`block h-full w-full ${member.active ? "" : "grayscale opacity-35"}`}><Avatar src={member.avatarSrc} name={member.name} className="h-full w-full" /></span>
         </span>)}
-        {hidden ? <span title={`${hidden} more active user${hidden === 1 ? "" : "s"}`} className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 border-neutral-950 bg-neutral-800 text-[10px] font-medium text-neutral-200">+{hidden}</span> : null}
         {state !== "live" ? <span aria-label="Workspace presence reconnecting" title={error || "Workspace presence reconnecting"} className="ml-2 h-2 w-2 animate-pulse rounded-full bg-amber-400" /> : null}
     </div>
 }
@@ -1816,6 +1812,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const activeNavigation = navigationStateByTab[activeTabId]
     const activeBackgroundSaving = (backgroundMutationCounts[activeTabId] ?? 0) > 0
     const currentPresenceMember = workspaceMembers.find((member) => member.id === currentUserId) ?? { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null }
+    const workspacePresenceMembers = workspacePresenceRoster(workspaceMembers, activeWorkspaceUsers, currentUserId)
 
     useEffect(() => {
         if (!presenceSessionIdRef.current) presenceSessionIdRef.current = crypto.randomUUID()
@@ -2005,7 +2002,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         <input ref={desktopSearchInputRef} value={query} onKeyDown={submitSearch} onChange={(event) => { setQuery(event.target.value); openDesktopSearch() }} onFocus={openDesktopSearch} aria-label="Search Betelgeze" placeholder="Search relationships, work, leads..." className="h-9 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 pl-9 pr-16 text-sm text-neutral-300 outline-none transition placeholder:text-neutral-600 focus:border-neutral-600 focus:ring-2 focus:ring-white/10" />
                         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-neutral-800 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500">{searchShortcutLabel}</span>
                     </label>
-                    <WorkspacePresenceAvatars members={activeWorkspaceUsers} state={presenceState} error={presenceError} />
+                    <WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} />
                     <WorkspaceMutationStatus state={activeBackgroundSaving ? "saving" : backgroundMutationState} error={backgroundMutationError} />
                     {searchOpen && (
                         <div className="absolute left-[6.5rem] right-0 top-11 z-[70] max-h-[32rem] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
@@ -2074,7 +2071,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                             <OkrIcon />
                         </button>}
                     </div>
-                    <div className="md:hidden"><WorkspacePresenceAvatars members={activeWorkspaceUsers} state={presenceState} error={presenceError} /></div>
+                    <div className="md:hidden"><WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} /></div>
                     <AccountMenu username={username} email={email} avatarSrc={avatarSrc} workspaceId={workspace.id} workspaceName={workspace.name} leaveAction={leaveAction} buttonClassName="h-9 w-9" />
                 </div>
             </div>

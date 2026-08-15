@@ -11,8 +11,6 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
 
-type RealtimeState = "connecting" | "live" | "offline"
-type Presence = { clientId: string; userId: string; name: string; avatarSrc: string | null; conversationId: string | null }
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
 const EMOJI_CATALOGUE = [
     "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "🙂", "🙃", "😉", "😍", "🥰", "😘", "😎",
@@ -240,8 +238,6 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
-    const [presence, setPresence] = useState<Presence[]>([])
-    const [realtimeState, setRealtimeState] = useState<RealtimeState>("connecting")
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
     const searchRef = useRef<HTMLInputElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
@@ -251,8 +247,6 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean } | null>(null)
     const swipedMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
-    const clientIdRef = useRef(crypto.randomUUID())
-    const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
 
     useEffect(() => {
@@ -512,11 +506,10 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
         async function connect() {
             const session = await supabase.auth.getSession()
             const accessToken = session.data.session?.access_token
-            if (!accessToken || disposed) { setRealtimeState("offline"); return }
+            if (!accessToken || disposed) return
             await supabase.realtime.setAuth(accessToken)
             if (disposed) return
-            channel = supabase.channel(`communications:${bootstrap.workspaceSlug}`, { config: { private: true, presence: { key: clientIdRef.current } } })
-            channelRef.current = channel
+            channel = supabase.channel(`communications:${bootstrap.workspaceSlug}`, { config: { private: true } })
             channel
                 .on("postgres_changes", { event: "*", schema: "public", table: "client_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const message = realtimeMessage(payload.new)
@@ -540,27 +533,11 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                     const reaction = realtimeReaction(payload.new)
                     if (reaction) setReactions((current) => mergeReaction(current, reaction))
                 })
-                .on("presence", { event: "sync" }, () => {
-                    if (!channel) return
-                    const next = Object.values(channel.presenceState<Presence>()).flatMap((entries) => entries).filter((entry) => entry.clientId && entry.userId)
-                    setPresence(next)
-                })
-                .subscribe(async (status) => {
-                    if (!channel || disposed) return
-                    if (status === "SUBSCRIBED") {
-                        setRealtimeState("live")
-                        await channel.track({ clientId: clientIdRef.current, userId: bootstrap.currentUser.id, name: bootstrap.currentUser.name, avatarSrc: bootstrap.currentUser.avatarSrc, conversationId: selectedRef.current })
-                    } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setRealtimeState("offline")
-                })
+                .subscribe()
         }
-        void connect().catch(() => setRealtimeState("offline"))
-        return () => { disposed = true; channelRef.current = null; if (channel) void supabase.removeChannel(channel) }
+        void connect().catch(() => undefined)
+        return () => { disposed = true; if (channel) void supabase.removeChannel(channel) }
     }, [bootstrap.currentUser, bootstrap.workspaceId, bootstrap.workspaceSlug, supabase, updateConversationMessages])
-
-    useEffect(() => {
-        const channel = channelRef.current
-        if (channel && realtimeState === "live") void channel.track({ clientId: clientIdRef.current, userId: bootstrap.currentUser.id, name: bootstrap.currentUser.name, avatarSrc: bootstrap.currentUser.avatarSrc, conversationId: selectedId })
-    }, [bootstrap.currentUser, realtimeState, selectedId])
 
     async function sendMessage(messageToRetry?: CommunicationMessage) {
         if (!selected || !bootstrap.schemaReady || !selected.canSend) return
@@ -609,7 +586,6 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
         else if (!response.ok) updateConversationMessages(selected.id, [{ ...optimistic, status: result?.retryable ? "send_failed" : "send_uncertain", error: result?.error ?? "Could not send message", failedAt: result?.retryable ? new Date().toISOString() : null }])
     }
 
-    const connectedUserIds = new Set([bootstrap.currentUser.id, ...presence.map((person) => person.userId)])
     const normalizedSearch = search.trim().toLowerCase()
     const visibleConversations = conversations.filter((conversation) => !normalizedSearch || `${conversation.title} ${conversation.subtitle ?? ""} ${conversation.messages.at(-1)?.body ?? ""}`.toLowerCase().includes(normalizedSearch))
     const peopleById = new Map(bootstrap.people.map((person) => [person.id, person]))
@@ -620,15 +596,6 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
             : message.senderKind === "legacy" ? "Previous system" : selected?.title ?? "Client"
 
     return <section aria-label="Client communications" className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
-            <div className="min-w-0"><h1 className="truncate text-sm font-semibold">Communications</h1><p className="hidden truncate text-[11px] text-neutral-600 sm:block">{bootstrap.workspaceName}</p></div>
-            <button type="button" onClick={() => searchRef.current?.focus()} aria-label="Search client chats" className="ml-1 inline-flex h-9 w-9 items-center justify-center text-neutral-500 hover:text-white"><SearchIcon /></button>
-            <div className="ml-auto flex items-center gap-3">
-                <div aria-label="Team presence" className="flex -space-x-1.5">{bootstrap.people.map((person) => <span key={person.id} title={`${person.name} — ${connectedUserIds.has(person.id) ? "Connected" : "Disconnected"}`} className="h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900"><span className={`block h-full w-full ${connectedUserIds.has(person.id) ? "" : "grayscale opacity-35"}`}><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full" /></span></span>)}</div>
-                <span className={`hidden items-center gap-1.5 text-[11px] sm:flex ${realtimeState === "live" ? "text-emerald-500" : "text-neutral-600"}`}><span className={`h-1.5 w-1.5 rounded-full ${realtimeState === "live" ? "bg-emerald-500" : realtimeState === "connecting" ? "bg-amber-500" : "bg-neutral-700"}`} />{realtimeState === "live" ? "Live" : realtimeState === "connecting" ? "Connecting" : "Offline"}</span>
-            </div>
-        </header>
-
         {!bootstrap.schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
 
         <div className="grid min-h-0 flex-1 lg:grid-cols-[22rem_minmax(0,1fr)]">

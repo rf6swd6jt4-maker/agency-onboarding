@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { visibleWorkspacePresence } from "../lib/workspace-presence.ts"
+import { visibleWorkspacePresence, workspacePresenceRoster } from "../lib/workspace-presence.ts"
 
 function source(path: string) {
     return readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
@@ -26,6 +26,20 @@ test("presence trusts the server member directory, excludes the current user, an
         activePath: "/new",
         updatedAt: "2026-08-15T12:01:00.000Z",
     }])
+})
+
+test("workspace presence roster includes active and inactive peers without duplicating the current user", () => {
+    const active = [{ sessionId: "peer-1", userId: "peer", name: "Active peer", avatarSrc: null, activePath: "/workspace", updatedAt: "2026-08-15T12:00:00.000Z" }]
+    const roster = workspacePresenceRoster([
+        { id: "me", name: "Current user", avatarSrc: "/me.png" },
+        { id: "peer", name: "Active peer", avatarSrc: "/peer.png" },
+        { id: "offline", name: "Inactive peer", avatarSrc: null },
+    ], active, "me")
+
+    assert.deepEqual(roster, [
+        { id: "peer", name: "Active peer", avatarSrc: "/peer.png", active: true, activePath: "/workspace", updatedAt: "2026-08-15T12:00:00.000Z" },
+        { id: "offline", name: "Inactive peer", avatarSrc: null, active: false, activePath: null, updatedAt: null },
+    ])
 })
 
 test("workspace navigation keeps frame content mounted and reports progress inline", () => {
