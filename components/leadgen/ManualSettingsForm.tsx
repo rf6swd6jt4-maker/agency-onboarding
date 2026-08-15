@@ -1,12 +1,11 @@
 "use client"
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { runWorkspaceBackgroundMutation } from "@/lib/workspace-background"
+import { useRouter } from "next/navigation"
 
 type DirtyCounts = Record<string, number>
 type ControlValue = { name: string; values: string[] }
 type SectionDirtyOverride = { section: string; count: number }
-type SettingsSaveState = "idle" | "dirty" | "saving" | "saved" | "error"
 
 function controlValues(section: Element): ControlValue[] {
     const controls = [...section.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input[name], textarea[name], select[name]")]
@@ -79,11 +78,9 @@ export function ManualSettingsForm({
     children: ReactNode
     className?: string
 }) {
+    const router = useRouter()
     const formRef = useRef<HTMLFormElement>(null)
     const baselineRef = useRef<Map<string, ControlValue[]>>(new Map())
-    const timerRef = useRef<number | null>(null)
-    const savingRef = useRef(false)
-    const resaveRef = useRef(false)
     const [saving, setSaving] = useState(false)
 
     function publishDirty() {
@@ -93,45 +90,8 @@ export function ManualSettingsForm({
         window.dispatchEvent(new CustomEvent("betelgeze:settings-dirty", { detail: counts }))
     }
 
-    function publishSaveState(state: SettingsSaveState) {
-        window.dispatchEvent(new CustomEvent("betelgeze:settings-save-state", { detail: state }))
-    }
-
-    async function save() {
-        const form = formRef.current
-        if (!form || !form.reportValidity()) return
-        const submitted = snapshot(form)
-        const changes = dirtyCounts(submitted, baselineRef.current)
-        if (!Object.values(changes).some((count) => count > 0)) return
-        if (savingRef.current) {
-            resaveRef.current = true
-            return
-        }
-        savingRef.current = true
-        setSaving(true)
-        publishSaveState("saving")
-        try {
-            await runWorkspaceBackgroundMutation(() => Promise.resolve(action(new FormData(form))))
-            baselineRef.current = submitted
-            publishDirty()
-            publishSaveState("saved")
-        } catch {
-            publishSaveState("error")
-        } finally {
-            savingRef.current = false
-            setSaving(false)
-            if (resaveRef.current) {
-                resaveRef.current = false
-                void save()
-            }
-        }
-    }
-
     function scheduleDirtyCheck() {
         window.setTimeout(publishDirty, 0)
-        publishSaveState("dirty")
-        if (timerRef.current) window.clearTimeout(timerRef.current)
-        timerRef.current = window.setTimeout(() => void save(), 900)
     }
 
     useEffect(() => {
@@ -151,15 +111,22 @@ export function ManualSettingsForm({
             }, 0)
         }
         window.addEventListener("betelgeze:settings-revert-request", revert)
-        return () => {
-            window.removeEventListener("betelgeze:settings-revert-request", revert)
-            if (timerRef.current) window.clearTimeout(timerRef.current)
-        }
+        return () => window.removeEventListener("betelgeze:settings-revert-request", revert)
     }, [])
 
     return <form
         ref={formRef}
-        onSubmit={(event) => { event.preventDefault(); if (timerRef.current) window.clearTimeout(timerRef.current); void save() }}
+        action={async (formData) => {
+            setSaving(true)
+            try {
+                await action(formData)
+                if (formRef.current) baselineRef.current = snapshot(formRef.current)
+                publishDirty()
+                router.refresh()
+            } finally {
+                setSaving(false)
+            }
+        }}
         onChange={scheduleDirtyCheck}
         onInput={scheduleDirtyCheck}
         onClick={(event) => {
@@ -167,7 +134,6 @@ export function ManualSettingsForm({
         }}
         className={className}
         data-settings-saving={saving ? "true" : "false"}
-        data-workspace-autosave="true"
     >
         {children}
     </form>
@@ -176,7 +142,6 @@ export function ManualSettingsForm({
 export function SettingsSectionActions({ section, label }: { section: string; label: string }) {
     const [dirtyCount, setDirtyCount] = useState(0)
     const [overrideDirtyCount, setOverrideDirtyCount] = useState<number | null>(null)
-    const [saveState, setSaveState] = useState<SettingsSaveState>("idle")
     useEffect(() => {
         const update = (event: Event) => {
             const counts = (event as CustomEvent<DirtyCounts>).detail ?? {}
@@ -186,14 +151,11 @@ export function SettingsSectionActions({ section, label }: { section: string; la
             const detail = (event as CustomEvent<SectionDirtyOverride>).detail
             if (detail?.section === section) setOverrideDirtyCount(detail.count)
         }
-        const updateSaveState = (event: Event) => setSaveState((event as CustomEvent<SettingsSaveState>).detail ?? "idle")
         window.addEventListener("betelgeze:settings-dirty", update)
         window.addEventListener("betelgeze:settings-section-dirty", updateOverride)
-        window.addEventListener("betelgeze:settings-save-state", updateSaveState)
         return () => {
             window.removeEventListener("betelgeze:settings-dirty", update)
             window.removeEventListener("betelgeze:settings-section-dirty", updateOverride)
-            window.removeEventListener("betelgeze:settings-save-state", updateSaveState)
         }
     }, [section])
 
@@ -204,7 +166,7 @@ export function SettingsSectionActions({ section, label }: { section: string; la
     }
 
     return <div className="mt-4 flex flex-wrap items-center gap-2">
-        <p aria-live="polite" className={`text-xs ${saveState === "error" ? "text-red-300" : "text-neutral-500"}`}>{saveState === "saving" ? `Saving ${label}…` : saveState === "error" ? `${label} could not save automatically` : displayDirtyCount > 0 ? `${label} will save automatically` : `${label} saved automatically`}</p>
+        <button type="submit" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">Save {label}</button>
         {displayDirtyCount > 0 && <button type="button" onClick={revert} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-red-400/40 px-3 text-sm font-medium leading-none text-red-200 transition hover:border-red-300 hover:text-red-100">Revert {displayDirtyCount} change{displayDirtyCount === 1 ? "" : "s"}</button>}
     </div>
 }

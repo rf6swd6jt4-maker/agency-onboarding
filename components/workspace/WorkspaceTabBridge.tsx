@@ -181,7 +181,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             window.parent.postMessage(message, window.location.origin)
         }
 
-        function reportActionState(type: "action-start" | "action-end" | "mutation-start") {
+        function reportActionState(type: "action-start" | "action-end") {
             const message: WorkspaceTabFrameMessage = {
                 source: WORKSPACE_TAB_MESSAGE_SOURCE,
                 target: "host",
@@ -193,17 +193,6 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
 
         const reportActionStart = () => reportActionState("action-start")
         const reportActionEnd = () => reportActionState("action-end")
-        const reportMutationStart = () => reportActionState("mutation-start")
-        const reportMutationEnd = (event: Event) => {
-            const message: WorkspaceTabFrameMessage = {
-                source: WORKSPACE_TAB_MESSAGE_SOURCE,
-                target: "host",
-                tabId,
-                type: "mutation-end",
-                mutationFailed: (event as CustomEvent<{ failed?: boolean }>).detail?.failed === true,
-            }
-            window.parent.postMessage(message, window.location.origin)
-        }
 
         function forwardTabShortcut(event: KeyboardEvent) {
             if (!isReopenClosedTabShortcut(event)) return
@@ -224,8 +213,6 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
         window.addEventListener("betelgeze:workspace-mutation", reportPossibleMutation)
         window.addEventListener("betelgeze:workspace-action-start", reportActionStart)
         window.addEventListener("betelgeze:workspace-action-end", reportActionEnd)
-        window.addEventListener("betelgeze:workspace-mutation-start", reportMutationStart)
-        window.addEventListener("betelgeze:workspace-mutation-end", reportMutationEnd)
         const observer = new MutationObserver(updateContextObstruction)
         observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-work-item-popup", "data-loading-overlay"] })
         updateContextObstruction()
@@ -237,8 +224,6 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             window.removeEventListener("betelgeze:workspace-mutation", reportPossibleMutation)
             window.removeEventListener("betelgeze:workspace-action-start", reportActionStart)
             window.removeEventListener("betelgeze:workspace-action-end", reportActionEnd)
-            window.removeEventListener("betelgeze:workspace-mutation-start", reportMutationStart)
-            window.removeEventListener("betelgeze:workspace-mutation-end", reportMutationEnd)
             observer.disconnect()
             reportContextObstruction(false)
             delete document.body.dataset.workspaceTabActive

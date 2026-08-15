@@ -101,7 +101,7 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
                 tabs={<AdminPanelNav workspaceSlug={workspace.slug} active="activity" />}
             />
 
-            <section className="mt-5" aria-label="Activity trends"><div className="grid gap-3 md:grid-cols-3">{metrics.map((metric) => <ActivityMetricCard key={metric.key} metric={metric} />)}</div><p className="mt-2 text-[11px] text-neutral-700">Rolling 24 hours in hourly buckets. Reloading this tab includes the latest recorded activity.</p></section>
+            <section className="mt-5" aria-label="Activity trends"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <ActivityMetricCard key={metric.key} metric={metric} />)}</div><p className="mt-2 text-[11px] text-neutral-700">Rolling 24 hours in hourly buckets. Reloading this tab includes the latest recorded activity.</p></section>
 
             <FilterRail ariaLabel="Filter activity by level">
                 <FilterRailLink href={filterHref(category, null)} selected={!level}>All <FilterRailCount>{facets.levelTotal}</FilterRailCount></FilterRailLink>

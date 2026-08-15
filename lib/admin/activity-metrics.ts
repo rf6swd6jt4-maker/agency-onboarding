@@ -1,6 +1,6 @@
 import type { AdminActivityEvent } from "@/lib/admin/activity"
 
-export type AdminActivityMetricKey = "requests" | "calls" | "error_rate"
+export type AdminActivityMetricKey = "requests" | "internal_calls" | "external_calls" | "error_rate"
 
 export type AdminActivityMetricPoint = {
     startsAt: string
@@ -39,7 +39,8 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
     const buckets = Array.from({ length: TREND_HOURS }, (_, index) => ({
         startsAt: new Date(firstHour.getTime() + index * 60 * 60 * 1000).toISOString(),
         requests: 0,
-        calls: 0,
+        internalCalls: 0,
+        externalCalls: 0,
         errors: 0,
     }))
 
@@ -50,12 +51,11 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
         if (bucketIndex < 0 || bucketIndex >= buckets.length) continue
         const bucket = buckets[bucketIndex]
         const classification = metricClassification(event)
-        const request = classification === "operational" && event.event_key.startsWith("workspace.mutation.")
-        const call = classification === "external_call"
-        if (!request && !call) continue
-        if (request) bucket.requests += 1
-        if (call) bucket.calls += 1
+        if (classification === "audit") continue
+        bucket.requests += 1
         if (event.outcome === "failed" || event.level === "error") bucket.errors += 1
+        if (classification === "internal_call") bucket.internalCalls += 1
+        if (classification === "external_call") bucket.externalCalls += 1
     }
 
     const metric = (
@@ -71,8 +71,9 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
     }
 
     return [
-        metric("requests", "Requests", "Workspace mutation requests.", "neutral", "count", (bucket) => bucket.requests),
-        metric("calls", "Calls", "Webhook calls received from connected platforms.", "neutral", "count", (bucket) => bucket.calls),
-        metric("error_rate", "Error rate", "Errors across mutation requests and webhook calls.", "red", "percentage", (bucket) => bucket.requests + bucket.calls ? (bucket.errors / (bucket.requests + bucket.calls)) * 100 : 0),
+        metric("requests", "Requests", "Recorded actions that could generate an error.", "neutral", "count", (bucket) => bucket.requests),
+        metric("internal_calls", "Internal Calls", "Calls from Betelgeze to another platform.", "neutral", "count", (bucket) => bucket.internalCalls),
+        metric("external_calls", "External Calls", "Calls from another platform into Betelgeze.", "neutral", "count", (bucket) => bucket.externalCalls),
+        metric("error_rate", "Error rate", "Errors in the activity log as a share of requests.", "red", "percentage", (bucket) => bucket.requests ? (bucket.errors / bucket.requests) * 100 : 0),
     ]
 }

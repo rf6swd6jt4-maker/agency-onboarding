@@ -7,7 +7,6 @@ import { Avatar } from "@/components/account/Avatar"
 import { DetailField, DetailFields } from "@/components/detail"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
 import { workItemPrioritySelectionLabel, workItemPrioritySelectionOptions } from "@/lib/work-item-priority"
-import { runWorkspaceBackgroundMutation } from "@/lib/workspace-background"
 import {
     updateWorkItemAssignees,
     updateWorkItemDependencies,
@@ -166,10 +165,7 @@ export function InlineWorkItemFields(props: Props) {
     const [relationshipIds, setRelationshipIds] = useState(props.relationships.map((relationship) => relationship.id))
     const [keyResultEstimates, setKeyResultEstimates] = useState<KeyResultEstimate[]>(props.keyResults.map((result) => ({ keyResultId: result.id, expectedMovement: result.expected_movement === null ? "" : String(result.expected_movement), impactHypothesis: result.impact_hypothesis ?? "" })))
     const [description, setDescription] = useState(props.description ?? "")
-    const [descriptionBaseline, setDescriptionBaseline] = useState(props.description ?? "")
-    const [descriptionSaveState, setDescriptionSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const descriptionRef = useRef<HTMLTextAreaElement>(null)
-    const descriptionSaveTimerRef = useRef<number | null>(null)
 
     useEffect(() => {
         function close(event: MouseEvent) {
@@ -191,23 +187,6 @@ export function InlineWorkItemFields(props: Props) {
         textarea.style.height = "auto"
         textarea.style.height = `${Math.max(80, textarea.scrollHeight)}px`
     }, [description])
-
-    useEffect(() => {
-        if (description === descriptionBaseline) return
-        if (descriptionSaveTimerRef.current) window.clearTimeout(descriptionSaveTimerRef.current)
-        const nextDescription = description
-        descriptionSaveTimerRef.current = window.setTimeout(() => {
-            setDescriptionSaveState("saving")
-            void runWorkspaceBackgroundMutation(() => updateWorkItemDescription(props.workspaceSlug, props.workItemId, nextDescription))
-                .then(() => {
-                    setDescriptionBaseline(nextDescription)
-                    setDescriptionSaveState("saved")
-                    postGanttSync(props.workspaceSlug)
-                })
-                .catch(() => setDescriptionSaveState("error"))
-        }, 900)
-        return () => { if (descriptionSaveTimerRef.current) window.clearTimeout(descriptionSaveTimerRef.current) }
-    }, [description, descriptionBaseline, props.workspaceSlug, props.workItemId])
 
     function toggle(name: string, trigger?: HTMLElement) {
         if (trigger) setPopupTrigger(trigger)
@@ -231,7 +210,7 @@ export function InlineWorkItemFields(props: Props) {
         setError(null)
         setOpen(null)
         startTransition(async () => {
-            try { await runWorkspaceBackgroundMutation(action); router.refresh(); postGanttSync(props.workspaceSlug) }
+            try { await action(); router.refresh(); postGanttSync(props.workspaceSlug) }
             catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save this field") }
         })
     }
@@ -356,7 +335,7 @@ export function InlineWorkItemFields(props: Props) {
                     <DetailField label="Description" icon="description" className="lg:col-span-2 lg:col-start-1 lg:row-start-5">
                         <div>
                             <textarea ref={descriptionRef} value={description} onChange={(event) => setDescription(event.target.value)} rows={3} placeholder="Add a description…" className="min-h-20 w-full resize-none overflow-hidden bg-transparent py-0 text-sm leading-6 text-neutral-200 caret-neutral-300 outline-none placeholder:text-neutral-600 selection:bg-neutral-600 selection:text-white" />
-                            <p aria-live="polite" className={`mt-1 text-right text-xs ${descriptionSaveState === "error" ? "text-red-300" : "text-neutral-500"}`}>{descriptionSaveState === "saving" ? "Saving description…" : descriptionSaveState === "error" ? "Description could not save automatically" : description !== descriptionBaseline ? "Description will save automatically" : descriptionSaveState === "saved" ? "Description saved automatically" : "Description saves automatically"}</p>
+                            {description !== (props.description ?? "") ? <div className="mt-1 flex justify-end gap-1.5"><button type="button" disabled={pending} onClick={() => setDescription(props.description ?? "")} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => save(() => updateWorkItemDescription(props.workspaceSlug, props.workItemId, description))} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div> : null}
                         </div>
                     </DetailField>
             </DetailFields>
