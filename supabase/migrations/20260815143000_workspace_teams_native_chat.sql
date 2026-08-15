@@ -539,20 +539,28 @@ alter table public.workspace_native_messages enable row level security;
 alter table public.workspace_native_reactions enable row level security;
 alter table public.workspace_native_read_cursors enable row level security;
 
+drop policy if exists "workspace members read teams" on public.workspace_teams;
 create policy "workspace members read teams" on public.workspace_teams
 for select to authenticated using (public.is_workspace_member(workspace_id));
+drop policy if exists "workspace members read team members" on public.workspace_team_members;
 create policy "workspace members read team members" on public.workspace_team_members
 for select to authenticated using (public.is_workspace_member(workspace_id));
+drop policy if exists "workspace members read team service responsibilities" on public.workspace_team_service_responsibilities;
 create policy "workspace members read team service responsibilities" on public.workspace_team_service_responsibilities
 for select to authenticated using (public.is_workspace_member(workspace_id));
+drop policy if exists "participants read native conversations" on public.workspace_native_conversations;
 create policy "participants read native conversations" on public.workspace_native_conversations
 for select to authenticated using (public.native_conversation_can_read(id));
+drop policy if exists "participants read native conversation participants" on public.workspace_native_conversation_participants;
 create policy "participants read native conversation participants" on public.workspace_native_conversation_participants
 for select to authenticated using (public.native_conversation_can_read(conversation_id));
+drop policy if exists "participants read native messages" on public.workspace_native_messages;
 create policy "participants read native messages" on public.workspace_native_messages
 for select to authenticated using (public.native_conversation_can_read(conversation_id));
+drop policy if exists "participants read native reactions" on public.workspace_native_reactions;
 create policy "participants read native reactions" on public.workspace_native_reactions
 for select to authenticated using (public.native_conversation_can_read(conversation_id));
+drop policy if exists "participants read native cursors" on public.workspace_native_read_cursors;
 create policy "participants read native cursors" on public.workspace_native_read_cursors
 for select to authenticated using (public.native_conversation_can_read(conversation_id));
 
