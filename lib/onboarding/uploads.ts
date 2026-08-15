@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto"
+import { createHash, randomUUID } from "crypto"
 import sharp from "sharp"
 import {
     DeleteObjectsCommand,
@@ -623,13 +623,56 @@ export async function inspectStoredCommunicationSticker(input: {
         Bucket: getR2BucketName(),
         Key: input.storagePath,
     }))
-    const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
+    const storedContentType = (response.ContentType ?? "").toLowerCase().split(";", 1)[0].trim()
+    const contentType = (!storedContentType || storedContentType === "application/octet-stream" ? input.mimeType : storedContentType).toLowerCase().split(";", 1)[0].trim()
     const kind = communicationAttachmentKind(contentType)
     const size = response.ContentLength ?? 0
     if (kind !== "sticker" || size <= 0 || size > communicationAttachmentLimit("sticker")) {
         throw new Error("This message does not contain a supported WhatsApp sticker.")
     }
     return { contentType, size }
+}
+
+export async function prepareStoredCommunicationSticker(input: {
+    workspaceId: string
+    storagePath: string
+    fileName: string
+    mimeType: string
+}) {
+    try {
+        const inspected = await inspectStoredCommunicationSticker(input)
+        return { ...inspected, storagePath: input.storagePath, fileName: input.fileName }
+    } catch {
+        // Client-originated stickers are allowed to exceed the outbound tray
+        // format. Normalize them into a deterministic tray object instead of
+        // weakening the 512px/100KB contract used when sending them again.
+    }
+
+    const sourceKey = createHash("sha256").update(input.storagePath).digest("hex").slice(0, 24)
+    const storagePath = `${input.workspaceId}/communications/stickers/received-${sourceKey}.webp`
+    try {
+        const inspected = await inspectStoredCommunicationSticker({ ...input, storagePath, mimeType: "image/webp" })
+        return { ...inspected, storagePath, fileName: input.fileName.replace(/\.[^.]+$/u, "") + ".webp" }
+    } catch {
+        // The deterministic normalized copy has not been created yet.
+    }
+
+    const source = await downloadOnboardingUpload(input.storagePath)
+    const storedContentType = source.contentType.toLowerCase().split(";", 1)[0].trim()
+    const contentType = (!storedContentType || storedContentType === "application/octet-stream" ? input.mimeType : storedContentType).toLowerCase().split(";", 1)[0].trim()
+    const converted = await convertCommunicationStickerImage({
+        name: input.fileName,
+        size: source.bytes.byteLength,
+        type: contentType,
+        bytes: source.bytes,
+    })
+    await getR2Client().send(new PutObjectCommand({
+        Bucket: getR2BucketName(),
+        Key: storagePath,
+        Body: converted.bytes,
+        ContentType: "image/webp",
+    }))
+    return { contentType: "image/webp", size: converted.bytes.byteLength, storagePath, fileName: converted.fileName }
 }
 
 export async function storeCommunicationSticker(

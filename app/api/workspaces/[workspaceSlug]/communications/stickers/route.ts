@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
-import { deleteOnboardingUploads, inspectStoredCommunicationSticker, storeCommunicationSticker } from "@/lib/onboarding/uploads"
+import { deleteOnboardingUploads, prepareStoredCommunicationSticker, storeCommunicationSticker } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -45,34 +45,34 @@ async function saveStickerFromMessage(workspaceId: string, userId: string, messa
     if (attachment?.kind !== "sticker") {
         return Response.json({ error: "That message does not contain a sticker." }, { status: 400 })
     }
-    const existing = await savedSticker(workspaceId, attachment.storagePath)
-    if (existing.error) return Response.json({ error: existing.error.message }, { status: 503 })
-    if (existing.data) return Response.json({ sticker: stickerValue(existing.data), alreadySaved: true })
-
-    let inspected: Awaited<ReturnType<typeof inspectStoredCommunicationSticker>>
+    let prepared: Awaited<ReturnType<typeof prepareStoredCommunicationSticker>>
     try {
-        inspected = await inspectStoredCommunicationSticker({
+        prepared = await prepareStoredCommunicationSticker({
             workspaceId,
             storagePath: attachment.storagePath,
+            fileName: attachment.fileName,
             mimeType: attachment.mimeType,
         })
     } catch (error) {
         return Response.json({ error: error instanceof Error ? error.message : "Could not verify this sticker." }, { status: 400 })
     }
+    const existing = await savedSticker(workspaceId, prepared.storagePath)
+    if (existing.error) return Response.json({ error: existing.error.message }, { status: 503 })
+    if (existing.data) return Response.json({ sticker: stickerValue(existing.data), alreadySaved: true })
     const { data, error } = await supabaseAdmin
         .from("communication_stickers")
         .insert({
             workspace_id: workspaceId,
             created_by: userId,
-            file_name: attachment.fileName,
-            storage_path: attachment.storagePath,
-            size_bytes: inspected.size,
+            file_name: prepared.fileName,
+            storage_path: prepared.storagePath,
+            size_bytes: prepared.size,
         })
         .select(STICKER_COLUMNS)
         .single()
     if (!error && data) return Response.json({ sticker: stickerValue(data), alreadySaved: false })
     if (error?.code === "23505") {
-        const raced = await savedSticker(workspaceId, attachment.storagePath)
+        const raced = await savedSticker(workspaceId, prepared.storagePath)
         if (!raced.error && raced.data) return Response.json({ sticker: stickerValue(raced.data), alreadySaved: true })
     }
     return Response.json({ error: error?.message ?? "Could not save this sticker." }, { status: 503 })

@@ -180,6 +180,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
                 replyToMessageId: replyToProviderMessageId,
                 callbackData: messageId,
             })
+        } else if (attachment?.kind === "audio") {
+            throw new Error("Voice notes can currently be received in chat but not sent from Betelgeze.")
         } else if (attachment) {
             providerResponse = await sendMetaWhatsAppMedia({
                 workspaceId: workspace.id,

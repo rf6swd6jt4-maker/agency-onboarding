@@ -300,9 +300,10 @@ Communications is an interactive master/detail workspace rather than a canonical
 - Conversation-header people and all user avatars in Communications and the app shell are profile actions on mobile and desktop. Their image boxes use a fixed square aspect ratio, `shrink-0`, circular clipping, and an image that fills the box so responsive flex layouts cannot stretch them.
 - The composer is vertically centred and says `Message [conversation name]`. Attachment and send controls keep fixed square hit areas while the text input flexes.
 - Tapping or clicking a message opens its reaction/action popup. A pointer press anywhere outside that popup—including the surrounding iframe shell—closes it. The triggering message must not immediately reopen it from the same gesture.
-- Mobile swipe actions use a square-edged gradient that reaches both horizontal edges of the conversation viewport. The reply or delete control is vertically centred on the visible portion of the message, with a fixed inset from an obscured top or bottom edge; it is not anchored to the gradient or the message's hidden centre.
+- Mobile swipe actions use a square-edged gradient that reaches both horizontal edges of the conversation viewport. The reply or delete control stays vertically centred on the complete message bubble, even when that centre is temporarily outside the visible viewport; scrolling must not reposition it within the message.
 - Deleting a native message always requires confirmation before the request is sent.
-- Test client relationships use the canonical yellow `SquarePill` labelled `Test`, immediately before the timestamp in the conversation list and immediately after the relationship name in the conversation header.
+- Test client relationships use a compact form of the canonical yellow `SquarePill` labelled `Test`, immediately before the timestamp in the conversation list and immediately after the relationship name in the conversation header. This Communications-only density adjustment changes size, never colour or shape.
+- Received WhatsApp audio renders as an inline voice note rather than a download-only file. Its play control starts audio from a user gesture, its waveform fills from left to right with playback, paused progress remains until the page reloads, completion returns it to the start, and the waveform is directly scrubbable. Native browser sound permission is not requested because ordinary user-initiated media playback does not use a permission API.
 
 ## Detail pages
 

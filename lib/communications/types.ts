@@ -1,7 +1,7 @@
 export type CommunicationSenderKind = "client" | "staff" | "automation" | "legacy"
 
 export type CommunicationAttachment = {
-    kind: "image" | "video" | "document" | "sticker"
+    kind: "image" | "video" | "audio" | "document" | "sticker"
     fileName: string
     mimeType: string
     size: number | null

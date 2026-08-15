@@ -2,6 +2,7 @@ import type { CommunicationAttachment } from "@/lib/communications/types"
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png"])
 const VIDEO_TYPES = new Set(["video/mp4", "video/3gpp", "video/3sp"])
+const AUDIO_TYPES = new Set(["audio/aac", "audio/mp4", "audio/mpeg", "audio/ogg"])
 const DOCUMENT_TYPES = new Set([
     "text/plain",
     "application/pdf",
@@ -16,6 +17,7 @@ const STICKER_TYPES = new Set(["image/webp"])
 
 export const MAX_COMMUNICATION_IMAGE_SIZE = 5 * 1024 * 1024
 export const MAX_COMMUNICATION_VIDEO_SIZE = 16 * 1024 * 1024
+export const MAX_COMMUNICATION_AUDIO_SIZE = 16 * 1024 * 1024
 export const MAX_COMMUNICATION_DOCUMENT_SIZE = 100 * 1024 * 1024
 export const MAX_COMMUNICATION_STICKER_SIZE = 100 * 1024
 export const MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH = 900
@@ -40,6 +42,7 @@ export function communicationAttachmentKind(mimeType: string) {
     const normalized = mimeType.toLowerCase().split(";", 1)[0].trim()
     if (IMAGE_TYPES.has(normalized)) return "image" as const
     if (VIDEO_TYPES.has(normalized)) return "video" as const
+    if (AUDIO_TYPES.has(normalized)) return "audio" as const
     if (DOCUMENT_TYPES.has(normalized)) return "document" as const
     if (STICKER_TYPES.has(normalized)) return "sticker" as const
     return null
@@ -48,6 +51,7 @@ export function communicationAttachmentKind(mimeType: string) {
 export function communicationAttachmentLimit(kind: CommunicationAttachment["kind"]) {
     if (kind === "image") return MAX_COMMUNICATION_IMAGE_SIZE
     if (kind === "video") return MAX_COMMUNICATION_VIDEO_SIZE
+    if (kind === "audio") return MAX_COMMUNICATION_AUDIO_SIZE
     if (kind === "sticker") return MAX_COMMUNICATION_STICKER_SIZE
     return MAX_COMMUNICATION_DOCUMENT_SIZE
 }
@@ -59,6 +63,7 @@ export function validateCommunicationAttachmentFile(input: {
 }) {
     const kind = communicationAttachmentKind(input.type)
     if (!kind) return { error: "Use a JPEG, PNG, MP4, PDF, Word, Excel, PowerPoint, or text file." } as const
+    if (kind === "audio") return { error: "Voice notes can currently be received in chat but not sent from Betelgeze." } as const
     if (kind === "sticker") return { error: "Add stickers through the tray using a JPEG or PNG source." } as const
     if (!input.name.trim() || !Number.isFinite(input.size) || input.size <= 0) {
         return { error: "Choose a non-empty attachment." } as const
@@ -81,7 +86,7 @@ export function communicationAttachmentFromValue(value: unknown): CommunicationA
     const fileName = rawFileName?.replace(/[\u0000-\u001f\u007f]/gu, " ").trim() ?? null
     const mimeType = text(source.mimeType) ?? text(source.mime_type)
     const explicitKind = text(source.kind) ?? text(source.type)
-    const kind = explicitKind === "image" || explicitKind === "video" || explicitKind === "document" || explicitKind === "sticker"
+    const kind = explicitKind === "image" || explicitKind === "video" || explicitKind === "audio" || explicitKind === "document" || explicitKind === "sticker"
         ? explicitKind
         : mimeType ? communicationAttachmentKind(mimeType) ?? "document" : null
     if (!storagePath || !fileName || fileName.length > 180 || !mimeType || !kind) return null

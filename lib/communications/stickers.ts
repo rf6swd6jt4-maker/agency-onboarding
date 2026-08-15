@@ -16,13 +16,13 @@ export async function convertCommunicationStickerImage(
 ) {
     if (!file.name.trim() || file.size <= 0) throw new Error("Choose a non-empty sticker image.")
     if (file.size > 10 * 1024 * 1024) throw new Error("Sticker source images can be up to 10MB.")
-    if (!new Set(["image/jpeg", "image/png"]).has(file.type.toLowerCase())) {
-        throw new Error("Upload a JPEG or PNG image for the sticker tray.")
+    if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(file.type.toLowerCase())) {
+        throw new Error("Use a JPEG, PNG, or WebP image for the sticker tray.")
     }
     const source = sharp(file.bytes, { failOn: "error" }).rotate()
     const metadata = await source.metadata()
-    if (metadata.format !== "jpeg" && metadata.format !== "png") {
-        throw new Error("The sticker source must be a valid JPEG or PNG image.")
+    if (metadata.format !== "jpeg" && metadata.format !== "png" && metadata.format !== "webp") {
+        throw new Error("The sticker source must be a valid JPEG, PNG, or WebP image.")
     }
 
     for (const quality of [82, 72, 62, 52, 42, 34]) {
