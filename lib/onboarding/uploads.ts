@@ -567,6 +567,27 @@ export async function verifyClientMessageUpload(input: {
     return { kind, contentType, size }
 }
 
+export async function inspectStoredCommunicationSticker(input: {
+    workspaceId: string
+    storagePath: string
+    mimeType: string
+}) {
+    if (!input.storagePath.startsWith(`${input.workspaceId}/`)) {
+        throw new Error("Invalid workspace sticker path")
+    }
+    const response = await getR2Client().send(new HeadObjectCommand({
+        Bucket: getR2BucketName(),
+        Key: input.storagePath,
+    }))
+    const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
+    const kind = communicationAttachmentKind(contentType)
+    const size = response.ContentLength ?? 0
+    if (kind !== "sticker" || size <= 0 || size > communicationAttachmentLimit("sticker")) {
+        throw new Error("This message does not contain a supported WhatsApp sticker.")
+    }
+    return { contentType, size }
+}
+
 export async function storeCommunicationSticker(
     workspaceId: string,
     file: { name: string; size: number; type: string; bytes: Uint8Array }

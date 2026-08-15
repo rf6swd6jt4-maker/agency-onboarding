@@ -106,6 +106,7 @@ type InboundMessageContent = {
         type: string
         fileName: string
         mimeType: string
+        size: number
         storagePath: string
         url: string
     }
@@ -759,6 +760,7 @@ async function getInboundMessageContent({
             type: mediaPayload.type,
             fileName,
             mimeType: contentType,
+            size: downloadedMedia.bytes.byteLength,
             storagePath: storedMedia.path,
             url: storedMedia.url,
         },

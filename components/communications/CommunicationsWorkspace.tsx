@@ -190,6 +190,28 @@ function ReactionTray({ currentEmoji, onReact, onReply, side }: {
     </div>
 }
 
+function MessageActionTray({ canInteract, currentEmoji, onReact, onReply, side, stickerSaved, stickerSaving, onSaveSticker }: {
+    canInteract: boolean
+    currentEmoji: string | null
+    onReact: (emoji: string) => void
+    onReply: () => void
+    side: "left" | "right"
+    stickerSaved: boolean
+    stickerSaving: boolean
+    onSaveSticker: (() => void) | null
+}) {
+    return <div className={`flex flex-col gap-1 ${side === "right" ? "items-end" : "items-start"}`}>
+        {onSaveSticker || stickerSaved ? <button
+            type="button"
+            onClick={onSaveSticker ?? undefined}
+            disabled={stickerSaved || stickerSaving}
+            aria-label={stickerSaved ? "Sticker saved" : "Save sticker"}
+            className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs font-medium text-neutral-300 shadow-xl hover:bg-neutral-900 hover:text-white disabled:text-emerald-400"
+        >{stickerSaved ? "✓ Saved" : stickerSaving ? "Saving…" : "Save sticker"}</button> : null}
+        {canInteract ? <ReactionTray currentEmoji={currentEmoji} onReact={onReact} onReply={onReply} side={side} /> : null}
+    </div>
+}
+
 function mergeCursor(current: CommunicationReadCursor[], incoming: CommunicationReadCursor) {
     return [...current.filter((cursor) => !(cursor.relationshipId === incoming.relationshipId && cursor.userId === incoming.userId)), incoming]
 }
@@ -213,6 +235,7 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
     const [stickers, setStickers] = useState(bootstrap.stickers)
     const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
     const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
+    const [savingStickerMessageId, setSavingStickerMessageId] = useState<string | null>(null)
     const [interactionError, setInteractionError] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
@@ -349,6 +372,28 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
         } finally {
             setStickerUploadState("idle")
             if (stickerInputRef.current) stickerInputRef.current.value = ""
+        }
+    }
+
+    async function saveSticker(message: CommunicationMessage) {
+        if (message.attachment?.kind !== "sticker" || savingStickerMessageId) return
+        setSavingStickerMessageId(message.id)
+        setInteractionError(null)
+        try {
+            const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/stickers`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messageId: message.id }),
+            })
+            const result = await response.json().catch(() => null) as { sticker?: CommunicationSticker; error?: string } | null
+            if (!response.ok || !result?.sticker) throw new Error(result?.error ?? "Could not save this sticker.")
+            setStickers((current) => current.some((sticker) => sticker.storagePath === result.sticker!.storagePath)
+                ? current
+                : [...current, result.sticker!])
+        } catch (error) {
+            setInteractionError(error instanceof Error ? error.message : "Could not save this sticker.")
+        } finally {
+            setSavingStickerMessageId(null)
         }
     }
 
@@ -625,16 +670,18 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                             const canInteract = Boolean(message.providerMessageId) && new Date(message.createdAt).getTime() >= reactionCutoff
                             const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                             const isSticker = message.attachment?.kind === "sticker"
+                            const stickerSaved = Boolean(isSticker && stickers.some((sticker) => sticker.storagePath === message.attachment?.storagePath))
+                            const showActions = actionMessageId === message.id && (canInteract || isSticker)
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.lastReadMessageId === message.id).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                             return <Fragment key={message.id}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                                 <div className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 42), transform: `scale(${0.7 + Math.min(0.3, swipeOffset / 180)})` }} className="absolute left-1 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-800 text-sm text-white transition-transform">↩</span>
-                                    {message.direction === "outbound" && actionMessageId === message.id && canInteract ? <div className="absolute bottom-full right-0 z-20 mb-1"><ReactionTray currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" /></div> : null}
+                                    {message.direction === "outbound" && showActions ? <div className="absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                     <article
                                         role="button"
                                         tabIndex={0}
-                                        aria-label={`Message from ${sender}. Activate for reply actions.`}
+                                        aria-label={`Message from ${sender}. Activate for message actions.`}
                                         onClick={() => {
                                             if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
                                             setActionMessageId((current) => current === message.id ? null : message.id)
@@ -684,7 +731,7 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {message.status === "send_failed" && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry</button> : null}
                                     </article>
-                                    {message.direction === "inbound" && actionMessageId === message.id && canInteract ? <div className="absolute bottom-full left-0 z-20 mb-1"><ReactionTray currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" /></div> : null}
+                                    {message.direction === "inbound" && showActions ? <div className="absolute bottom-full left-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                 </div>
                                 {messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                 {readers.length ? <div className={`flex -space-x-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{readers.map((person) => <span key={person.id} title={`Read in Betelgeze by ${person.name}`} className="h-4 w-4 overflow-hidden rounded-full border border-black"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full" /></span>)}</div> : null}
