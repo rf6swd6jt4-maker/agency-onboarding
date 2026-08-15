@@ -290,21 +290,6 @@ When a new list cannot fit this anatomy, first determine whether it is actually 
 
 The Assets gallery remains a gallery even though it shares the Library panel header, tabs, and `QuickStats` with Work Items. OKRs remain a nested planning workspace. Settings/source rows and onboarding-builder records remain configuration or authoring controls. None should be forced into `List` merely because they contain repeated records.
 
-## Communications
-
-Communications is an interactive master/detail workspace rather than a canonical `List`, but its client, team, and private conversations share one message language:
-
-- A private-message bubble never repeats either participant's name. Team and client conversations may identify the sender in the bubble because more than two people can participate; sender profile pictures do not sit beside messages in any conversation type.
-- Client and team conversations may show who has read a message. Compact, circular reader avatars sit inside the message footer opposite the timestamp and open that person's profile. Private messages use delivery ticks instead of reader avatars.
-- Native private and team messages show one neutral tick while sending, two neutral ticks once stored for the recipient, and two blue ticks once read. In a team, any reader other than the sender makes the ticks blue.
-- Conversation-header people and all user avatars in Communications and the app shell are profile actions on mobile and desktop. Their image boxes use a fixed square aspect ratio, `shrink-0`, circular clipping, and an image that fills the box so responsive flex layouts cannot stretch them.
-- The composer is vertically centred and says `Message [conversation name]`. Attachment and send controls keep fixed square hit areas while the text input flexes.
-- Tapping or clicking a message opens its reaction/action popup. A pointer press anywhere outside that popup—including the surrounding iframe shell—closes it. The triggering message must not immediately reopen it from the same gesture.
-- Mobile swipe actions use a square-edged gradient that reaches both horizontal edges of the conversation viewport. The reply or delete control stays vertically centred on the complete message bubble, even when that centre is temporarily outside the visible viewport; scrolling must not reposition it within the message.
-- Deleting a native message always requires confirmation before the request is sent.
-- Test client relationships use a compact form of the canonical yellow `SquarePill` labelled `Test`, immediately before the timestamp in the conversation list and immediately after the relationship name in the conversation header. This Communications-only density adjustment changes size, never colour or shape.
-- Received WhatsApp audio renders as an inline voice note rather than a download-only file. Its play control starts audio from a user gesture, its waveform fills from left to right with playback, paused progress remains until the page reloads, completion returns it to the start, and the waveform is directly scrubbable. Native browser sound permission is not requested because ordinary user-initiated media playback does not use a permission API.
-
 ## Detail pages
 
 A detail page is the canonical destination for one durable record. Relationship, onboarding, fulfilment, work-item, asset, poll, and activity-event detail routes share one visual sequence even though their content differs:
