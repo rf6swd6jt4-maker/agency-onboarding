@@ -108,13 +108,20 @@ function MessageBody({ body }: { body: string }) {
         : <Fragment key={index}>{part}</Fragment>)}</p>
 }
 
+function DoubleDeliveryCheckIcon() {
+    return <svg viewBox="0 0 14 10" aria-hidden="true" className="h-3 w-4 fill-none stroke-current" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m1 5 2.4 2.4L8.7 1.6" />
+        <path d="m4.5 5 2.4 2.4 5.3-5.8" />
+    </svg>
+}
+
 function DeliveryTicks({ message }: { message: CommunicationMessage }) {
     const status = message.status.toLowerCase()
     if (status === "sending" || status.includes("queued") || status.includes("pending")) return <span title="Sending" aria-label="Sending">◷</span>
     if (status === "send_failed" || status === "delivery_failed" || status.includes("error")) return <span className="text-red-500" title={message.error ?? "Message failed"} aria-label="Message failed">!</span>
     if (status === "send_uncertain") return <span className="text-amber-600" title="Delivery is being confirmed. Betelgeze will not resend automatically." aria-label="Delivery confirmation pending">?</span>
-    if (message.readAt || status.includes("read")) return <span className="font-bold text-sky-600" title="Read in WhatsApp" aria-label="Read in WhatsApp">✓✓</span>
-    if (message.deliveredAt || status.includes("delivered")) return <span className="font-bold" title="Delivered to WhatsApp" aria-label="Delivered to WhatsApp">✓✓</span>
+    if (message.readAt || status.includes("read")) return <span className="inline-flex shrink-0 text-sky-500" title="Read in WhatsApp" aria-label="Read in WhatsApp"><DoubleDeliveryCheckIcon /></span>
+    if (message.deliveredAt || status.includes("delivered")) return <span className="inline-flex shrink-0" title="Delivered to WhatsApp" aria-label="Delivered to WhatsApp"><DoubleDeliveryCheckIcon /></span>
     return <span className="font-bold" title="Sent to WhatsApp" aria-label="Sent to WhatsApp">✓</span>
 }
 
@@ -601,7 +608,10 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
         <div className="grid min-h-0 flex-1 lg:grid-cols-[22rem_minmax(0,1fr)]">
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>
                 <div className="shrink-0 border-b border-neutral-800 p-3">
-                    <div className="flex items-center justify-between px-1"><h2 className="text-sm font-semibold">Client chats</h2><span className="text-[11px] text-neutral-600">{visibleConversations.length}</span></div>
+                    <div role="tablist" aria-label="Communication conversations" className="flex items-center gap-1">
+                        <button type="button" role="tab" aria-selected="true" className="inline-flex h-8 items-center gap-2 rounded-lg bg-neutral-800 px-3 text-xs font-semibold text-white">Clients<span className="text-[10px] font-medium text-neutral-400">{visibleConversations.length}</span></button>
+                        <button type="button" role="tab" aria-selected="false" disabled title="Team messaging will be added next" className="h-8 rounded-lg px-3 text-xs font-medium text-neutral-600 disabled:cursor-not-allowed">Team</button>
+                    </div>
                     <label className="relative mt-3 block"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600"><SearchIcon /></span><input ref={searchRef} type="search" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search conversations" placeholder="Search conversations" className="h-10 w-full rounded-lg border border-neutral-800 bg-black pl-9 pr-3 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600" /></label>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{visibleConversations.length ? visibleConversations.map((conversation) => {
@@ -620,9 +630,10 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                 {selected ? <>
                     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
                         <button type="button" onClick={() => selectConversation(null)} aria-label="Back to client chats" className="inline-flex h-10 w-10 items-center justify-center text-neutral-400 hover:text-white lg:hidden"><BackIcon /></button>
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-xs font-semibold">{initials(selected.title)}</span>
-                        <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{selected.title}</h2><p className="truncate text-[11px] text-neutral-600">{selected.subtitle ?? "WhatsApp client"}</p></div>
-                        <Link href={`/${bootstrap.workspaceSlug}/relationships/${selected.id}`} className="text-xs text-neutral-500 hover:text-white">Relationship</Link>
+                        <Link href={`/${bootstrap.workspaceSlug}/relationships/${selected.id}`} aria-label={`Open ${selected.title} relationship`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg outline-none hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-600">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-xs font-semibold">{initials(selected.title)}</span>
+                            <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.subtitle ?? "WhatsApp client"}</span></span>
+                        </Link>
                     </header>
 
                     <div ref={messagePaneRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
