@@ -20,6 +20,16 @@ type SendMetaWhatsAppTemplateInput = {
     callbackData?: string | null
 }
 
+type SendMetaWhatsAppMediaInput = {
+    workspaceId?: string
+    to: string
+    kind: "image" | "video" | "document"
+    link: string
+    caption?: string | null
+    fileName?: string | null
+    callbackData?: string | null
+}
+
 export class MetaWhatsAppSendError extends Error {
     safeToRetry: boolean
 
@@ -114,6 +124,57 @@ export async function sendMetaWhatsAppMessage({
         )
     }
 
+    return responseBody ? JSON.parse(responseBody) : null
+}
+
+export async function sendMetaWhatsAppMedia({
+    workspaceId,
+    to,
+    kind,
+    link,
+    caption,
+    fileName,
+    callbackData,
+}: SendMetaWhatsAppMediaInput) {
+    let config: Awaited<ReturnType<typeof metaConfig>>
+    try {
+        config = await metaConfig(workspaceId)
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "WhatsApp is not configured", true)
+    }
+    const media = {
+        link,
+        caption: caption || undefined,
+        ...(kind === "document" && fileName ? { filename: fileName } : {}),
+    }
+    let response: Response
+    try {
+        response = await fetch(`https://graph.facebook.com/v25.0/${config.phone_number_id}/messages`, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${config.access_token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: toMetaWhatsAppRecipient(to),
+                biz_opaque_callback_data: callbackData || undefined,
+                type: kind,
+                [kind]: media,
+            }),
+        })
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "Meta WhatsApp media request did not return a response", false)
+    }
+    const responseBody = await response.text()
+    if (!response.ok) {
+        throw new MetaWhatsAppSendError(formatMetaWhatsAppApiError({
+            action: "Meta WhatsApp media message",
+            status: response.status,
+            responseBody,
+        }), true)
+    }
     return responseBody ? JSON.parse(responseBody) : null
 }
 

@@ -1,5 +1,14 @@
 export type CommunicationSenderKind = "client" | "staff" | "automation" | "legacy"
 
+export type CommunicationAttachment = {
+    kind: "image" | "video" | "document"
+    fileName: string
+    mimeType: string
+    size: number | null
+    storagePath: string
+    url: string
+}
+
 export type CommunicationMessage = {
     id: string
     clientRequestId: string | null
@@ -13,6 +22,7 @@ export type CommunicationMessage = {
     senderUserId: string | null
     automationKind: string | null
     automationLabel: string | null
+    attachment: CommunicationAttachment | null
     createdAt: string
     sentAt: string | null
     deliveredAt: string | null

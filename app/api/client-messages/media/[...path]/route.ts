@@ -1,4 +1,6 @@
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
+import { getCurrentUser } from "@/lib/workspaces"
+import { supabaseAdmin } from "@/lib/supabase/admin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -18,6 +20,17 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
             error: new Response("Missing media path", { status: 400 }),
         }
     }
+
+    const user = await getCurrentUser()
+    const workspaceId = path[0] ?? ""
+    if (!user || !workspaceId) return { error: new Response("Unauthorized", { status: 401 }) }
+    const { data: membership } = await supabaseAdmin
+        .from("workspace_memberships")
+        .select("user_id")
+        .eq("workspace_id", workspaceId)
+        .eq("user_id", user.id)
+        .maybeSingle()
+    if (!membership) return { error: new Response("Media not found", { status: 404 }) }
 
     try {
         const signedUrl = await createPrivateUploadSignedUrl(storagePath)

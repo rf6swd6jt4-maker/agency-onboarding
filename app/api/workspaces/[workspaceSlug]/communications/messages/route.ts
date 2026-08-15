@@ -2,8 +2,10 @@ import { NextRequest } from "next/server"
 
 import { recordClientAdminActivity } from "@/lib/admin/activity"
 import { normalizeMessageAddress } from "@/lib/client-messages/addresses"
-import { metaWhatsAppFailureIsSafeToRetry, sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
+import { metaWhatsAppFailureIsSafeToRetry, sendMetaWhatsAppMedia, sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
 import { COMMUNICATION_MESSAGE_COLUMNS, communicationMessageFromRow, loadCommunicationMessages } from "@/lib/communications/server"
+import { communicationAttachmentFromValue, MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH } from "@/lib/communications/attachments"
+import { createPrivateUploadSignedUrl, verifyClientMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-attribution"
@@ -65,11 +67,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
 export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
     const { workspace, user } = await requireWorkspace(workspaceSlug)
-    const input = await request.json().catch(() => null) as { relationshipId?: unknown; body?: unknown; clientRequestId?: unknown; retry?: unknown } | null
+    const input = await request.json().catch(() => null) as { relationshipId?: unknown; body?: unknown; clientRequestId?: unknown; retry?: unknown; attachment?: unknown } | null
     const relationshipId = typeof input?.relationshipId === "string" ? input.relationshipId : ""
     const clientRequestId = typeof input?.clientRequestId === "string" ? input.clientRequestId : ""
     const body = typeof input?.body === "string" ? input.body.trim() : ""
-    if (!UUID_PATTERN.test(relationshipId) || !UUID_PATTERN.test(clientRequestId) || !body || body.length > 4_000) return Response.json({ error: "A valid conversation, request ID, and message of up to 4,000 characters are required." }, { status: 400 })
+    const inputAttachment = communicationAttachmentFromValue(input?.attachment)
+    if (input?.attachment && !inputAttachment) return Response.json({ error: "The attachment metadata is invalid." }, { status: 400 })
+    if (!UUID_PATTERN.test(relationshipId) || !UUID_PATTERN.test(clientRequestId) || (!body && !inputAttachment) || body.length > 4_000) return Response.json({ error: "A valid conversation, request ID, and message or attachment are required." }, { status: 400 })
     const relationship = await scopedRelationship(workspace.id, relationshipId)
     if (!relationship) return Response.json({ error: "Conversation not found" }, { status: 404 })
     const channel = await destinationForRelationship(workspace.id, relationship)
@@ -80,12 +84,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
         .eq("user_id", user.id)
         .maybeSingle()
     if (profileError) return Response.json({ error: "Could not load your chat display name." }, { status: 503 })
-    const providerBody = formatWhatsAppAttributedMessage(profile?.display_name ?? profile?.username, body)
 
     const existingResult = await supabaseAdmin.from("client_messages").select(COMMUNICATION_MESSAGE_COLUMNS).eq("workspace_id", workspace.id).eq("client_request_id", clientRequestId).maybeSingle()
     if (existingResult.error) return Response.json({ error: existingResult.error.message }, { status: 503 })
     const existing = communicationMessageFromRow(existingResult.data)
     if (existing && !(input?.retry === true && existing.status === "send_failed")) return Response.json({ message: existing, reused: true })
+    let attachment = existing?.attachment ?? inputAttachment
+    if (attachment && body.length > MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH) {
+        return Response.json({ error: `Attachment captions can be up to ${MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH} characters.` }, { status: 400 })
+    }
+    const storedBody = body || (attachment ? `[${attachment.kind[0].toUpperCase()}${attachment.kind.slice(1)}] ${attachment.fileName}` : "")
+    const providerBody = formatWhatsAppAttributedMessage(profile?.display_name ?? profile?.username, body)
+    if (attachment) {
+        try {
+            const verified = await verifyClientMessageUpload({
+                workspaceId: workspace.id,
+                relationshipId: relationship.id,
+                storagePath: attachment.storagePath,
+                mimeType: attachment.mimeType,
+            })
+            attachment = { ...attachment, kind: verified.kind, mimeType: verified.contentType, size: verified.size }
+        } catch (error) {
+            return Response.json({ error: error instanceof Error ? error.message : "Could not verify attachment." }, { status: 400 })
+        }
+    }
 
     let messageId = existing?.id ?? null
     if (messageId) {
@@ -100,18 +122,32 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
             direction: "outbound",
             provider: "meta_whatsapp",
             to_address: channel.external_address,
-            body,
+            body: storedBody,
             status: "sending",
             sender_kind: "staff",
             sender_user_id: user.id,
             client_request_id: clientRequestId,
+            raw_payload: attachment ? { bridge_media: attachment } : {},
         }).select("id").single()
         if (error || !data) return Response.json({ error: error?.message ?? "Could not create message" }, { status: 503 })
         messageId = data.id
     }
 
     try {
-        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: workspace.id, to: channel.external_address, body: providerBody, callbackData: messageId })
+        let providerResponse: unknown
+        if (attachment) {
+            providerResponse = await sendMetaWhatsAppMedia({
+                workspaceId: workspace.id,
+                to: channel.external_address,
+                kind: attachment.kind,
+                link: await createPrivateUploadSignedUrl(attachment.storagePath),
+                caption: providerBody,
+                fileName: attachment.fileName,
+                callbackData: messageId,
+            })
+        } else {
+            providerResponse = await sendMetaWhatsAppMessage({ workspaceId: workspace.id, to: channel.external_address, body: providerBody, callbackData: messageId })
+        }
         const externalId = providerMessageId(providerResponse)
         const sentAt = new Date().toISOString()
         const finalized = await supabaseAdmin.from("client_messages").update({ status: "whatsapp_sent", provider_message_id: externalId, whatsapp_message_id: externalId, sent_at: sentAt, error: null }).eq("workspace_id", workspace.id).eq("id", messageId).in("status", ["sending", "send_uncertain", "send_failed", "sent", "whatsapp_sent"]).select(COMMUNICATION_MESSAGE_COLUMNS).maybeSingle()

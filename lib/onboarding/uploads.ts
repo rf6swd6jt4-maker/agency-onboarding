@@ -3,11 +3,13 @@ import sharp from "sharp"
 import {
     DeleteObjectsCommand,
     GetObjectCommand,
+    HeadObjectCommand,
     PutObjectCommand,
     S3Client,
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { recordAdminActivity } from "@/lib/admin/activity"
+import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile } from "@/lib/communications/attachments"
 import { getRequiredEnv } from "@/lib/env"
 import {
     getUploadKind,
@@ -506,4 +508,60 @@ export async function storeClientMessageMedia({
                 R2_BRIDGE_MEDIA_SIGNED_URL_TTL_SECONDS
             )),
     }
+}
+
+export async function createSignedClientMessageUpload(
+    workspaceId: string,
+    relationshipId: string,
+    file: { name: string; size: number; type: string }
+) {
+    const validation = validateCommunicationAttachmentFile(file)
+    if ("error" in validation) throw new Error(validation.error)
+    const fileName = sanitizeFileName(file.name) || "attachment"
+    const contentType = file.type.toLowerCase().split(";", 1)[0].trim()
+    const path = `${workspaceId}/relationships/${relationshipId}/client-messages/${randomUUID()}-${fileName}`
+    const uploadUrl = await getSignedUrl(
+        getR2Client(),
+        new PutObjectCommand({
+            Bucket: getR2BucketName(),
+            Key: path,
+            ContentType: contentType,
+            ContentLength: file.size,
+        }),
+        { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }
+    )
+    return {
+        uploadUrl,
+        attachment: {
+            kind: validation.kind,
+            fileName: fileName.slice(0, 180),
+            mimeType: contentType,
+            size: file.size,
+            storagePath: path,
+            url: createClientMessageMediaUrl(path) ?? `/api/client-messages/media/${encodeStoragePath(path)}`,
+        },
+    }
+}
+
+export async function verifyClientMessageUpload(input: {
+    workspaceId: string
+    relationshipId: string
+    storagePath: string
+    mimeType: string
+}) {
+    const prefix = `${input.workspaceId}/relationships/${input.relationshipId}/client-messages/`
+    if (!input.storagePath.startsWith(prefix) || input.storagePath.slice(prefix.length).includes("/")) {
+        throw new Error("Invalid client message attachment path")
+    }
+    const response = await getR2Client().send(new HeadObjectCommand({
+        Bucket: getR2BucketName(),
+        Key: input.storagePath,
+    }))
+    const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
+    const kind = communicationAttachmentKind(contentType)
+    const size = response.ContentLength ?? 0
+    if (!kind || size <= 0 || size > communicationAttachmentLimit(kind)) {
+        throw new Error("The uploaded attachment is missing or unsupported")
+    }
+    return { kind, contentType, size }
 }

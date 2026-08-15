@@ -1,10 +1,12 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Avatar } from "@/components/account/Avatar"
-import type { CommunicationMessage, CommunicationReadCursor, CommunicationsBootstrap } from "@/lib/communications/types"
+import type { CommunicationAttachment, CommunicationMessage, CommunicationReadCursor, CommunicationsBootstrap } from "@/lib/communications/types"
+import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
@@ -45,6 +47,7 @@ function realtimeMessage(value: unknown): CommunicationMessage | null {
         senderUserId: stringValue(row.sender_user_id),
         automationKind: stringValue(row.automation_kind) ?? stringValue(raw.kind),
         automationLabel: stringValue(row.automation_label) ?? (raw.template_name ? "Consent request" : raw.outbox_id || raw.onboarding_url ? "Onboarding link" : null),
+        attachment: communicationAttachmentFromRawPayload(row.raw_payload),
         createdAt,
         sentAt: stringValue(row.sent_at),
         deliveredAt: stringValue(row.delivered_at),
@@ -108,6 +111,30 @@ function SendIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m4 4 17 8-17 8 3-8-3-8Z" /><path d="M7 12h14" /></svg>
 }
 
+function AttachmentIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m8.5 12.5 6.8-6.8a3 3 0 0 1 4.2 4.2l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9" /></svg>
+}
+
+function formatFileSize(size: number | null) {
+    if (!size) return "Attachment"
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))}KB`
+    return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)}MB`
+}
+
+function attachmentPlaceholder(attachment: CommunicationAttachment) {
+    return `[${attachment.kind[0].toUpperCase()}${attachment.kind.slice(1)}] ${attachment.fileName}`
+}
+
+function MessageAttachment({ attachment }: { attachment: CommunicationAttachment }) {
+    if (attachment.kind === "image") {
+        return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 block overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} className="max-h-80 h-auto w-full object-contain" /></a>
+    }
+    if (attachment.kind === "video") {
+        return <video src={attachment.url} controls preload="metadata" className="mb-2 max-h-80 w-full rounded-xl bg-black" />
+    }
+    return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-3 rounded-xl border border-current/10 bg-black/5 px-3 py-2.5 hover:bg-black/10"><span className="text-xl">↗</span><span className="min-w-0"><span className="block truncate text-xs font-semibold">{attachment.fileName}</span><span className="mt-0.5 block text-[10px] opacity-60">{formatFileSize(attachment.size)}</span></span></a>
+}
+
 function mergeCursor(current: CommunicationReadCursor[], incoming: CommunicationReadCursor) {
     return [...current.filter((cursor) => !(cursor.relationshipId === incoming.relationshipId && cursor.userId === incoming.userId)), incoming]
 }
@@ -118,11 +145,16 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
     const [selectedId, setSelectedId] = useState(bootstrap.selectedConversationId)
     const [search, setSearch] = useState("")
     const [draft, setDraft] = useState("")
+    const [attachment, setAttachment] = useState<CommunicationAttachment | null>(null)
+    const [attachmentState, setAttachmentState] = useState<"idle" | "uploading">("idle")
+    const [attachmentError, setAttachmentError] = useState<string | null>(null)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
     const [presence, setPresence] = useState<Presence[]>([])
     const [realtimeState, setRealtimeState] = useState<RealtimeState>("connecting")
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
     const searchRef = useRef<HTMLInputElement | null>(null)
+    const attachmentInputRef = useRef<HTMLInputElement | null>(null)
+    const attachmentRef = useRef<CommunicationAttachment | null>(null)
     const selectedRef = useRef(selectedId)
     const clientIdRef = useRef(crypto.randomUUID())
     const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -131,6 +163,10 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
     useEffect(() => {
         selectedRef.current = selectedId
     }, [selectedId])
+
+    useEffect(() => {
+        attachmentRef.current = attachment
+    }, [attachment])
 
     const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[]) => {
         setConversations((current) => current.map((conversation) => conversation.id === relationshipId
@@ -153,10 +189,65 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
     }, [])
 
     const selectConversation = useCallback((conversationId: string | null) => {
+        const pendingAttachment = attachmentRef.current
+        const previousRelationshipId = selectedRef.current
+        if (pendingAttachment && previousRelationshipId) {
+            void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/attachments`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ relationshipId: previousRelationshipId, storagePath: pendingAttachment.storagePath }),
+            }).catch(() => undefined)
+        }
         setSelectedId(conversationId)
+        setAttachment(null)
+        setAttachmentError(null)
         setDraft(conversationId ? localStorage.getItem(`betelgeze:communications:draft:${bootstrap.workspaceId}:${conversationId}`) ?? "" : "")
         syncConversationUrl(conversationId)
-    }, [bootstrap.workspaceId, syncConversationUrl])
+    }, [bootstrap.workspaceId, bootstrap.workspaceSlug, syncConversationUrl])
+
+    async function removeAttachment(target = attachment, relationshipId = selectedId) {
+        setAttachment(null)
+        setAttachmentError(null)
+        if (!target || !relationshipId) return
+        await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/attachments`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ relationshipId, storagePath: target.storagePath }),
+        }).catch(() => undefined)
+    }
+
+    async function uploadAttachment(file: File) {
+        if (!selected || attachmentState === "uploading") return
+        const relationshipId = selected.id
+        if (attachment) await removeAttachment(attachment, relationshipId)
+        setAttachmentState("uploading")
+        setAttachmentError(null)
+        try {
+            const prepareResponse = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/attachments`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ relationshipId, name: file.name, size: file.size, type: file.type }),
+            })
+            const prepared = await prepareResponse.json().catch(() => null) as { uploadUrl?: string; attachment?: CommunicationAttachment; error?: string } | null
+            if (!prepareResponse.ok || !prepared?.uploadUrl || !prepared.attachment) throw new Error(prepared?.error ?? "Could not prepare attachment.")
+            const uploadResponse = await fetch(prepared.uploadUrl, {
+                method: "PUT",
+                headers: { "Content-Type": prepared.attachment.mimeType },
+                body: file,
+            })
+            if (!uploadResponse.ok) throw new Error("Could not upload attachment.")
+            if (selectedRef.current !== relationshipId) {
+                await removeAttachment(prepared.attachment, relationshipId)
+                return
+            }
+            setAttachment(prepared.attachment)
+        } catch (error) {
+            setAttachmentError(error instanceof Error ? error.message : "Could not upload attachment.")
+        } finally {
+            setAttachmentState("idle")
+            if (attachmentInputRef.current) attachmentInputRef.current.value = ""
+        }
+    }
 
     useEffect(() => {
         const key = selectedId ? `betelgeze:communications:draft:${bootstrap.workspaceId}:${selectedId}` : null
@@ -242,8 +333,10 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
 
     async function sendMessage(messageToRetry?: CommunicationMessage) {
         if (!selected || !bootstrap.schemaReady || !selected.canSend) return
-        const body = messageToRetry?.body ?? draft.trim()
-        if (!body) return
+        const messageAttachment = messageToRetry?.attachment ?? attachment
+        const typedBody = messageToRetry ? (messageToRetry.attachment && messageToRetry.body === attachmentPlaceholder(messageToRetry.attachment) ? "" : messageToRetry.body) : draft.trim()
+        if (!typedBody && !messageAttachment) return
+        const body = typedBody || (messageAttachment ? attachmentPlaceholder(messageAttachment) : "")
         const clientRequestId = messageToRetry?.clientRequestId ?? crypto.randomUUID()
         const optimistic: CommunicationMessage = messageToRetry ? { ...messageToRetry, status: "sending", error: null, failedAt: null } : {
             id: clientRequestId,
@@ -258,6 +351,7 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
             senderUserId: bootstrap.currentUser.id,
             automationKind: null,
             automationLabel: null,
+            attachment: messageAttachment,
             createdAt: new Date().toISOString(),
             sentAt: null,
             deliveredAt: null,
@@ -267,9 +361,10 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
         updateConversationMessages(selected.id, [optimistic])
         if (!messageToRetry) {
             setDraft("")
+            setAttachment(null)
             localStorage.removeItem(`betelgeze:communications:draft:${bootstrap.workspaceId}:${selected.id}`)
         }
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId: selected.id, body, clientRequestId, retry: Boolean(messageToRetry) }) }).catch(() => null)
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId: selected.id, body: typedBody, attachment: messageAttachment, clientRequestId, retry: Boolean(messageToRetry) }) }).catch(() => null)
         if (!response) {
             updateConversationMessages(selected.id, [{ ...optimistic, status: "send_uncertain", error: "Delivery is being confirmed." }])
             return
@@ -333,7 +428,8 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                                 <article className={`flex ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
                                     <div className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`}>
                                         <p className={`mb-1 text-[10px] font-semibold ${message.direction === "outbound" ? "text-neutral-500" : "text-neutral-500"}`}>{sender}</p>
-                                        <MessageBody body={message.body || "No message body saved"} />
+                                        {message.attachment ? <MessageAttachment attachment={message.attachment} /> : null}
+                                        {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
                                         <div className={`mt-1.5 flex items-center justify-end gap-1.5 text-[10px] ${message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {message.status === "send_failed" && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry</button> : null}
@@ -345,9 +441,12 @@ export function CommunicationsWorkspace({ bootstrap }: { bootstrap: Communicatio
                     </div>
 
                     <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">
+                        {attachment || attachmentState === "uploading" || attachmentError ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="text-lg">{attachment?.kind === "image" ? "▧" : attachment?.kind === "video" ? "▶" : "↗"}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium text-neutral-200">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName ?? "Attachment failed"}</span><span className={`mt-0.5 block text-[10px] ${attachmentError ? "text-red-400" : "text-neutral-600"}`}>{attachmentError ?? formatFileSize(attachment?.size ?? null)}</span></span>{attachment ? <button type="button" onClick={() => void removeAttachment()} aria-label="Remove attachment" className="h-8 w-8 text-neutral-500 hover:text-white">×</button> : null}</div> : null}
                         <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-neutral-800 bg-black px-3 py-2 focus-within:border-neutral-600">
+                            <input ref={attachmentInputRef} type="file" accept="image/jpeg,image/png,video/mp4,video/3gpp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
+                            <button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!bootstrap.schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
                             <textarea rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label="Message client" placeholder={selected.canSend ? "Message on WhatsApp" : "Add a WhatsApp number to this relationship"} className="max-h-28 min-h-8 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-neutral-600 disabled:cursor-not-allowed" />
-                            <button type="button" onClick={() => void sendMessage()} disabled={!draft.trim() || !bootstrap.schemaReady || !selected.canSend} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
+                            <button type="button" onClick={() => void sendMessage()} disabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !bootstrap.schemaReady || !selected.canSend} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>
                     </footer>

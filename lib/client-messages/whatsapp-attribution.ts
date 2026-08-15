@@ -21,5 +21,6 @@ export function formatWhatsAppAttributedMessage(
     const safeName = (normalizeChatDisplayName(displayName) ?? normalizedFallback)
         .replace(/[*_~`]/gu, "")
         .trim() || normalizedFallback
-    return `*~ ${safeName}*\n${body.trim()}`
+    const message = body.trim()
+    return `*~ ${safeName}*${message ? `\n${message}` : ""}`
 }

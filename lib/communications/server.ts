@@ -6,8 +6,9 @@ import type {
     CommunicationReadCursor,
     CommunicationSenderKind,
 } from "@/lib/communications/types"
+import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 
-export const COMMUNICATION_MESSAGE_COLUMNS = "id, client_request_id, relationship_id, body, direction, provider, status, error, sender_kind, sender_user_id, automation_kind, automation_label, created_at, sent_at, delivered_at, read_at, failed_at"
+export const COMMUNICATION_MESSAGE_COLUMNS = "id, client_request_id, relationship_id, body, direction, provider, status, error, sender_kind, sender_user_id, automation_kind, automation_label, created_at, sent_at, delivered_at, read_at, failed_at, raw_payload"
 const legacyMessageColumns = "id, relationship_id, body, direction, provider, status, error, created_at, raw_payload"
 
 function record(value: unknown) {
@@ -67,6 +68,7 @@ export function communicationMessageFromRow(value: unknown): CommunicationMessag
         senderUserId: text(row.sender_user_id),
         automationKind: text(row.automation_kind) ?? text(record(row.raw_payload).kind),
         automationLabel: text(row.automation_label) ?? legacyAutomationLabel(row),
+        attachment: communicationAttachmentFromRawPayload(row.raw_payload),
         createdAt,
         sentAt: text(row.sent_at) ?? inferredTimestamp(status, createdAt, ["sent", "delivered", "read", "whatsapp_sent", "whatsapp_delivered", "whatsapp_read"]),
         deliveredAt: text(row.delivered_at) ?? inferredTimestamp(status, createdAt, ["delivered", "read", "whatsapp_delivered", "whatsapp_read"]),

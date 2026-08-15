@@ -16,4 +16,5 @@ test("WhatsApp messages begin with one bold attributed sender line", () => {
     assert.equal(formatWhatsAppAttributedMessage("Patryk", "Hello there"), "*~ Patryk*\nHello there")
     assert.equal(formatWhatsAppAttributedMessage(null, "Automated update"), "*~ Scaylup*\nAutomated update")
     assert.equal(formatWhatsAppAttributedMessage("*Rick*", "Hi"), "*~ Rick*\nHi")
+    assert.equal(formatWhatsAppAttributedMessage("Patryk", ""), "*~ Patryk*")
 })
