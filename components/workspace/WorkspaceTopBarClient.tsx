@@ -6,6 +6,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useId, useRef, useState, useTransition, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { AccountMenu } from "@/components/account/AccountMenu"
+import { Avatar } from "@/components/account/Avatar"
 import { LoadingOverlay } from "@/components/LoadingOverlay"
 import { shortId } from "@/lib/ui/relative-time"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
@@ -16,6 +17,8 @@ import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
 import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type OnboardingBuilderWindowSignal } from "@/lib/onboarding-builder-window"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
+import { visibleWorkspacePresence, workspacePresenceTopic, type WorkspacePresenceMember } from "@/lib/workspace-presence"
 import {
     appendWorkspaceTabHistory,
     isWorkspaceOnboardingBuilderUrl,
@@ -90,6 +93,7 @@ type Props = {
     workItemOptions: Array<{ id: string; title: string; status: string }>
     relationshipOptions: Array<{ id: string; label: string }>
     okrOwnerOptions: Array<{ id: string; label: string; role: string }>
+    workspaceMembers: Array<{ id: string; name: string; avatarSrc: string | null }>
 }
 
 type SearchResult = {
@@ -114,6 +118,26 @@ function WorkspaceLogo({ src, name }: { src?: string | null; name: string }) {
     }
 
     return <div aria-label={`${name} logo`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-sm font-semibold text-neutral-200">{name.slice(0, 1).toUpperCase()}</div>
+}
+
+function WorkspacePresenceAvatars({ members }: { members: WorkspacePresenceMember[] }) {
+    const visible = members.slice(0, 4)
+    const hidden = Math.max(0, members.length - visible.length)
+    if (!members.length) return null
+    return <div aria-label="Active workspace users" className="flex shrink-0 items-center -space-x-1.5">
+        {visible.map((member) => <span key={member.userId} title={`${member.name} · Active now`} className="relative h-7 w-7 overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900">
+            <Avatar src={member.avatarSrc} name={member.name} className="h-full w-full" />
+            <span aria-hidden="true" className="absolute bottom-0 right-0 h-2 w-2 rounded-full border border-neutral-950 bg-emerald-400" />
+        </span>)}
+        {hidden ? <span title={`${hidden} more active user${hidden === 1 ? "" : "s"}`} className="relative flex h-7 w-7 items-center justify-center rounded-full border-2 border-neutral-950 bg-neutral-800 text-[10px] font-medium text-neutral-200">+{hidden}</span> : null}
+    </div>
+}
+
+function WorkspaceMutationStatus({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
+    if (state === "idle") return null
+    return <span aria-live="polite" className={`hidden shrink-0 text-[11px] md:inline ${state === "error" ? "text-red-300" : "text-neutral-500"}`}>
+        {state === "saving" ? "Saving…" : state === "saved" ? "Saved" : "Save failed"}
+    </span>
 }
 
 function ArrowLeftIcon() {
@@ -376,7 +400,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions }: Props) {
+function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -413,6 +437,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const contextManualClosedByTabRef = useRef<Record<string, boolean>>({})
     const contextObstructedByTabRef = useRef<Record<string, boolean>>({})
     const creationNoticeTimeoutRef = useRef<number | null>(null)
+    const mutationStatusTimeoutRef = useRef<number | null>(null)
+    const presenceChannelRef = useRef<ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]> | null>(null)
+    const presenceClientIdRef = useRef(crypto.randomUUID())
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [sidebarHydrated, setSidebarHydrated] = useState(false)
     const [sidebarTransitionEnabled, setSidebarTransitionEnabled] = useState(false)
@@ -438,6 +465,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [createError, setCreateError] = useState<string | null>(null)
     const [uploadLabel, setUploadLabel] = useState<string | null>(null)
     const [creationNotice, setCreationNotice] = useState<CreationNotice | null>(null)
+    const [activeWorkspaceUsers, setActiveWorkspaceUsers] = useState<WorkspacePresenceMember[]>([])
+    const [backgroundMutationCounts, setBackgroundMutationCounts] = useState<Record<string, number>>({})
+    const [backgroundMutationState, setBackgroundMutationState] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const [isCreating, startCreateTransition] = useTransition()
     const defaultWorkspaceUrl = `/${workspace.slug}`
     const tabsStorageKey = `betelgeze:workspace-tabs:${workspace.slug}`
@@ -822,6 +852,23 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
             if (message.type === "action-end") {
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
+            }
+
+            if (message.type === "mutation-start") {
+                setBackgroundMutationCounts((current) => ({ ...current, [message.tabId]: (current[message.tabId] ?? 0) + 1 }))
+                if (message.tabId === activeTabIdRef.current) {
+                    if (mutationStatusTimeoutRef.current) window.clearTimeout(mutationStatusTimeoutRef.current)
+                    setBackgroundMutationState("saving")
+                }
+            }
+
+            if (message.type === "mutation-end") {
+                setBackgroundMutationCounts((current) => ({ ...current, [message.tabId]: Math.max(0, (current[message.tabId] ?? 1) - 1) }))
+                if (message.tabId === activeTabIdRef.current) {
+                    setBackgroundMutationState(message.mutationFailed ? "error" : "saved")
+                    if (mutationStatusTimeoutRef.current) window.clearTimeout(mutationStatusTimeoutRef.current)
+                    mutationStatusTimeoutRef.current = window.setTimeout(() => setBackgroundMutationState("idle"), message.mutationFailed ? 5000 : 1600)
+                }
             }
 
             if (message.type === "poll-started" && message.pollId) {
@@ -1605,6 +1652,57 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const activeRelationshipContext = activeContextOpen && !activeContextObstructed ? activeContextStatus?.context ?? null : null
     const activePathname = new URL(activeTab.url, typeof window === "undefined" ? "http://localhost" : window.location.origin).pathname
     const activeRouteLoading = routeLoadingTabId === activeTabId
+    const activeBackgroundSaving = (backgroundMutationCounts[activeTabId] ?? 0) > 0
+    const currentPresenceMember = workspaceMembers.find((member) => member.id === currentUserId) ?? { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null }
+
+    useEffect(() => {
+        const supabase = createSupabaseBrowserClient()
+        let channel: ReturnType<typeof supabase.channel> | null = null
+        let disposed = false
+        async function connect() {
+            const session = await supabase.auth.getSession()
+            const accessToken = session.data.session?.access_token
+            if (!accessToken || disposed) return
+            await supabase.realtime.setAuth(accessToken)
+            if (disposed) return
+            channel = supabase.channel(workspacePresenceTopic(workspace.slug), { config: { private: true, presence: { key: presenceClientIdRef.current } } })
+            presenceChannelRef.current = channel
+            channel
+                .on("presence", { event: "sync" }, () => {
+                    if (!channel) return
+                    setActiveWorkspaceUsers(visibleWorkspacePresence(channel.presenceState<WorkspacePresenceMember>(), currentUserId))
+                })
+                .subscribe(async (status) => {
+                    if (status !== "SUBSCRIBED" || !channel || disposed) return
+                    await channel.track({
+                        clientId: presenceClientIdRef.current,
+                        userId: currentUserId,
+                        name: currentPresenceMember.name,
+                        avatarSrc: currentPresenceMember.avatarSrc,
+                        activePath: activeTabIdRef.current ? tabsRef.current.find((tab) => tab.id === activeTabIdRef.current)?.url ?? null : null,
+                    })
+                })
+        }
+        void connect().catch(() => undefined)
+        return () => {
+            disposed = true
+            presenceChannelRef.current = null
+            setActiveWorkspaceUsers([])
+            if (channel) void supabase.removeChannel(channel)
+        }
+    }, [currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, workspace.slug])
+
+    useEffect(() => {
+        const channel = presenceChannelRef.current
+        if (!channel) return
+        void channel.track({
+            clientId: presenceClientIdRef.current,
+            userId: currentUserId,
+            name: currentPresenceMember.name,
+            avatarSrc: currentPresenceMember.avatarSrc,
+            activePath: activePathname,
+        })
+    }, [activePathname, currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId])
 
     function viewCreatedRecord() {
         if (!creationNotice) return
@@ -1642,6 +1740,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         <input ref={desktopSearchInputRef} value={query} onKeyDown={submitSearch} onChange={(event) => { setQuery(event.target.value); openDesktopSearch() }} onFocus={openDesktopSearch} aria-label="Search Betelgeze" placeholder="Search relationships, work, leads..." className="h-9 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 pl-9 pr-16 text-sm text-neutral-300 outline-none transition placeholder:text-neutral-600 focus:border-neutral-600 focus:ring-2 focus:ring-white/10" />
                         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-neutral-800 px-1.5 py-0.5 text-[10px] leading-none text-neutral-500">{searchShortcutLabel}</span>
                     </label>
+                    <WorkspacePresenceAvatars members={activeWorkspaceUsers} />
+                    <WorkspaceMutationStatus state={activeBackgroundSaving ? "saving" : backgroundMutationState} />
                     {searchOpen && (
                         <div className="absolute left-[6.5rem] right-0 top-11 z-[70] max-h-[32rem] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
                             <div className="max-h-[32rem] overflow-y-auto">
@@ -1709,6 +1809,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                             <OkrIcon />
                         </button>}
                     </div>
+                    <div className="md:hidden"><WorkspacePresenceAvatars members={activeWorkspaceUsers} /></div>
                     <AccountMenu username={username} email={email} avatarSrc={avatarSrc} workspaceId={workspace.id} workspaceName={workspace.name} leaveAction={leaveAction} buttonClassName="h-9 w-9" />
                 </div>
             </div>

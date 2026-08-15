@@ -62,6 +62,10 @@ export type RelationshipDealDetailsInput = {
     }>
 }
 
+export type RelationshipBackgroundDetailsInput = Pick<RelationshipDealDetailsInput,
+    "primaryPersonName" | "businessName" | "primaryContactRole" | "primaryPhone" | "whatsappPhone" | "primaryEmail" | "description"
+>
+
 function formString(formData: FormData, key: string) {
     return String(formData.get(key) ?? "").trim()
 }
@@ -325,6 +329,31 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
             : "The relationship could not be saved. Review the details and try again."
         return { ok: false, error: safe }
     }
+}
+
+export async function saveRelationshipBackgroundDetails(slug: string, relationshipId: string, input: RelationshipBackgroundDetailsInput): Promise<{ ok: true } | { ok: false; error: string }> {
+    const { workspace, user, role } = await requireWorkspace(slug)
+    const primaryPersonName = input.primaryPersonName.trim()
+    if (!primaryPersonName) return { ok: false, error: "Add the client's name before saving the relationship" }
+    const { data: relationship, error: relationshipError } = await supabaseAdmin.from("relationships")
+        .select("seller_user_id").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle()
+    if (relationshipError || !relationship) return { ok: false, error: "The relationship could not be found" }
+    if (role !== "owner" && role !== "admin" && relationship.seller_user_id !== user.id) {
+        return { ok: false, error: "Only this relationship's seller or a workspace admin can update its details" }
+    }
+    const { error } = await supabaseAdmin.from("relationships").update({
+        primary_person_name: primaryPersonName,
+        business_name: input.businessName.trim() || null,
+        primary_contact_role: input.primaryContactRole.trim() || null,
+        primary_phone: input.primaryPhone.trim() || null,
+        whatsapp_phone: input.whatsappPhone.trim() || null,
+        primary_email: input.primaryEmail.trim() || null,
+        description: input.description.trim() || null,
+        updated_at: new Date().toISOString(),
+    }).eq("workspace_id", workspace.id).eq("id", relationshipId)
+    if (error) return { ok: false, error: "The relationship could not be saved. Change a field to retry." }
+    relationshipRevalidatePaths(slug, relationshipId)
+    return { ok: true }
 }
 
 type ArchiveRelationshipState = { error?: string }

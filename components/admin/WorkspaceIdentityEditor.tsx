@@ -1,6 +1,7 @@
 "use client"
 
 import { ChangeEvent, CSSProperties, PointerEvent, useRef, useState, useTransition } from "react"
+import { runWorkspaceBackgroundMutation } from "@/lib/workspace-background"
 
 type Props = {
     workspace: { name: string; slug: string; bannerHeight: number; bannerPosition: number; bannerSrc: string | null; logoSrc: string | null }
@@ -37,9 +38,9 @@ export function WorkspaceIdentityEditor({ workspace, updateName, updateCoverLayo
     const [logoSelected, setLogoSelected] = useState(false)
 
     function reportMutation() { window.dispatchEvent(new Event("betelgeze:workspace-mutation")) }
-    function saveCover() { const next = layout.current; startTransition(async () => { await updateCoverLayout(next.height, next.position); reportMutation() }) }
-    function saveName() { const data = new FormData(); data.set("name", name); startTransition(async () => { await updateName(data); setNameEditing(false); reportMutation() }) }
-    function upload(input: HTMLInputElement, action: (formData: FormData) => Promise<void>, key: "banner" | "logo") { if (!input.files?.[0]) return; const data = new FormData(); data.set(key, input.files[0]); startTransition(async () => { await action(data); reportMutation() }) }
+    function saveCover() { const next = layout.current; startTransition(async () => { await runWorkspaceBackgroundMutation(() => updateCoverLayout(next.height, next.position)); reportMutation() }) }
+    function saveName() { const data = new FormData(); data.set("name", name); startTransition(async () => { await runWorkspaceBackgroundMutation(() => updateName(data)); setNameEditing(false); reportMutation() }) }
+    function upload(input: HTMLInputElement, action: (formData: FormData) => Promise<void>, key: "banner" | "logo") { if (!input.files?.[0]) return; const data = new FormData(); data.set(key, input.files[0]); startTransition(async () => { await runWorkspaceBackgroundMutation(() => action(data)); reportMutation() }) }
     function onResizeStart(event: PointerEvent<HTMLButtonElement>) { event.preventDefault(); event.stopPropagation(); resizeStart.current = { y: event.clientY, height: layout.current.height }; event.currentTarget.setPointerCapture(event.pointerId) }
     function onResizeMove(event: PointerEvent<HTMLButtonElement>) { if (!resizeStart.current) return; const next = clamp(resizeStart.current.height + event.clientY - resizeStart.current.y, 192, 288); layout.current.height = next; setHeight(next) }
     function onResizeEnd() { if (!resizeStart.current) return; resizeStart.current = null; saveCover() }

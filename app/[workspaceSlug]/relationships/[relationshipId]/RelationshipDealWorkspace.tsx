@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useTransition } from "react"
+import { useEffect, useRef, useState, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
@@ -12,7 +12,8 @@ import type { OnboardingHelpSettings, OnboardingModuleDefinition, OnboardingThem
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import type { RelationshipGanttPlan } from "@/lib/relationship-gantt"
 import { postGanttSync } from "@/lib/ui/gantt-sync"
-import { proceedRelationshipCurrentWork, saveRelationshipDealDetails, type RelationshipDealDetailsInput } from "../actions"
+import { runWorkspaceBackgroundMutation } from "@/lib/workspace-background"
+import { proceedRelationshipCurrentWork, saveRelationshipBackgroundDetails, saveRelationshipDealDetails, type RelationshipDealDetailsInput } from "../actions"
 import { RelationshipGantt } from "./RelationshipGantt"
 
 type Member = { id: string; name: string }
@@ -114,6 +115,32 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
     }
 }
 
+function backgroundDetailsKey(draft: Draft) {
+    return JSON.stringify({
+        primaryPersonName: draft.primaryPersonName,
+        businessName: draft.businessName,
+        primaryContactRole: draft.primaryContactRole,
+        primaryPhone: draft.primaryPhone,
+        whatsappPhone: draft.whatsappPhone,
+        primaryEmail: draft.primaryEmail,
+        description: draft.description,
+    })
+}
+
+function commercialDetailsKey(draft: Draft) {
+    return JSON.stringify({
+        sellerUserId: draft.sellerUserId,
+        fulfilmentManagerUserId: draft.fulfilmentManagerUserId,
+        projectTimeframeDays: draft.projectTimeframeDays,
+        selectedCodes: draft.selectedCodes,
+        upfrontPrices: draft.upfrontPrices,
+        recurringPrices: draft.recurringPrices,
+        currency: draft.currency,
+        billingInterval: draft.billingInterval,
+        billingIntervalCount: draft.billingIntervalCount,
+    })
+}
+
 function MissingHint({ message }: { message: string | null }) {
     return message ? <span className="mt-1 block text-[11px] text-amber-300">{message}</span> : null
 }
@@ -160,7 +187,10 @@ export function RelationshipDealWorkspace({
     const [previewModule, setPreviewModule] = useState<OnboardingModuleDefinition | null>(null)
     const [error, setError] = useState<string | null>(null)
     const [notice, setNotice] = useState<{ label: string } | null>(null)
+    const [autosaveState, setAutosaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle")
     const [pending, startTransition] = useTransition()
+    const autosaveTimerRef = useRef<number | null>(null)
+    const autosaveQueueRef = useRef(Promise.resolve())
     const parentDocument = typeof window !== "undefined" && window.parent !== window ? window.parent.document : typeof document !== "undefined" ? document : null
     const selectedServices = services.filter((service) => draft.selectedCodes.includes(service.code))
     const selectedModuleIds = new Set([
@@ -169,7 +199,8 @@ export function RelationshipDealWorkspace({
     ])
     const assignedModules = modules.filter((module) => selectedModuleIds.has(module.id)).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
     const invoiced = ["sold", "invoiced", "onboarding", "onboarding_review", "fulfilment", "retention", "completed_lost"].includes(details.lifecyclePhase)
-    const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
+    const backgroundDirty = backgroundDetailsKey(draft) !== backgroundDetailsKey(baseline)
+    const commercialDirty = commercialDetailsKey(draft) !== commercialDetailsKey(baseline)
     const relationshipIssues = [
         missingText(draft.primaryPersonName, "Client name required"),
         emailIssue(draft.primaryEmail),
@@ -195,6 +226,44 @@ export function RelationshipDealWorkspace({
         const timeout = window.setTimeout(() => setNotice(null), 8400)
         return () => window.clearTimeout(timeout)
     }, [notice])
+
+    useEffect(() => {
+        if (!canEdit || !backgroundDirty || !draft.primaryPersonName.trim()) return
+        if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
+        const source = draft
+        autosaveTimerRef.current = window.setTimeout(() => {
+            autosaveQueueRef.current = autosaveQueueRef.current.then(async () => {
+                setAutosaveState("saving")
+                const outcome = await runWorkspaceBackgroundMutation(() => saveRelationshipBackgroundDetails(workspaceSlug, relationshipId, {
+                    primaryPersonName: source.primaryPersonName,
+                    businessName: source.businessName,
+                    primaryContactRole: source.primaryContactRole,
+                    primaryPhone: source.primaryPhone,
+                    whatsappPhone: source.whatsappPhone,
+                    primaryEmail: source.primaryEmail,
+                    description: source.description,
+                }))
+                if (!outcome.ok) {
+                    setError(outcome.error)
+                    setAutosaveState("error")
+                    return
+                }
+                setBaseline((current) => ({
+                    ...current,
+                    primaryPersonName: source.primaryPersonName,
+                    businessName: source.businessName,
+                    primaryContactRole: source.primaryContactRole,
+                    primaryPhone: source.primaryPhone,
+                    whatsappPhone: source.whatsappPhone,
+                    primaryEmail: source.primaryEmail,
+                    description: source.description,
+                }))
+                setError(null)
+                setAutosaveState("saved")
+            }).catch(() => setAutosaveState("error"))
+        }, 900)
+        return () => { if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current) }
+    }, [backgroundDirty, canEdit, draft, relationshipId, workspaceSlug])
 
     function update<K extends keyof Draft>(key: K, value: Draft[K]) {
         setDraft((current) => ({ ...current, [key]: value }))
@@ -319,7 +388,7 @@ export function RelationshipDealWorkspace({
         <DetailField label="Description" icon="description" className="lg:col-span-2"><textarea disabled={!canEdit} value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Add relationship context…" className={`${inputClass} min-h-20 resize-none leading-6`} /></DetailField>
         </DetailFields>
         {error && !invoiceOpen ? <p className="border-t border-red-500/20 py-2 text-sm text-red-300">{error}</p> : null}
-        {dirty && canEdit ? <div className="flex justify-end gap-2 border-t border-neutral-900 py-2.5"><button type="button" disabled={pending} onClick={() => { setDraft(baseline); setServicesOpen(false); setError(null) }} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => startTransition(() => { void saveDetails() })} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save changes"}</button></div> : null}
+        {canEdit ? <div className="flex items-center justify-between gap-3 border-t border-neutral-900 py-2.5"><span aria-live="polite" className={`text-xs ${autosaveState === "error" ? "text-red-300" : "text-neutral-500"}`}>{autosaveState === "saving" ? "Saving contact details…" : autosaveState === "error" ? "Contact details could not save automatically" : backgroundDirty ? "Contact details will save automatically" : autosaveState === "saved" ? "Contact details saved automatically" : "Contact details save automatically"}</span>{commercialDirty ? <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={() => { setDraft(baseline); setServicesOpen(false); setError(null) }} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Cancel</button><button type="button" disabled={pending} onClick={() => startTransition(() => { void saveDetails() })} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save commercial changes"}</button></div> : null}</div> : null}
     </div>
 
     const modal = invoiceOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 text-white backdrop-blur-sm">

@@ -17,13 +17,14 @@ export type WorkspaceTabFrameMessage = {
     source: typeof WORKSPACE_TAB_MESSAGE_SOURCE
     target: "host"
     tabId: string
-    type: "location" | "location-replace" | "mutation" | "action-start" | "action-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab"
+    type: "location" | "location-replace" | "mutation" | "action-start" | "action-end" | "mutation-start" | "mutation-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab"
     url?: string
     relationshipId?: string | null
     contextSupported?: boolean
     context?: WorkspaceTabRelationshipContext | null
     contextObstructed?: boolean
     pollId?: string
+    mutationFailed?: boolean
 }
 
 export type WorkspaceTabContextMetric = {

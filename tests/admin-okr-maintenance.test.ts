@@ -405,7 +405,7 @@ test("the private activity console covers core automation producers", async () =
     assert.ok(migration.indexOf('drop policy if exists "workspace admins read activity console"') < migration.indexOf('create policy "workspace admins read activity console"'))
     assert.match(migration, /workspace admins read activity console/)
     assert.match(activityPage, /Activity Console/)
-    for (const graph of ["Requests", "Internal Calls", "External Calls", "Error rate"]) assert.match(activityMetrics, new RegExp(graph))
+    for (const graph of ["Requests", "Calls", "Error rate"]) assert.match(activityMetrics, new RegExp(graph))
     assert.match(activityPage, /buildAdminActivityMetrics/)
     assert.match(activityPage, /listAdminActivitySince/)
     assert.match(activityPage, /tone=\{metric\.tone\}/)

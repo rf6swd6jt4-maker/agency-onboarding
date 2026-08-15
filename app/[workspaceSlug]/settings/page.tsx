@@ -11,6 +11,7 @@ import { AgencyBrandingEditor } from "@/components/settings/AgencyBrandingEditor
 import { OnboardingSettings } from "@/components/settings/OnboardingSettings"
 import { ServiceCatalogue } from "@/components/settings/ServiceCatalogue"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
+import { WorkspaceAutosaveForm } from "@/components/workspace/WorkspaceAutosaveForm"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
@@ -167,15 +168,12 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Workspace"
                             description="Edit the workspace name shown in the top bar, menus, and account areas."
                         >
-                            <form action={updateWorkspaceName.bind(null, workspace.slug)} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
+                            <WorkspaceAutosaveForm action={updateWorkspaceName.bind(null, workspace.slug)} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                                 <label className="block text-sm text-neutral-300">
                                     Workspace name
                                     <input name="name" required defaultValue={workspace.name} className="mt-2 h-11 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm text-white" />
                                 </label>
-                                <button className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium leading-none text-black transition hover:bg-neutral-200">
-                                    Save workspace
-                                </button>
-                            </form>
+                            </WorkspaceAutosaveForm>
                         </UnifiedSection>
 
                         <UnifiedSection

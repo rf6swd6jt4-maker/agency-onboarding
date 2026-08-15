@@ -24,22 +24,22 @@ function event(id: string, occurredAt: string, overrides: Partial<AdminActivityE
 
 test("Activity graphs use rolling hourly buckets and the current hour updates from the log", () => {
     const metrics = buildAdminActivityMetrics([
-        event("request", "2026-08-09T12:05:00.000Z", { metric_classification: "operational" }),
+        event("request", "2026-08-09T12:05:00.000Z", { event_key: "workspace.mutation.completed", metric_classification: "operational" }),
         event("outbound", "2026-08-09T12:10:00.000Z", { category: "billing", metric_classification: "internal_call" }),
         event("inbound", "2026-08-09T12:15:00.000Z", { category: "communications", metric_classification: "external_call" }),
-        event("error", "2026-08-09T12:20:00.000Z", { category: "integrations", level: "error", outcome: "failed", metric_classification: "operational" }),
+        event("error", "2026-08-09T12:20:00.000Z", { category: "integrations", event_key: "workspace.mutation.failed", level: "error", outcome: "failed", metric_classification: "operational" }),
+        event("other-operational", "2026-08-09T12:22:00.000Z", { category: "integrations", metric_classification: "operational" }),
         event("historic-webhook", "2026-08-09T11:20:00.000Z", { category: "billing", event_key: "stripe.webhook.received", metric_classification: "external_call" }),
         event("audit", "2026-08-09T12:25:00.000Z", { metric_classification: "audit" }),
         event("too-old", "2026-08-08T12:20:00.000Z"),
     ], new Date("2026-08-09T12:30:00.000Z"))
 
-    assert.deepEqual(metrics.map((metric) => metric.title), ["Requests", "Internal Calls", "External Calls", "Error rate"])
+    assert.deepEqual(metrics.map((metric) => metric.title), ["Requests", "Calls", "Error rate"])
     assert.ok(metrics.every((metric) => metric.points.length === 24))
-    assert.equal(metrics.find((metric) => metric.key === "requests")?.currentValue, 4)
-    assert.equal(metrics.find((metric) => metric.key === "internal_calls")?.currentValue, 1)
-    assert.equal(metrics.find((metric) => metric.key === "external_calls")?.currentValue, 1)
-    assert.equal(metrics.find((metric) => metric.key === "external_calls")?.points.at(-2)?.value, 1)
-    assert.equal(metrics.find((metric) => metric.key === "error_rate")?.currentValue, 25)
+    assert.equal(metrics.find((metric) => metric.key === "requests")?.currentValue, 2)
+    assert.equal(metrics.find((metric) => metric.key === "calls")?.currentValue, 1)
+    assert.equal(metrics.find((metric) => metric.key === "calls")?.points.at(-2)?.value, 1)
+    assert.ok(Math.abs((metrics.find((metric) => metric.key === "error_rate")?.currentValue ?? 0) - (100 / 3)) < 0.001)
     assert.equal(metrics.find((metric) => metric.key === "error_rate")?.tone, "red")
 })
 
