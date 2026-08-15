@@ -24,7 +24,7 @@ test("Communications is a fixed local-first client chat workspace", async () => 
     assert.match(workspace, /aria-label="Search conversations"/)
     assert.match(workspace, /aria-label=\{`Open \$\{selected\.title\} relationship`\}/)
     assert.doesNotMatch(workspace, />Relationship<\/Link>/)
-    assert.match(workspace, /function DoubleDeliveryCheckIcon/)
+    assert.match(workspace, /DoubleDeliveryCheckIcon/)
     assert.doesNotMatch(workspace, />✓✓<\/span>/)
     assert.match(workspace, /communication_read_cursors/)
     assert.match(workspace, /status: "sending"/)

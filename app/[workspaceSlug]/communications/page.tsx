@@ -42,6 +42,7 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
         clientId: relationship.client_id,
         title: relationship.business_name ? `${relationship.primary_person_name} – ${relationship.business_name}` : relationship.primary_person_name,
         subtitle: relationship.whatsapp_phone ?? relationship.primary_phone ?? relationship.primary_email,
+        isTest: relationship.source_metadata.is_test === true,
         canSend: Boolean((relationship.client_id && channelClientIds.has(relationship.client_id)) || relationship.whatsapp_phone || relationship.primary_phone),
         messages: messagesByRelationship.get(relationship.id) ?? [],
     })).sort((left, right) => {

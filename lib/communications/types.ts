@@ -69,6 +69,7 @@ export type ClientConversation = {
     clientId: string | null
     title: string
     subtitle: string | null
+    isTest: boolean
     canSend: boolean
     messages: CommunicationMessage[]
 }

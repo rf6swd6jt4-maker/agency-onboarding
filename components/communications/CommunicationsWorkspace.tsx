@@ -5,12 +5,15 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Avatar } from "@/components/account/Avatar"
-import { ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
+import { visibleSwipeActionTop } from "@/components/communications/message-swipe"
+import { SquarePill } from "@/components/ui"
 import type { CommunicationAttachment, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
+import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
@@ -108,13 +111,6 @@ function MessageBody({ body }: { body: string }) {
     return <p className="whitespace-pre-wrap break-words leading-5">{parts.map((part, index) => /^https?:\/\//.test(part)
         ? <a key={`${part}:${index}`} href={part} target="_blank" rel="noreferrer" className="underline decoration-current/40 underline-offset-2 hover:decoration-current">{part}</a>
         : <Fragment key={index}>{part}</Fragment>)}</p>
-}
-
-function DoubleDeliveryCheckIcon() {
-    return <svg viewBox="0 0 14 10" aria-hidden="true" className="h-3 w-4 fill-none stroke-current" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m1 5 2.4 2.4L8.7 1.6" />
-        <path d="m4.5 5 2.4 2.4 5.3-5.8" />
-    </svg>
 }
 
 function DeliveryTicks({ message }: { message: CommunicationMessage }) {
@@ -244,7 +240,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
     const [savingStickerMessageId, setSavingStickerMessageId] = useState<string | null>(null)
     const [interactionError, setInteractionError] = useState<string | null>(null)
-    const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
+    const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean; actionTop?: number } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
@@ -256,6 +252,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const attachmentRef = useRef<CommunicationAttachment | null>(null)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean } | null>(null)
     const swipedMessageRef = useRef<string | null>(null)
+    const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
 
@@ -270,11 +267,15 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     useEffect(() => {
         if (!actionMessageId) return
         const dismiss = (event: PointerEvent) => {
-            const interaction = event.target instanceof Element ? event.target.closest("[data-message-interaction]") : null
-            if (interaction?.getAttribute("data-message-interaction") !== actionMessageId) setActionMessageId(null)
+            const target = event.target instanceof Element ? event.target : null
+            if (target?.closest("[data-message-action-popup]")) return
+            if (target?.closest(`[data-message-interaction="${actionMessageId}"]`)) dismissedActionMessageRef.current = actionMessageId
+            setActionMessageId(null)
         }
-        document.addEventListener("pointerdown", dismiss)
-        return () => document.removeEventListener("pointerdown", dismiss)
+        const documents = [document]
+        try { if (window.parent !== window) documents.push(window.parent.document) } catch { /* Cross-origin shells cannot be observed. */ }
+        documents.forEach((ownerDocument) => ownerDocument.addEventListener("pointerdown", dismiss, true))
+        return () => documents.forEach((ownerDocument) => ownerDocument.removeEventListener("pointerdown", dismiss, true))
     }, [actionMessageId])
 
     const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[]) => {
@@ -633,8 +634,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     const cursorIndex = ownCursor?.lastReadMessageId ? conversation.messages.findIndex((message) => message.id === ownCursor.lastReadMessageId) : -1
                     const unread = conversation.messages.slice(cursorIndex + 1).filter((message) => message.direction === "inbound").length
                     return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} aria-current={selectedId === conversation.id ? "page" : undefined} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left transition ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}>
-                        <span className="flex h-11 w-11 items-center justify-center rounded-full bg-neutral-800 text-sm font-semibold text-neutral-200">{initials(conversation.title)}</span>
-                        <span className="min-w-0"><span className="flex items-start justify-between gap-3"><span className="truncate text-sm font-semibold">{conversation.title}</span>{latest ? <time dateTime={latest.createdAt} className={`shrink-0 text-[11px] ${unread ? "text-emerald-400" : "text-neutral-600"}`}>{formatRelativeTime(latest.createdAt)}</time> : null}</span><span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-neutral-500">{latest?.direction === "outbound" ? <DeliveryTicks message={latest} /> : null}<span className="truncate">{latest?.body || "No messages yet"}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span>
+                        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-800 text-sm font-semibold text-neutral-200">{initials(conversation.title)}</span>
+                        <span className="min-w-0"><span className="flex min-w-0 items-start justify-between gap-3"><span className="min-w-0 flex-1 truncate text-sm font-semibold">{conversation.title}</span><span className="flex shrink-0 items-center gap-2">{conversation.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}{latest ? <time dateTime={latest.createdAt} className={`text-[11px] ${unread ? "text-emerald-400" : "text-neutral-600"}`}>{formatRelativeTime(latest.createdAt)}</time> : null}</span></span><span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-neutral-500">{latest?.direction === "outbound" ? <DeliveryTicks message={latest} /> : null}<span className="truncate">{latest?.body || "No messages yet"}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span>
                     </button>
                 }) : <div className="p-6 text-center"><p className="text-sm font-medium text-neutral-300">{conversations.length ? "No matching conversations" : "No clients yet"}</p><p className="mt-2 text-xs leading-5 text-neutral-600">{conversations.length ? "Try another name or message." : "Client relationships will appear here automatically."}</p></div>}</div>
             </aside>
@@ -644,8 +645,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
                         <button type="button" onClick={() => selectConversation(null)} aria-label="Back to client chats" className="inline-flex h-10 w-10 items-center justify-center text-neutral-400 hover:text-white lg:hidden"><BackIcon /></button>
                         <Link href={`/${bootstrap.workspaceSlug}/relationships/${selected.id}`} aria-label={`Open ${selected.title} relationship`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg outline-none hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-neutral-600">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-xs font-semibold">{initials(selected.title)}</span>
-                            <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.subtitle ?? "WhatsApp client"}</span></span>
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-800 text-xs font-semibold">{initials(selected.title)}</span>
+                            <span className="min-w-0"><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-semibold">{selected.title}</span>{selected.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span><span className="block truncate text-[11px] text-neutral-600">{selected.subtitle ?? "WhatsApp client"}</span></span>
                         </Link>
                     </header>
 
@@ -663,26 +664,31 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             const isSticker = message.attachment?.kind === "sticker"
                             const stickerSaved = Boolean(isSticker && stickers.some((sticker) => sticker.storagePath === message.attachment?.storagePath))
                             const showActions = actionMessageId === message.id && (canInteract || isSticker)
-                            const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.lastReadMessageId === message.id).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
+                            const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                             return <Fragment key={message.id}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                                 <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                                    <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
-                                    <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 38), transform: `scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-3 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
-                                    {message.direction === "outbound" && showActions ? <div className="absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
+                                    <span aria-hidden="true" style={{ top: swipePosition?.id === message.id && swipePosition.actionTop !== undefined ? swipePosition.actionTop : "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
+                                    {message.direction === "outbound" && showActions ? <div data-message-action-popup className="absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                     <article
                                         role="button"
                                         tabIndex={0}
                                         aria-label={`Message from ${sender}. Activate for message actions.`}
                                         onClick={() => {
                                             if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
+                                            if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
                                             setActionMessageId((current) => current === message.id ? null : message.id)
                                         }}
                                         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionMessageId((current) => current === message.id ? null : message.id) } }}
                                         onTouchStart={(event) => {
                                             const touch = event.touches[0]
                                             swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false } : null
-                                            if (touch) setSwipePosition({ id: message.id, offset: 0, active: true })
+                                            if (touch) {
+                                                const messageRect = event.currentTarget.getBoundingClientRect()
+                                                const viewportRect = messagePaneRef.current?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight }
+                                                setSwipePosition({ id: message.id, offset: 0, active: true, actionTop: visibleSwipeActionTop(messageRect, viewportRect) })
+                                            }
                                         }}
                                         onTouchMove={(event) => {
                                             const start = swipeStartRef.current
@@ -692,12 +698,12 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                             const deltaY = touch.clientY - start.y
                                             if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 8) {
                                                 start.cancelled = true
-                                                setSwipePosition({ id: message.id, offset: 0, active: false })
+                                                setSwipePosition((current) => ({ id: message.id, offset: 0, active: false, actionTop: current?.id === message.id ? current.actionTop : undefined }))
                                                 return
                                             }
                                             if (deltaX > 0) {
                                                 event.preventDefault()
-                                                setSwipePosition({ id: message.id, offset: Math.min(82, deltaX * 0.78), active: true })
+                                                setSwipePosition((current) => ({ id: message.id, offset: Math.min(82, deltaX * 0.78), active: true, actionTop: current?.id === message.id ? current.actionTop : undefined }))
                                             }
                                         }}
                                         onTouchEnd={(event) => {
@@ -719,14 +725,13 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                         {message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
                                         {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} /> : null}
                                         {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
-                                        <div className={`mt-1.5 flex items-center justify-end gap-1.5 text-[10px] ${isSticker ? "ml-auto w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</div>
+                                        <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><span className="flex min-w-0 -space-x-1">{readers.map((person) => <button type="button" key={person.id} onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(person.id) }} title={`Read in Betelgeze by ${person.name}`} aria-label={`Open ${person.name} profile`} className="h-4 w-4 shrink-0 overflow-hidden rounded-full border border-black"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full" /></button>)}</span><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {message.status === "send_failed" && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry</button> : null}
                                     </article>
-                                    {message.direction === "inbound" && showActions ? <div className="absolute bottom-full left-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "inbound" && showActions ? <div data-message-action-popup className="absolute bottom-full left-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                 </div>
                                 {messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
-                                {readers.length ? <div className={`flex -space-x-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{readers.map((person) => <span key={person.id} title={`Read in Betelgeze by ${person.name}`} className="h-4 w-4 overflow-hidden rounded-full border border-black"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full" /></span>)}</div> : null}
                             </Fragment>
                         }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here arrive from the shared workspace WhatsApp number.</p></div></div>}</div>
                     </div>
@@ -742,12 +747,12 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             </div>
                         </div> : null}
                         {interactionError ? <div className="mx-auto mb-2 flex max-w-3xl items-center justify-between gap-3 rounded-lg bg-red-950/60 px-3 py-2 text-xs text-red-300"><span>{interactionError}</span><button type="button" onClick={() => setInteractionError(null)} aria-label="Dismiss interaction error">×</button></div> : null}
-                        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-neutral-800 bg-black px-3 py-2 focus-within:border-neutral-600">
+                        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-xl border border-neutral-800 bg-black px-3 py-2 focus-within:border-neutral-600">
                             <input ref={attachmentInputRef} type="file" accept="image/jpeg,image/png,video/mp4,video/3gpp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
                             <input ref={stickerInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadSticker(file) }} />
                             <button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!bootstrap.schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
                             <button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setInteractionError(null) }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
-                            <textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label="Message client" placeholder={selected.canSend ? "Message on WhatsApp" : "Add a WhatsApp number to this relationship"} className="max-h-28 min-h-8 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-neutral-600 disabled:cursor-not-allowed" />
+                            <textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label={`Message ${selected.title}`} placeholder={selected.canSend ? `Message ${selected.title}` : "Add a WhatsApp number to this relationship"} className="max-h-28 min-h-9 min-w-0 flex-1 resize-none bg-transparent py-2 text-sm leading-5 outline-none placeholder:text-neutral-600 disabled:cursor-not-allowed" />
                             <button type="button" onClick={() => void sendMessage()} disabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !bootstrap.schemaReady || !selected.canSend} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>
