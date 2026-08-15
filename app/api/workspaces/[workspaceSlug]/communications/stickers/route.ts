@@ -1,0 +1,69 @@
+import { NextRequest } from "next/server"
+
+import { deleteOnboardingUploads, storeCommunicationSticker } from "@/lib/onboarding/uploads"
+import { supabaseAdmin } from "@/lib/supabase/admin"
+import { requireWorkspace } from "@/lib/workspaces"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+function stickerValue(row: { id: string; file_name: string; storage_path: string; size_bytes: number; created_at: string }) {
+    return {
+        id: row.id,
+        fileName: row.file_name,
+        storagePath: row.storage_path,
+        size: row.size_bytes,
+        url: `/api/client-messages/media/${row.storage_path.split("/").map(encodeURIComponent).join("/")}`,
+        createdAt: row.created_at,
+    }
+}
+
+export async function GET(_request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
+    const { workspaceSlug } = await context.params
+    const { workspace } = await requireWorkspace(workspaceSlug)
+    const { data, error } = await supabaseAdmin
+        .from("communication_stickers")
+        .select("id, file_name, storage_path, size_bytes, created_at")
+        .eq("workspace_id", workspace.id)
+        .order("created_at")
+    if (error) return Response.json({ error: error.message }, { status: 503 })
+    return Response.json({ stickers: (data ?? []).map(stickerValue) })
+}
+
+export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
+    const { workspaceSlug } = await context.params
+    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const formData = await request.formData().catch(() => null)
+    const file = formData?.get("file")
+    if (!file || typeof file === "string" || typeof file.arrayBuffer !== "function") {
+        return Response.json({ error: "Choose a JPEG or PNG sticker image." }, { status: 400 })
+    }
+    let stored: Awaited<ReturnType<typeof storeCommunicationSticker>>
+    try {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        stored = await storeCommunicationSticker(workspace.id, {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            bytes,
+        })
+    } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Could not convert this sticker." }, { status: 400 })
+    }
+    const { data, error } = await supabaseAdmin
+        .from("communication_stickers")
+        .insert({
+            workspace_id: workspace.id,
+            created_by: user.id,
+            file_name: stored.fileName,
+            storage_path: stored.storagePath,
+            size_bytes: stored.size,
+        })
+        .select("id, file_name, storage_path, size_bytes, created_at")
+        .single()
+    if (error || !data) {
+        await deleteOnboardingUploads([stored.storagePath]).catch(() => undefined)
+        return Response.json({ error: error?.message ?? "Could not save this sticker." }, { status: 503 })
+    }
+    return Response.json({ sticker: stickerValue(data) })
+}

@@ -3,8 +3,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import type {
     CommunicationMessage,
     CommunicationPerson,
+    CommunicationReaction,
     CommunicationReadCursor,
     CommunicationSenderKind,
+    CommunicationSticker,
 } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 
@@ -153,4 +155,46 @@ export async function loadCommunicationReadCursors(workspaceId: string): Promise
     }
     if (missingCommunicationsSchema(error)) return { cursors: [], schemaReady: false }
     throw new Error(`Could not load communication read cursors: ${error.message}`)
+}
+
+export async function loadCommunicationReactions(workspaceId: string): Promise<{ reactions: CommunicationReaction[]; schemaReady: boolean }> {
+    const { data, error } = await supabaseAdmin
+        .from("communication_reactions")
+        .select("id, relationship_id, client_message_id, direction, emoji, reactor_user_id, updated_at")
+        .eq("workspace_id", workspaceId)
+    if (!error) return {
+        reactions: (data ?? []).flatMap((reaction) => reaction.direction === "inbound" || reaction.direction === "outbound" ? [{
+            id: reaction.id,
+            relationshipId: reaction.relationship_id,
+            messageId: reaction.client_message_id,
+            direction: reaction.direction,
+            emoji: reaction.emoji,
+            reactorUserId: reaction.reactor_user_id,
+            updatedAt: reaction.updated_at,
+        }] : []),
+        schemaReady: true,
+    }
+    if (missingCommunicationsSchema(error) || error.code === "42P01") return { reactions: [], schemaReady: false }
+    throw new Error(`Could not load communication reactions: ${error.message}`)
+}
+
+export async function loadCommunicationStickers(workspaceId: string): Promise<{ stickers: CommunicationSticker[]; schemaReady: boolean }> {
+    const { data, error } = await supabaseAdmin
+        .from("communication_stickers")
+        .select("id, file_name, storage_path, size_bytes, created_at")
+        .eq("workspace_id", workspaceId)
+        .order("created_at")
+    if (!error) return {
+        stickers: (data ?? []).map((sticker) => ({
+            id: sticker.id,
+            fileName: sticker.file_name,
+            storagePath: sticker.storage_path,
+            size: sticker.size_bytes,
+            url: `/api/client-messages/media/${sticker.storage_path.split("/").map(encodeURIComponent).join("/")}`,
+            createdAt: sticker.created_at,
+        })),
+        schemaReady: true,
+    }
+    if (missingCommunicationsSchema(error) || error.code === "42P01") return { stickers: [], schemaReady: false }
+    throw new Error(`Could not load communication stickers: ${error.message}`)
 }

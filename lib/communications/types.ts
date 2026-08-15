@@ -1,12 +1,31 @@
 export type CommunicationSenderKind = "client" | "staff" | "automation" | "legacy"
 
 export type CommunicationAttachment = {
-    kind: "image" | "video" | "document"
+    kind: "image" | "video" | "document" | "sticker"
     fileName: string
     mimeType: string
     size: number | null
     storagePath: string
     url: string
+}
+
+export type CommunicationReaction = {
+    id: string
+    relationshipId: string
+    messageId: string
+    direction: "inbound" | "outbound"
+    emoji: string
+    reactorUserId: string | null
+    updatedAt: string
+}
+
+export type CommunicationSticker = {
+    id: string
+    fileName: string
+    storagePath: string
+    size: number
+    url: string
+    createdAt: string
 }
 
 export type CommunicationMessage = {
@@ -62,6 +81,8 @@ export type CommunicationsBootstrap = {
     people: CommunicationPerson[]
     conversations: ClientConversation[]
     readCursors: CommunicationReadCursor[]
+    reactions: CommunicationReaction[]
+    stickers: CommunicationSticker[]
     selectedConversationId: string | null
     schemaReady: boolean
 }

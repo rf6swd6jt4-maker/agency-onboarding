@@ -31,6 +31,21 @@ type SendMetaWhatsAppMediaInput = {
     callbackData?: string | null
 }
 
+type SendMetaWhatsAppStickerInput = {
+    workspaceId?: string
+    to: string
+    link: string
+    replyToMessageId?: string | null
+    callbackData?: string | null
+}
+
+type SendMetaWhatsAppReactionInput = {
+    workspaceId?: string
+    to: string
+    messageId: string
+    emoji: string
+}
+
 export class MetaWhatsAppSendError extends Error {
     safeToRetry: boolean
 
@@ -178,6 +193,70 @@ export async function sendMetaWhatsAppMedia({
             responseBody,
         }), true)
     }
+    return responseBody ? JSON.parse(responseBody) : null
+}
+
+export async function sendMetaWhatsAppSticker({
+    workspaceId,
+    to,
+    link,
+    replyToMessageId,
+    callbackData,
+}: SendMetaWhatsAppStickerInput) {
+    let config: Awaited<ReturnType<typeof metaConfig>>
+    try {
+        config = await metaConfig(workspaceId)
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "WhatsApp is not configured", true)
+    }
+    let response: Response
+    try {
+        response = await fetch(`https://graph.facebook.com/v25.0/${config.phone_number_id}/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: toMetaWhatsAppRecipient(to),
+                biz_opaque_callback_data: callbackData || undefined,
+                context: replyToMessageId ? { message_id: replyToMessageId } : undefined,
+                type: "sticker",
+                sticker: { link },
+            }),
+        })
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "Meta WhatsApp sticker request did not return a response", false)
+    }
+    const responseBody = await response.text()
+    if (!response.ok) throw new MetaWhatsAppSendError(formatMetaWhatsAppApiError({ action: "Meta WhatsApp sticker message", status: response.status, responseBody }), true)
+    return responseBody ? JSON.parse(responseBody) : null
+}
+
+export async function sendMetaWhatsAppReaction({ workspaceId, to, messageId, emoji }: SendMetaWhatsAppReactionInput) {
+    let config: Awaited<ReturnType<typeof metaConfig>>
+    try {
+        config = await metaConfig(workspaceId)
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "WhatsApp is not configured", true)
+    }
+    let response: Response
+    try {
+        response = await fetch(`https://graph.facebook.com/v25.0/${config.phone_number_id}/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: toMetaWhatsAppRecipient(to),
+                type: "reaction",
+                reaction: { message_id: messageId, emoji },
+            }),
+        })
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "Meta WhatsApp reaction request did not return a response", false)
+    }
+    const responseBody = await response.text()
+    if (!response.ok) throw new MetaWhatsAppSendError(formatMetaWhatsAppApiError({ action: "Meta WhatsApp reaction", status: response.status, responseBody }), true)
     return responseBody ? JSON.parse(responseBody) : null
 }
 

@@ -58,6 +58,10 @@ type WhatsAppMessage = {
     audio?: WhatsAppMediaPayload
     document?: WhatsAppMediaPayload
     sticker?: WhatsAppMediaPayload
+    reaction?: {
+        emoji?: string
+        message_id?: string
+    }
 }
 
 type WhatsAppChangeValue = {
@@ -432,6 +436,50 @@ async function findStatusMessage(workspaceId: string, messageId: string, callbac
     return null
 }
 
+async function handleInboundReaction(workspaceId: string, message: WhatsAppMessage, from: string) {
+    if (message.type !== "reaction" || !message.reaction?.message_id) return false
+    let target: { id: string; relationship_id: string | null } | null = null
+    for (const column of ["provider_message_id", "whatsapp_message_id"] as const) {
+        const result = await supabaseAdmin
+            .from("client_messages")
+            .select("id, relationship_id")
+            .eq("workspace_id", workspaceId)
+            .eq(column, message.reaction.message_id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        if (result.error) throw result.error
+        if (result.data) { target = result.data; break }
+    }
+    if (!target?.relationship_id) return true
+    const emoji = message.reaction.emoji?.trim() ?? ""
+    if (!emoji) {
+        const { error } = await supabaseAdmin
+            .from("communication_reactions")
+            .delete()
+            .eq("workspace_id", workspaceId)
+            .eq("client_message_id", target.id)
+            .eq("direction", "inbound")
+        if (error) throw error
+        return true
+    }
+    const { error } = await supabaseAdmin
+        .from("communication_reactions")
+        .upsert({
+            workspace_id: workspaceId,
+            relationship_id: target.relationship_id,
+            client_message_id: target.id,
+            direction: "inbound",
+            reactor_address: from,
+            reactor_user_id: null,
+            emoji,
+            provider_message_id: message.id ?? null,
+            updated_at: new Date().toISOString(),
+        }, { onConflict: "client_message_id,direction" })
+    if (error) throw error
+    return true
+}
+
 async function handleStatusUpdate({
     workspaceId,
     status,
@@ -738,6 +786,8 @@ async function handleInboundMessage({
     const replyToWhatsAppMessageId = message.context?.id ?? null
 
     if (!from) return
+
+    if (await handleInboundReaction(workspaceId, message, from)) return
 
     const { data: existingMessage } = messageId
         ? await supabaseAdmin

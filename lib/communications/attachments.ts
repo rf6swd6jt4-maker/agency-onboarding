@@ -12,10 +12,12 @@ const DOCUMENT_TYPES = new Set([
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 ])
+const STICKER_TYPES = new Set(["image/webp"])
 
 export const MAX_COMMUNICATION_IMAGE_SIZE = 5 * 1024 * 1024
 export const MAX_COMMUNICATION_VIDEO_SIZE = 16 * 1024 * 1024
 export const MAX_COMMUNICATION_DOCUMENT_SIZE = 100 * 1024 * 1024
+export const MAX_COMMUNICATION_STICKER_SIZE = 100 * 1024
 export const MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH = 900
 
 function record(value: unknown) {
@@ -39,12 +41,14 @@ export function communicationAttachmentKind(mimeType: string) {
     if (IMAGE_TYPES.has(normalized)) return "image" as const
     if (VIDEO_TYPES.has(normalized)) return "video" as const
     if (DOCUMENT_TYPES.has(normalized)) return "document" as const
+    if (STICKER_TYPES.has(normalized)) return "sticker" as const
     return null
 }
 
 export function communicationAttachmentLimit(kind: CommunicationAttachment["kind"]) {
     if (kind === "image") return MAX_COMMUNICATION_IMAGE_SIZE
     if (kind === "video") return MAX_COMMUNICATION_VIDEO_SIZE
+    if (kind === "sticker") return MAX_COMMUNICATION_STICKER_SIZE
     return MAX_COMMUNICATION_DOCUMENT_SIZE
 }
 
@@ -55,6 +59,7 @@ export function validateCommunicationAttachmentFile(input: {
 }) {
     const kind = communicationAttachmentKind(input.type)
     if (!kind) return { error: "Use a JPEG, PNG, MP4, PDF, Word, Excel, PowerPoint, or text file." } as const
+    if (kind === "sticker") return { error: "Add stickers through the tray using a JPEG or PNG source." } as const
     if (!input.name.trim() || !Number.isFinite(input.size) || input.size <= 0) {
         return { error: "Choose a non-empty attachment." } as const
     }
@@ -76,7 +81,7 @@ export function communicationAttachmentFromValue(value: unknown): CommunicationA
     const fileName = rawFileName?.replace(/[\u0000-\u001f\u007f]/gu, " ").trim() ?? null
     const mimeType = text(source.mimeType) ?? text(source.mime_type)
     const explicitKind = text(source.kind) ?? text(source.type)
-    const kind = explicitKind === "image" || explicitKind === "video" || explicitKind === "document"
+    const kind = explicitKind === "image" || explicitKind === "video" || explicitKind === "document" || explicitKind === "sticker"
         ? explicitKind
         : mimeType ? communicationAttachmentKind(mimeType) ?? "document" : null
     if (!storagePath || !fileName || fileName.length > 180 || !mimeType || !kind) return null

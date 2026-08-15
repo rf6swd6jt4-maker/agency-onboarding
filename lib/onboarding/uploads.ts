@@ -10,6 +10,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile } from "@/lib/communications/attachments"
+import { convertCommunicationStickerImage } from "@/lib/communications/stickers"
 import { getRequiredEnv } from "@/lib/env"
 import {
     getUploadKind,
@@ -564,4 +565,25 @@ export async function verifyClientMessageUpload(input: {
         throw new Error("The uploaded attachment is missing or unsupported")
     }
     return { kind, contentType, size }
+}
+
+export async function storeCommunicationSticker(
+    workspaceId: string,
+    file: { name: string; size: number; type: string; bytes: Uint8Array }
+) {
+    const converted = await convertCommunicationStickerImage(file)
+    const fileName = converted.fileName
+    const path = `${workspaceId}/communications/stickers/${randomUUID()}-${fileName}`
+    await getR2Client().send(new PutObjectCommand({
+        Bucket: getR2BucketName(),
+        Key: path,
+        Body: converted.bytes,
+        ContentType: "image/webp",
+    }))
+    return {
+        fileName,
+        storagePath: path,
+        size: converted.bytes.byteLength,
+        url: createClientMessageMediaUrl(path) ?? `/api/client-messages/media/${encodeStoragePath(path)}`,
+    }
 }

@@ -1,6 +1,6 @@
 import { CommunicationsWorkspace } from "@/components/communications/CommunicationsWorkspace"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
-import { loadCommunicationMessages, loadCommunicationPeople, loadCommunicationReadCursors } from "@/lib/communications/server"
+import { loadCommunicationMessages, loadCommunicationPeople, loadCommunicationReactions, loadCommunicationReadCursors, loadCommunicationStickers } from "@/lib/communications/server"
 import type { ClientConversation, CommunicationsBootstrap } from "@/lib/communications/types"
 import { listRelationshipsForWorkspace } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -18,9 +18,11 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
     const { workspace, user } = await requireWorkspace(workspaceSlug)
     const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => relationship.status !== "archived")
     const clientIds = relationships.flatMap((relationship) => relationship.client_id ? [relationship.client_id] : [])
-    const [messageResult, cursorResult, peopleResult, channelResult] = await Promise.all([
+    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult] = await Promise.all([
         loadCommunicationMessages({ workspaceId: workspace.id }),
         loadCommunicationReadCursors(workspace.id),
+        loadCommunicationReactions(workspace.id),
+        loadCommunicationStickers(workspace.id),
         loadCommunicationPeople(workspace.id, user.id),
         clientIds.length
             ? supabaseAdmin.from("client_communication_channels").select("client_id").eq("workspace_id", workspace.id).eq("provider", "meta_whatsapp").eq("is_active", true).in("client_id", clientIds)
@@ -53,8 +55,10 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
         people: peopleResult.people,
         conversations,
         readCursors: cursorResult.cursors,
+        reactions: reactionResult.reactions,
+        stickers: stickerResult.stickers,
         selectedConversationId: conversations.some((conversation) => conversation.id === query.conversation) ? query.conversation ?? null : null,
-        schemaReady: messageResult.schemaReady && cursorResult.schemaReady,
+        schemaReady: messageResult.schemaReady && cursorResult.schemaReady && reactionResult.schemaReady && stickerResult.schemaReady,
     }
 
     return (
