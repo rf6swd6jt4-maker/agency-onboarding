@@ -40,21 +40,13 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             window.cancelAnimationFrame(frame)
             frame = window.requestAnimationFrame(() => {
                 const viewportHeight = viewport?.height ?? viewportHost.innerHeight
-                const viewportWidth = viewport?.width ?? viewportHost.innerWidth
                 const viewportTop = viewport?.offsetTop ?? 0
-                const viewportLeft = viewport?.offsetLeft ?? 0
                 const frameRect = frameElement?.getBoundingClientRect()
-                const visibleTop = frameRect ? Math.max(frameRect.top, viewportTop) : viewportTop
-                const visibleLeft = frameRect ? Math.max(frameRect.left, viewportLeft) : viewportLeft
-                const visibleBottom = frameRect ? Math.min(frameRect.bottom, viewportTop + viewportHeight) : viewportTop + viewportHeight
-                const visibleRight = frameRect ? Math.min(frameRect.right, viewportLeft + viewportWidth) : viewportLeft + viewportWidth
-                const height = Math.max(0, frameRect ? visibleBottom - visibleTop : viewportHeight)
-                const width = Math.max(0, frameRect ? visibleRight - visibleLeft : viewportWidth)
-                const top = frameRect ? visibleTop - frameRect.top : visibleTop
-                const left = frameRect ? visibleLeft - frameRect.left : visibleLeft
-                panel.style.height = `${Math.round(height)}px`
-                panel.style.width = `${Math.round(width)}px`
-                panel.style.transform = `translate3d(${Math.round(left)}px,${Math.round(top)}px,0)`
+                const viewportBottom = viewportTop + viewportHeight
+                const layoutBottom = frameRect?.bottom ?? viewportHost.innerHeight
+                const composerFocused = document.activeElement instanceof HTMLTextAreaElement
+                const keyboardInset = composerFocused ? Math.max(0, Math.round(layoutBottom - viewportBottom)) : 0
+                panel.style.setProperty("--communications-keyboard-inset", `${keyboardInset}px`)
                 if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0)
             })
         }
@@ -89,6 +81,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             document.removeEventListener("focusin", updateViewport)
             frameMutationObserver?.disconnect()
             frameResizeObserver?.disconnect()
+            panel.style.removeProperty("--communications-keyboard-inset")
             delete root.dataset.communicationsViewportLocked
         }
     }, [])

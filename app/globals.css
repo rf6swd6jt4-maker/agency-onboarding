@@ -52,6 +52,13 @@ html[data-communications-viewport-locked="true"] [data-communications-panel] {
   background: #000;
 }
 
+[data-communications-composer] {
+  position: relative;
+  z-index: 20;
+  transform: translate3d(0, calc(-1 * var(--communications-keyboard-inset, 0px)), 0);
+  will-change: transform;
+}
+
 @media (min-width: 768px) {
   body[data-workspace-sidebar-open="true"] [data-workspace-tabbar] {
     left: var(--workspace-sidebar-width);
