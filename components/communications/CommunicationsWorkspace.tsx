@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 import { Avatar } from "@/components/account/Avatar"
 import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
-import { JumpToLatestButton, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
+import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
@@ -91,6 +91,10 @@ function mergeMessages(current: CommunicationMessage[], incoming: CommunicationM
         byKey.set(requestKey, existing ? { ...existing, ...message } : message)
     }
     return [...byKey.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+}
+
+function messageAnimationKey(message: CommunicationMessage) {
+    return message.clientRequestId ? `request:${message.clientRequestId}` : `id:${message.id}`
 }
 
 function initials(value: string) {
@@ -247,9 +251,13 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+    const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
+    const followLatestRef = useRef(true)
+    const messageAnimationTimersRef = useRef<number[]>([])
+    const knownMessageKeysRef = useRef(new Set(bootstrap.conversations.flatMap((conversation) => conversation.messages.map(messageAnimationKey))))
     const searchRef = useRef<HTMLInputElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
     const stickerInputRef = useRef<HTMLInputElement | null>(null)
@@ -275,6 +283,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         return () => window.removeEventListener("resize", resizeComposer)
     }, [])
 
+    useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
+
     useEffect(() => {
         attachmentRef.current = attachment
     }, [attachment])
@@ -293,7 +303,18 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         return () => documents.forEach((ownerDocument) => ownerDocument.removeEventListener("pointerdown", dismiss, true))
     }, [actionMessageId])
 
-    const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[]) => {
+    const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[], animate = false) => {
+        const newMessages = incoming.filter((message) => !knownMessageKeysRef.current.has(messageAnimationKey(message)))
+        incoming.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message)))
+        if (animate && newMessages.length && selectedRef.current === relationshipId && messagePaneCanShowNewMessage(messagePaneRef.current, followLatestRef.current)) {
+            const ids = newMessages.map((message) => message.id)
+            setEnteringMessageIds((current) => new Set([...current, ...ids]))
+            const timer = window.setTimeout(() => {
+                setEnteringMessageIds((current) => new Set([...current].filter((id) => !ids.includes(id))))
+                messageAnimationTimersRef.current = messageAnimationTimersRef.current.filter((candidate) => candidate !== timer)
+            }, 320)
+            messageAnimationTimersRef.current.push(timer)
+        }
         setConversations((current) => current.map((conversation) => conversation.id === relationshipId
             ? { ...conversation, messages: mergeMessages(conversation.messages, incoming) }
             : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title)))
@@ -323,6 +344,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                 body: JSON.stringify({ relationshipId: previousRelationshipId, storagePath: pendingAttachment.storagePath }),
             }).catch(() => undefined)
         }
+        followLatestRef.current = true
+        setShowJumpToLatest(false)
         setSelectedId(conversationId)
         setAttachment(null)
         setAttachmentError(null)
@@ -454,7 +477,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             readAt: null,
             failedAt: null,
         }
-        updateConversationMessages(selected.id, [optimistic])
+        updateConversationMessages(selected.id, [optimistic], true)
         setStickerTrayOpen(false)
         setReplyingTo(null)
         setInteractionError(null)
@@ -532,7 +555,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     }, [bootstrap.currentUser.id, bootstrap.schemaReady, bootstrap.workspaceSlug, selected?.messages, selectedId])
 
     useEffect(() => {
-        if (!selectedId) return
+        if (!selectedId || !followLatestRef.current) return
         window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 }))
     }, [selected?.messages.length, selectedId])
 
@@ -549,7 +572,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             channel
                 .on("postgres_changes", { event: "*", schema: "public", table: "client_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const message = realtimeMessage(payload.new)
-                    if (message) updateConversationMessages(message.relationshipId, [message])
+                    if (message) updateConversationMessages(message.relationshipId, [message], true)
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "communication_read_cursors", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.new)
@@ -605,7 +628,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             readAt: null,
             failedAt: null,
         }
-        updateConversationMessages(selected.id, [optimistic])
+        updateConversationMessages(selected.id, [optimistic], true)
         if (!messageToRetry) {
             setDraft("")
             setAttachment(null)
@@ -666,7 +689,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     </header>
 
                     <div className="relative min-h-0 flex-1">
-                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
+                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; followLatestRef.current = !messagePaneIsAwayFromBottom(event.currentTarget, 24); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
                         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
@@ -683,10 +706,10 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                             return <Fragment key={message.id}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
-                                <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>
+                                <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
                                     <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
-                                    {message.direction === "outbound" && showActions ? <div data-message-action-popup className="absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "outbound" && showActions ? <div data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                     <article
                                         role="button"
                                         tabIndex={0}
@@ -755,13 +778,13 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {message.status === "send_failed" && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry</button> : null}
                                     </article>
-                                    {message.direction === "inbound" && showActions ? <div data-message-action-popup className="absolute bottom-full left-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "inbound" && showActions ? <div data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                 </div>
                                 {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                             </Fragment>
                         }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here arrive from the shared workspace WhatsApp number.</p></div></div>}</div>
                     </div>
-                    {showJumpToLatest ? <JumpToLatestButton onClick={() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" })} /> : null}
+                    {showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}
                     </div>
 
                     <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">

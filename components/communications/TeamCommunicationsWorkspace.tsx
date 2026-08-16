@@ -4,7 +4,7 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Avatar } from "@/components/account/Avatar"
 import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
-import { JumpToLatestButton, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
+import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
@@ -132,6 +132,10 @@ function mergeMessages(current: NativeMessage[], incoming: NativeMessage[]) {
     return [...keyed.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 }
 
+function messageAnimationKey(message: NativeMessage) {
+    return message.clientRequestId ? `request:${message.clientRequestId}` : `id:${message.id}`
+}
+
 function realtimeMessage(value: unknown): NativeMessage | null {
     const row = record(value); const id = text(row.id); const conversationId = text(row.conversation_id); const senderUserId = text(row.sender_user_id); const createdAt = text(row.created_at)
     if (!id || !conversationId || !senderUserId || !createdAt) return null
@@ -161,7 +165,11 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [editingTeam, setEditingTeam] = useState<WorkspaceTeam | null | undefined>(undefined)
     const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+    const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
+    const followLatestRef = useRef(true)
+    const messageAnimationTimersRef = useRef<number[]>([])
+    const knownMessageKeysRef = useRef(new Set(bootstrap.conversations.flatMap((conversation) => conversation.messages.map(messageAnimationKey))))
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
     const stickerInputRef = useRef<HTMLInputElement | null>(null)
@@ -180,6 +188,8 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
         return () => window.removeEventListener("resize", resizeComposer)
     }, [])
 
+    useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
+
     useEffect(() => {
         if (!actionMessageId) return
         const dismiss = (event: PointerEvent) => {
@@ -194,7 +204,18 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
         return () => documents.forEach((ownerDocument) => ownerDocument.removeEventListener("pointerdown", dismiss, true))
     }, [actionMessageId])
 
-    const updateConversationMessages = useCallback((conversationId: string, incoming: NativeMessage[]) => {
+    const updateConversationMessages = useCallback((conversationId: string, incoming: NativeMessage[], animate = false) => {
+        const newMessages = incoming.filter((message) => !knownMessageKeysRef.current.has(messageAnimationKey(message)))
+        incoming.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message)))
+        if (animate && newMessages.length && selectedRef.current === conversationId && messagePaneCanShowNewMessage(messagePaneRef.current, followLatestRef.current)) {
+            const ids = newMessages.map((message) => message.id)
+            setEnteringMessageIds((current) => new Set([...current, ...ids]))
+            const timer = window.setTimeout(() => {
+                setEnteringMessageIds((current) => new Set([...current].filter((id) => !ids.includes(id))))
+                messageAnimationTimersRef.current = messageAnimationTimersRef.current.filter((candidate) => candidate !== timer)
+            }, 320)
+            messageAnimationTimersRef.current.push(timer)
+        }
         setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: mergeMessages(conversation.messages, incoming), updatedAt: incoming.at(-1)?.createdAt ?? conversation.updatedAt } : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt)))
     }, [])
 
@@ -219,6 +240,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     }, [bootstrap.requestedDmUserId, bootstrap.workspaceSlug, refresh])
 
     function selectConversation(id: string | null) {
+        followLatestRef.current = true; setShowJumpToLatest(false)
         setSelectedId(id); setReplyingTo(null); setActionMessageId(null); setAttachment(null); setError(null)
         setDraft(id ? localStorage.getItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${id}`) ?? "" : "")
         const url = new URL(window.location.href)
@@ -228,7 +250,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     }
 
     useEffect(() => { if (selectedId) localStorage.setItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selectedId}`, draft) }, [bootstrap.workspaceId, draft, selectedId])
-    useEffect(() => { if (selectedId) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selected?.messages.length, selectedId])
+    useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selected?.messages.length, selectedId])
 
     useEffect(() => {
         if (!selectedId || !selected?.messages.length) return
@@ -253,7 +275,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                         if (messageId && conversationId) setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== messageId) } : conversation))
                         return
                     }
-                    const message = realtimeMessage(payload.new); if (message) updateConversationMessages(message.conversationId, [message])
+                    const message = realtimeMessage(payload.new); if (message) updateConversationMessages(message.conversationId, [message], true)
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_reactions", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.eventType === "DELETE" ? payload.old : payload.new); const messageId = text(row.message_id); const reactorUserId = text(row.reactor_user_id)
@@ -301,7 +323,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
         const stickerAttachment: CommunicationAttachment = { kind: "sticker", fileName: sticker.fileName, mimeType: "image/webp", size: sticker.size, storagePath: sticker.storagePath, url: sticker.url }
         const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString() }
-        updateConversationMessages(selected.id, [optimistic]); setReplyingTo(null); setStickerTrayOpen(false); setError(null)
+        updateConversationMessages(selected.id, [optimistic], true); setReplyingTo(null); setStickerTrayOpen(false); setError(null)
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body: "", replyToMessageId: replyTarget?.id, attachment: stickerAttachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
         if (result?.message) updateConversationMessages(selected.id, [result.message])
@@ -313,7 +335,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
         const body = draft.trim(); if (!body && !attachment) return
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
         const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString() }
-        updateConversationMessages(selected.id, [optimistic]); setDraft(""); setReplyingTo(null); setAttachment(null); setError(null); localStorage.removeItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selected.id}`)
+        updateConversationMessages(selected.id, [optimistic], true); setDraft(""); setReplyingTo(null); setAttachment(null); setError(null); localStorage.removeItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selected.id}`)
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body, replyToMessageId: replyTarget?.id, attachment: optimistic.attachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
         if (result?.message) updateConversationMessages(selected.id, [result.message])
@@ -377,7 +399,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.archived ? "Archived · read-only" : selected.subtitle}</span></span>
                         </button>
                     </header>
-                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; followLatestRef.current = !messagePaneIsAwayFromBottom(event.currentTarget, 24); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null
@@ -390,11 +412,11 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                         const isSticker = message.attachment?.kind === "sticker"
                         return <Fragment key={message.id}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
-                            <div data-message-interaction={message.id} className={`relative flex items-end ${own ? "justify-end" : "justify-start"}`}>
+                            <div data-message-interaction={message.id} className={`relative flex items-end ${own ? "justify-end" : "justify-start"} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                 <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-3 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/45 via-red-950/20 to-transparent" : "bg-gradient-to-r from-white/20 via-white/5 to-transparent"}`} />
                                 <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                 {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
-                                {actionMessageId === message.id && selected.canWrite ? <div data-message-action-popup className={`absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}><NativeReactionTray current={ownReaction?.emoji ?? null} onReply={() => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() }} onDelete={canDelete ? () => void deleteMessage(message) : null} onReact={(emoji) => void sendReaction(message, emoji)} side={own ? "right" : "left"} /></div> : null}
+                                {actionMessageId === message.id && selected.canWrite ? <div data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}><NativeReactionTray current={ownReaction?.emoji ?? null} onReply={() => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() }} onDelete={canDelete ? () => void deleteMessage(message) : null} onReact={(emoji) => void sendReaction(message, emoji)} side={own ? "right" : "left"} /></div> : null}
                                 {!own && selected.kind === "team" ? <button data-icon-button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full object-center" /></button> : null}
                                 <article
                                     role="button"
@@ -425,7 +447,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             </div>
                             {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>
-                    }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" })} /> : null}</div>
+                    }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
                     <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">{selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"}</span><span className="block truncate text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onClick={() => setReplyingTo(null)} className="h-8 w-8 text-neutral-500">×</button></div> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}

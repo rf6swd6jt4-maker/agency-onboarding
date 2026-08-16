@@ -79,7 +79,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns, jumpToLatest] = await Promise.all([
+    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns, jumpToLatest, globals] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
@@ -89,6 +89,7 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
         readFile("components/communications/JumpToLatestButton.tsx", "utf8"),
+        readFile("app/globals.css", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
@@ -103,6 +104,10 @@ test("message interactions keep the approved mobile and profile parity", async (
         assert.match(source, /scrollTo\(\{ top: messagePaneRef\.current\.scrollHeight, left: 0 \}\)/)
         assert.match(source, /messagePaneIsAwayFromBottom\(event\.currentTarget\)/)
         assert.match(source, /behavior: "smooth"/)
+        assert.match(source, /messagePaneCanShowNewMessage\(messagePaneRef\.current, followLatestRef\.current\)/)
+        assert.match(source, /betelgeze-message-enter-right/)
+        assert.match(source, /betelgeze-message-enter-left/)
+        assert.match(source, /betelgeze-reaction-popup-enter/)
     }
     assert.match(team, /data-message-action-popup/)
     assert.match(clients, /window\.parent\.document/)
@@ -124,6 +129,10 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(jumpToLatest, /right-4 inline-flex lg:hidden/)
     assert.match(jumpToLatest, /right-6 hidden lg:inline-flex/)
     assert.match(jumpToLatest, /block h-5 w-5 shrink-0/)
+    assert.match(jumpToLatest, /document\.visibilityState !== "visible"/)
+    assert.match(globals, /@keyframes betelgeze-message-grow-in/)
+    assert.match(globals, /@keyframes betelgeze-reaction-popup-in/)
+    assert.match(globals, /prefers-reduced-motion: reduce/)
     assert.match(team, /selected\.kind === "team" \? <button/)
     assert.match(team, /!own && selected\.kind === "team" \? <button/)
     assert.match(team, /NativeDeliveryTicks/)

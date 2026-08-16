@@ -96,6 +96,36 @@ body {
   }
 }
 
+@keyframes betelgeze-message-grow-in {
+  0% { opacity: 0; transform: translateY(0.45rem) scale(0.82); }
+  70% { opacity: 1; transform: translateY(0) scale(1.015); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes betelgeze-reaction-popup-in {
+  0% { opacity: 0; transform: translateX(0.75rem) scale(0.96); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.betelgeze-message-enter-left,
+.betelgeze-message-enter-right {
+  animation: betelgeze-message-grow-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.betelgeze-message-enter-left { transform-origin: bottom left; }
+.betelgeze-message-enter-right { transform-origin: bottom right; }
+
+.betelgeze-reaction-popup-enter {
+  transform-origin: right center;
+  animation: betelgeze-reaction-popup-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .betelgeze-message-enter-left,
+  .betelgeze-message-enter-right,
+  .betelgeze-reaction-popup-enter { animation: none; }
+}
+
 .whitespace-pre-wrap,
 .break-words {
   overflow-wrap: anywhere;

@@ -4,6 +4,12 @@ export function messagePaneIsAwayFromBottom(pane: HTMLDivElement, threshold = 96
     return pane.scrollHeight - pane.scrollTop - pane.clientHeight > threshold
 }
 
+export function messagePaneCanShowNewMessage(pane: HTMLDivElement | null, followingLatest: boolean) {
+    if (!pane || !followingLatest || document.visibilityState !== "visible") return false
+    const bounds = pane.getBoundingClientRect()
+    return bounds.bottom > 0 && bounds.top < window.innerHeight
+}
+
 const BUTTON_CLASS = "absolute bottom-3 z-20 h-10 w-10 min-h-10 min-w-10 max-h-10 max-w-10 shrink-0 aspect-square items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 p-0 leading-none text-neutral-200 shadow-xl transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
 
 function JumpButton({ className, onClick }: { className: string; onClick: () => void }) {
