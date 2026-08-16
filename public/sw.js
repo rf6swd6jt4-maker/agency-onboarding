@@ -53,8 +53,12 @@ self.addEventListener("push", (event) => {
     body: typeof payload.body === "string" ? payload.body : "A Betelgeze update is ready.",
     icon: typeof payload.icon === "string" ? payload.icon : "/icons/betelgeze-icon-192.png",
     badge: "/icons/betelgeze-icon-192.png",
+    tag: typeof payload.tag === "string" ? payload.tag : undefined,
+    renotify: typeof payload.tag === "string",
     data: {
-      url: typeof payload.url === "string" ? payload.url : "/",
+      url: typeof payload.url === "string" && payload.url.startsWith("/") ? payload.url : "/",
+      category: typeof payload.category === "string" ? payload.category : "update",
+      conversationId: typeof payload.conversationId === "string" ? payload.conversationId : null,
     },
   };
 

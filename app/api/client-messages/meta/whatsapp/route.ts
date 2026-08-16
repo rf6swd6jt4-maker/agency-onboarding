@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server"
+import { after, NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { platformFailureFingerprint, reportClientPlatformFailure } from "@/lib/admin/maintenance"
 import { recordClientAdminActivity } from "@/lib/admin/activity"
@@ -13,6 +13,7 @@ import {
 import { storeClientMessageMedia } from "@/lib/onboarding/uploads"
 import { handleSaleConsentConfirmation } from "@/lib/client-sales/automation"
 import { getWorkspaceIdForWhatsAppPhoneNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
+import { notifyWhatsAppChatMessage } from "@/lib/push/chat-notifications"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -889,6 +890,8 @@ async function handleInboundMessage({
     if (destination.clientId) {
         await recordClientAdminActivity({ clientId: destination.clientId, category: "communications", eventKey: "whatsapp.webhook.received", summary: "WhatsApp message received", entityType: "client_message", entityId: insertedMessage.id, direction: "inbound", metadata: { provider_message_id: messageId, message_type: message.type ?? "unknown" } })
     }
+
+    if (relationshipId) after(() => notifyWhatsAppChatMessage({ workspaceId, relationshipId, messageId: insertedMessage.id, senderName: client?.name?.trim() || "A client" }))
 
     let content: InboundMessageContent | null = null
 

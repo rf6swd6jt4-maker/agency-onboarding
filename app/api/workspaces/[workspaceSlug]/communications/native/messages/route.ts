@@ -2,6 +2,8 @@ import { nativeAttachmentFromInput, nativeMessageFromRow, assertNativeConversati
 import { deleteOnboardingUploads, inspectStoredCommunicationSticker, verifyNativeMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
+import { after } from "next/server"
+import { notifyNativeChatMessage } from "@/lib/push/chat-notifications"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -54,7 +56,9 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     }
     const { data, error } = await supabaseAdmin.from("workspace_native_messages").insert({ workspace_id: workspace.id, conversation_id: conversationId, sender_user_id: user.id, client_request_id: clientRequestId, body, reply_to_message_id: replyToMessageId || null, attachment: storedAttachment }).select(COLUMNS).single()
     if (error) return Response.json({ error: error.message }, { status: 503 })
-    return Response.json({ message: nativeMessageFromRow(data) })
+    const message = nativeMessageFromRow(data)
+    if (message) after(() => notifyNativeChatMessage({ workspaceId: workspace.id, workspaceSlug: workspace.slug, conversationId, messageId: message.id, senderUserId: user.id }))
+    return Response.json({ message })
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {

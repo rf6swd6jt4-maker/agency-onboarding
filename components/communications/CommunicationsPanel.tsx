@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react"
 import { CommunicationsWorkspace } from "@/components/communications/CommunicationsWorkspace"
 import { TeamCommunicationsWorkspace } from "@/components/communications/TeamCommunicationsWorkspace"
+import { CommunicationsActivityTracker } from "@/components/communications/CommunicationsActivityTracker"
 import type { CommunicationsBootstrap } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap } from "@/lib/teams/types"
 
@@ -24,6 +25,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
         window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
     }, [])
     return <div data-communications-panel className="fixed inset-0 isolate overflow-hidden bg-black">
+        <CommunicationsActivityTracker />
         {mode === "team"
             ? <TeamCommunicationsWorkspace bootstrap={nativeBootstrap} onOpenClients={() => setMode("clients")} />
             : <CommunicationsWorkspace bootstrap={clientBootstrap} onOpenTeam={() => setMode("team")} />}

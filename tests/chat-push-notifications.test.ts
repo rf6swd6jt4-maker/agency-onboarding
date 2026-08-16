@@ -1,0 +1,62 @@
+import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+import test from "node:test"
+
+test("chat push subscriptions and Communications sessions use server-only durable storage", async () => {
+    const migration = await readFile("supabase/migrations/20260816170000_chat_web_push.sql", "utf8")
+    assert.match(migration, /create table if not exists public\.web_push_subscriptions/)
+    assert.match(migration, /create table if not exists public\.communications_active_sessions/)
+    assert.match(migration, /alter table public\.web_push_subscriptions enable row level security/)
+    assert.match(migration, /revoke all on public\.web_push_subscriptions from anon, authenticated/)
+    assert.match(migration, /references auth\.users\(id\) on delete cascade/)
+})
+
+test("profile toggle requests permission and registers a user-visible per-device subscription", async () => {
+    const [settings, profile, subscriptionRoute] = await Promise.all([
+        readFile("components/account/PushNotificationSettings.tsx", "utf8"),
+        readFile("components/account/ProfileSettings.tsx", "utf8"),
+        readFile("app/api/push/subscriptions/route.ts", "utf8"),
+    ])
+    assert.match(profile, /<PushNotificationSettings/)
+    assert.match(settings, /Notification\.requestPermission\(\)/)
+    assert.match(settings, /userVisibleOnly: true/)
+    assert.match(settings, /pushManager\.subscribe/)
+    assert.match(settings, /Add Betelgeze to your Home Screen/)
+    assert.match(settings, /role="switch"/)
+    assert.match(subscriptionRoute, /getCurrentUser\(\)/)
+    assert.match(subscriptionRoute, /WEB_PUSH|webPushPublicKey/)
+    assert.match(subscriptionRoute, /httpOnly: true/)
+})
+
+test("chat push delivery suppresses all devices while a Communications tab is active", async () => {
+    const [delivery, tracker, panel] = await Promise.all([
+        readFile("lib/push/chat-notifications.ts", "utf8"),
+        readFile("components/communications/CommunicationsActivityTracker.tsx", "utf8"),
+        readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
+    ])
+    assert.match(delivery, /communications_active_sessions/)
+    assert.match(delivery, /activeUsers\.has\(subscription\.user_id\)/)
+    assert.match(delivery, /workspace_native_conversation_participants/)
+    assert.match(delivery, /userId !== input\.senderUserId/)
+    assert.match(delivery, /workspace_memberships/)
+    assert.match(delivery, /title: kind === "whatsapp" \? "WhatsApp chat" : "Betelgeze chat"/)
+    assert.match(delivery, /body: `From \$\{safeName\}`/)
+    assert.doesNotMatch(delivery, /input\.body/)
+    assert.match(tracker, /useWorkspaceTabActive\(\)/)
+    assert.match(tracker, /document\.visibilityState === "visible"/)
+    assert.match(tracker, /navigator\.sendBeacon/)
+    assert.match(panel, /<CommunicationsActivityTracker/)
+})
+
+test("native and inbound WhatsApp message writes schedule chat pushes after their responses", async () => {
+    const [nativeRoute, whatsappRoute, worker] = await Promise.all([
+        readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
+        readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
+        readFile("public/sw.js", "utf8"),
+    ])
+    assert.match(nativeRoute, /after\(\(\) => notifyNativeChatMessage/)
+    assert.match(whatsappRoute, /after\(\(\) => notifyWhatsAppChatMessage/)
+    assert.match(worker, /self\.addEventListener\("push"/)
+    assert.match(worker, /payload\.url\.startsWith\("\/"\)/)
+    assert.match(worker, /conversationId/)
+})
