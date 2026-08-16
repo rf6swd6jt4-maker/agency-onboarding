@@ -150,7 +150,7 @@ function WorkspacePresenceAvatars({ members, state, error, onOpenProfile }: { me
         return <span aria-label={label} title={label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${state === "connecting" || state === "reconnecting" ? "animate-pulse bg-amber-400" : "bg-red-400"}`} />
     }
     return <div aria-label="Workspace team presence" className="flex shrink-0 items-center -space-x-1.5">
-        {members.map((member, index) => <button data-icon-button type="button" key={member.id} onClick={() => onOpenProfile(member.id)} aria-label={`Open ${member.name} profile`} title={`${member.name} — ${member.active ? "Connected" : "Disconnected"}`} className="relative h-6 w-6 shrink-0 aspect-square overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900 p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 md:h-7 md:w-7" style={{ zIndex: index + 1 }}>
+        {members.map((member, index) => <button data-icon-button type="button" key={member.id} onClick={() => onOpenProfile(member.id)} aria-label={`Open ${member.name} profile`} title={`${member.name} — ${member.active ? "Connected" : "Disconnected"}`} className="relative h-[30px] w-[30px] shrink-0 aspect-square overflow-hidden rounded-full border-2 border-neutral-950 bg-neutral-900 p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 md:h-7 md:w-7" style={{ zIndex: index + 1 }}>
             <span className={`block h-full w-full ${member.active ? "" : "grayscale opacity-35"}`}><Avatar src={member.avatarSrc} name={member.name} className="h-full w-full" /></span>
         </button>)}
         {state !== "live" ? <span aria-label="Workspace presence reconnecting" title={error || "Workspace presence reconnecting"} className="ml-2 h-2 w-2 animate-pulse rounded-full bg-amber-400" /> : null}
@@ -2107,8 +2107,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                             <OkrIcon />
                         </button>}
                     </div>
-                    <div className="flex items-center -space-x-2 md:space-x-0">
-                        <div className="md:hidden"><WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} onOpenProfile={setProfileUserId} /></div>
+                    <div className="flex h-9 items-center -space-x-2 md:space-x-0">
+                        <div className="flex h-9 items-center md:hidden"><WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} onOpenProfile={setProfileUserId} /></div>
                         <AccountMenu username={username} email={email} avatarSrc={avatarSrc} workspaceId={workspace.id} workspaceName={workspace.name} leaveAction={leaveAction} buttonClassName="relative z-20 h-9 w-9" />
                     </div>
                 </div>
