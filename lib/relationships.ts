@@ -30,6 +30,7 @@ export type RelationshipRecord = {
     fulfilment_manager_user_id: string | null
     fulfilment_team_id: string | null
     project_timeframe_days: number | null
+    communication_pinned_message_id: string | null
     lifecycle_phase: RelationshipPhase
     status: RelationshipStatus
     source_metadata: Record<string, unknown>
@@ -135,7 +136,7 @@ type ClientRow = {
     is_test?: boolean | null
 }
 
-const RELATIONSHIP_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, website_url, industry_value, location_value, address, source_label, primary_contact_role, notes_summary, started_onboarding_at, seller_user_id, fulfilment_manager_user_id, fulfilment_team_id, project_timeframe_days, lifecycle_phase, status, source_metadata, created_at, updated_at"
+const RELATIONSHIP_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, website_url, industry_value, location_value, address, source_label, primary_contact_role, notes_summary, started_onboarding_at, seller_user_id, fulfilment_manager_user_id, fulfilment_team_id, project_timeframe_days, communication_pinned_message_id, lifecycle_phase, status, source_metadata, created_at, updated_at"
 const RELATIONSHIP_LEGACY_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, business_name, website_url, lifecycle_phase, status, source_metadata, created_at, updated_at"
 
 function isMissingRelationshipSchema(error: QueryError) {
@@ -232,6 +233,7 @@ function fallbackRelationshipFromClient(client: ClientRow): RelationshipRecord {
         fulfilment_manager_user_id: null,
         fulfilment_team_id: null,
         project_timeframe_days: null,
+        communication_pinned_message_id: null,
         lifecycle_phase: client.archived_at ? "completed_lost" : "onboarding",
         status: client.archived_at ? "archived" : "active",
         source_metadata: { fallback_from: "clients", is_test: Boolean(client.is_test) },
@@ -290,6 +292,7 @@ export async function listRelationshipsForWorkspace(workspaceId: string): Promis
         fulfilment_manager_user_id: relationship.fulfilment_manager_user_id ?? null,
         fulfilment_team_id: relationship.fulfilment_team_id ?? null,
         project_timeframe_days: relationship.project_timeframe_days ?? null,
+        communication_pinned_message_id: relationship.communication_pinned_message_id ?? null,
     }))
     const wrappedClientIds = new Set(relationships.map((relationship) => relationship.client_id).filter(Boolean))
     const missingClientFallbacks = clients.filter((client) => client.client_id && !wrappedClientIds.has(client.client_id))
@@ -331,6 +334,7 @@ export async function getRelationship(workspaceId: string, relationshipId: strin
             fulfilment_manager_user_id: relationship.fulfilment_manager_user_id ?? null,
             fulfilment_team_id: relationship.fulfilment_team_id ?? null,
             project_timeframe_days: relationship.project_timeframe_days ?? null,
+            communication_pinned_message_id: relationship.communication_pinned_message_id ?? null,
         }
     }
 
@@ -360,6 +364,7 @@ export async function getRelationship(workspaceId: string, relationshipId: strin
                 fulfilment_manager_user_id: relationship.fulfilment_manager_user_id ?? null,
                 fulfilment_team_id: relationship.fulfilment_team_id ?? null,
                 project_timeframe_days: relationship.project_timeframe_days ?? null,
+                communication_pinned_message_id: relationship.communication_pinned_message_id ?? null,
             }
         }
     }

@@ -3,9 +3,11 @@
 import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Avatar } from "@/components/account/Avatar"
+import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
+import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
@@ -14,9 +16,6 @@ import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import type { CommunicationAttachment, CommunicationSticker } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, WorkspaceTeam } from "@/lib/teams/types"
-
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
-const EMOJI_CATALOGUE = ["😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "🙂", "😉", "😍", "🥰", "😎", "🤩", "🥳", "😮", "😱", "😢", "😭", "😡", "🤯", "🤔", "🫡", "🤗", "🫶", "🙏", "👏", "🙌", "👍", "👎", "👌", "✌️", "💪", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💯", "✨", "🔥", "🎉", "🚀", "⭐", "✅", "⚡", "💡", "👀", "📌"]
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function text(value: unknown) { return typeof value === "string" && value ? value : null }
@@ -49,21 +48,6 @@ function NativeAttachment({ attachment, onOpenImage, light }: { attachment: Comm
 function MessageText({ body }: { body: string }) {
     const parts = body.split(/(https?:\/\/[^\s)]+)/g)
     return <p className="whitespace-pre-wrap break-words leading-5">{parts.map((part, index) => /^https?:\/\//.test(part) ? <a key={`${part}:${index}`} href={part} target="_blank" rel="noreferrer" className="underline decoration-current/40 underline-offset-2">{part}</a> : <Fragment key={index}>{part}</Fragment>)}</p>
-}
-
-function NativeReactionTray({ current, onReply, onDelete, onReact, side }: { current: string | null; onReply: () => void; onDelete: (() => void) | null; onReact: (emoji: string) => void; side: "left" | "right" }) {
-    const [expanded, setExpanded] = useState(false)
-    const [custom, setCustom] = useState("")
-    return <div className="relative flex items-center rounded-full border border-neutral-800 bg-neutral-950 p-1 shadow-xl">
-        <button type="button" onClick={onReply} aria-label="Reply" className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-800 hover:text-white"><ReplyIcon /></button>
-        {onDelete ? <button type="button" onClick={onDelete} aria-label="Delete message" className="flex h-8 w-8 items-center justify-center rounded-full text-red-500 hover:bg-red-500/10 hover:text-red-400"><DeleteIcon /></button> : null}
-        {QUICK_REACTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => onReact(current === emoji ? "" : emoji)} className={`flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-800 ${current === emoji ? "bg-neutral-800" : ""}`}>{emoji}</button>)}
-        <button type="button" onClick={() => setExpanded((value) => !value)} aria-label="More emoji" className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-neutral-400 hover:bg-neutral-800">+</button>
-        {expanded ? <div className={`absolute bottom-11 w-72 rounded-2xl border border-neutral-800 bg-neutral-950 p-3 shadow-2xl ${side === "right" ? "right-0" : "left-0"}`}>
-            <form onSubmit={(event) => { event.preventDefault(); if (custom.trim()) { onReact(current === custom.trim() ? "" : custom.trim()); setCustom(""); setExpanded(false) } }} className="flex gap-2"><input value={custom} onChange={(event) => setCustom(event.target.value)} maxLength={32} placeholder="Type or paste any emoji" className="h-9 min-w-0 flex-1 rounded-lg border border-neutral-800 bg-black px-3 text-sm outline-none" /><button className="rounded-lg bg-white px-3 text-xs font-semibold text-black">React</button></form>
-            <div className="mt-3 grid max-h-40 grid-cols-8 gap-1 overflow-y-auto">{EMOJI_CATALOGUE.map((emoji) => <button key={emoji} type="button" onClick={() => { onReact(current === emoji ? "" : emoji); setExpanded(false) }} className="flex h-8 w-8 items-center justify-center rounded-lg text-lg hover:bg-neutral-800">{emoji}</button>)}</div>
-        </div> : null}
-    </div>
 }
 
 function TeamAvatar({ conversation, currentUserId }: { conversation: NativeConversation; currentUserId: string }) {
@@ -161,6 +145,8 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
     const [error, setError] = useState<string | null>(null)
     const [actionMessageId, setActionMessageId] = useState<string | null>(null)
+    const [actionView, setActionView] = useState<MessageActionView>("actions")
+    const [recentReaction, setRecentReaction] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [editingTeam, setEditingTeam] = useState<WorkspaceTeam | null | undefined>(undefined)
@@ -181,6 +167,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const peopleById = useMemo(() => new Map(bootstrap.people.map((person) => [person.id, person])), [bootstrap.people])
 
     useEffect(() => { selectedRef.current = selectedId }, [selectedId])
+    useEffect(() => { const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0); return () => window.clearTimeout(timer) }, [bootstrap.workspaceId])
     useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
     useEffect(() => {
         const resizeComposer = () => keepComposerCurrentLineCentered(composerRef.current)
@@ -241,7 +228,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
 
     function selectConversation(id: string | null) {
         followLatestRef.current = true; setShowJumpToLatest(false)
-        setSelectedId(id); setReplyingTo(null); setActionMessageId(null); setAttachment(null); setError(null)
+        setSelectedId(id); setReplyingTo(null); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
         setDraft(id ? localStorage.getItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${id}`) ?? "" : "")
         const url = new URL(window.location.href)
         if (id) url.searchParams.set("nativeConversation", id); else url.searchParams.delete("nativeConversation")
@@ -352,17 +339,54 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
         if (!response.ok) { setReactions((current) => previous ? [...current.filter((reaction) => !(reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id)), previous] : current.filter((reaction) => !(reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id))); setError("Could not send reaction.") }
     }
 
+    function rememberRecentReaction(emoji: string) {
+        setRecentReaction(emoji)
+        localStorage.setItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`, emoji)
+    }
+
+    async function copyMessage(message: NativeMessage) {
+        setActionMessageId(null)
+        setError(null)
+        try {
+            await copyMessageText(messagePreview(message))
+        } catch (copyError) {
+            setError(copyError instanceof Error ? copyError.message : "Could not copy this message.")
+        }
+    }
+
+    async function togglePinnedMessage(message: NativeMessage) {
+        if (!selected?.canWrite) return
+        const conversationId = selected.id
+        const previous = selected.pinnedMessageId
+        const pinnedMessageId = previous === message.id ? null : message.id
+        setActionMessageId(null)
+        setError(null)
+        setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, pinnedMessageId } : conversation))
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/pins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, messageId: pinnedMessageId }) }).catch(() => null)
+        if (!response?.ok) {
+            setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, pinnedMessageId: previous } : conversation))
+            const result = response ? await response.json().catch(() => null) as { error?: string } | null : null
+            setError(result?.error ?? "Could not update the pinned message.")
+        }
+    }
+
+    function jumpToMessage(messageId: string) {
+        const target = messagePaneRef.current?.querySelector<HTMLElement>(`[data-message-interaction="${messageId}"]`)
+        target?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+
     async function deleteMessage(message: NativeMessage) {
         if (!selected?.canWrite || message.senderUserId !== bootstrap.currentUser.id || message.clientRequestId === message.id) return
         if (!window.confirm("Delete this message? This cannot be undone.")) return
         const previous = selected.messages
+        const previousPinnedMessageId = selected.pinnedMessageId
         setActionMessageId(null)
         setReplyingTo((current) => current?.id === message.id ? null : current)
-        setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((candidate) => candidate.id !== message.id) } : conversation))
+        setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, pinnedMessageId: conversation.pinnedMessageId === message.id ? null : conversation.pinnedMessageId, messages: conversation.messages.filter((candidate) => candidate.id !== message.id) } : conversation))
         const params = new URLSearchParams({ conversationId: selected.id, messageId: message.id })
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?${params}`, { method: "DELETE" }).catch(() => null)
         if (!response?.ok) {
-            setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: mergeMessages(conversation.messages, previous) } : conversation))
+            setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, pinnedMessageId: previousPinnedMessageId, messages: mergeMessages(conversation.messages, previous) } : conversation))
             const result = response ? await response.json().catch(() => null) as { error?: string } | null : null
             setError(result?.error ?? "Could not delete message.")
         }
@@ -371,6 +395,8 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const normalizedSearch = search.trim().toLowerCase()
     const visible = conversations.filter((conversation) => (showArchived ? conversation.archived : !conversation.archived) && (!normalizedSearch || `${conversation.title} ${conversation.messages.at(-1)?.body ?? ""}`.toLowerCase().includes(normalizedSearch)))
     const currentTeam = selected?.teamId ? teams.find((team) => team.id === selected.teamId) : null
+    const pinnedMessage = selected?.pinnedMessageId ? selected.messages.find((message) => message.id === selected.pinnedMessageId) ?? null : null
+    const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId ? "Pinned message unavailable" : null
 
     return <section aria-label="Team communications" className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black">
         {!bootstrap.schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">Apply the Teams database migration to enable native messaging.</div> : null}
@@ -399,6 +425,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.archived ? "Archived · read-only" : selected.subtitle}</span></span>
                         </button>
                     </header>
+                    {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
                     <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; followLatestRef.current = !messagePaneIsAwayFromBottom(event.currentTarget, 24); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
@@ -409,6 +436,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                         const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                         const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                         const canDelete = own && message.clientRequestId !== message.id
+                        const canPin = selected.canWrite && message.clientRequestId !== message.id
                         const isSticker = message.attachment?.kind === "sticker"
                         return <Fragment key={message.id}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
@@ -416,7 +444,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                                 <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-3 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/45 via-red-950/20 to-transparent" : "bg-gradient-to-r from-white/20 via-white/5 to-transparent"}`} />
                                 <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                 {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
-                                {actionMessageId === message.id && selected.canWrite ? <div data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}><NativeReactionTray current={ownReaction?.emoji ?? null} onReply={() => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() }} onDelete={canDelete ? () => void deleteMessage(message) : null} onReact={(emoji) => void sendReaction(message, emoji)} side={own ? "right" : "left"} /></div> : null}
+                                {actionMessageId === message.id ? <div key={`${message.id}:${actionView}`} data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}>{actionView === "actions" ? <PrimaryMessageActions onDelete={canDelete && selected.canWrite ? () => void deleteMessage(message) : null} onReply={selected.canWrite ? () => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onReact={selected.canWrite ? () => setActionView("reactions") : null} pinned={selected.pinnedMessageId === message.id} /> : selected.canWrite ? <MessageReactionActions currentEmoji={ownReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}</div> : null}
                                 {!own && selected.kind === "team" ? <button data-icon-button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full object-center" /></button> : null}
                                 <article
                                     role="button"
@@ -424,9 +452,10 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                                     onClick={() => {
                                         if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
                                         if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
+                                        setActionView("actions")
                                         setActionMessageId((current) => current === message.id ? null : message.id)
                                     }}
-                                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setActionMessageId((current) => current === message.id ? null : message.id) }}
+                                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionView("actions"); setActionMessageId((current) => current === message.id ? null : message.id) } }}
                                     onTouchStart={(event) => { const touch = event.touches[0]; swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false, maxDeltaX: 0, minDeltaX: 0, verticalAtMax: 0, verticalAtMin: 0 } : null; if (touch) setSwipePosition({ id: message.id, offset: 0, active: true }) }}
                                     onTouchMove={(event) => { const start = swipeStartRef.current; const touch = event.touches[0]; if (!start || start.id !== message.id || !touch || start.cancelled) return; const deltaX = touch.clientX - start.x; const deltaY = touch.clientY - start.y; if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = Math.abs(deltaY) } if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = Math.abs(deltaY) } if (Math.abs(deltaY) > Math.abs(deltaX) * 1.5 && Math.abs(deltaY) > 12) { start.cancelled = true; setSwipePosition({ id: message.id, offset: 0, active: false }); return } const constrained = canDelete ? Math.max(-82, Math.min(82, deltaX * 0.78)) : Math.max(0, Math.min(82, deltaX * 0.78)); if (Math.abs(constrained) > 2) { event.preventDefault(); setSwipePosition({ id: message.id, offset: constrained, active: true }) } }}
                                     onTouchEnd={(event) => { const start = swipeStartRef.current; const touch = event.changedTouches[0]; swipeStartRef.current = null; if (start && touch) { const deltaX = touch.clientX - start.x; const vertical = Math.abs(touch.clientY - start.y); if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = vertical } if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = vertical } } const replyGesture = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42); const deleteGesture = Boolean(start && !start.cancelled && canDelete && start.minDeltaX < -52 && start.verticalAtMin < 42); setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220); if (replyGesture) { swipedMessageRef.current = message.id; setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } else if (deleteGesture) { swipedMessageRef.current = message.id; void deleteMessage(message) } }}

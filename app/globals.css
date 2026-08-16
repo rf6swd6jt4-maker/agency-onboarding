@@ -109,7 +109,7 @@ body {
 
 .betelgeze-message-enter-left,
 .betelgeze-message-enter-right {
-  animation: betelgeze-message-grow-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: betelgeze-message-grow-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .betelgeze-message-enter-left { transform-origin: bottom left; }

@@ -55,6 +55,7 @@ export type NativeConversation = {
     memberIds: string[]
     archived: boolean
     canWrite: boolean
+    pinnedMessageId: string | null
     updatedAt: string
     messages: NativeMessage[]
 }

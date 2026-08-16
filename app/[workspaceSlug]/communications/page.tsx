@@ -44,6 +44,7 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
         subtitle: relationship.whatsapp_phone ?? relationship.primary_phone ?? relationship.primary_email,
         isTest: relationship.source_metadata.is_test === true,
         canSend: Boolean((relationship.client_id && channelClientIds.has(relationship.client_id)) || relationship.whatsapp_phone || relationship.primary_phone),
+        pinnedMessageId: relationship.communication_pinned_message_id,
         messages: messagesByRelationship.get(relationship.id) ?? [],
     })).sort((left, right) => {
         const leftDate = left.messages.at(-1)?.createdAt ?? ""

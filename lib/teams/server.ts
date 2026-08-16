@@ -110,7 +110,7 @@ export async function loadNativeCommunications(input: {
     if (!schemaReady) return { ...base, conversations: [], reactions: [], readCursors: [], schemaReady: false }
 
     const [conversationResult, participantResult, messageResult, reactionResult, cursorResult, membershipResult] = await Promise.all([
-        supabaseAdmin.from("workspace_native_conversations").select("id, kind, team_id, direct_user_one, direct_user_two, updated_at").eq("workspace_id", input.workspaceId).order("updated_at", { ascending: false }),
+        supabaseAdmin.from("workspace_native_conversations").select("id, kind, team_id, direct_user_one, direct_user_two, pinned_message_id, updated_at").eq("workspace_id", input.workspaceId).order("updated_at", { ascending: false }),
         supabaseAdmin.from("workspace_native_conversation_participants").select("conversation_id, user_id").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspace_native_messages").select("id, client_request_id, conversation_id, sender_user_id, body, reply_to_message_id, attachment, created_at").eq("workspace_id", input.workspaceId).order("created_at").limit(4000),
         supabaseAdmin.from("workspace_native_reactions").select("id, conversation_id, message_id, reactor_user_id, emoji, updated_at").eq("workspace_id", input.workspaceId),
@@ -135,13 +135,13 @@ export async function loadNativeCommunications(input: {
             if (!memberIds.includes(input.currentUserId)) return []
             const otherId = memberIds.find((id) => id !== input.currentUserId) ?? input.currentUserId
             const person = peopleById.get(otherId) ?? { id: otherId, name: "Workspace member", avatarSrc: null }
-            return [{ id: conversation.id, kind: "direct" as const, teamId: null, title: person.name, subtitle: "Direct message", avatarSrc: person.avatarSrc, memberIds, archived: false, canWrite: true, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
+            return [{ id: conversation.id, kind: "direct" as const, teamId: null, title: person.name, subtitle: "Direct message", avatarSrc: person.avatarSrc, memberIds, archived: false, canWrite: true, pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
         }
         const team = conversation.team_id ? teamById.get(conversation.team_id) : null
         if (!team) return []
         const archived = Boolean(team.archivedAt)
         if (!team.memberIds.includes(input.currentUserId) && !(archived && canInspectArchived)) return []
-        return [{ id: conversation.id, kind: "team" as const, teamId: team.id, title: team.name, subtitle: `${team.memberIds.length} member${team.memberIds.length === 1 ? "" : "s"}`, avatarSrc: null, memberIds: team.memberIds, archived, canWrite: !archived && team.memberIds.includes(input.currentUserId), updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
+        return [{ id: conversation.id, kind: "team" as const, teamId: team.id, title: team.name, subtitle: `${team.memberIds.length} member${team.memberIds.length === 1 ? "" : "s"}`, avatarSrc: null, memberIds: team.memberIds, archived, canWrite: !archived && team.memberIds.includes(input.currentUserId), pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
     }).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt) || left.title.localeCompare(right.title))
     const conversationIds = new Set(conversations.map((conversation) => conversation.id))
     const reactions: NativeReaction[] = (reactionResult.data ?? []).flatMap((reaction) => conversationIds.has(reaction.conversation_id) ? [{ id: reaction.id, conversationId: reaction.conversation_id, messageId: reaction.message_id, reactorUserId: reaction.reactor_user_id, emoji: reaction.emoji, updatedAt: reaction.updated_at }] : [])

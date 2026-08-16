@@ -44,13 +44,16 @@ test("inbound WhatsApp audio renders as an inline voice note", () => {
 })
 
 test("Communications interactions are durable and native to WhatsApp", async () => {
-    const [migration, reactions, stickers, meta, webhook, workspace] = await Promise.all([
+    const [migration, reactions, stickers, meta, webhook, workspace, actions, pinMigration, pins] = await Promise.all([
         readFile("supabase/migrations/20260815010000_communications_reactions_stickers.sql", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/reactions/route.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/stickers/route.ts", "utf8"),
         readFile("lib/client-messages/meta-whatsapp.ts", "utf8"),
         readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/MessageActionMenu.tsx", "utf8"),
+        readFile("supabase/migrations/20260816203000_communication_message_pins.sql", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/pins/route.ts", "utf8"),
     ])
     assert.match(migration, /create table if not exists public\.communication_reactions/)
     assert.match(migration, /unique \(client_message_id, direction\)/)
@@ -72,14 +75,22 @@ test("Communications interactions are durable and native to WhatsApp", async () 
     assert.match(workspace, /data-message-interaction/)
     assert.match(workspace, /bg-gradient-to-r from-white\/20/)
     assert.match(workspace, /MessageMediaLightbox/)
-    assert.match(workspace, /Type or paste any emoji/)
+    assert.match(actions, /Use device emoji picker/)
+    assert.match(actions, /PrimaryMessageActions/)
+    assert.match(actions, /Copy message/)
+    assert.match(actions, /Pin message/)
+    assert.match(actions, /React to message/)
+    assert.doesNotMatch(actions, /EMOJI_CATALOGUE/)
+    assert.match(pinMigration, /communication_pinned_message_id/)
+    assert.match(pinMigration, /pinned_message_id/)
+    assert.match(pins, /eq\("relationship_id", relationshipId\)/)
     assert.match(workspace, /JPEG and PNG images are converted automatically/)
     assert.match(workspace, /Save sticker/)
     assert.match(workspace, /messageId: message\.id/)
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns, jumpToLatest, globals] = await Promise.all([
+    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
@@ -90,6 +101,8 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
         readFile("components/communications/JumpToLatestButton.tsx", "utf8"),
         readFile("app/globals.css", "utf8"),
+        readFile("components/communications/MessageActionMenu.tsx", "utf8"),
+        readFile("components/communications/PinnedMessageBar.tsx", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
@@ -131,6 +144,7 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(jumpToLatest, /block h-5 w-5 shrink-0/)
     assert.match(jumpToLatest, /document\.visibilityState !== "visible"/)
     assert.match(globals, /@keyframes betelgeze-message-grow-in/)
+    assert.match(globals, /280ms cubic-bezier/)
     assert.match(globals, /@keyframes betelgeze-reaction-popup-in/)
     assert.match(globals, /prefers-reduced-motion: reduce/)
     assert.match(team, /selected\.kind === "team" \? <button/)
@@ -145,6 +159,18 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(page, /isTest: relationship\.source_metadata\.is_test === true/)
     assert.match(types, /isTest: boolean/)
     assert.match(icons, /function DoubleDeliveryCheckIcon/)
+    assert.match(icons, /function CopyIcon/)
+    assert.match(icons, /function PinIcon/)
+    assert.match(icons, /function ReactIcon/)
+    assert.match(actions, /recentReactionChoices/)
+    assert.match(actions, /navigator\.clipboard/)
+    assert.match(actions, /lg:h-8 lg:w-8/)
+    assert.match(pinnedBar, /Jump to pinned message/)
+    assert.match(pinnedBar, /<PinIcon/)
+    assert.match(clients, /setActionView\("reactions"\)/)
+    assert.match(team, /setActionView\("reactions"\)/)
+    assert.match(clients, /communication_pinned_message_id/)
+    assert.match(team, /pinnedMessageId/)
     assert.match(shell, /onClick=\{\(\) => onOpenProfile\(member\.id\)\}/)
     assert.match(clients, /-inset-x-3 inset-y-0/)
     assert.match(team, /-inset-x-3 inset-y-0/)

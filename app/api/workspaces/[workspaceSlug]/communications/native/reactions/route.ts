@@ -6,6 +6,12 @@ export const dynamic = "force-dynamic"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+function validReactionEmoji(value: string) {
+    if (!value) return true
+    const segments = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value)]
+    return segments.length === 1 && value.length <= 32 && /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20e3]/u.test(value)
+}
+
 export async function POST(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
     const { workspace, user } = await requireWorkspace(workspaceSlug)
@@ -13,7 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
     const messageId = typeof input?.messageId === "string" ? input.messageId : ""
     const emoji = typeof input?.emoji === "string" ? input.emoji.trim() : ""
-    if (!UUID_PATTERN.test(conversationId) || !UUID_PATTERN.test(messageId) || emoji.length > 32) return Response.json({ error: "Invalid reaction." }, { status: 400 })
+    if (!UUID_PATTERN.test(conversationId) || !UUID_PATTERN.test(messageId) || !validReactionEmoji(emoji)) return Response.json({ error: "Choose one valid emoji reaction." }, { status: 400 })
     if (!await assertNativeConversationAccess(conversationId, user.id, "write")) return Response.json({ error: "Conversation is unavailable or read-only." }, { status: 403 })
     const { data: message } = await supabaseAdmin.from("workspace_native_messages").select("id").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).maybeSingle()
     if (!message) return Response.json({ error: "Message not found." }, { status: 404 })

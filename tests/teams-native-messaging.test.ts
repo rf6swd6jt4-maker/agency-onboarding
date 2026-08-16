@@ -70,27 +70,32 @@ test("team editing enforces required teams and complete responsibility maps", as
     assert.match(editor, /Archived conversation/)
 })
 
-test("native messaging supports realtime messages, replies, reactions, reads, files, and shared stickers", async () => {
-    const [workspace, messages, reactions, reads, attachments, media] = await Promise.all([
+test("native messaging supports realtime messages, replies, reactions, reads, files, shared stickers, and pins", async () => {
+    const [workspace, messages, reactions, reads, attachments, media, actions, pins, pinMigration] = await Promise.all([
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/reactions/route.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/read/route.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/attachments/route.ts", "utf8"),
         readFile("app/api/client-messages/media/[...path]/route.ts", "utf8"),
+        readFile("components/communications/MessageActionMenu.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/native/pins/route.ts", "utf8"),
+        readFile("supabase/migrations/20260816203000_communication_message_pins.sql", "utf8"),
     ])
     for (const table of ["workspace_native_messages", "workspace_native_reactions", "workspace_native_read_cursors", "workspace_team_members"]) assert.match(workspace, new RegExp(`table: "${table}"`))
     assert.match(workspace, /replyingTo/)
-    assert.match(workspace, /Type or paste any emoji/)
+    assert.match(actions, /Use device emoji picker/)
+    assert.doesNotMatch(actions, /EMOJI_CATALOGUE/)
     assert.match(workspace, /clientRequestId/)
     assert.match(workspace, /bg-gradient-to-l from-red-600\/45/)
-    assert.match(workspace, /onDelete=\{canDelete/)
+    assert.match(workspace, /onDelete=\{canDelete && selected\.canWrite/)
     assert.match(workspace, /MessageMediaLightbox/)
     assert.match(messages, /assertNativeConversationAccess\(conversationId, user\.id, "write"\)/)
     assert.match(messages, /reply_to_message_id/)
     assert.match(messages, /message\.sender_user_id !== user\.id/)
     assert.match(messages, /workspace_native_messages"\)\.delete\(\)/)
     assert.match(reactions, /onConflict: "message_id,reactor_user_id"/)
+    assert.match(reactions, /Intl\.Segmenter/)
     assert.match(reads, /current\.last_read_at >= message\.created_at/)
     assert.match(attachments, /createSignedNativeMessageUpload/)
     assert.match(media, /assertNativeConversationAccess\(conversationId, user\.id, "read"\)/)
@@ -98,4 +103,7 @@ test("native messaging supports realtime messages, replies, reactions, reads, fi
     assert.match(workspace, /Shared across client and team chats\./)
     assert.match(messages, /inspectStoredCommunicationSticker/)
     assert.match(messages, /communication_stickers/)
+    assert.match(workspace, /PinnedMessageBar/)
+    assert.match(pins, /assertNativeConversationAccess\(conversationId, user\.id, "write"\)/)
+    assert.match(pinMigration, /workspace_native_conversations_pinned_message_fkey/)
 })

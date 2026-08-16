@@ -5,9 +5,11 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Avatar } from "@/components/account/Avatar"
+import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
+import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
@@ -18,14 +20,6 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
-
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
-const EMOJI_CATALOGUE = [
-    "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "🙂", "🙃", "😉", "😍", "🥰", "😘", "😎",
-    "🤩", "🥳", "😮", "😱", "😢", "😭", "😡", "🤯", "🤔", "🫡", "🤗", "🫶", "🙏", "👏", "🙌", "👍",
-    "👎", "👌", "✌️", "🤞", "💪", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "💯", "✨", "🔥",
-    "🎉", "🎊", "🚀", "⭐", "✅", "❌", "⚡", "💡", "👀", "💬", "📌", "📅", "🏆", "☕", "🍾", "🌍",
-]
 
 function record(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -179,33 +173,18 @@ function MessageAttachment({ attachment, onOpenImage, light }: { attachment: Com
     return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-3 rounded-xl border border-current/10 bg-black/5 px-3 py-2.5 hover:bg-black/10"><span className="text-xl">↗</span><span className="min-w-0"><span className="block truncate text-xs font-semibold">{attachment.fileName}</span><span className="mt-0.5 block text-[10px] opacity-60">{formatFileSize(attachment.size)}</span></span></a>
 }
 
-function ReactionTray({ currentEmoji, onReact, onReply, side }: {
-    currentEmoji: string | null
-    onReact: (emoji: string) => void
-    onReply: () => void
-    side: "left" | "right"
-}) {
-    const [expanded, setExpanded] = useState(false)
-    const [customEmoji, setCustomEmoji] = useState("")
-    return <div className="relative z-20 flex items-center rounded-full border border-neutral-800 bg-neutral-950 p-1 shadow-xl">
-        <button type="button" onClick={onReply} aria-label="Reply" className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-800 hover:text-white"><ReplyIcon /></button>
-        {QUICK_REACTIONS.map((emoji) => <button key={emoji} type="button" onClick={() => onReact(currentEmoji === emoji ? "" : emoji)} aria-label={`React with ${emoji}`} className={`flex h-8 w-8 items-center justify-center rounded-full text-base hover:bg-neutral-800 ${currentEmoji === emoji ? "bg-neutral-800" : ""}`}>{emoji}</button>)}
-        <button type="button" onClick={() => setExpanded((current) => !current)} aria-label="More emoji reactions" className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-neutral-400 hover:bg-neutral-800 hover:text-white">+</button>
-        {expanded ? <div className={`absolute bottom-11 w-72 rounded-2xl border border-neutral-800 bg-neutral-950 p-3 shadow-2xl ${side === "right" ? "right-0" : "left-0"}`}>
-            <form onSubmit={(event) => { event.preventDefault(); if (customEmoji.trim()) { onReact(currentEmoji === customEmoji.trim() ? "" : customEmoji.trim()); setExpanded(false); setCustomEmoji("") } }} className="flex gap-2">
-                <input value={customEmoji} onChange={(event) => setCustomEmoji(event.target.value)} maxLength={32} aria-label="Any emoji reaction" placeholder="Type or paste any emoji" className="h-9 min-w-0 flex-1 rounded-lg border border-neutral-800 bg-black px-3 text-sm outline-none focus:border-neutral-600" />
-                <button type="submit" className="h-9 rounded-lg bg-white px-3 text-xs font-semibold text-black">React</button>
-            </form>
-            <div className="mt-3 grid max-h-44 grid-cols-8 gap-1 overflow-y-auto">{EMOJI_CATALOGUE.map((emoji) => <button key={emoji} type="button" onClick={() => { onReact(currentEmoji === emoji ? "" : emoji); setExpanded(false) }} className={`flex h-8 w-8 items-center justify-center rounded-lg text-lg hover:bg-neutral-800 ${currentEmoji === emoji ? "bg-neutral-800" : ""}`}>{emoji}</button>)}</div>
-        </div> : null}
-    </div>
-}
-
-function MessageActionTray({ canInteract, currentEmoji, onReact, onReply, side, stickerSaved, stickerSaving, onSaveSticker }: {
+function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onReact, onRecentEmoji, onReply, onCopy, onPin, onShowReactions, pinned, side, stickerSaved, stickerSaving, onSaveSticker }: {
+    view: MessageActionView
     canInteract: boolean
     currentEmoji: string | null
+    recentEmoji: string | null
     onReact: (emoji: string) => void
-    onReply: () => void
+    onRecentEmoji: (emoji: string) => void
+    onReply: (() => void) | null
+    onCopy: () => void
+    onPin: (() => void) | null
+    onShowReactions: () => void
+    pinned: boolean
     side: "left" | "right"
     stickerSaved: boolean
     stickerSaving: boolean
@@ -219,7 +198,9 @@ function MessageActionTray({ canInteract, currentEmoji, onReact, onReply, side, 
             aria-label={stickerSaved ? "Sticker saved" : "Save sticker"}
             className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs font-medium text-neutral-300 shadow-xl hover:bg-neutral-900 hover:text-white disabled:text-emerald-400"
         >{stickerSaved ? "✓ Saved" : stickerSaving ? "Saving…" : "Save sticker"}</button> : null}
-        {canInteract ? <ReactionTray currentEmoji={currentEmoji} onReact={onReact} onReply={onReply} side={side} /> : null}
+        {view === "actions"
+            ? <PrimaryMessageActions onDelete={null} onReply={onReply} onCopy={onCopy} onPin={onPin} onReact={canInteract ? onShowReactions : null} pinned={pinned} />
+            : canInteract ? <MessageReactionActions currentEmoji={currentEmoji} recentEmoji={recentEmoji} onReact={onReact} onRecentEmoji={onRecentEmoji} side={side} /> : null}
     </div>
 }
 
@@ -242,6 +223,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const [attachmentError, setAttachmentError] = useState<string | null>(null)
     const [replyingTo, setReplyingTo] = useState<CommunicationMessage | null>(null)
     const [actionMessageId, setActionMessageId] = useState<string | null>(null)
+    const [actionView, setActionView] = useState<MessageActionView>("actions")
+    const [recentReaction, setRecentReaction] = useState<string | null>(null)
     const [reactions, setReactions] = useState(bootstrap.reactions)
     const [stickers, setStickers] = useState(bootstrap.stickers)
     const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
@@ -272,6 +255,11 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     useEffect(() => {
         selectedRef.current = selectedId
     }, [selectedId])
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0)
+        return () => window.clearTimeout(timer)
+    }, [bootstrap.workspaceId])
 
     useEffect(() => {
         keepComposerCurrentLineCentered(composerRef.current)
@@ -351,6 +339,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         setAttachmentError(null)
         setReplyingTo(null)
         setActionMessageId(null)
+        setActionView("actions")
         setStickerTrayOpen(false)
         setInteractionError(null)
         setSwipePosition(null)
@@ -363,6 +352,47 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         setReplyingTo(message)
         setActionMessageId(null)
         window.requestAnimationFrame(() => composerRef.current?.focus())
+    }
+
+    function rememberRecentReaction(emoji: string) {
+        setRecentReaction(emoji)
+        localStorage.setItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`, emoji)
+    }
+
+    async function copyMessage(message: CommunicationMessage) {
+        setActionMessageId(null)
+        setInteractionError(null)
+        const body = message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? message.body : messagePreview(message)
+        try {
+            await copyMessageText(body)
+        } catch (error) {
+            setInteractionError(error instanceof Error ? error.message : "Could not copy this message.")
+        }
+    }
+
+    async function togglePinnedMessage(message: CommunicationMessage) {
+        if (!selected) return
+        const relationshipId = selected.id
+        const previous = selected.pinnedMessageId
+        const pinnedMessageId = previous === message.id ? null : message.id
+        setActionMessageId(null)
+        setInteractionError(null)
+        setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId } : conversation))
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/pins`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ relationshipId, messageId: pinnedMessageId }),
+        }).catch(() => null)
+        if (!response?.ok) {
+            setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId: previous } : conversation))
+            const result = response ? await response.json().catch(() => null) as { error?: string } | null : null
+            setInteractionError(result?.error ?? "Could not update the pinned message.")
+        }
+    }
+
+    function jumpToMessage(messageId: string) {
+        const target = messagePaneRef.current?.querySelector<HTMLElement>(`[data-message-interaction="${messageId}"]`)
+        target?.scrollIntoView({ behavior: "smooth", block: "center" })
     }
 
     async function removeAttachment(target = attachment, relationshipId = selectedId) {
@@ -592,6 +622,12 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     const reaction = realtimeReaction(payload.new)
                     if (reaction) setReactions((current) => mergeReaction(current, reaction))
                 })
+                .on("postgres_changes", { event: "UPDATE", schema: "public", table: "relationships", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
+                    const row = record(payload.new)
+                    const relationshipId = stringValue(row.id)
+                    if (!relationshipId || !("communication_pinned_message_id" in row)) return
+                    setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId: stringValue(row.communication_pinned_message_id) } : conversation))
+                })
                 .subscribe()
         }
         void connect().catch(() => undefined)
@@ -653,6 +689,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         : message.senderKind === "staff"
             ? (message.senderUserId === bootstrap.currentUser.id ? "You" : peopleById.get(message.senderUserId ?? "")?.name ?? "Team")
             : message.senderKind === "legacy" ? "Previous system" : selected?.title ?? "Client"
+    const pinnedMessage = selected?.pinnedMessageId ? selected.messages.find((message) => message.id === selected.pinnedMessageId) ?? null : null
+    const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId ? "Pinned message unavailable" : null
 
     return <section aria-label="Client communications" className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black">
         {!bootstrap.schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
@@ -687,6 +725,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             <span className="min-w-0"><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-semibold">{selected.title}</span>{selected.isTest ? <SquarePill tone="yellow" className="!min-h-5 !px-2 !py-0.5 !text-[10px] !leading-3">Test</SquarePill> : null}</span><span className="block truncate text-[11px] text-neutral-600">{selected.subtitle ?? "WhatsApp client"}</span></span>
                         </Link>
                     </header>
+                    {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
 
                     <div className="relative min-h-0 flex-1">
                     <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; followLatestRef.current = !messagePaneIsAwayFromBottom(event.currentTarget, 24); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
@@ -702,14 +741,15 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                             const isSticker = message.attachment?.kind === "sticker"
                             const stickerSaved = Boolean(isSticker && stickers.some((sticker) => sticker.storagePath === message.attachment?.storagePath))
-                            const showActions = actionMessageId === message.id && (canInteract || isSticker)
+                            const canPin = message.clientRequestId !== message.id
+                            const showActions = actionMessageId === message.id
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                             return <Fragment key={message.id}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                                 <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
                                     <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
-                                    {message.direction === "outbound" && showActions ? <div data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={message.providerMessageId ? () => beginReply(message) : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                     <article
                                         role="button"
                                         tabIndex={0}
@@ -717,9 +757,10 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                         onClick={() => {
                                             if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
                                             if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
+                                            setActionView("actions")
                                             setActionMessageId((current) => current === message.id ? null : message.id)
                                         }}
-                                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionMessageId((current) => current === message.id ? null : message.id) } }}
+                                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionView("actions"); setActionMessageId((current) => current === message.id ? null : message.id) } }}
                                         onTouchStart={(event) => {
                                             const touch = event.touches[0]
                                             swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false, maxDeltaX: 0, verticalAtMax: 0 } : null
@@ -778,7 +819,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {message.status === "send_failed" && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry</button> : null}
                                     </article>
-                                    {message.direction === "inbound" && showActions ? <div data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} onReact={(emoji) => void sendReaction(message, emoji)} onReply={() => beginReply(message)} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={message.providerMessageId ? () => beginReply(message) : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                 </div>
                                 {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                             </Fragment>

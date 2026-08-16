@@ -71,6 +71,7 @@ export type ClientConversation = {
     subtitle: string | null
     isTest: boolean
     canSend: boolean
+    pinnedMessageId: string | null
     messages: CommunicationMessage[]
 }
 
