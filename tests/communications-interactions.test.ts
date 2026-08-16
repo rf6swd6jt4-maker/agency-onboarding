@@ -126,8 +126,10 @@ test("message interactions keep the approved mobile and profile parity", async (
     }
     assert.match(team, /data-message-action-popup/)
     assert.doesNotMatch(panel, /visualViewport|scrollTo|useLayoutEffect/)
-    assert.match(panel, /absolute inset-0 isolate overflow-hidden overscroll-none bg-black/)
+    assert.match(panel, /fixed inset-0 isolate overflow-hidden overscroll-none bg-black/)
     assert.match(shell, /dataset\.workspaceViewportLocked = "true"/)
+    assert.match(shell, /element\.hidden = true/)
+    assert.match(shell, /element\.hidden = hidden/)
     assert.match(shell, /--workspace-visual-viewport-height/)
     assert.doesNotMatch(shell, /--workspace-visual-viewport-top|visualViewport\?\.offsetTop|window\.scrollTo\(0, 0\)/)
     assert.match(globals, /html\[data-workspace-viewport-locked="true"\]/)

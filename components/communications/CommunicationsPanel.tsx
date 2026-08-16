@@ -25,7 +25,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
         }
         window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
     }, [])
-    return <div data-communications-panel className="absolute inset-0 isolate overflow-hidden overscroll-none bg-black [contain:strict]">
+    return <div data-communications-panel className="fixed inset-0 isolate overflow-hidden overscroll-none bg-black [contain:paint]">
         <CommunicationsActivityTracker />
         {mode === "team"
             ? <TeamCommunicationsWorkspace bootstrap={nativeBootstrap} onOpenClients={() => setMode("clients")} />

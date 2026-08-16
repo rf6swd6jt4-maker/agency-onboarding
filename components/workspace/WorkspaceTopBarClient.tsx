@@ -1111,7 +1111,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 root.style.setProperty("--workspace-visual-viewport-height", `${Math.round(visualViewport?.height ?? window.innerHeight)}px`)
             })
         }
-        const previousStates = hiddenSiblings.map((element) => ({ element, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
+        const previousStates = hiddenSiblings.map((element) => ({ element, hidden: element.hidden, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
         document.body.dataset.workspaceTabsHosted = "true"
         root.dataset.workspaceViewportLocked = "true"
@@ -1120,6 +1120,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         holdWorkspaceViewport()
         window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
         hiddenSiblings.forEach((element) => {
+            element.hidden = true
             element.inert = true
             element.setAttribute("aria-hidden", "true")
         })
@@ -1133,7 +1134,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             delete root.dataset.workspaceViewportLocked
             root.style.removeProperty("--workspace-visual-viewport-height")
             window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
-            previousStates.forEach(({ element, inert, ariaHidden }) => {
+            previousStates.forEach(({ element, hidden, inert, ariaHidden }) => {
+                element.hidden = hidden
                 element.inert = inert
                 if (ariaHidden === null) element.removeAttribute("aria-hidden")
                 else element.setAttribute("aria-hidden", ariaHidden)
