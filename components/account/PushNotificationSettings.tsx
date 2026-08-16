@@ -128,7 +128,7 @@ export function PushNotificationSettings() {
         <div className="flex items-center justify-between gap-5">
             <div>
                 <h3 className="font-medium">Chat notifications</h3>
-                <p className="mt-1 text-sm text-neutral-400">Native and incoming WhatsApp chats. Notification previews only identify who sent the chat.</p>
+                <p className="mt-1 text-sm text-neutral-400">Native and incoming WhatsApp chats. Notification previews show the chat name and message.</p>
             </div>
             <button type="button" role="switch" aria-checked={enabled} aria-label="Chat notifications on this device" disabled={disabled} onClick={() => enabled ? void disable() : void enable()} className="flex h-11 min-h-0 w-14 shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50 sm:h-7 sm:w-12">
                 <span aria-hidden="true" className={`relative block h-7 w-12 rounded-full border transition ${enabled ? "border-white bg-white" : "border-neutral-600 bg-neutral-800"}`}>

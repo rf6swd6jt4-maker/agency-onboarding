@@ -67,15 +67,20 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || "/";
+  const targetPath = event.notification.data?.url || "/";
+  const targetUrl = new URL(targetPath, self.location.origin).href;
 
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+    (async () => {
+      const clientList = await clients.matchAll({ type: "window", includeUncontrolled: true });
+      const exactClient = clientList.find((client) => client.url === targetUrl);
+      if (exactClient) return exactClient.focus();
       const existingClient = clientList.find((client) => client.url.startsWith(self.location.origin));
       if (existingClient) {
-        return existingClient.focus().then((client) => client.navigate(targetUrl));
+        const navigatedClient = await existingClient.navigate(targetUrl);
+        return navigatedClient ? navigatedClient.focus() : existingClient.focus();
       }
       return clients.openWindow(targetUrl);
-    })
+    })()
   );
 });

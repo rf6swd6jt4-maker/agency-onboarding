@@ -34,9 +34,24 @@ export function webPushPublicKey() {
     return process.env.WEB_PUSH_VAPID_PUBLIC_KEY?.trim() || null
 }
 
-export function chatNotificationText(kind: "native" | "whatsapp", senderName: string) {
-    const safeName = senderName.replace(/\s+/g, " ").trim().slice(0, 80) || (kind === "whatsapp" ? "A client" : "A workspace member")
-    return { title: kind === "whatsapp" ? "WhatsApp chat" : "Betelgeze chat", body: `From ${safeName}` }
+function notificationLine(value: unknown, limit: number) {
+    return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, limit) : ""
+}
+
+function attachmentMessage(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return ""
+    const attachment = value as Record<string, unknown>
+    const kind = notificationLine(attachment.kind, 24)
+    const fileName = notificationLine(attachment.fileName, 100)
+    const label = kind === "image" ? "Photo" : kind === "video" ? "Video" : kind === "audio" ? "Voice note" : kind === "sticker" ? "Sticker" : kind === "document" ? "File" : ""
+    return label ? (label === "File" && fileName ? `${label}: ${fileName}` : label) : ""
+}
+
+export function chatNotificationText(chatName: string, messageBody: unknown, attachment?: unknown) {
+    return {
+        title: notificationLine(chatName, 80) || "Betelgeze chat",
+        body: notificationLine(messageBody, 240) || attachmentMessage(attachment) || "New message",
+    }
 }
 
 async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
@@ -104,16 +119,32 @@ export async function notifyNativeChatMessage(input: {
     messageId: string
     senderUserId: string
 }) {
-    const [{ data: participants, error: participantsError }, { data: profile, error: profileError }] = await Promise.all([
+    const [
+        { data: participants, error: participantsError },
+        { data: profile, error: profileError },
+        { data: conversation, error: conversationError },
+        { data: message, error: messageError },
+    ] = await Promise.all([
         supabaseAdmin.from("workspace_native_conversation_participants").select("user_id").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId),
         supabaseAdmin.from("user_profiles").select("display_name, username").eq("user_id", input.senderUserId).maybeSingle(),
+        supabaseAdmin.from("workspace_native_conversations").select("kind, team_id").eq("workspace_id", input.workspaceId).eq("id", input.conversationId).maybeSingle(),
+        supabaseAdmin.from("workspace_native_messages").select("body, attachment").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId).eq("id", input.messageId).maybeSingle(),
     ])
-    if (participantsError || profileError) {
-        console.error("Could not prepare native chat push", participantsError ?? profileError)
+    if (participantsError || profileError || conversationError || messageError || !conversation || !message) {
+        console.error("Could not prepare native chat push", participantsError ?? profileError ?? conversationError ?? messageError)
         return
     }
     const senderName = profile?.display_name?.trim() || profile?.username || "A workspace member"
-    const notification = chatNotificationText("native", senderName)
+    let chatName = senderName
+    if (conversation.kind === "team" && conversation.team_id) {
+        const { data: team, error: teamError } = await supabaseAdmin.from("workspace_teams").select("name").eq("workspace_id", input.workspaceId).eq("id", conversation.team_id).maybeSingle()
+        if (teamError) {
+            console.error("Could not resolve native chat name", teamError)
+            return
+        }
+        chatName = team?.name?.trim() || "Team chat"
+    }
+    const notification = chatNotificationText(chatName, message.body, message.attachment)
     await deliverChatPush(
         (participants ?? []).map((participant) => participant.user_id).filter((userId) => userId !== input.senderUserId),
         {
@@ -132,15 +163,24 @@ export async function notifyWhatsAppChatMessage(input: {
     messageId: string
     senderName: string
 }) {
-    const [{ data: memberships, error: membershipError }, { data: workspace, error: workspaceError }] = await Promise.all([
+    const [
+        { data: memberships, error: membershipError },
+        { data: workspace, error: workspaceError },
+        { data: relationship, error: relationshipError },
+        { data: message, error: messageError },
+    ] = await Promise.all([
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspaces").select("slug").eq("id", input.workspaceId).single(),
+        supabaseAdmin.from("relationships").select("primary_person_name, business_name").eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).maybeSingle(),
+        supabaseAdmin.from("client_messages").select("body").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).eq("id", input.messageId).maybeSingle(),
     ])
-    if (membershipError || workspaceError || !workspace) {
-        console.error("Could not prepare WhatsApp chat push", membershipError ?? workspaceError)
+    if (membershipError || workspaceError || relationshipError || messageError || !workspace || !message) {
+        console.error("Could not prepare WhatsApp chat push", membershipError ?? workspaceError ?? relationshipError ?? messageError)
         return
     }
-    const notification = chatNotificationText("whatsapp", input.senderName)
+    const primaryName = relationship?.primary_person_name?.trim() || input.senderName
+    const businessName = relationship?.business_name?.trim()
+    const notification = chatNotificationText(businessName ? `${primaryName} – ${businessName}` : primaryName, message.body)
     await deliverChatPush((memberships ?? []).map((membership) => membership.user_id), {
         messageId: input.messageId,
         conversationId: input.relationshipId,
