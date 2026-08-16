@@ -16,8 +16,8 @@ export function Avatar({
                 width={96}
                 height={96}
                 decoding="async"
-                className={`${className} block shrink-0 aspect-square overflow-hidden rounded-full object-cover`}
-                style={{ aspectRatio: "1 / 1", objectFit: "cover" }}
+                className={`${className} block shrink-0 aspect-square overflow-hidden rounded-full object-cover object-center`}
+                style={{ aspectRatio: "1 / 1", objectFit: "cover", objectPosition: "50% 50%" }}
             />
         )
     }

@@ -32,6 +32,20 @@ test("Communications is a fixed local-first client chat workspace", async () => 
     assert.match(workspace, /message\.direction === "outbound" \? "justify-end" : "justify-start"/)
 })
 
+test("Communications avatar controls stay circular on mobile", async () => {
+    const [clients, team, avatar] = await Promise.all([
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/account/Avatar.tsx", "utf8"),
+    ])
+
+    assert.match(clients, /readers\.map\(\(person\) => <button data-icon-button/)
+    assert.match(team, /readers\.map\(\(person\) => <button data-icon-button/)
+    assert.match(team, /<button data-icon-button type="button" onClick=\{\(\) => openWorkspaceMemberProfile\(message\.senderUserId\)\}/)
+    assert.match(avatar, /object-cover object-center/)
+    assert.match(avatar, /objectPosition: "50% 50%"/)
+})
+
 test("direct WhatsApp sending is durable and idempotent", async () => {
     const [migration, route, meta, webhook] = await Promise.all([
         readFile("supabase/migrations/20260814200000_communications_workspace.sql", "utf8"),
