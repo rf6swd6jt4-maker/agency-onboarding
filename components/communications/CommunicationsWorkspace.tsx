@@ -8,6 +8,7 @@ import { Avatar } from "@/components/account/Avatar"
 import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
+import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
 import { SquarePill } from "@/components/ui"
 import type { CommunicationAttachment, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
@@ -260,6 +261,10 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     useEffect(() => {
         selectedRef.current = selectedId
     }, [selectedId])
+
+    useEffect(() => {
+        keepComposerCurrentLineCentered(composerRef.current)
+    }, [draft])
 
     useEffect(() => {
         attachmentRef.current = attachment
@@ -752,7 +757,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!bootstrap.schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
                                 <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setInteractionError(null) }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
                             </div>
-                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canSend ? `Message ${selected.title}` : "Add a WhatsApp number to this relationship"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto bg-transparent py-1.5 text-sm leading-5 outline-none disabled:cursor-not-allowed" /></div>
+                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canSend ? `Message ${selected.title}` : "Add a WhatsApp number to this relationship"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto bg-transparent py-2 text-sm leading-5 outline-none disabled:cursor-not-allowed" /></div>
                             <button data-icon-button type="button" onClick={() => void sendMessage()} disabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !bootstrap.schemaReady || !selected.canSend} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>

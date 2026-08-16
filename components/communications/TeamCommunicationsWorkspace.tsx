@@ -6,6 +6,7 @@ import { Avatar } from "@/components/account/Avatar"
 import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
+import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
@@ -169,6 +170,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const peopleById = useMemo(() => new Map(bootstrap.people.map((person) => [person.id, person])), [bootstrap.people])
 
     useEffect(() => { selectedRef.current = selectedId }, [selectedId])
+    useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
 
     useEffect(() => {
         if (!actionMessageId) return
@@ -427,7 +429,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
                                 <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setError(null) }} disabled={!selected.canWrite} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
                             </div>
-                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto bg-transparent py-1.5 text-sm leading-5 outline-none" /></div>
+                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto bg-transparent py-2 text-sm leading-5 outline-none" /></div>
                             <button data-icon-button type="button" onClick={() => void sendMessage()} disabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>

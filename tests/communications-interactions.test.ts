@@ -78,9 +78,10 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, page, types, icons, shell] = await Promise.all([
+    const [clients, team, composerScroll, page, types, icons, shell] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/composer-scroll.ts", "utf8"),
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("lib/communications/types.ts", "utf8"),
         readFile("components/communications/MessageInteractionIcons.tsx", "utf8"),
@@ -115,8 +116,11 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(team, /h-4 w-4 shrink-0 aspect-square/)
     assert.match(clients, /flex shrink-0 items-center -space-x-1/)
     assert.match(team, /flex shrink-0 items-center -space-x-1/)
-    assert.match(clients, /h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto[^\"]*py-1\.5/)
-    assert.match(team, /h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto[^\"]*py-1\.5/)
+    assert.match(clients, /h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto[^\"]*py-2/)
+    assert.match(team, /h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto[^\"]*py-2/)
+    assert.match(clients, /keepComposerCurrentLineCentered\(composerRef\.current\)/)
+    assert.match(team, /keepComposerCurrentLineCentered\(composerRef\.current\)/)
+    assert.match(composerScroll, /textarea\.scrollTop = Math\.max\(0, textarea\.scrollHeight - textarea\.clientHeight\)/)
     assert.match(clients, /<button data-icon-button type="button" onClick=\{\(\) => void sendMessage\(\)\}/)
     assert.match(team, /<button data-icon-button type="button" onClick=\{\(\) => void sendMessage\(\)\}/)
     assert.match(team, /Shared across client and team chats\./)
