@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect, useState } from "react"
 import { Avatar } from "@/components/account/Avatar"
+import { Status } from "@/components/ui"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 
 type Profile = {
@@ -51,14 +52,14 @@ export function WorkspaceMemberProfileModal({ workspaceSlug, userId, initialProf
             {error ? <div className="px-6 pb-8 text-center"><p className="text-sm text-red-300">{error}</p></div> : !profile && initialProfile ? <section className="flex flex-col items-center px-6 pb-10 text-center">
                 <Avatar src={initialProfile.avatarSrc} name={initialProfile.displayName} className="h-28 w-28 border-2 border-neutral-700" />
                 <h2 id="workspace-member-profile-title" className="mt-5 max-w-full break-words text-4xl font-bold tracking-tight">{initialProfile.displayName}</h2>
-                <p className="mt-4 text-sm text-neutral-500">Loading profile details…</p>
+                <Status label={active ? "Online" : "Last seen - loading…"} tone={active ? "green" : "grey"} className="mt-4" />
             </section> : !profile ? <div className="px-6 pb-10 text-center text-sm text-neutral-500">Loading profile…</div> : <>
                 <section className="flex flex-col items-center px-6 pb-6 text-center">
                     <Avatar src={profile.avatarSrc} name={profile.displayName} className="h-28 w-28 border-2 border-neutral-700" />
                     <h2 id="workspace-member-profile-title" className="mt-5 max-w-full break-words text-4xl font-bold tracking-tight">{profile.displayName}</h2>
                     {profile.isSelf && profile.username ? <p className="mt-2 text-sm text-neutral-500">@{profile.username}</p> : null}
                     <p className="mt-2 max-w-full break-all text-sm text-neutral-300">{profile.email}</p>
-                    <div className={`mt-4 inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${active ? "bg-emerald-500/15 text-emerald-300" : "bg-neutral-900 text-neutral-400"}`}><span className={`h-2 w-2 rounded-full ${active ? "bg-emerald-400" : "bg-neutral-600"}`} />{active ? "Active" : profile.lastSeenAt ? `Last seen ${formatRelativeTime(profile.lastSeenAt)}` : "Last seen unavailable"}</div>
+                    <Status label={active ? "Online" : profile.lastSeenAt ? `Last seen - ${formatRelativeTime(profile.lastSeenAt)}` : "Last seen - unavailable"} tone={active ? "green" : "grey"} className="mt-4" />
                     {profile.isSelf ? <Link href={`/users/${profile.username}/edit`} className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black">Edit profile</Link> : <button type="button" onClick={() => onMessage(profile.id)} className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-white px-5 text-sm font-semibold text-black">Message</button>}
                 </section>
                 <section className="border-t border-neutral-800 px-5 py-5">
