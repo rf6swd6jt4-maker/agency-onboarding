@@ -252,7 +252,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const stickerInputRef = useRef<HTMLInputElement | null>(null)
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
     const attachmentRef = useRef<CommunicationAttachment | null>(null)
-    const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean } | null>(null)
+    const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; verticalAtMax: number } | null>(null)
     const swipedMessageRef = useRef<string | null>(null)
     const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
@@ -689,7 +689,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                         onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionMessageId((current) => current === message.id ? null : message.id) } }}
                                         onTouchStart={(event) => {
                                             const touch = event.touches[0]
-                                            swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false } : null
+                                            swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false, maxDeltaX: 0, verticalAtMax: 0 } : null
                                             if (touch) setSwipePosition({ id: message.id, offset: 0, active: true })
                                         }}
                                         onTouchMove={(event) => {
@@ -698,7 +698,11 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                             if (!start || start.id !== message.id || !touch || start.cancelled) return
                                             const deltaX = touch.clientX - start.x
                                             const deltaY = touch.clientY - start.y
-                                            if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 8) {
+                                            if (deltaX > start.maxDeltaX) {
+                                                start.maxDeltaX = deltaX
+                                                start.verticalAtMax = Math.abs(deltaY)
+                                            }
+                                            if (Math.abs(deltaY) > Math.abs(deltaX) * 1.5 && Math.abs(deltaY) > 12) {
                                                 start.cancelled = true
                                                 setSwipePosition({ id: message.id, offset: 0, active: false })
                                                 return
@@ -712,7 +716,11 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                             const start = swipeStartRef.current
                                             const touch = event.changedTouches[0]
                                             swipeStartRef.current = null
-                                            const completed = Boolean(start && !start.cancelled && touch && touch.clientX - start.x > 58 && Math.abs(touch.clientY - start.y) < 42 && message.providerMessageId)
+                                            if (start && touch && touch.clientX - start.x > start.maxDeltaX) {
+                                                start.maxDeltaX = touch.clientX - start.x
+                                                start.verticalAtMax = Math.abs(touch.clientY - start.y)
+                                            }
+                                            const completed = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42 && message.providerMessageId)
                                             setSwipePosition({ id: message.id, offset: 0, active: false })
                                             window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 180)
                                             if (completed) {
@@ -726,7 +734,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                             window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
                                         }}
                                         style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
-                                        className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 max-w-full touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
+                                        className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
                                     >
                                         <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : "mb-0.5 leading-none text-neutral-500"} text-[10px] font-semibold`}>{sender}</p>
                                         {message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
