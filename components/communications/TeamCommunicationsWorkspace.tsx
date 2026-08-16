@@ -5,7 +5,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Avatar } from "@/components/account/Avatar"
 import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
-import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
+import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
+import { MessageComposer } from "@/components/communications/MessageComposer"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
@@ -32,7 +33,6 @@ function NativeDeliveryTicks({ message, read }: { message: NativeMessage; read: 
 
 function SearchIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-2"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg> }
 function BackIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m15 6-6 6 6 6" /></svg> }
-function SendIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m4 4 17 8-17 8 3-8-3-8Z" /><path d="M7 12h14" /></svg> }
 function AttachmentIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m8.5 12.5 6.8-6.8a3 3 0 0 1 4.2 4.2l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9" /></svg> }
 function StickerIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="M5 3h10a4 4 0 0 1 4 4v7l-7 7H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /><path d="M12 21v-5a2 2 0 0 1 2-2h5" /><path d="M7 9h.01M15 9h.01M8 13c1.5 1.2 6.5 1.2 8 0" /></svg> }
 function TeamIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><circle cx="8" cy="8" r="3" /><circle cx="16" cy="9" r="2.5" /><path d="M3 19c0-3 2-5 5-5s5 2 5 5" /><path d="M13 15c1-.8 2-1.2 3.5-1 2.5.3 4 2.1 4 4.5" /></svg> }
@@ -169,12 +169,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     useEffect(() => { selectedRef.current = selectedId }, [selectedId])
     useEffect(() => { const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0); return () => window.clearTimeout(timer) }, [bootstrap.workspaceId])
     useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
-    useEffect(() => {
-        const resizeComposer = () => keepComposerCurrentLineCentered(composerRef.current)
-        window.addEventListener("resize", resizeComposer)
-        return () => window.removeEventListener("resize", resizeComposer)
-    }, [])
-
+    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current), [selectedId])
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
 
     useEffect(() => {
@@ -477,22 +472,26 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>
                     }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
-                    <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">
+                    <footer className="relative z-10 shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">{selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"}</span><span className="block truncate text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onClick={() => setReplyingTo(null)} className="h-8 w-8 text-neutral-500">×</button></div> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
                         {stickerTrayOpen ? <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-neutral-800 bg-black p-3 shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold text-neutral-200">Stickers</p><p className="mt-0.5 text-[10px] text-neutral-600">Shared across client and team chats.</p></div><button type="button" onClick={() => setStickerTrayOpen(false)} aria-label="Close sticker tray" className="h-8 w-8 text-neutral-500 hover:text-white">×</button></div><div className="mt-3 grid max-h-52 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-7">{stickers.map((sticker) => <button key={sticker.id} type="button" onClick={() => void sendSticker(sticker)} disabled={!selected.canWrite} title={sticker.fileName} className="flex aspect-square items-center justify-center rounded-xl bg-neutral-950 p-1.5 hover:bg-neutral-900 disabled:opacity-40"><Image unoptimized src={sticker.url} alt={sticker.fileName} width={512} height={512} className="h-full w-full object-contain" /></button>)}<button type="button" onClick={() => stickerInputRef.current?.click()} disabled={stickerUploadState === "uploading"} className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-white disabled:opacity-40"><span className="text-2xl">+</span><span className="mt-1 text-[9px]">{stickerUploadState === "uploading" ? "Converting…" : "Add sticker"}</span></button></div></div> : null}
                         {error ? <div className="mx-auto mb-2 flex max-w-3xl justify-between rounded-lg bg-red-950/60 px-3 py-2 text-xs text-red-300"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
-                        <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-xl border border-neutral-800 bg-black px-3 py-1 focus-within:border-neutral-600">
-                            <input ref={attachmentInputRef} type="file" accept="image/jpeg,image/png,video/mp4,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
-                            <input ref={stickerInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadSticker(file) }} />
-                            <div className="flex shrink-0 items-center -space-x-1">
-                                <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
-                                <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setError(null) }} disabled={!selected.canWrite} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
-                            </div>
-                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 w-full resize-none overflow-y-hidden bg-transparent py-2 text-sm leading-5 outline-none" /></div>
-                            <button data-icon-button type="button" onClick={() => void sendMessage()} disabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
-                        </div>
-                        <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>
+                        <input ref={attachmentInputRef} type="file" accept="image/jpeg,image/png,video/mp4,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
+                        <input ref={stickerInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadSticker(file) }} />
+                        <MessageComposer
+                            textareaRef={composerRef}
+                            draft={draft}
+                            placeholder={selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}
+                            disabled={!selected.canWrite}
+                            sendDisabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"}
+                            onDraftChange={setDraft}
+                            onSend={() => void sendMessage()}
+                            leadingActions={<>
+                                <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><AttachmentIcon /></button>
+                                <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setError(null) }} disabled={!selected.canWrite} aria-label="Open sticker tray" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><StickerIcon /></button>
+                            </>}
+                        />
                     </footer>
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950"><TeamIcon /></div><h2 className="mt-4 text-sm font-semibold">Select a team conversation</h2><p className="mt-2 text-xs text-neutral-600">Direct messages and team chats update without reloading.</p></div></div>}
             </div>

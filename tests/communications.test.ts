@@ -2,12 +2,12 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
-test("Communications is a fixed local-first client chat workspace", async () => {
+test("Communications is an opaque local-first client chat workspace", async () => {
     const [page, workspace] = await Promise.all([
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
     ])
-    assert.match(page, /fixed inset-0 overflow-hidden bg-black/)
+    assert.match(page, /absolute inset-0 overflow-hidden bg-black/)
     assert.doesNotMatch(page, /WorkspaceBanner|PanelTabs|area=/)
     assert.match(page, /relationship\.status !== "archived"/)
     assert.doesNotMatch(page, /relationship\.status !== "archived" && relationship\.client_id/)
