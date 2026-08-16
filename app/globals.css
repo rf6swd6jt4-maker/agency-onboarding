@@ -49,8 +49,13 @@ html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   background: #000;
 }
 
+html[data-workspace-viewport-locked="true"] [data-workspace-topbar],
+html[data-workspace-viewport-locked="true"] [data-workspace-tabbar] {
+  transform: translate3d(0, var(--workspace-visual-viewport-top, 0px), 0);
+}
+
 html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
-  top: 6.25rem;
+  top: calc(6.25rem + var(--workspace-visual-viewport-top, 0px));
   bottom: auto;
   height: max(0px, calc(var(--workspace-visual-viewport-height, 100dvh) - 6.25rem));
 }
