@@ -27,11 +27,12 @@ test("canonical platform lists use the shared header and two-row list primitives
 })
 
 test("Communications uses its dedicated responsive conversation workspace instead of canonical List", async () => {
-    const [page, panel, workspace, teamWorkspace] = await Promise.all([
+    const [page, panel, workspace, teamWorkspace, resizableColumns] = await Promise.all([
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
     ])
 
     assert.doesNotMatch(page, /WorkspaceBanner|PanelTabHeader|PanelTabs/)
@@ -52,7 +53,8 @@ test("Communications uses its dedicated responsive conversation workspace instea
     assert.doesNotMatch(workspace, /href=\{href\}/)
     assert.doesNotMatch(workspace, /@\/lib\/relationships/, "the client workspace must not import the server-only relationships module")
     assert.match(teamWorkspace, /h-dvh min-h-0/)
-    assert.match(teamWorkspace, /lg:grid-cols/)
+    assert.match(teamWorkspace, /<ResizableConversationColumns>/)
+    assert.match(resizableColumns, /lg:grid-cols/)
     assert.match(teamWorkspace, /lg:hidden/)
     assert.match(teamWorkspace, /selectConversation\(conversation\.id\)/)
 })

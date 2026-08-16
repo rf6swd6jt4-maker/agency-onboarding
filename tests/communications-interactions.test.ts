@@ -79,7 +79,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composerScroll, page, types, icons, shell] = await Promise.all([
+    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
@@ -87,11 +87,13 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("lib/communications/types.ts", "utf8"),
         readFile("components/communications/MessageInteractionIcons.tsx", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
         assert.match(source, /touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain/)
-        assert.match(source, /mx-auto flex w-full min-w-0 max-w-3xl/)
+        assert.match(source, /mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none/)
+        assert.match(source, /<ResizableConversationColumns>/)
         assert.match(source, /onTouchCancel/)
         assert.match(source, /max-w-\[80%\]/)
         assert.match(source, /min-w-0 touch-pan-y cursor-pointer/)
@@ -106,6 +108,12 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(team, /start\.minDeltaX < -52/)
     assert.match(team, /start\.verticalAtMin < 42/)
     assert.match(team, /start\.maxDeltaX > 52/)
+    assert.match(resizableColumns, /MIN_LIST_WIDTH = 288/)
+    assert.match(resizableColumns, /MAX_LIST_WIDTH = 448/)
+    assert.match(resizableColumns, /rect\.width \* 0\.42/)
+    assert.match(resizableColumns, /aria-label="Resize chat list"/)
+    assert.match(resizableColumns, /setPointerCapture\(event\.pointerId\)/)
+    assert.match(resizableColumns, /hidden w-4 .*lg:flex/)
     assert.match(team, /selected\.kind === "team" \? <button/)
     assert.match(team, /!own && selected\.kind === "team" \? <button/)
     assert.match(team, /NativeDeliveryTicks/)

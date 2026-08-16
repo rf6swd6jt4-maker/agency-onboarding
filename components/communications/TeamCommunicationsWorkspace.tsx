@@ -5,6 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Avatar } from "@/components/account/Avatar"
 import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
+import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -344,7 +345,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
 
     return <section aria-label="Team communications" className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black">
         {!bootstrap.schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">Apply the Teams database migration to enable native messaging.</div> : null}
-        <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[22rem_minmax(0,1fr)]">
+        <ResizableConversationColumns>
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>
                 <div className="shrink-0 border-b border-neutral-800 p-3">
                     <div className="flex items-center gap-1"><div role="tablist" className="flex items-center gap-1"><button type="button" role="tab" aria-selected="false" onClick={onOpenClients} className="h-8 rounded-lg px-3 text-xs font-medium text-neutral-400 hover:bg-neutral-900 hover:text-white">Clients</button><button type="button" role="tab" aria-selected="true" className="inline-flex h-8 items-center gap-2 rounded-lg bg-neutral-800 px-3 text-xs font-semibold text-white">Team<span className="text-[10px] text-neutral-400">{visible.length}</span></button></div>{bootstrap.canManageTeams ? <button type="button" onClick={() => setEditingTeam(null)} aria-label="Create team" title="Create team" className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-full text-xl text-neutral-400 hover:bg-neutral-900 hover:text-white">+</button> : null}</div>
@@ -369,7 +370,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.archived ? "Archived · read-only" : selected.subtitle}</span></span>
                         </button>
                     </header>
-                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0 }} className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0 }} className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null
@@ -437,7 +438,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                     </footer>
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950"><TeamIcon /></div><h2 className="mt-4 text-sm font-semibold">Select a team conversation</h2><p className="mt-2 text-xs text-neutral-600">Direct messages and team chats update without reloading.</p></div></div>}
             </div>
-        </div>
+        </ResizableConversationColumns>
         {editingTeam !== undefined ? <TeamEditor bootstrap={{ ...bootstrap, teams }} team={editingTeam} onClose={() => setEditingTeam(undefined)} onSaved={async () => { await refresh(selectedRef.current) }} /> : null}
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
     </section>
