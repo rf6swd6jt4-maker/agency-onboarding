@@ -55,4 +55,6 @@ test("Communications uploads to R2 and sends verified media through Meta", async
     assert.match(voiceNotePlayer, /type="range"/)
     assert.match(voiceNotePlayer, /playbackPositions\.set\(src/)
     assert.match(voiceNotePlayer, /playbackPositions\.delete\(src\)/)
+    assert.match(voiceNotePlayer, /bg-transparent text-white/)
+    assert.match(voiceNotePlayer, /index \/ WAVEFORM\.length <= progress \? "bg-white"/)
 })

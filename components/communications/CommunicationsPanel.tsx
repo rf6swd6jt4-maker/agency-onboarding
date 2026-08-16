@@ -23,7 +23,9 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
         }
         window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
     }, [])
-    return mode === "team"
-        ? <TeamCommunicationsWorkspace bootstrap={nativeBootstrap} onOpenClients={() => setMode("clients")} />
-        : <CommunicationsWorkspace bootstrap={clientBootstrap} onOpenTeam={() => setMode("team")} />
+    return <div data-communications-panel className="fixed inset-0 isolate overflow-hidden bg-black">
+        {mode === "team"
+            ? <TeamCommunicationsWorkspace bootstrap={nativeBootstrap} onOpenClients={() => setMode("clients")} />
+            : <CommunicationsWorkspace bootstrap={clientBootstrap} onOpenTeam={() => setMode("team")} />}
+    </div>
 }

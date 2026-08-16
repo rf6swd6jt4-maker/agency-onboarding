@@ -7,7 +7,7 @@ test("Communications is a fixed local-first client chat workspace", async () => 
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
     ])
-    assert.match(page, /h-dvh overflow-hidden/)
+    assert.match(page, /fixed inset-0 overflow-hidden bg-black/)
     assert.doesNotMatch(page, /WorkspaceBanner|PanelTabs|area=/)
     assert.match(page, /relationship\.status !== "archived"/)
     assert.doesNotMatch(page, /relationship\.status !== "archived" && relationship\.client_id/)

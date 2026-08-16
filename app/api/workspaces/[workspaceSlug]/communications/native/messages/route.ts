@@ -1,5 +1,5 @@
 import { nativeAttachmentFromInput, nativeMessageFromRow, assertNativeConversationAccess } from "@/lib/teams/server"
-import { deleteOnboardingUploads, verifyNativeMessageUpload } from "@/lib/onboarding/uploads"
+import { deleteOnboardingUploads, inspectStoredCommunicationSticker, verifyNativeMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -39,8 +39,15 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     let storedAttachment = attachment
     if (storedAttachment) {
         try {
-            const verified = await verifyNativeMessageUpload({ workspaceId: workspace.id, conversationId, storagePath: storedAttachment.storagePath, mimeType: storedAttachment.mimeType })
-            storedAttachment = { ...storedAttachment, kind: verified.kind, mimeType: verified.contentType, size: verified.size }
+            if (storedAttachment.kind === "sticker") {
+                const { data: savedSticker } = await supabaseAdmin.from("communication_stickers").select("id").eq("workspace_id", workspace.id).eq("storage_path", storedAttachment.storagePath).maybeSingle()
+                if (!savedSticker) throw new Error("Sticker not found in this workspace.")
+                const verified = await inspectStoredCommunicationSticker({ workspaceId: workspace.id, storagePath: storedAttachment.storagePath, mimeType: storedAttachment.mimeType })
+                storedAttachment = { ...storedAttachment, kind: "sticker", mimeType: verified.contentType, size: verified.size }
+            } else {
+                const verified = await verifyNativeMessageUpload({ workspaceId: workspace.id, conversationId, storagePath: storedAttachment.storagePath, mimeType: storedAttachment.mimeType })
+                storedAttachment = { ...storedAttachment, kind: verified.kind, mimeType: verified.contentType, size: verified.size }
+            }
         } catch (error) {
             return Response.json({ error: error instanceof Error ? error.message : "Could not verify attachment." }, { status: 400 })
         }
@@ -67,6 +74,6 @@ export async function DELETE(request: Request, context: { params: Promise<{ work
     const { error } = await supabaseAdmin.from("workspace_native_messages").delete().eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).eq("sender_user_id", user.id)
     if (error) return Response.json({ error: error.message }, { status: 503 })
     const attachment = nativeAttachmentFromInput(message.attachment)
-    if (attachment?.storagePath) await deleteOnboardingUploads([attachment.storagePath]).catch(() => undefined)
+    if (attachment?.storagePath && attachment.kind !== "sticker") await deleteOnboardingUploads([attachment.storagePath]).catch(() => undefined)
     return Response.json({ deleted: true })
 }

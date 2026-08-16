@@ -79,10 +79,10 @@ export function VoiceNotePlayer({ src, fileName, light = false }: { src: string;
             onError={() => setFailed(true)}
         />
         <div className="flex items-center gap-2.5">
-            <button type="button" onClick={() => void togglePlayback()} aria-label={`${playing ? "Pause" : "Play"} ${fileName}`} className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${light ? "bg-neutral-900 text-white" : "bg-white text-black"}`}><PlayIcon playing={playing} /></button>
+            <button type="button" onClick={() => void togglePlayback()} aria-label={`${playing ? "Pause" : "Play"} ${fileName}`} className="inline-flex h-9 w-9 shrink-0 items-center justify-center bg-transparent text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"><PlayIcon playing={playing} /></button>
             <div className="min-w-0 flex-1">
                 <div className="relative flex h-7 items-center gap-[2px]" aria-hidden="true">
-                    {WAVEFORM.map((height, index) => <span key={index} style={{ height }} className={`min-w-px flex-1 rounded-full transition-colors ${index / WAVEFORM.length <= progress ? "bg-sky-500" : light ? "bg-neutral-400" : "bg-neutral-600"}`} />)}
+                    {WAVEFORM.map((height, index) => <span key={index} style={{ height }} className={`min-w-px flex-1 rounded-full transition-colors ${index / WAVEFORM.length <= progress ? "bg-white" : light ? "bg-neutral-400" : "bg-neutral-600"}`} />)}
                     <input aria-label={`Seek ${fileName}`} type="range" min={0} max={duration || 0} step={0.1} value={Math.min(currentTime, duration || 0)} onChange={(event) => seek(Number(event.target.value))} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
                 </div>
                 <div className={`mt-0.5 flex items-center justify-between text-[10px] tabular-nums ${failed ? "text-red-500" : light ? "text-neutral-500" : "text-neutral-500"}`}><span>{failed ? "Audio unavailable" : formatPlaybackTime(currentTime)}</span><span>{formatPlaybackTime(duration)}</span></div>

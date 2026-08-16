@@ -61,7 +61,7 @@ test("team editing enforces required teams and complete responsibility maps", as
     assert.match(editor, /Archived conversation/)
 })
 
-test("native messaging supports realtime messages, replies, reactions, reads, and files", async () => {
+test("native messaging supports realtime messages, replies, reactions, reads, files, and shared stickers", async () => {
     const [workspace, messages, reactions, reads, attachments, media] = await Promise.all([
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
@@ -85,4 +85,8 @@ test("native messaging supports realtime messages, replies, reactions, reads, an
     assert.match(reads, /current\.last_read_at >= message\.created_at/)
     assert.match(attachments, /createSignedNativeMessageUpload/)
     assert.match(media, /assertNativeConversationAccess\(conversationId, user\.id, "read"\)/)
+    assert.match(workspace, /sendSticker/)
+    assert.match(workspace, /Shared across client and team chats\./)
+    assert.match(messages, /inspectStoredCommunicationSticker/)
+    assert.match(messages, /communication_stickers/)
 })

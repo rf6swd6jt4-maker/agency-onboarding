@@ -1,5 +1,5 @@
 import { communicationAttachmentFromValue } from "@/lib/communications/attachments"
-import { loadCommunicationPeople } from "@/lib/communications/server"
+import { loadCommunicationPeople, loadCommunicationStickers } from "@/lib/communications/server"
 import { maintenanceCategoryLabel, MAINTENANCE_CATEGORIES } from "@/lib/admin/maintenance"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -88,15 +88,17 @@ export async function loadNativeCommunications(input: {
     requestedConversationId?: string | null
     requestedDmUserId?: string | null
 }): Promise<NativeCommunicationsBootstrap> {
-    const [{ teams, services, schemaReady }, peopleResult] = await Promise.all([
+    const [{ teams, services, schemaReady }, peopleResult, stickerResult] = await Promise.all([
         loadWorkspaceTeams(input.workspaceId),
         loadCommunicationPeople(input.workspaceId, input.currentUserId),
+        loadCommunicationStickers(input.workspaceId),
     ])
     const base = {
         workspaceId: input.workspaceId,
         workspaceSlug: input.workspaceSlug,
         currentUser: peopleResult.currentUser,
         people: peopleResult.people,
+        stickers: stickerResult.stickers,
         teams,
         services,
         maintenanceCategories: MAINTENANCE_CATEGORIES.map((key) => ({ key, label: maintenanceCategoryLabel(key) })),
@@ -148,8 +150,7 @@ export async function loadNativeCommunications(input: {
 }
 
 export function nativeAttachmentFromInput(value: unknown): CommunicationAttachment | null {
-    const attachment = communicationAttachmentFromValue(value)
-    return attachment?.kind === "sticker" ? null : attachment
+    return communicationAttachmentFromValue(value)
 }
 
 export async function loadWorkspaceMemberProfiles(workspaceId: string): Promise<Array<CommunicationPerson & { username: string }>> {

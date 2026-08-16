@@ -40,10 +40,8 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name, avatar_path").in("user_id", presenceIds)
         : { data: [] }
     const presenceProfilesById = new Map((presenceProfiles ?? []).map((item) => [item.user_id, item]))
-    const [avatarSrc, workspaceLogoSrc] = await Promise.all([
-        profile?.avatar_path ? createUploadSignedUrl(profile.avatar_path) : null,
-        workspace.logo_path ? createUploadSignedUrl(workspace.logo_path) : null,
-    ])
+    const avatarSrc = profile?.avatar_path ? profileAvatarUrl(username, profile.avatar_path) : null
+    const workspaceLogoSrc = workspace.logo_path ? await createUploadSignedUrl(workspace.logo_path) : null
     const okrPeriodStartDate = new Date()
     const okrPeriodEndDate = new Date(okrPeriodStartDate)
     okrPeriodEndDate.setUTCDate(okrPeriodEndDate.getUTCDate() + 90)

@@ -9,7 +9,7 @@ import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
-import type { CommunicationAttachment } from "@/lib/communications/types"
+import type { CommunicationAttachment, CommunicationSticker } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, WorkspaceTeam } from "@/lib/teams/types"
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥"]
@@ -20,7 +20,7 @@ function text(value: unknown) { return typeof value === "string" && value ? valu
 function messageTime(value: string) { return new Intl.DateTimeFormat("en-IE", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)) }
 function messageDay(value: string) { return new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value)) }
 function sameDay(left: string, right: string) { return new Date(left).toDateString() === new Date(right).toDateString() }
-function attachmentPreview(attachment: CommunicationAttachment | null) { return attachment ? `${attachment.kind === "image" ? "Image" : attachment.kind === "video" ? "Video" : attachment.kind === "audio" ? "Voice note" : "File"}: ${attachment.fileName}` : "" }
+function attachmentPreview(attachment: CommunicationAttachment | null) { return attachment ? `${attachment.kind === "image" ? "Image" : attachment.kind === "video" ? "Video" : attachment.kind === "audio" ? "Voice note" : attachment.kind === "sticker" ? "Sticker" : "File"}: ${attachment.fileName}` : "" }
 function messagePreview(message: NativeMessage) { return message.body || attachmentPreview(message.attachment) || "Message" }
 
 function NativeDeliveryTicks({ message, read }: { message: NativeMessage; read: boolean }) {
@@ -32,9 +32,11 @@ function SearchIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" class
 function BackIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m15 6-6 6 6 6" /></svg> }
 function SendIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m4 4 17 8-17 8 3-8-3-8Z" /><path d="M7 12h14" /></svg> }
 function AttachmentIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m8.5 12.5 6.8-6.8a3 3 0 0 1 4.2 4.2l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9" /></svg> }
+function StickerIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="M5 3h10a4 4 0 0 1 4 4v7l-7 7H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /><path d="M12 21v-5a2 2 0 0 1 2-2h5" /><path d="M7 9h.01M15 9h.01M8 13c1.5 1.2 6.5 1.2 8 0" /></svg> }
 function TeamIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><circle cx="8" cy="8" r="3" /><circle cx="16" cy="9" r="2.5" /><path d="M3 19c0-3 2-5 5-5s5 2 5 5" /><path d="M13 15c1-.8 2-1.2 3.5-1 2.5.3 4 2.1 4 4.5" /></svg> }
 
 function NativeAttachment({ attachment, onOpenImage, light }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void; light: boolean }) {
+    if (attachment.kind === "sticker") return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
     if (attachment.kind === "image") return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} className="max-h-80 h-auto w-full object-contain" /></button>
     if (attachment.kind === "video") return <video src={attachment.url} controls preload="metadata" className="mb-2 max-h-80 w-full rounded-xl bg-black" />
     if (attachment.kind === "audio") return <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} />
@@ -147,6 +149,9 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const [replyingTo, setReplyingTo] = useState<NativeMessage | null>(null)
     const [attachment, setAttachment] = useState<CommunicationAttachment | null>(null)
     const [attachmentState, setAttachmentState] = useState<"idle" | "uploading">("idle")
+    const [stickers, setStickers] = useState(bootstrap.stickers)
+    const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
+    const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
     const [error, setError] = useState<string | null>(null)
     const [actionMessageId, setActionMessageId] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
@@ -155,6 +160,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
+    const stickerInputRef = useRef<HTMLInputElement | null>(null)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean } | null>(null)
     const swipedMessageRef = useRef<string | null>(null)
     const dismissedActionMessageRef = useRef<string | null>(null)
@@ -186,7 +192,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/conversations`)
         const next = await response.json().catch(() => null) as NativeCommunicationsBootstrap | null
         if (!response.ok || !next) throw new Error("Could not refresh team conversations.")
-        setConversations(next.conversations); setTeams(next.teams); setReactions(next.reactions); setReadCursors(next.readCursors)
+        setConversations(next.conversations); setTeams(next.teams); setReactions(next.reactions); setReadCursors(next.readCursors); setStickers(next.stickers)
         setSelectedId((current) => {
             const requested = selectId ?? current
             return requested && next.conversations.some((conversation) => conversation.id === requested) ? requested : null
@@ -265,6 +271,31 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
             setAttachment(prepared.attachment)
         } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.") }
         finally { setAttachmentState("idle"); if (attachmentInputRef.current) attachmentInputRef.current.value = "" }
+    }
+
+    async function uploadSticker(file: File) {
+        if (stickerUploadState === "uploading") return
+        setStickerUploadState("uploading"); setError(null)
+        try {
+            const formData = new FormData(); formData.set("file", file)
+            const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/stickers`, { method: "POST", body: formData })
+            const result = await response.json().catch(() => null) as { sticker?: CommunicationSticker; error?: string } | null
+            if (!response.ok || !result?.sticker) throw new Error(result?.error ?? "Could not add this sticker.")
+            setStickers((current) => current.some((sticker) => sticker.id === result.sticker!.id) ? current : [...current, result.sticker!])
+        } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Could not add this sticker.") }
+        finally { setStickerUploadState("idle"); if (stickerInputRef.current) stickerInputRef.current.value = "" }
+    }
+
+    async function sendSticker(sticker: CommunicationSticker) {
+        if (!selected?.canWrite) return
+        const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
+        const stickerAttachment: CommunicationAttachment = { kind: "sticker", fileName: sticker.fileName, mimeType: "image/webp", size: sticker.size, storagePath: sticker.storagePath, url: sticker.url }
+        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString() }
+        updateConversationMessages(selected.id, [optimistic]); setReplyingTo(null); setStickerTrayOpen(false); setError(null)
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body: "", replyToMessageId: replyTarget?.id, attachment: stickerAttachment }) }).catch(() => null)
+        const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
+        if (result?.message) updateConversationMessages(selected.id, [result.message])
+        else { setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((message) => message.clientRequestId !== clientRequestId) } : conversation)); setError(result?.error ?? "Could not send sticker.") }
     }
 
     async function sendMessage() {
@@ -346,6 +377,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                         const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                         const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                         const canDelete = own && message.clientRequestId !== message.id
+                        const isSticker = message.attachment?.kind === "sticker"
                         return <Fragment key={message.id}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                             <div data-message-interaction={message.id} className={`relative flex items-end ${own ? "justify-end" : "justify-start"}`}>
@@ -353,6 +385,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                                 <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                 {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
                                 {actionMessageId === message.id && selected.canWrite ? <div data-message-action-popup className={`absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}><NativeReactionTray current={ownReaction?.emoji ?? null} onReply={() => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() }} onDelete={canDelete ? () => void deleteMessage(message) : null} onReact={(emoji) => void sendReaction(message, emoji)} side={own ? "right" : "left"} /></div> : null}
+                                {!own && selected.kind === "team" ? <button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full" /></button> : null}
                                 <article
                                     role="button"
                                     tabIndex={0}
@@ -366,29 +399,33 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                                     onTouchMove={(event) => { const start = swipeStartRef.current; const touch = event.touches[0]; if (!start || start.id !== message.id || !touch || start.cancelled) return; const deltaX = touch.clientX - start.x; const deltaY = touch.clientY - start.y; if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 8) { start.cancelled = true; setSwipePosition({ id: message.id, offset: 0, active: false }); return } const constrained = canDelete ? Math.max(-82, Math.min(82, deltaX * 0.78)) : Math.max(0, Math.min(82, deltaX * 0.78)); if (Math.abs(constrained) > 2) { event.preventDefault(); setSwipePosition({ id: message.id, offset: constrained, active: true }) } }}
                                     onTouchEnd={(event) => { const start = swipeStartRef.current; const touch = event.changedTouches[0]; swipeStartRef.current = null; const deltaX = start && touch ? touch.clientX - start.x : 0; const vertical = start && touch ? Math.abs(touch.clientY - start.y) : Infinity; const replyGesture = Boolean(start && !start.cancelled && deltaX > 58 && vertical < 42); const deleteGesture = Boolean(start && !start.cancelled && canDelete && deltaX < -58 && vertical < 42); setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220); if (replyGesture) { swipedMessageRef.current = message.id; setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } else if (deleteGesture) { swipedMessageRef.current = message.id; void deleteMessage(message) } }}
                                     style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
-                                    className={`max-w-[88%] cursor-pointer rounded-2xl px-3.5 py-2.5 text-sm shadow-sm outline-none sm:max-w-[72%] ${own ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`}
+                                    className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${own ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} cursor-pointer outline-none`}
                                 >
-                                    {selected.kind === "team" ? <button type="button" onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(message.senderUserId) }} className="mb-0.5 block text-[10px] font-semibold leading-none text-neutral-500 hover:underline">{own ? "You" : sender?.name ?? "Team member"}</button> : null}
+                                    {selected.kind === "team" ? <button type="button" onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(message.senderUserId) }} className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500 hover:underline`}>{own ? "You" : sender?.name ?? "Team member"}</button> : null}
                                     {reply ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${own ? "bg-black/10" : "bg-black/35"}`}>{selected.kind === "team" ? <p className="truncate text-[10px] font-semibold opacity-70">{reply.senderUserId === bootstrap.currentUser.id ? "You" : peopleById.get(reply.senderUserId)?.name ?? "Team member"}</p> : null}<p className={`${selected.kind === "team" ? "mt-0.5 " : ""}truncate text-xs opacity-65`}>{messagePreview(reply)}</p></div> : null}
                                     {message.attachment ? <NativeAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={own} /> : null}
                                     {message.body ? <MessageText body={message.body} /> : null}
-                                    <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${own ? "text-neutral-500" : "text-neutral-600"}`}>
+                                    {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
+                                    <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : own ? "text-neutral-500" : "text-neutral-600"}`}>
                                         <span className="flex min-w-0 items-center -space-x-1">{selected.kind === "team" ? readers.map((person) => <button type="button" key={person.id} onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(person.id) }} title={`Read by ${person.name}`} aria-label={`Open ${person.name} profile`} className="relative inline-flex h-4 min-h-4 w-4 min-w-4 max-w-4 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full border border-black p-0 leading-none"><Avatar src={person.avatarSrc} name={person.name} className="absolute inset-0 !h-4 !w-4 aspect-square object-cover" /></button>) : null}</span>
                                         <span className="flex shrink-0 items-center gap-1.5"><time>{messageTime(message.createdAt)}</time>{own ? <NativeDeliveryTicks message={message} read={readers.length > 0} /> : null}</span>
                                     </div>
                                 </article>
                             </div>
-                            {messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
+                            {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>
                     }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>
                     <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">{selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"}</span><span className="block truncate text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onClick={() => setReplyingTo(null)} className="h-8 w-8 text-neutral-500">×</button></div> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
+                        {stickerTrayOpen ? <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-neutral-800 bg-black p-3 shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold text-neutral-200">Stickers</p><p className="mt-0.5 text-[10px] text-neutral-600">Shared across client and team chats.</p></div><button type="button" onClick={() => setStickerTrayOpen(false)} aria-label="Close sticker tray" className="h-8 w-8 text-neutral-500 hover:text-white">×</button></div><div className="mt-3 grid max-h-52 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-7">{stickers.map((sticker) => <button key={sticker.id} type="button" onClick={() => void sendSticker(sticker)} disabled={!selected.canWrite} title={sticker.fileName} className="flex aspect-square items-center justify-center rounded-xl bg-neutral-950 p-1.5 hover:bg-neutral-900 disabled:opacity-40"><Image unoptimized src={sticker.url} alt={sticker.fileName} width={512} height={512} className="h-full w-full object-contain" /></button>)}<button type="button" onClick={() => stickerInputRef.current?.click()} disabled={stickerUploadState === "uploading"} className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-white disabled:opacity-40"><span className="text-2xl">+</span><span className="mt-1 text-[9px]">{stickerUploadState === "uploading" ? "Converting…" : "Add sticker"}</span></button></div></div> : null}
                         {error ? <div className="mx-auto mb-2 flex max-w-3xl justify-between rounded-lg bg-red-950/60 px-3 py-2 text-xs text-red-300"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
                         <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-xl border border-neutral-800 bg-black px-3 py-2 focus-within:border-neutral-600">
                             <input ref={attachmentInputRef} type="file" accept="image/jpeg,image/png,video/mp4,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
+                            <input ref={stickerInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadSticker(file) }} />
                             <button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
-                            <textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} placeholder={selected.canWrite ? `Message ${selected.title}` : "Archived conversation"} className="max-h-28 min-h-9 min-w-0 flex-1 resize-none bg-transparent py-2 text-sm leading-5 outline-none placeholder:text-neutral-600" />
+                            <button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setError(null) }} disabled={!selected.canWrite} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
+                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-2 truncate text-sm leading-5 text-neutral-600">{selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} className="relative max-h-28 min-h-9 w-full resize-none bg-transparent py-2 text-sm leading-5 outline-none" /></div>
                             <button type="button" onClick={() => void sendMessage()} disabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>

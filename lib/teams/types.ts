@@ -1,4 +1,4 @@
-import type { ClientConversation, CommunicationAttachment, CommunicationPerson } from "@/lib/communications/types"
+import type { ClientConversation, CommunicationAttachment, CommunicationPerson, CommunicationSticker } from "@/lib/communications/types"
 
 export type WorkspaceTeamKind = "admins" | "maintenance" | "custom"
 
@@ -72,6 +72,7 @@ export type NativeCommunicationsBootstrap = {
     teams: WorkspaceTeam[]
     reactions: NativeReaction[]
     readCursors: NativeReadCursor[]
+    stickers: CommunicationSticker[]
     services: Array<{ id: string; name: string }>
     maintenanceCategories: Array<{ key: string; label: string }>
     canManageTeams: boolean
