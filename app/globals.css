@@ -26,6 +26,32 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html[data-workspace-viewport-locked="true"],
+html[data-communications-viewport-locked="true"] {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+}
+
+html[data-workspace-viewport-locked="true"] body,
+html[data-communications-viewport-locked="true"] body {
+  position: fixed;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #000;
+}
+
+html[data-workspace-viewport-locked="true"] [data-workspace-shell-root],
+html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels],
+html[data-communications-viewport-locked="true"] [data-communications-panel] {
+  overscroll-behavior: none;
+  background: #000;
+}
+
 @media (min-width: 768px) {
   body[data-workspace-sidebar-open="true"] [data-workspace-tabbar] {
     left: var(--workspace-sidebar-width);

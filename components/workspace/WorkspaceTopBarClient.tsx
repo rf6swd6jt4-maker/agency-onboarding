@@ -1102,9 +1102,23 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (!shellRoot || !host) return
         const hiddenSiblings = Array.from(host.children).filter((element): element is HTMLElement => element instanceof HTMLElement && element !== shellRoot)
         const previousOverflow = document.body.style.overflow
+        const root = document.documentElement
+        const previousScroll = { left: window.scrollX, top: window.scrollY }
+        let scrollFrame = 0
+        const holdWorkspaceViewport = () => {
+            window.cancelAnimationFrame(scrollFrame)
+            scrollFrame = window.requestAnimationFrame(() => {
+                if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0)
+            })
+        }
         const previousStates = hiddenSiblings.map((element) => ({ element, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
         document.body.dataset.workspaceTabsHosted = "true"
+        root.dataset.workspaceViewportLocked = "true"
+        window.addEventListener("scroll", holdWorkspaceViewport, { passive: true })
+        window.visualViewport?.addEventListener("scroll", holdWorkspaceViewport)
+        window.visualViewport?.addEventListener("resize", holdWorkspaceViewport)
+        holdWorkspaceViewport()
         window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
         hiddenSiblings.forEach((element) => {
             element.inert = true
@@ -1112,8 +1126,14 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         })
 
         return () => {
+            window.cancelAnimationFrame(scrollFrame)
+            window.removeEventListener("scroll", holdWorkspaceViewport)
+            window.visualViewport?.removeEventListener("scroll", holdWorkspaceViewport)
+            window.visualViewport?.removeEventListener("resize", holdWorkspaceViewport)
             document.body.style.overflow = previousOverflow
             delete document.body.dataset.workspaceTabsHosted
+            delete root.dataset.workspaceViewportLocked
+            window.scrollTo(previousScroll.left, previousScroll.top)
             window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
             previousStates.forEach(({ element, inert, ariaHidden }) => {
                 element.inert = inert

@@ -90,11 +90,12 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar] = await Promise.all([
+    const [clients, team, composerScroll, page, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
+        readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
         readFile("lib/communications/types.ts", "utf8"),
         readFile("components/communications/MessageInteractionIcons.tsx", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
@@ -123,6 +124,14 @@ test("message interactions keep the approved mobile and profile parity", async (
         assert.match(source, /betelgeze-reaction-popup-enter/)
     }
     assert.match(team, /data-message-action-popup/)
+    assert.match(panel, /window\.frameElement as HTMLElement \| null/)
+    assert.match(panel, /viewport\?\.height \?\? viewportHost\.innerHeight/)
+    assert.match(panel, /visibleBottom - visibleTop/)
+    assert.match(panel, /translate3d\(\$\{Math\.round\(left\)\}px,\$\{Math\.round\(top\)\}px,0\)/)
+    assert.match(panel, /window\.scrollTo\(0, 0\)/)
+    assert.match(shell, /dataset\.workspaceViewportLocked = "true"/)
+    assert.match(globals, /html\[data-workspace-viewport-locked="true"\]/)
+    assert.match(globals, /position: fixed;/)
     assert.match(clients, /window\.parent\.document/)
     assert.match(team, /window\.parent\.document/)
     assert.match(team, /Delete this message\? This cannot be undone\./)
