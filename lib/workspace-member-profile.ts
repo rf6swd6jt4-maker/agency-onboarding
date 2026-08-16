@@ -4,6 +4,12 @@ export const WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE = "betelgeze:workspace-memb
 export function openWorkspaceMemberProfile(userId: string) {
     if (typeof window === "undefined" || !userId) return
     if (window.parent !== window) {
+        try {
+            window.parent.dispatchEvent(new CustomEvent(WORKSPACE_MEMBER_PROFILE_EVENT, { detail: { userId } }))
+            return
+        } catch {
+            // Cross-origin embedding cannot dispatch directly; use the message bridge.
+        }
         window.parent.postMessage({ source: WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE, userId }, window.location.origin)
         return
     }

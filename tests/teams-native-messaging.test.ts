@@ -24,11 +24,13 @@ test("workspace teams and native conversations have scoped durable storage", asy
 })
 
 test("profile lookup preserves workspace authorization and username privacy", async () => {
-    const [profileRoute, profileModal, shell, assignee] = await Promise.all([
+    const [profileRoute, profileModal, profileBridge, shell, assignee, communications] = await Promise.all([
         readFile("app/api/workspaces/[workspaceSlug]/members/[userId]/profile/route.ts", "utf8"),
         readFile("components/workspace/WorkspaceMemberProfileModal.tsx", "utf8"),
+        readFile("lib/workspace-member-profile.ts", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("components/ui/Assignee.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
     ])
     assert.match(profileRoute, /requireWorkspace\(workspaceSlug\)/)
     assert.match(profileRoute, /eq\("workspace_id", workspace\.id\)\.eq\("user_id", userId\)/)
@@ -37,8 +39,13 @@ test("profile lookup preserves workspace authorization and username privacy", as
     assert.match(profileRoute, /in\("workspace_id", currentWorkspaceIds\)/)
     assert.match(profileModal, /Last seen/)
     assert.match(profileModal, /Shared workspaces/)
+    assert.match(profileModal, /initialProfile/)
+    assert.match(profileModal, /Loading profile details…/)
+    assert.ok(profileBridge.indexOf("window.parent.dispatchEvent") < profileBridge.indexOf("window.parent.postMessage"))
+    assert.match(shell, /initialProfile=\{profilePreviewMember/)
     assert.match(shell, /state: "heartbeat"/)
     assert.match(assignee, /openWorkspaceMemberProfile\(userId\)/)
+    assert.match(communications, /onClick=\{\(event\) => \{ event\.preventDefault\(\); event\.stopPropagation\(\); if \(selected\.kind === "direct"\) openWorkspaceMemberProfile/)
 })
 
 test("team editing enforces required teams and complete responsibility maps", async () => {

@@ -1848,6 +1848,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const activeNavigation = navigationStateByTab[activeTabId]
     const activeBackgroundSaving = (backgroundMutationCounts[activeTabId] ?? 0) > 0
     const currentPresenceMember = workspaceMembers.find((member) => member.id === currentUserId) ?? { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null }
+    const profilePreviewMember = profileUserId ? workspaceMembers.find((member) => member.id === profileUserId) ?? null : null
     const workspacePresenceMembers = workspacePresenceRoster(workspaceMembers, activeWorkspaceUsers, currentUserId)
 
     useEffect(() => {
@@ -2119,6 +2120,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             key={profileUserId}
             workspaceSlug={workspace.slug}
             userId={profileUserId}
+            initialProfile={profilePreviewMember ? { displayName: profilePreviewMember.name, avatarSrc: profilePreviewMember.avatarSrc } : null}
             active={profileUserId === currentUserId || activeWorkspaceUsers.some((member) => member.userId === profileUserId)}
             onClose={() => setProfileUserId(null)}
             onMessage={(userId) => { setProfileUserId(null); navigateActiveTab(`/${workspace.slug}/communications?mode=team&dm=${userId}`) }}
