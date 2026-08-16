@@ -160,6 +160,9 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.doesNotMatch(composer, /navigator\.userAgent|iPhone|iPad|Android/)
     assert.match(clients, /shrink-0 touch-none border-t/)
     assert.match(team, /shrink-0 touch-none border-t/)
+    for (const source of [clients, team]) {
+        assert.match(source, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\} onClick=\{\(\) => \{ setReplyingTo\(null\); composerRef\.current\?\.focus\(\{ preventScroll: true \}\) \}\} aria-label="Cancel reply"/)
+    }
     assert.match(resizableColumns, /MIN_LIST_WIDTH = 288/)
     assert.match(resizableColumns, /MAX_LIST_WIDTH = 448/)
     assert.match(resizableColumns, /rect\.width \* 0\.42/)
