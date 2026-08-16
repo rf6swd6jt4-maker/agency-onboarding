@@ -28,7 +28,6 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             window.cancelAnimationFrame(frame)
             frame = window.requestAnimationFrame(() => {
                 panel.style.height = `${Math.round(viewport?.height ?? window.innerHeight)}px`
-                panel.style.transform = `translate3d(0,${Math.round(viewport?.offsetTop ?? 0)}px,0)`
                 if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0)
             })
         }

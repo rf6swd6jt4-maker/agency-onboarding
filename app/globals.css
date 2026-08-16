@@ -52,13 +52,8 @@ html[data-communications-viewport-locked="true"] [data-communications-panel] {
   background: #000;
 }
 
-html[data-workspace-viewport-locked="true"] [data-workspace-topbar],
-html[data-workspace-viewport-locked="true"] [data-workspace-tabbar] {
-  transform: translate3d(0, var(--workspace-visual-viewport-top, 0px), 0);
-}
-
 html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
-  top: calc(6.25rem + var(--workspace-visual-viewport-top, 0px));
+  top: 6.25rem;
   bottom: auto;
   height: calc(var(--workspace-visual-viewport-height, 100dvh) - 6.25rem);
 }

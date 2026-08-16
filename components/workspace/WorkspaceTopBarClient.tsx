@@ -1109,7 +1109,6 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             window.cancelAnimationFrame(scrollFrame)
             scrollFrame = window.requestAnimationFrame(() => {
                 const visualViewport = window.visualViewport
-                root.style.setProperty("--workspace-visual-viewport-top", `${Math.round(visualViewport?.offsetTop ?? 0)}px`)
                 root.style.setProperty("--workspace-visual-viewport-height", `${Math.round(visualViewport?.height ?? window.innerHeight)}px`)
                 if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0)
             })
@@ -1138,7 +1137,6 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             document.body.style.overflow = previousOverflow
             delete document.body.dataset.workspaceTabsHosted
             delete root.dataset.workspaceViewportLocked
-            root.style.removeProperty("--workspace-visual-viewport-top")
             root.style.removeProperty("--workspace-visual-viewport-height")
             window.scrollTo(previousScroll.left, previousScroll.top)
             window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
