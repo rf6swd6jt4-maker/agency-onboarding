@@ -79,7 +79,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns] = await Promise.all([
+    const [clients, team, composerScroll, page, types, icons, shell, resizableColumns, jumpToLatest] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
@@ -88,6 +88,7 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("components/communications/MessageInteractionIcons.tsx", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
+        readFile("components/communications/JumpToLatestButton.tsx", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
@@ -100,6 +101,8 @@ test("message interactions keep the approved mobile and profile parity", async (
         assert.doesNotMatch(source, /min-w-0 max-w-full touch-pan-y cursor-pointer/)
         assert.match(source, /scrollLeft !== 0\) event\.currentTarget\.scrollLeft = 0/)
         assert.match(source, /scrollTo\(\{ top: messagePaneRef\.current\.scrollHeight, left: 0 \}\)/)
+        assert.match(source, /messagePaneIsAwayFromBottom\(event\.currentTarget\)/)
+        assert.match(source, /behavior: "smooth"/)
     }
     assert.match(team, /data-message-action-popup/)
     assert.match(clients, /window\.parent\.document/)
@@ -115,6 +118,8 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(resizableColumns, /setPointerCapture\(event\.pointerId\)/)
     assert.match(resizableColumns, /hidden w-4 .*cursor-col-resize .*lg:block/)
     assert.doesNotMatch(resizableColumns, /ResizeIcon|group-hover|shadow-xl/)
+    assert.match(jumpToLatest, /aria-label="Jump to latest message"/)
+    assert.match(jumpToLatest, /scrollHeight - pane\.scrollTop - pane\.clientHeight > threshold/)
     assert.match(team, /selected\.kind === "team" \? <button/)
     assert.match(team, /!own && selected\.kind === "team" \? <button/)
     assert.match(team, /NativeDeliveryTicks/)
@@ -139,10 +144,14 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(team, /h-4 w-4 shrink-0 aspect-square/)
     assert.match(clients, /flex shrink-0 items-center -space-x-1/)
     assert.match(team, /flex shrink-0 items-center -space-x-1/)
-    assert.match(clients, /h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto[^\"]*py-2/)
-    assert.match(team, /h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto[^\"]*py-2/)
+    assert.match(clients, /h-9 min-h-9 w-full resize-none overflow-y-hidden[^\"]*py-2/)
+    assert.match(team, /h-9 min-h-9 w-full resize-none overflow-y-hidden[^\"]*py-2/)
+    assert.doesNotMatch(clients, /max-h-9 w-full resize-none/)
+    assert.doesNotMatch(team, /max-h-9 w-full resize-none/)
     assert.match(clients, /keepComposerCurrentLineCentered\(composerRef\.current\)/)
     assert.match(team, /keepComposerCurrentLineCentered\(composerRef\.current\)/)
+    assert.match(composerScroll, /maximumLines = window\.matchMedia\("\(min-width: 1024px\)"\)\.matches \? 7 : 4/)
+    assert.match(composerScroll, /textarea\.style\.height = `\$\{Math\.min\(maximumHeight/)
     assert.match(composerScroll, /textarea\.scrollTop = Math\.max\(0, textarea\.scrollHeight - textarea\.clientHeight\)/)
     assert.match(clients, /<button data-icon-button type="button" onClick=\{\(\) => void sendMessage\(\)\}/)
     assert.match(team, /<button data-icon-button type="button" onClick=\{\(\) => void sendMessage\(\)\}/)

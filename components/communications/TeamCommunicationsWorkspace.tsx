@@ -4,6 +4,7 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Avatar } from "@/components/account/Avatar"
 import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { JumpToLatestButton, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
@@ -159,6 +160,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [editingTeam, setEditingTeam] = useState<WorkspaceTeam | null | undefined>(undefined)
+    const [showJumpToLatest, setShowJumpToLatest] = useState(false)
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
@@ -172,6 +174,11 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
 
     useEffect(() => { selectedRef.current = selectedId }, [selectedId])
     useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
+    useEffect(() => {
+        const resizeComposer = () => keepComposerCurrentLineCentered(composerRef.current)
+        window.addEventListener("resize", resizeComposer)
+        return () => window.removeEventListener("resize", resizeComposer)
+    }, [])
 
     useEffect(() => {
         if (!actionMessageId) return
@@ -370,7 +377,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.archived ? "Archived · read-only" : selected.subtitle}</span></span>
                         </button>
                     </header>
-                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0 }} className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null
@@ -418,7 +425,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                             </div>
                             {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>
-                    }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>
+                    }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" })} /> : null}</div>
                     <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">{selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"}</span><span className="block truncate text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onClick={() => setReplyingTo(null)} className="h-8 w-8 text-neutral-500">×</button></div> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
@@ -431,7 +438,7 @@ export function TeamCommunicationsWorkspace({ bootstrap, onOpenClients }: { boot
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
                                 <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setError(null) }} disabled={!selected.canWrite} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
                             </div>
-                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto bg-transparent py-2 text-sm leading-5 outline-none" /></div>
+                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!selected.canWrite} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 w-full resize-none overflow-y-hidden bg-transparent py-2 text-sm leading-5 outline-none" /></div>
                             <button data-icon-button type="button" onClick={() => void sendMessage()} disabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>

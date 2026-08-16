@@ -6,6 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 import { Avatar } from "@/components/account/Avatar"
 import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { JumpToLatestButton, messagePaneIsAwayFromBottom } from "@/components/communications/JumpToLatestButton"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
@@ -245,6 +246,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const [interactionError, setInteractionError] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
+    const [showJumpToLatest, setShowJumpToLatest] = useState(false)
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
@@ -266,6 +268,12 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     useEffect(() => {
         keepComposerCurrentLineCentered(composerRef.current)
     }, [draft])
+
+    useEffect(() => {
+        const resizeComposer = () => keepComposerCurrentLineCentered(composerRef.current)
+        window.addEventListener("resize", resizeComposer)
+        return () => window.removeEventListener("resize", resizeComposer)
+    }, [])
 
     useEffect(() => {
         attachmentRef.current = attachment
@@ -657,7 +665,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                         </Link>
                     </header>
 
-                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0 }} className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
+                    <div className="relative min-h-0 flex-1">
+                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
                         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
@@ -752,6 +761,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             </Fragment>
                         }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here arrive from the shared workspace WhatsApp number.</p></div></div>}</div>
                     </div>
+                    {showJumpToLatest ? <JumpToLatestButton onClick={() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" })} /> : null}
+                    </div>
 
                     <footer className="shrink-0 border-t border-neutral-800 bg-neutral-950 p-3 sm:p-4">
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">Replying to {senderName(replyingTo)}</span><span className="mt-0.5 block truncate text-[11px] text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onClick={() => setReplyingTo(null)} aria-label="Cancel reply" className="h-8 w-8 text-neutral-500 hover:text-white">×</button></div> : null}
@@ -771,7 +782,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!bootstrap.schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><AttachmentIcon /></button>
                                 <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setInteractionError(null) }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label="Open sticker tray" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800"><StickerIcon /></button>
                             </div>
-                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canSend ? `Message ${selected.title}` : "Add a WhatsApp number to this relationship"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 max-h-9 w-full resize-none overflow-y-auto bg-transparent py-2 text-sm leading-5 outline-none disabled:cursor-not-allowed" /></div>
+                            <div className="relative min-w-0 flex-1">{!draft ? <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 truncate text-sm leading-5 text-neutral-600">{selected.canSend ? `Message ${selected.title}` : "Add a WhatsApp number to this relationship"}</span> : null}<textarea ref={composerRef} rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage() } }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label={`Message ${selected.title}`} className="relative h-9 min-h-9 w-full resize-none overflow-y-hidden bg-transparent py-2 text-sm leading-5 outline-none disabled:cursor-not-allowed" /></div>
                             <button data-icon-button type="button" onClick={() => void sendMessage()} disabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !bootstrap.schemaReady || !selected.canSend} aria-label="Send message" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600"><SendIcon /></button>
                         </div>
                         <p className="mx-auto mt-2 max-w-3xl text-center text-[10px] text-neutral-600">Enter to send · Shift+Enter for a new line</p>
