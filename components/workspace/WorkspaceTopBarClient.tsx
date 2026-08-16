@@ -1103,14 +1103,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const hiddenSiblings = Array.from(host.children).filter((element): element is HTMLElement => element instanceof HTMLElement && element !== shellRoot)
         const previousOverflow = document.body.style.overflow
         const root = document.documentElement
-        let scrollFrame = 0
         const holdWorkspaceViewport = () => {
-            window.cancelAnimationFrame(scrollFrame)
-            scrollFrame = window.requestAnimationFrame(() => {
-                const visualViewport = window.visualViewport
-                root.style.setProperty("--workspace-visual-viewport-top", `${Math.round(visualViewport?.offsetTop ?? 0)}px`)
-                root.style.setProperty("--workspace-visual-viewport-height", `${Math.round(visualViewport?.height ?? window.innerHeight)}px`)
-            })
+            const visualViewport = window.visualViewport
+            root.style.setProperty("--workspace-visual-viewport-top", `${Math.round(visualViewport?.offsetTop ?? 0)}px`)
+            root.style.setProperty("--workspace-visual-viewport-height", `${Math.round(visualViewport?.height ?? window.innerHeight)}px`)
         }
         const previousStates = hiddenSiblings.map((element) => ({ element, hidden: element.hidden, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
@@ -1128,7 +1124,6 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         })
 
         return () => {
-            window.cancelAnimationFrame(scrollFrame)
             window.removeEventListener("resize", holdWorkspaceViewport)
             window.visualViewport?.removeEventListener("resize", holdWorkspaceViewport)
             window.visualViewport?.removeEventListener("scroll", holdWorkspaceViewport)

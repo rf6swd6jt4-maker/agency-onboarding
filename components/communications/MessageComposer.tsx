@@ -37,6 +37,13 @@ export function MessageComposer({
                     rows={1}
                     value={draft}
                     enterKeyHint="send"
+                    onPointerDown={(event) => {
+                        if (event.pointerType !== "touch" || document.activeElement === event.currentTarget) return
+                        event.preventDefault()
+                        event.currentTarget.focus({ preventScroll: true })
+                        const draftEnd = event.currentTarget.value.length
+                        event.currentTarget.setSelectionRange(draftEnd, draftEnd)
+                    }}
                     onChange={(event) => onDraftChange(event.target.value)}
                     onKeyDown={(event) => {
                         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
