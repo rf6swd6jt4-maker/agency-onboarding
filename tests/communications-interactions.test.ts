@@ -90,7 +90,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerScroll, page, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar] = await Promise.all([
+    const [clients, team, composer, composerScroll, page, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
@@ -105,6 +105,7 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("app/globals.css", "utf8"),
         readFile("components/communications/MessageActionMenu.tsx", "utf8"),
         readFile("components/communications/PinnedMessageBar.tsx", "utf8"),
+        readFile("app/layout.tsx", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
@@ -148,11 +149,15 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(team, /start\.minDeltaX < -52/)
     assert.match(team, /start\.verticalAtMin < 42/)
     assert.match(team, /start\.maxDeltaX > 52/)
-    assert.match(clients, /onPointerDown=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
-    assert.match(team, /onPointerDown=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
+    assert.match(clients, /onClick=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
+    assert.match(team, /onClick=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
+    assert.doesNotMatch(clients, /onPointerDown=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
+    assert.doesNotMatch(team, /onPointerDown=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
     assert.match(composer, /max-w-3xl touch-none items-end/)
     assert.match(composer, /event\.currentTarget\.focus\(\{ preventScroll: true \}\)/)
     assert.match(composer, /event\.pointerType !== "touch"/)
+    assert.match(rootLayout, /interactiveWidget: "resizes-visual"/)
+    assert.doesNotMatch(composer, /navigator\.userAgent|iPhone|iPad|Android/)
     assert.match(clients, /shrink-0 touch-none border-t/)
     assert.match(team, /shrink-0 touch-none border-t/)
     assert.match(resizableColumns, /MIN_LIST_WIDTH = 288/)
