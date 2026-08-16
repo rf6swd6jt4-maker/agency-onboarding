@@ -48,12 +48,34 @@ export function PushNotificationSettings() {
             if (!response.ok) { setState("error"); setDetail(result?.error ?? "Could not check notification settings."); return }
             if (!result?.configured || !result.publicKey) { setState("unavailable"); setDetail("Chat notifications are not configured on this Betelgeze deployment yet."); return }
             setPublicKey(result.publicKey)
-            if (Notification.permission === "denied") { setState("blocked"); setDetail("Notifications are blocked. Allow Betelgeze in this device’s browser or notification settings."); return }
-            setState(result.subscribed ? "on" : "off")
-            setDetail(result.subscribed ? "This device will notify you when none of your devices has Communications open." : "Enable notifications for chats on this device.")
+            const registration = await navigator.serviceWorker.getRegistration("/")
+            const browserSubscription = await registration?.pushManager.getSubscription()
+            if (result.subscribed && browserSubscription) {
+                setState("on")
+                setDetail("This device will notify you when none of your devices has Communications open.")
+                return
+            }
+            if (Notification.permission === "denied") {
+                setState("blocked")
+                setDetail("Notifications are blocked. Allow Betelgeze in this device’s settings, then select the toggle again to finish enabling them.")
+                return
+            }
+            setState("off")
+            setDetail(Notification.permission === "granted" ? "Notification permission is allowed. Select the toggle to finish enabling chats on this device." : "Enable notifications for chats on this device.")
         }
-        void inspect().catch(() => { if (!cancelled) { setState("error"); setDetail("Could not check notification settings.") } })
-        return () => { cancelled = true }
+        const refresh = () => {
+            if (document.visibilityState === "visible") void inspect().catch(() => { if (!cancelled) { setState("error"); setDetail("Could not check notification settings.") } })
+        }
+        refresh()
+        window.addEventListener("focus", refresh)
+        window.addEventListener("pageshow", refresh)
+        document.addEventListener("visibilitychange", refresh)
+        return () => {
+            cancelled = true
+            window.removeEventListener("focus", refresh)
+            window.removeEventListener("pageshow", refresh)
+            document.removeEventListener("visibilitychange", refresh)
+        }
     }, [])
 
     async function enable() {
@@ -61,12 +83,6 @@ export function PushNotificationSettings() {
         setState("saving")
         setDetail(Notification.permission === "default" ? "Opening this device’s notification permission prompt…" : "Enabling notifications on this device…")
         try {
-            const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission
-            if (permission !== "granted") {
-                setState("blocked")
-                setDetail("Notifications were not allowed. Enable Betelgeze in this device’s browser or notification settings, then try again.")
-                return
-            }
             let registration = await navigator.serviceWorker.getRegistration("/")
             if (!registration) registration = await navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" })
             const existing = await registration.pushManager.getSubscription()
@@ -77,6 +93,11 @@ export function PushNotificationSettings() {
             setState("on")
             setDetail("This device will notify you when none of your devices has Communications open.")
         } catch (error) {
+            if (error instanceof DOMException && error.name === "NotAllowedError") {
+                setState("blocked")
+                setDetail("Notifications are still blocked. Allow Betelgeze in this device’s settings, return here, then select the toggle again.")
+                return
+            }
             setState("error")
             setDetail(error instanceof Error ? error.message : "Could not enable notifications on this device.")
         }

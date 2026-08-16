@@ -11,16 +11,18 @@ test("chat push subscriptions and Communications sessions use server-only durabl
     assert.match(migration, /references auth\.users\(id\) on delete cascade/)
 })
 
-test("profile toggle requests permission and registers a user-visible per-device subscription", async () => {
+test("profile toggle registers from the user gesture and recovers after returning from device settings", async () => {
     const [settings, profile, subscriptionRoute] = await Promise.all([
         readFile("components/account/PushNotificationSettings.tsx", "utf8"),
         readFile("components/account/ProfileSettings.tsx", "utf8"),
         readFile("app/api/push/subscriptions/route.ts", "utf8"),
     ])
     assert.match(profile, /<PushNotificationSettings/)
-    assert.match(settings, /Notification\.requestPermission\(\)/)
     assert.match(settings, /userVisibleOnly: true/)
     assert.match(settings, /pushManager\.subscribe/)
+    assert.match(settings, /window\.addEventListener\("focus", refresh\)/)
+    assert.match(settings, /document\.addEventListener\("visibilitychange", refresh\)/)
+    assert.doesNotMatch(settings, /if \(permission !== "granted"\)/)
     assert.match(settings, /Add Betelgeze to your Home Screen/)
     assert.match(settings, /role="switch"/)
     assert.match(subscriptionRoute, /getCurrentUser\(\)/)
