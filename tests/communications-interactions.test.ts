@@ -67,6 +67,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
     assert.match(meta, /type: "sticker"/)
     assert.match(webhook, /handleInboundReaction/)
     assert.match(workspace, /onTouchMove/)
+    assert.match(workspace, /onTouchCancel/)
     assert.match(workspace, /translate3d\(\$\{swipeOffset\}px,0,0\)/)
     assert.match(workspace, /data-message-interaction/)
     assert.match(workspace, /bg-gradient-to-r from-white\/20/)
@@ -88,6 +89,14 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
+    for (const source of [clients, team]) {
+        assert.match(source, /touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain/)
+        assert.match(source, /mx-auto flex w-full min-w-0 max-w-3xl/)
+        assert.match(source, /onTouchCancel/)
+        assert.match(source, /min-w-0 max-w-full touch-pan-y cursor-pointer/)
+        assert.match(source, /scrollLeft !== 0\) event\.currentTarget\.scrollLeft = 0/)
+        assert.match(source, /scrollTo\(\{ top: messagePaneRef\.current\.scrollHeight, left: 0 \}\)/)
+    }
     assert.match(team, /data-message-action-popup/)
     assert.match(clients, /window\.parent\.document/)
     assert.match(team, /window\.parent\.document/)

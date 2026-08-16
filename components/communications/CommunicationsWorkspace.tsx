@@ -524,7 +524,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
 
     useEffect(() => {
         if (!selectedId) return
-        window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight }))
+        window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 }))
     }, [selected?.messages.length, selectedId])
 
     useEffect(() => {
@@ -625,7 +625,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     return <section aria-label="Client communications" className="flex h-dvh min-h-0 flex-col overflow-hidden bg-black">
         {!bootstrap.schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
 
-        <div className="grid min-h-0 flex-1 lg:grid-cols-[22rem_minmax(0,1fr)]">
+        <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[22rem_minmax(0,1fr)]">
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>
                 <div className="shrink-0 border-b border-neutral-800 p-3">
                     <div role="tablist" aria-label="Communication conversations" className="flex items-center gap-1">
@@ -646,7 +646,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                 }) : <div className="p-6 text-center"><p className="text-sm font-medium text-neutral-300">{conversations.length ? "No matching conversations" : "No clients yet"}</p><p className="mt-2 text-xs leading-5 text-neutral-600">{conversations.length ? "Try another name or message." : "Client relationships will appear here automatically."}</p></div>}</div>
             </aside>
 
-            <div className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col bg-black`}>
+            <div className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
                 {selected ? <>
                     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
                         <button type="button" onClick={() => selectConversation(null)} aria-label="Back to client chats" className="inline-flex h-10 w-10 items-center justify-center text-neutral-400 hover:text-white lg:hidden"><BackIcon /></button>
@@ -656,8 +656,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                         </Link>
                     </header>
 
-                    <div ref={messagePaneRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
-                        <div className="mx-auto flex max-w-3xl flex-col gap-2">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div ref={messagePaneRef} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0 }} className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
+                        <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2">{selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
                             const repliedMessage = message.replyToProviderMessageId
@@ -720,8 +720,13 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                                 beginReply(message)
                                             }
                                         }}
+                                        onTouchCancel={() => {
+                                            swipeStartRef.current = null
+                                            setSwipePosition({ id: message.id, offset: 0, active: false })
+                                            window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
+                                        }}
                                         style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
-                                        className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
+                                        className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 max-w-full touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
                                     >
                                         <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : "mb-0.5 leading-none text-neutral-500"} text-[10px] font-semibold`}>{sender}</p>
                                         {message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
