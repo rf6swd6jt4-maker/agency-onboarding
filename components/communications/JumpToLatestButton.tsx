@@ -30,10 +30,11 @@ export function observeMessagePaneResize(pane: HTMLDivElement | null, isFollowin
     }
 }
 
-const BUTTON_CLASS = "absolute bottom-3 z-20 h-10 w-10 min-h-10 min-w-10 max-h-10 max-w-10 shrink-0 aspect-square items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 p-0 leading-none text-neutral-200 shadow-xl transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
+const BUTTON_CLASS = "absolute bottom-3 z-20 box-border shrink-0 aspect-square place-items-center overflow-hidden rounded-full border border-neutral-700 bg-neutral-900 p-0 leading-none text-neutral-200 shadow-xl transition hover:bg-neutral-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"
 
 function JumpButton({ className, onClick }: { className: string; onClick: () => void }) {
     return <button
+        data-icon-button
         type="button"
         aria-label="Jump to latest message"
         title="Jump to latest message"
@@ -46,7 +47,7 @@ function JumpButton({ className, onClick }: { className: string; onClick: () => 
 
 export function JumpToLatestButton({ onClick }: { onClick: () => void }) {
     return <>
-        <JumpButton onClick={onClick} className="right-4 inline-flex lg:hidden" />
-        <JumpButton onClick={onClick} className="right-6 hidden lg:inline-flex" />
+        <JumpButton onClick={onClick} className="right-4 grid h-11 w-11 min-h-11 min-w-11 max-h-11 max-w-11 lg:hidden" />
+        <JumpButton onClick={onClick} className="right-6 hidden h-10 w-10 min-h-10 min-w-10 max-h-10 max-w-10 lg:grid" />
     </>
 }

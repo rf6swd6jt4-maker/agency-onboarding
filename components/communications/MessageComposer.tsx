@@ -27,7 +27,7 @@ export function MessageComposer({
                 event.preventDefault()
                 if (!sendDisabled) onSend()
             }}
-            className="mx-auto flex max-w-3xl touch-none items-end gap-1.5 rounded-2xl border border-neutral-800 bg-black px-1.5 py-1.5 focus-within:border-neutral-600"
+            className="mx-auto flex max-w-3xl touch-none items-center gap-1.5 rounded-2xl border border-neutral-800 bg-black px-1.5 py-1.5 focus-within:border-neutral-600"
         >
             <div className="flex shrink-0 items-center -space-x-1">{leadingActions}</div>
             <div className="relative min-w-0 flex-1">
