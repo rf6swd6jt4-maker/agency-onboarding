@@ -46,6 +46,19 @@ test("Communications avatar controls stay circular on mobile", async () => {
     assert.match(avatar, /objectPosition: "50% 50%"/)
 })
 
+test("client and native unread chat indicators use the neutral white accent", async () => {
+    const [clients, team] = await Promise.all([
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+    ])
+
+    for (const workspace of [clients, team]) {
+        assert.match(workspace, /unread \? "[^"]*text-white"/)
+        assert.match(workspace, /\{unread \? <span className="[^"]*bg-white[^"]*text-black"/)
+        assert.doesNotMatch(workspace, /unread[^\n]*emerald/)
+    }
+})
+
 test("direct WhatsApp sending is durable and idempotent", async () => {
     const [migration, route, meta, webhook] = await Promise.all([
         readFile("supabase/migrations/20260814200000_communications_workspace.sql", "utf8"),

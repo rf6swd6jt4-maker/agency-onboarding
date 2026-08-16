@@ -130,8 +130,10 @@ export function PushNotificationSettings() {
                 <h3 className="font-medium">Chat notifications</h3>
                 <p className="mt-1 text-sm text-neutral-400">Native and incoming WhatsApp chats. Notification previews only identify who sent the chat.</p>
             </div>
-            <button type="button" role="switch" aria-checked={enabled} aria-label="Chat notifications on this device" disabled={disabled} onClick={() => enabled ? void disable() : void enable()} className={`relative h-7 w-12 shrink-0 rounded-full border transition ${enabled ? "border-white bg-white" : "border-neutral-600 bg-neutral-800"} disabled:cursor-not-allowed disabled:opacity-50`}>
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full transition ${enabled ? "left-[1.45rem] bg-black" : "left-0.5 bg-neutral-400"}`} />
+            <button type="button" role="switch" aria-checked={enabled} aria-label="Chat notifications on this device" disabled={disabled} onClick={() => enabled ? void disable() : void enable()} className="flex h-11 min-h-0 w-14 shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-50 sm:h-7 sm:w-12">
+                <span aria-hidden="true" className={`relative block h-7 w-12 rounded-full border transition ${enabled ? "border-white bg-white" : "border-neutral-600 bg-neutral-800"}`}>
+                    <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full transition-transform ${enabled ? "translate-x-5 bg-black" : "translate-x-0 bg-neutral-400"}`} />
+                </span>
             </button>
         </div>
         <p className={`mt-3 text-sm ${state === "error" || state === "blocked" ? "text-red-300" : "text-neutral-500"}`}>{detail}</p>
