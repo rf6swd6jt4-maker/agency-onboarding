@@ -43,7 +43,7 @@ test("Communications uses its dedicated responsive conversation workspace instea
     assert.match(page, /fixed inset-0 overflow-hidden bg-black/)
     assert.match(panel, /data-communications-panel/)
     assert.match(panel, /dataset\.communicationsViewportLocked = "true"/)
-    assert.match(panel, /viewportHost\.visualViewport/)
+    assert.match(panel, /window\.visualViewport/)
     assert.match(panel, /fixed left-0 top-0 isolate h-full w-full overflow-hidden overscroll-none bg-black/)
     assert.match(workspace, /h-full min-h-0 w-full/)
     assert.match(workspace, /overflow-y-auto/)

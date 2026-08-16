@@ -52,11 +52,15 @@ html[data-communications-viewport-locked="true"] [data-communications-panel] {
   background: #000;
 }
 
-[data-communications-composer] {
-  position: relative;
-  z-index: 20;
-  transform: translate3d(0, calc(-1 * var(--communications-keyboard-inset, 0px)), 0);
-  will-change: transform;
+html[data-workspace-viewport-locked="true"] [data-workspace-topbar],
+html[data-workspace-viewport-locked="true"] [data-workspace-tabbar] {
+  transform: translate3d(0, var(--workspace-visual-viewport-top, 0px), 0);
+}
+
+html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
+  top: calc(6.25rem + var(--workspace-visual-viewport-top, 0px));
+  bottom: auto;
+  height: calc(var(--workspace-visual-viewport-height, 100dvh) - 6.25rem);
 }
 
 @media (min-width: 768px) {

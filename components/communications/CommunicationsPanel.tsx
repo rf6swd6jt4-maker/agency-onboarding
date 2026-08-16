@@ -19,19 +19,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
         const panel = panelRef.current
         if (!panel) return
         const root = document.documentElement
-        let viewportHost: Window & typeof globalThis = window
-        let frameElement: HTMLElement | null = null
-        try {
-            if (window.parent !== window && window.parent.location.origin === window.location.origin) {
-                viewportHost = window.parent as Window & typeof globalThis
-                frameElement = window.frameElement as HTMLElement | null
-            }
-        } catch {
-            viewportHost = window
-        }
-        const viewport = viewportHost.visualViewport
-        const frameMutationObserver = frameElement ? new viewportHost.MutationObserver(updateViewportAfterFrameChange) : null
-        const frameResizeObserver = frameElement ? new viewportHost.ResizeObserver(updateViewportAfterFrameChange) : null
+        const viewport = window.visualViewport
         let frame = 0
 
         root.dataset.communicationsViewportLocked = "true"
@@ -39,31 +27,15 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
         const updateViewport = () => {
             window.cancelAnimationFrame(frame)
             frame = window.requestAnimationFrame(() => {
-                const viewportHeight = viewport?.height ?? viewportHost.innerHeight
-                const viewportTop = viewport?.offsetTop ?? 0
-                const frameRect = frameElement?.getBoundingClientRect()
-                const viewportBottom = viewportTop + viewportHeight
-                const layoutBottom = frameRect?.bottom ?? viewportHost.innerHeight
-                const composerFocused = document.activeElement instanceof HTMLTextAreaElement
-                const keyboardInset = composerFocused ? Math.max(0, Math.round(layoutBottom - viewportBottom)) : 0
-                panel.style.setProperty("--communications-keyboard-inset", `${keyboardInset}px`)
+                panel.style.height = `${Math.round(viewport?.height ?? window.innerHeight)}px`
+                panel.style.transform = `translate3d(0,${Math.round(viewport?.offsetTop ?? 0)}px,0)`
                 if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0)
             })
         }
 
-        function updateViewportAfterFrameChange() {
-            updateViewport()
-        }
-
         updateViewport()
-        frameMutationObserver?.observe(frameElement!, { attributes: true, attributeFilter: ["hidden", "aria-hidden", "class", "style"] })
-        frameResizeObserver?.observe(frameElement!)
         window.addEventListener("resize", updateViewport)
         window.addEventListener("scroll", updateViewport, { passive: true })
-        if (viewportHost !== window) {
-            viewportHost.addEventListener("resize", updateViewport)
-            viewportHost.addEventListener("scroll", updateViewport, { passive: true })
-        }
         viewport?.addEventListener("resize", updateViewport)
         viewport?.addEventListener("scroll", updateViewport)
         document.addEventListener("focusin", updateViewport)
@@ -72,16 +44,9 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             window.cancelAnimationFrame(frame)
             window.removeEventListener("resize", updateViewport)
             window.removeEventListener("scroll", updateViewport)
-            if (viewportHost !== window) {
-                viewportHost.removeEventListener("resize", updateViewport)
-                viewportHost.removeEventListener("scroll", updateViewport)
-            }
             viewport?.removeEventListener("resize", updateViewport)
             viewport?.removeEventListener("scroll", updateViewport)
             document.removeEventListener("focusin", updateViewport)
-            frameMutationObserver?.disconnect()
-            frameResizeObserver?.disconnect()
-            panel.style.removeProperty("--communications-keyboard-inset")
             delete root.dataset.communicationsViewportLocked
         }
     }, [])
