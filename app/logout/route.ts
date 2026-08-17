@@ -11,7 +11,9 @@ export function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-    const response = NextResponse.redirect(new URL("/login?loggedOut=1", request.url))
+    // Complete the POST/redirect/GET flow with 303 so the browser does not
+    // preserve the POST method when it follows the redirect to the login page.
+    const response = NextResponse.redirect(new URL("/login?loggedOut=1", request.url), 303)
     const auth = createSupabaseRouteClient(request, response)
     const { data: { user } } = await auth.auth.getUser().catch(() => ({ data: { user: null } }))
     const pushDeviceId = request.cookies.get(PUSH_DEVICE_COOKIE)?.value
