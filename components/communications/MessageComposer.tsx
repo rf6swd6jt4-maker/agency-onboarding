@@ -10,6 +10,7 @@ export function MessageComposer({
     sendDisabled,
     leadingActions,
     onDraftChange,
+    onBlur,
     onSend,
 }: {
     textareaRef: RefObject<HTMLTextAreaElement | null>
@@ -19,6 +20,7 @@ export function MessageComposer({
     sendDisabled: boolean
     leadingActions: ReactNode
     onDraftChange: (value: string) => void
+    onBlur?: () => void
     onSend: () => void
 }) {
     return <>
@@ -45,6 +47,7 @@ export function MessageComposer({
                         event.currentTarget.setSelectionRange(draftEnd, draftEnd)
                     }}
                     onChange={(event) => onDraftChange(event.target.value)}
+                    onBlur={onBlur}
                     onKeyDown={(event) => {
                         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                             event.preventDefault()

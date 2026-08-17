@@ -127,6 +127,25 @@ test("direct omnichannel sending is durable and idempotent", async () => {
     )
 })
 
+test("WhatsApp receives a debounced one-way typing indicator from client chat", async () => {
+    const [workspace, route, meta] = await Promise.all([
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/typing/route.ts", "utf8"),
+        readFile("lib/client-messages/meta-whatsapp.ts", "utf8"),
+    ])
+    assert.match(workspace, /WHATSAPP_TYPING_DEBOUNCE_MS = 500/)
+    assert.match(workspace, /WHATSAPP_TYPING_REFRESH_MS = 20_000/)
+    assert.match(workspace, /selected\?\.channels\?\.includes\("meta_whatsapp"\)/)
+    assert.match(workspace, /communications\/typing/)
+    assert.match(route, /requireWorkspace\(workspaceSlug\)/)
+    assert.match(route, /\.eq\("direction", "inbound"\)/)
+    assert.match(route, /\.eq\("provider", "meta_whatsapp"\)/)
+    assert.match(route, /sendMetaWhatsAppTypingIndicator/)
+    assert.match(meta, /status: "read"/)
+    assert.match(meta, /message_id: messageId/)
+    assert.match(meta, /typing_indicator: \{ type: "text" \}/)
+})
+
 test("client chat colours only inbound WhatsApp bubbles while retaining compact delivery ticks", async () => {
     const [workspace, voiceNote] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),

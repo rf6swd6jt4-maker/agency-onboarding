@@ -46,6 +46,11 @@ type SendMetaWhatsAppReactionInput = {
     emoji: string
 }
 
+type SendMetaWhatsAppTypingIndicatorInput = {
+    workspaceId: string
+    messageId: string
+}
+
 export class MetaWhatsAppSendError extends Error {
     safeToRetry: boolean
 
@@ -77,6 +82,33 @@ async function metaConfig(workspaceId?: string) {
         access_token: getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN"),
         phone_number_id: getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID"),
     }
+}
+
+export async function sendMetaWhatsAppTypingIndicator({ workspaceId, messageId }: SendMetaWhatsAppTypingIndicatorInput) {
+    let config: Awaited<ReturnType<typeof metaConfig>>
+    try {
+        config = await metaConfig(workspaceId)
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "WhatsApp is not configured", true)
+    }
+    let response: Response
+    try {
+        response = await fetch(`https://graph.facebook.com/v25.0/${config.phone_number_id}/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${config.access_token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                status: "read",
+                message_id: messageId,
+                typing_indicator: { type: "text" },
+            }),
+        })
+    } catch (error) {
+        throw new MetaWhatsAppSendError(error instanceof Error ? error.message : "Meta WhatsApp typing request did not return a response", false)
+    }
+    const responseBody = await response.text()
+    if (!response.ok) throw new MetaWhatsAppSendError(formatMetaWhatsAppApiError({ action: "Meta WhatsApp typing indicator", status: response.status, responseBody }), true)
+    return responseBody ? JSON.parse(responseBody) : null
 }
 
 export async function sendMetaWhatsAppMessage({

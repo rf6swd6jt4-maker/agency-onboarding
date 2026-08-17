@@ -30,6 +30,33 @@ function sameDay(left: string, right: string) { return new Date(left).toDateStri
 function attachmentPreview(attachment: CommunicationAttachment | null) { return attachment ? `${attachment.kind === "image" ? "Image" : attachment.kind === "video" ? "Video" : attachment.kind === "audio" ? "Voice note" : attachment.kind === "sticker" ? "Sticker" : "File"}: ${attachment.fileName}` : "" }
 function messagePreview(message: NativeMessage) { return message.body || attachmentPreview(message.attachment) || "Message" }
 
+const NATIVE_TYPING_EVENT = "native_typing"
+const NATIVE_TYPING_EXPIRY_MS = 6_000
+const NATIVE_TYPING_REFRESH_MS = 2_000
+
+type NativeTypingByConversation = Record<string, Record<string, number>>
+
+function updateNativeTyping(current: NativeTypingByConversation, conversationId: string, userId: string, expiresAt: number | null) {
+    const conversation = { ...(current[conversationId] ?? {}) }
+    if (expiresAt === null) delete conversation[userId]
+    else conversation[userId] = expiresAt
+    if (!Object.keys(conversation).length) {
+        const next = { ...current }
+        delete next[conversationId]
+        return next
+    }
+    return { ...current, [conversationId]: conversation }
+}
+
+function NativeTypingDots({ label }: { label: string }) {
+    return <div role="status" aria-live="polite" aria-label={label} className="flex justify-start">
+        <span className="inline-flex h-10 items-center gap-1 rounded-2xl rounded-bl-md border border-neutral-800 bg-neutral-900 px-4">
+            <span className="sr-only">{label}</span>
+            {[0, 1, 2].map((index) => <span key={index} aria-hidden="true" className="betelgeze-typing-dot h-1.5 w-1.5 rounded-full bg-neutral-400" style={{ animationDelay: `${index * 140}ms` }} />)}
+        </span>
+    </div>
+}
+
 function NativeDeliveryTicks({ message, read }: { message: NativeMessage; read: boolean }) {
     if (message.clientRequestId === message.id) return <span className="font-bold" title="Sending" aria-label="Sending">✓</span>
     return <span className={`inline-flex shrink-0 ${read ? "text-sky-500" : ""}`} title={read ? "Read" : "Delivered to account"} aria-label={read ? "Read" : "Delivered to account"}><DoubleDeliveryCheckIcon /></span>
@@ -180,6 +207,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const [atLatest, setAtLatest] = useState(true)
     const [documentVisible, setDocumentVisible] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible")
     const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
+    const [typingByConversation, setTypingByConversation] = useState<NativeTypingByConversation>({})
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
     const followLatestRef = useRef(true)
     const messageAnimationTimersRef = useRef<number[]>([])
@@ -191,6 +219,9 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const swipedMessageRef = useRef<string | null>(null)
     const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
+    const conversationsRef = useRef(conversations)
+    const sentTypingConversationRef = useRef<string | null>(null)
+    const lastTypingBroadcastAtRef = useRef(0)
     const pendingReadRef = useRef<NativeReadCursor | null>(null)
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
@@ -198,11 +229,27 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const peopleById = useMemo(() => new Map(bootstrap.people.map((person) => [person.id, person])), [bootstrap.people])
 
     useEffect(() => { selectedRef.current = selectedId; onSelectedConversationChange?.(selectedId) }, [onSelectedConversationChange, selectedId])
+    useEffect(() => { conversationsRef.current = conversations }, [conversations])
     useEffect(() => { const update = () => setDocumentVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", update); return () => document.removeEventListener("visibilitychange", update) }, [])
     useEffect(() => { const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0); return () => window.clearTimeout(timer) }, [bootstrap.workspaceId])
     useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
     useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current), [selectedId])
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
+    useEffect(() => {
+        const interval = window.setInterval(() => {
+            const now = Date.now()
+            setTypingByConversation((current) => {
+                let next = current
+                for (const [conversationId, users] of Object.entries(current)) {
+                    for (const [userId, expiresAt] of Object.entries(users)) {
+                        if (expiresAt <= now) next = updateNativeTyping(next, conversationId, userId, null)
+                    }
+                }
+                return next
+            })
+        }, 1_000)
+        return () => window.clearInterval(interval)
+    }, [])
 
     useEffect(() => {
         if (!actionMessageId) return
@@ -229,6 +276,9 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 messageAnimationTimersRef.current = messageAnimationTimersRef.current.filter((candidate) => candidate !== timer)
             }, 320)
             messageAnimationTimersRef.current.push(timer)
+        }
+        for (const message of incoming) {
+            setTypingByConversation((current) => updateNativeTyping(current, conversationId, message.senderUserId, null))
         }
         setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: mergeMessages(conversation.messages, incoming), updatedAt: incoming.at(-1)?.createdAt ?? conversation.updatedAt } : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt)))
     }, [])
@@ -292,8 +342,18 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     useEffect(() => { if (selectedId) localStorage.setItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selectedId}`, draft) }, [bootstrap.workspaceId, draft, selectedId])
     useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selected?.messages.length, selectedId])
+    useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selectedId, typingByConversation])
 
     const registerRealtime = useCallback((channel: ReturnType<typeof supabase.channel>) => channel
+                .on("broadcast", { event: NATIVE_TYPING_EVENT }, ({ payload }) => {
+                    const typing = record(payload)
+                    const conversationId = text(typing.conversationId)
+                    const userId = text(typing.userId)
+                    if (!conversationId || !userId || userId === bootstrap.currentUser.id) return
+                    const conversation = conversationsRef.current.find((candidate) => candidate.id === conversationId)
+                    if (!conversation?.memberIds.includes(userId)) return
+                    setTypingByConversation((current) => updateNativeTyping(current, conversationId, userId, typing.typing === true ? Date.now() + NATIVE_TYPING_EXPIRY_MS : null))
+                })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     if (payload.eventType === "DELETE") {
                         const deleted = record(payload.old); const messageId = text(deleted.id); const conversationId = text(deleted.conversation_id)
@@ -311,9 +371,45 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_read_cursors", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => { const row = record(payload.new); const conversationId = text(row.conversation_id); const userId = text(row.user_id); const lastReadAt = text(row.last_read_at); if (conversationId && userId && lastReadAt) setReadCursors((current) => [...current.filter((cursor) => !(cursor.conversationId === conversationId && cursor.userId === userId)), { conversationId, userId, lastReadMessageId: text(row.last_read_message_id), lastReadAt }]) })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_conversations", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_team_members", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
-        , [bootstrap.workspaceId, refresh, supabase, updateConversationMessages])
+        , [bootstrap.currentUser.id, bootstrap.workspaceId, refresh, supabase, updateConversationMessages])
 
     const connection = useReliableCommunicationsRealtime({ active, connectionKey: bootstrap.workspaceSlug, register: registerRealtime, schemaReady, supabase, synchronize: refresh })
+    const sendRealtimeBroadcast = connection.sendBroadcast
+
+    const stopNativeTyping = useCallback((conversationId: string | null) => {
+        if (!conversationId) return
+        if (sentTypingConversationRef.current === conversationId) sentTypingConversationRef.current = null
+        lastTypingBroadcastAtRef.current = 0
+        void sendRealtimeBroadcast(NATIVE_TYPING_EVENT, { conversationId, userId: bootstrap.currentUser.id, typing: false })
+    }, [bootstrap.currentUser.id, sendRealtimeBroadcast])
+
+    function handleDraftChange(value: string) {
+        setDraft(value)
+        if (!selected?.canWrite || !value.trim() || !active || !workspaceTabActive || !documentVisible || connection.state !== "live") {
+            stopNativeTyping(sentTypingConversationRef.current)
+            return
+        }
+        const now = Date.now()
+        if (sentTypingConversationRef.current === selected.id && now - lastTypingBroadcastAtRef.current < NATIVE_TYPING_REFRESH_MS) return
+        sentTypingConversationRef.current = selected.id
+        lastTypingBroadcastAtRef.current = now
+        void sendRealtimeBroadcast(NATIVE_TYPING_EVENT, { conversationId: selected.id, userId: bootstrap.currentUser.id, typing: true })
+    }
+
+    useEffect(() => {
+        const sentConversationId = sentTypingConversationRef.current
+        if (sentConversationId && sentConversationId !== selectedId) stopNativeTyping(sentConversationId)
+    }, [selectedId, stopNativeTyping])
+
+    useEffect(() => {
+        if (connection.state === "live") return
+        sentTypingConversationRef.current = null
+        lastTypingBroadcastAtRef.current = 0
+        const timer = window.setTimeout(() => setTypingByConversation({}), 0)
+        return () => window.clearTimeout(timer)
+    }, [connection.state])
+
+    useEffect(() => () => stopNativeTyping(sentTypingConversationRef.current), [stopNativeTyping])
 
     useEffect(() => onConnectionStateChange?.(connection.state), [connection.state, onConnectionStateChange])
 
@@ -372,6 +468,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     async function sendMessage() {
         if (!selected?.canWrite) return
         const body = draft.trim(); if (!body && !attachment) return
+        stopNativeTyping(selected.id)
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
         const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString() }
         updateConversationMessages(selected.id, [optimistic], true); setDraft(""); setReplyingTo(null); setAttachment(null); setError(null); localStorage.removeItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selected.id}`)
@@ -449,6 +546,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const currentTeam = selected?.teamId ? teams.find((team) => team.id === selected.teamId) : null
     const pinnedMessage = selected?.pinnedMessageId ? selected.messages.find((message) => message.id === selected.pinnedMessageId) ?? null : null
     const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId ? "Pinned message unavailable" : null
+    const selectedTypingPeople = selected ? Object.keys(typingByConversation[selected.id] ?? {}).flatMap((userId) => peopleById.get(userId) ?? []) : []
+    const selectedTypingLabel = selectedTypingPeople.length > 1
+        ? `${selectedTypingPeople.map((person) => person.name).join(", ")} are typing`
+        : `${selectedTypingPeople[0]?.name ?? selected?.title ?? "Someone"} is typing`
 
     return <section aria-label="Team communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
         {!schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">Apply the Teams database migration to enable native messaging.</div> : null}
@@ -461,11 +562,12 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">{visible.length ? visible.map((conversation) => {
                     const latest = conversation.messages.at(-1)
+                    const showTypingPreview = conversation.id !== selectedId && Object.keys(typingByConversation[conversation.id] ?? {}).length > 0
                     const ownCursor = readCursors.find((cursor) => cursor.conversationId === conversation.id && cursor.userId === bootstrap.currentUser.id)
                     const cursorIndex = ownCursor?.lastReadMessageId ? conversation.messages.findIndex((message) => message.id === ownCursor.lastReadMessageId) : -1
                     const unread = conversation.messages.filter((message, index) => message.senderUserId !== bootstrap.currentUser.id && (cursorIndex >= 0 ? index > cursorIndex : !ownCursor || message.createdAt > ownCursor.lastReadAt)).length
                     const latestRead = Boolean(latest && readCursors.some((cursor) => cursor.conversationId === conversation.id && cursor.userId !== latest.senderUserId && cursor.lastReadAt >= latest.createdAt))
-                    return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}><TeamAvatar conversation={conversation} currentUserId={bootstrap.currentUser.id} /><span className="min-w-0"><span className="flex items-start justify-between gap-3"><span className="truncate text-sm font-semibold">{conversation.title}</span>{latest ? <time className={unread ? "text-[11px] text-white" : "text-[11px] text-neutral-600"}>{formatRelativeTime(latest.createdAt)}</time> : null}</span><span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-neutral-500">{latest?.senderUserId === bootstrap.currentUser.id ? <NativeDeliveryTicks message={latest} read={latestRead} /> : null}<span className="truncate">{latest ? `${latest.senderUserId === bootstrap.currentUser.id ? "You: " : ""}${messagePreview(latest)}` : conversation.subtitle}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span></button>
+                    return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}><TeamAvatar conversation={conversation} currentUserId={bootstrap.currentUser.id} /><span className="min-w-0"><span className="flex items-start justify-between gap-3"><span className="truncate text-sm font-semibold">{conversation.title}</span>{latest ? <time className={unread ? "text-[11px] text-white" : "text-[11px] text-neutral-600"}>{formatRelativeTime(latest.createdAt)}</time> : null}</span><span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-neutral-500">{!showTypingPreview && latest?.senderUserId === bootstrap.currentUser.id ? <NativeDeliveryTicks message={latest} read={latestRead} /> : null}<span className={`truncate ${showTypingPreview ? "font-medium text-neutral-300" : ""}`}>{showTypingPreview ? "typing…" : latest ? `${latest.senderUserId === bootstrap.currentUser.id ? "You: " : ""}${messagePreview(latest)}` : conversation.subtitle}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span></button>
                 }) : <div className="p-6 text-center"><p className="text-sm text-neutral-300">{showArchived ? "No archived teams" : "No team conversations yet"}</p><p className="mt-2 text-xs text-neutral-600">{showArchived ? "Archived team history will appear here." : "Open a profile to start a DM or create a team."}</p></div>}</div>
             </aside>
             <div className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
@@ -529,7 +631,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                             </div>
                             {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>
-                    }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
+                    }) : selectedTypingPeople.length ? null : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}
+                    {selectedTypingPeople.length ? <NativeTypingDots label={selectedTypingLabel} /> : null}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
                     <footer className="relative z-10 shrink-0 touch-none border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">{selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"}</span><span className="block truncate text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => { setReplyingTo(null); composerRef.current?.focus({ preventScroll: true }) }} aria-label="Cancel reply" className="h-8 w-8 text-neutral-500">×</button></div> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
@@ -543,7 +646,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                             placeholder={selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}
                             disabled={!selected.canWrite}
                             sendDisabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"}
-                            onDraftChange={setDraft}
+                            onDraftChange={handleDraftChange}
+                            onBlur={() => stopNativeTyping(selected.id)}
                             onSend={() => void sendMessage()}
                             leadingActions={<>
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><AttachmentIcon /></button>

@@ -31,6 +31,7 @@ export function useReliableCommunicationsRealtime({
     const workspaceTabActiveRef = useRef(workspaceTabActive)
     const registerRef = useRef(register)
     const synchronizeRef = useRef(synchronize)
+    const channelRef = useRef<RealtimeChannel | null>(null)
     const stateRef = useRef<CommunicationsConnectionState>(schemaReady ? "connecting" : "offline")
     const [state, setState] = useState<CommunicationsConnectionState>(() => schemaReady ? "connecting" : "offline")
     const [error, setError] = useState<string | null>(schemaReady ? null : "Communications database updates are unavailable.")
@@ -44,6 +45,16 @@ export function useReliableCommunicationsRealtime({
         stateRef.current = next
         setState(next)
         setError(nextError)
+    }, [])
+
+    const sendBroadcast = useCallback(async (event: string, payload: Record<string, unknown>) => {
+        const channel = channelRef.current
+        if (!channel || stateRef.current !== "live") return false
+        try {
+            return await channel.send({ type: "broadcast", event, payload }) === "ok"
+        } catch {
+            return false
+        }
     }, [])
 
     useEffect(() => {
@@ -109,6 +120,7 @@ export function useReliableCommunicationsRealtime({
                 if (channel) {
                     const previous = channel
                     channel = null
+                    if (channelRef.current === previous) channelRef.current = null
                     await supabase.removeChannel(previous)
                 }
                 const session = await supabase.auth.getSession()
@@ -122,6 +134,7 @@ export function useReliableCommunicationsRealtime({
                 if (disposed) return
                 const candidate = registerRef.current(supabase.channel(`communications:${connectionKey}`, { config: { private: true } }))
                 channel = candidate
+                channelRef.current = candidate
                 candidate.subscribe((status, subscribeError) => {
                     if (disposed || channel !== candidate) return
                     if (status === "SUBSCRIBED") {
@@ -183,9 +196,12 @@ export function useReliableCommunicationsRealtime({
             window.removeEventListener(WORKSPACE_TAB_VISIBILITY_EVENT, recoverWhenAvailable)
             window.removeEventListener(COMMUNICATIONS_RECOVERY_EVENT, recoverWhenAvailable)
             document.removeEventListener("visibilitychange", recoverWhenAvailable)
-            if (channel) void supabase.removeChannel(channel)
+            if (channel) {
+                if (channelRef.current === channel) channelRef.current = null
+                void supabase.removeChannel(channel)
+            }
         }
     }, [connectionKey, schemaReady, supabase, updateState])
 
-    return { state, error, workspaceTabActive }
+    return { state, error, workspaceTabActive, sendBroadcast }
 }

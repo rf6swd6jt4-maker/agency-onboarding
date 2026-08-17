@@ -141,6 +141,11 @@ html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   100% { opacity: 1; transform: translateX(0) scale(1); }
 }
 
+@keyframes betelgeze-typing-dot {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-0.3rem); }
+}
+
 .betelgeze-message-enter-left,
 .betelgeze-message-enter-right {
   animation: betelgeze-message-grow-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -154,10 +159,15 @@ html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   animation: betelgeze-reaction-popup-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.betelgeze-typing-dot {
+  animation: betelgeze-typing-dot 900ms ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .betelgeze-message-enter-left,
   .betelgeze-message-enter-right,
-  .betelgeze-reaction-popup-enter { animation: none; }
+  .betelgeze-reaction-popup-enter,
+  .betelgeze-typing-dot { animation: none; }
 }
 
 .whitespace-pre-wrap,

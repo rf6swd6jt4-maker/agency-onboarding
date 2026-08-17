@@ -107,3 +107,20 @@ test("native messaging supports realtime messages, replies, reactions, reads, fi
     assert.match(pins, /assertNativeConversationAccess\(conversationId, user\.id, "write"\)/)
     assert.match(pinMigration, /workspace_native_conversations_pinned_message_fkey/)
 })
+
+test("native typing is conversation scoped, animated, previewed, and self expiring", async () => {
+    const [workspace, realtime, styles] = await Promise.all([
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/useReliableCommunicationsRealtime.ts", "utf8"),
+        readFile("app/globals.css", "utf8"),
+    ])
+    assert.match(realtime, /channel\.send\(\{ type: "broadcast", event, payload \}\)/)
+    assert.match(workspace, /\.on\("broadcast", \{ event: NATIVE_TYPING_EVENT \}/)
+    assert.match(workspace, /NATIVE_TYPING_EXPIRY_MS = 6_000/)
+    assert.match(workspace, /NATIVE_TYPING_REFRESH_MS = 2_000/)
+    assert.match(workspace, /conversation\?\.memberIds\.includes\(userId\)/)
+    assert.match(workspace, /showTypingPreview \? "typing…"/)
+    assert.match(workspace, /<NativeTypingDots label=\{selectedTypingLabel\}/)
+    assert.match(styles, /@keyframes betelgeze-typing-dot/)
+    assert.match(styles, /transform: translateY\(-0\.3rem\)/)
+})

@@ -34,6 +34,9 @@ function stringValue(value: unknown) {
     return typeof value === "string" ? value : null
 }
 
+const WHATSAPP_TYPING_DEBOUNCE_MS = 500
+const WHATSAPP_TYPING_REFRESH_MS = 20_000
+
 function realtimeMessage(value: unknown): CommunicationMessage | null {
     const row = record(value)
     const id = stringValue(row.id)
@@ -276,6 +279,9 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     const swipedMessageRef = useRef<string | null>(null)
     const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
+    const draftRef = useRef(draft)
+    const whatsAppTypingTimerRef = useRef<number | null>(null)
+    const whatsAppTypingCooldownTimersRef = useRef<Record<string, number>>({})
     const pendingReadRef = useRef<CommunicationReadCursor | null>(null)
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
@@ -285,6 +291,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         selectedRef.current = selectedId
         onSelectedConversationChange?.(selectedId)
     }, [onSelectedConversationChange, selectedId])
+
+    useEffect(() => { draftRef.current = draft }, [draft])
 
     useEffect(() => {
         const update = () => setDocumentVisible(document.visibilityState === "visible")
@@ -304,6 +312,11 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current), [selectedId])
 
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
+
+    useEffect(() => () => {
+        if (whatsAppTypingTimerRef.current !== null) window.clearTimeout(whatsAppTypingTimerRef.current)
+        Object.values(whatsAppTypingCooldownTimersRef.current).forEach((timer) => window.clearTimeout(timer))
+    }, [])
 
     useEffect(() => {
         attachmentRef.current = attachment
@@ -715,6 +728,43 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         synchronize,
     })
 
+    const clearPendingWhatsAppTyping = useCallback(() => {
+        if (whatsAppTypingTimerRef.current === null) return
+        window.clearTimeout(whatsAppTypingTimerRef.current)
+        whatsAppTypingTimerRef.current = null
+    }, [])
+
+    function handleClientDraftChange(value: string) {
+        draftRef.current = value
+        setDraft(value)
+        clearPendingWhatsAppTyping()
+        if (!value.trim() || !selected?.channels?.includes("meta_whatsapp") || !active || !workspaceTabActive || !documentVisible) return
+        const relationshipId = selected.id
+        if (whatsAppTypingCooldownTimersRef.current[relationshipId]) return
+        whatsAppTypingTimerRef.current = window.setTimeout(() => {
+            whatsAppTypingTimerRef.current = null
+            if (selectedRef.current !== relationshipId || !draftRef.current.trim() || document.visibilityState !== "visible") return
+            whatsAppTypingCooldownTimersRef.current[relationshipId] = window.setTimeout(() => {
+                delete whatsAppTypingCooldownTimersRef.current[relationshipId]
+            }, WHATSAPP_TYPING_REFRESH_MS)
+            void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/typing`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ relationshipId }),
+            }).then((response) => {
+                if (!response.ok) {
+                    window.clearTimeout(whatsAppTypingCooldownTimersRef.current[relationshipId])
+                    delete whatsAppTypingCooldownTimersRef.current[relationshipId]
+                }
+            }).catch(() => {
+                window.clearTimeout(whatsAppTypingCooldownTimersRef.current[relationshipId])
+                delete whatsAppTypingCooldownTimersRef.current[relationshipId]
+            })
+        }, WHATSAPP_TYPING_DEBOUNCE_MS)
+    }
+
+    useEffect(() => { clearPendingWhatsAppTyping() }, [clearPendingWhatsAppTyping, selectedId])
+
     useEffect(() => onConnectionStateChange?.(connection.state), [connection.state, onConnectionStateChange])
 
     useEffect(() => {
@@ -737,6 +787,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         const replyMessageId = messageToRetry?.replyToMessageId ?? replyTarget?.id ?? null
         const typedBody = messageToRetry ? (messageToRetry.attachment && messageToRetry.body === attachmentPlaceholder(messageToRetry.attachment) ? "" : messageToRetry.body) : draft.trim()
         if (!typedBody && !messageAttachment) return
+        clearPendingWhatsAppTyping()
         const body = typedBody || (messageAttachment ? attachmentPlaceholder(messageAttachment) : "")
         const clientRequestId = messageToRetry?.clientRequestId ?? crypto.randomUUID()
         const optimistic: CommunicationMessage = messageToRetry ? { ...messageToRetry, status: "sending", error: null, failedAt: null } : {
@@ -764,6 +815,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         }
         updateConversationMessages(selected.id, [optimistic], true)
         if (!messageToRetry) {
+            draftRef.current = ""
             setDraft("")
             setAttachment(null)
             setReplyingTo(null)
@@ -950,7 +1002,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                             placeholder={selected.canSend ? `Message ${selected.title}` : "Add a phone number and connect SMS or WhatsApp"}
                             disabled={!schemaReady || !selected.canSend}
                             sendDisabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !schemaReady || !selected.canSend}
-                            onDraftChange={setDraft}
+                            onDraftChange={handleClientDraftChange}
+                            onBlur={clearPendingWhatsAppTyping}
                             onSend={() => void sendMessage()}
                             leadingActions={<>
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><AttachmentIcon /></button>
