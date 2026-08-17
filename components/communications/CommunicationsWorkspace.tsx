@@ -21,6 +21,7 @@ import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabAct
 import type { ClientConversation, CommunicationAttachment, CommunicationDelivery, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
+import { dismissReadChatNotification } from "@/lib/push/browser-notifications"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
@@ -364,9 +365,10 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ relationshipId: cursor.relationshipId, messageId: cursor.lastReadMessageId }),
             })
-            const result = await response.json().catch(() => null) as { cursor?: CommunicationReadCursor; error?: string } | null
+            const result = await response.json().catch(() => null) as { cursor?: CommunicationReadCursor; notificationReadThrough?: string; error?: string } | null
             if (!response.ok || !result?.cursor) throw new Error(result?.error ?? "Could not save the read position.")
             setReadCursors((current) => mergeCursor(current, result.cursor!))
+            if (result.notificationReadThrough) void dismissReadChatNotification(cursor.relationshipId, result.notificationReadThrough)
             if (pendingReadRef.current?.relationshipId === cursor.relationshipId && pendingReadRef.current.lastReadMessageId === cursor.lastReadMessageId) pendingReadRef.current = null
         } finally {
             if (readRequestRef.current === cursor.lastReadMessageId) readRequestRef.current = null

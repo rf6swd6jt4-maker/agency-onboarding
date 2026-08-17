@@ -18,10 +18,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     const { data: current } = await supabaseAdmin.from("communication_read_cursors").select("last_read_message_id, last_read_at").eq("workspace_id", workspace.id).eq("relationship_id", relationshipId).eq("user_id", user.id).maybeSingle()
     if (current?.last_read_message_id) {
         const { data: previous } = await supabaseAdmin.from("client_messages").select("created_at").eq("id", current.last_read_message_id).maybeSingle()
-        if (previous && previous.created_at >= target.created_at) return Response.json({ cursor: { relationshipId, userId: user.id, lastReadMessageId: current.last_read_message_id, lastReadAt: current.last_read_at } })
+        if (previous && previous.created_at >= target.created_at) return Response.json({ cursor: { relationshipId, userId: user.id, lastReadMessageId: current.last_read_message_id, lastReadAt: current.last_read_at }, notificationReadThrough: previous.created_at })
     }
     const lastReadAt = new Date().toISOString()
     const { error } = await supabaseAdmin.from("communication_read_cursors").upsert({ workspace_id: workspace.id, relationship_id: relationshipId, user_id: user.id, last_read_message_id: messageId, last_read_at: lastReadAt }, { onConflict: "workspace_id,relationship_id,user_id" })
     if (error) return Response.json({ error: error.message }, { status: 503 })
-    return Response.json({ cursor: { relationshipId, userId: user.id, lastReadMessageId: messageId, lastReadAt } })
+    return Response.json({ cursor: { relationshipId, userId: user.id, lastReadMessageId: messageId, lastReadAt }, notificationReadThrough: target.created_at })
 }

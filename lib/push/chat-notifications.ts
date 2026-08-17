@@ -19,10 +19,16 @@ type ChatPush = {
     workspaceId: string
     conversationKind: "client" | "native"
     messageId: string
+    messageCreatedAt: string
     conversationId: string
     title: string
     body: string
     url: string
+}
+
+type ReadCursor = {
+    user_id: string
+    last_read_at: string
 }
 
 function vapidDetails() {
@@ -62,6 +68,42 @@ export function chatNotificationText(chatName: string, messageBody: unknown, att
     }
 }
 
+function chatNotificationBody(preview: string, unreadCount: number) {
+    return unreadCount > 1 ? `${unreadCount} new messages · ${preview}` : preview
+}
+
+async function unreadCounts(recipientUserIds: string[], push: ChatPush) {
+    const counts = new Map<string, number>()
+    if (recipientUserIds.length === 0) return counts
+
+    const cursorQuery = push.conversationKind === "client"
+        ? supabaseAdmin.from("communication_read_cursors").select("user_id, last_read_at").eq("workspace_id", push.workspaceId).eq("relationship_id", push.conversationId).in("user_id", recipientUserIds)
+        : supabaseAdmin.from("workspace_native_read_cursors").select("user_id, last_read_at").eq("workspace_id", push.workspaceId).eq("conversation_id", push.conversationId).in("user_id", recipientUserIds)
+    const { data: cursorRows, error: cursorError } = await cursorQuery
+    if (cursorError) {
+        console.warn("Could not resolve chat notification read cursors", cursorError)
+        recipientUserIds.forEach((userId) => counts.set(userId, 1))
+        return counts
+    }
+
+    const cursors = new Map(((cursorRows ?? []) as ReadCursor[]).map((cursor) => [cursor.user_id, cursor.last_read_at]))
+    await Promise.all(recipientUserIds.map(async (userId) => {
+        const lastReadAt = cursors.get(userId)
+        let query = push.conversationKind === "client"
+            ? supabaseAdmin.from("client_messages").select("id", { count: "exact", head: true }).eq("workspace_id", push.workspaceId).eq("relationship_id", push.conversationId).eq("direction", "inbound")
+            : supabaseAdmin.from("workspace_native_messages").select("id", { count: "exact", head: true }).eq("workspace_id", push.workspaceId).eq("conversation_id", push.conversationId).neq("sender_user_id", userId)
+        if (lastReadAt) query = query.gt("created_at", lastReadAt)
+        const { count, error } = await query
+        if (error) {
+            console.warn("Could not count unread chat messages", error)
+            counts.set(userId, 1)
+            return
+        }
+        counts.set(userId, count ?? 1)
+    }))
+    return counts
+}
+
 async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
     const recipients = [...new Set(recipientUserIds.filter(Boolean))]
     if (recipients.length === 0) return
@@ -85,18 +127,23 @@ async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
 
     const activeUsers = new Set((activeError ? [] : activeRows ?? []).map((row) => row.user_id))
     const subscriptions = (subscriptionRows ?? []) as StoredSubscription[]
-    const payload = JSON.stringify({
-        category: "chat",
-        title: push.title,
-        body: push.body,
-        url: push.url,
-        tag: `chat:${push.conversationId}`,
-        messageId: push.messageId,
-        conversationId: push.conversationId,
-    })
+    const inactiveUsers = [...new Set(subscriptions.map((subscription) => subscription.user_id).filter((userId) => !activeUsers.has(userId)))]
+    const counts = await unreadCounts(inactiveUsers, push)
     const topic = createHash("sha256").update(push.conversationId).digest("base64url").slice(0, 32)
 
-    await Promise.all(subscriptions.filter((subscription) => !activeUsers.has(subscription.user_id)).map(async (subscription) => {
+    await Promise.all(subscriptions.filter((subscription) => !activeUsers.has(subscription.user_id) && (counts.get(subscription.user_id) ?? 1) > 0).map(async (subscription) => {
+        const unreadCount = counts.get(subscription.user_id) ?? 1
+        const payload = JSON.stringify({
+            category: "chat",
+            title: push.title,
+            body: chatNotificationBody(push.body, unreadCount),
+            url: push.url,
+            tag: `chat:${push.conversationId}`,
+            messageId: push.messageId,
+            messageCreatedAt: push.messageCreatedAt,
+            unreadCount,
+            conversationId: push.conversationId,
+        })
         const browserSubscription: PushSubscription = {
             endpoint: subscription.endpoint,
             keys: { p256dh: subscription.p256dh, auth: subscription.auth },
@@ -137,7 +184,7 @@ export async function notifyNativeChatMessage(input: {
         supabaseAdmin.from("workspace_native_conversation_participants").select("user_id").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId),
         supabaseAdmin.from("user_profiles").select("display_name, username").eq("user_id", input.senderUserId).maybeSingle(),
         supabaseAdmin.from("workspace_native_conversations").select("kind, team_id").eq("workspace_id", input.workspaceId).eq("id", input.conversationId).maybeSingle(),
-        supabaseAdmin.from("workspace_native_messages").select("body, attachment").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId).eq("id", input.messageId).maybeSingle(),
+        supabaseAdmin.from("workspace_native_messages").select("body, attachment, created_at").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId).eq("id", input.messageId).maybeSingle(),
     ])
     if (participantsError || profileError || conversationError || messageError || !conversation || !message) {
         console.error("Could not prepare native chat push", participantsError ?? profileError ?? conversationError ?? messageError)
@@ -160,6 +207,7 @@ export async function notifyNativeChatMessage(input: {
             workspaceId: input.workspaceId,
             conversationKind: "native",
             messageId: input.messageId,
+            messageCreatedAt: message.created_at,
             conversationId: input.conversationId,
             title: notification.title,
             body: notification.body,
@@ -183,7 +231,7 @@ export async function notifyClientChatMessage(input: {
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspaces").select("slug").eq("id", input.workspaceId).single(),
         supabaseAdmin.from("relationships").select("primary_person_name, business_name").eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).maybeSingle(),
-        supabaseAdmin.from("client_messages").select("body").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).eq("id", input.messageId).maybeSingle(),
+        supabaseAdmin.from("client_messages").select("body, created_at").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).eq("id", input.messageId).maybeSingle(),
     ])
     if (membershipError || workspaceError || relationshipError || messageError || !workspace || !message) {
         console.error("Could not prepare client chat push", membershipError ?? workspaceError ?? relationshipError ?? messageError)
@@ -196,6 +244,7 @@ export async function notifyClientChatMessage(input: {
         workspaceId: input.workspaceId,
         conversationKind: "client",
         messageId: input.messageId,
+        messageCreatedAt: message.created_at,
         conversationId: input.relationshipId,
         title: notification.title,
         body: notification.body,

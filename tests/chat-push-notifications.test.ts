@@ -82,3 +82,25 @@ test("native, WhatsApp, and Twilio message writes schedule chat pushes after the
     assert.match(worker, /await existingClient\.navigate\(targetUrl\)/)
     assert.match(worker, /navigatedClient \? navigatedClient\.focus\(\)/)
 })
+
+test("chat notifications aggregate per conversation, quiet rapid replacements, and clear only after reads persist", async () => {
+    const [delivery, worker, clientWorkspace, teamWorkspace, browserNotifications] = await Promise.all([
+        readFile("lib/push/chat-notifications.ts", "utf8"),
+        readFile("public/sw.js", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("lib/push/browser-notifications.ts", "utf8"),
+    ])
+    assert.match(delivery, /chatNotificationBody\(push\.body, unreadCount\)/)
+    assert.match(delivery, /communication_read_cursors/)
+    assert.match(delivery, /workspace_native_read_cursors/)
+    assert.match(delivery, /new messages/)
+    assert.match(delivery, /messageCreatedAt/)
+    assert.match(worker, /getNotifications\(\{ tag \}\)/)
+    assert.match(worker, /now - previousMessageAt >= 60_000/)
+    assert.match(worker, /unreadCount/)
+    assert.match(clientWorkspace, /dismissReadChatNotification\(cursor\.relationshipId, result\.notificationReadThrough\)/)
+    assert.match(teamWorkspace, /dismissReadChatNotification\(cursor\.conversationId, result\.notificationReadThrough\)/)
+    assert.match(browserNotifications, /getNotifications\(\{ tag: `chat:\$\{conversationId\}` \}\)/)
+    assert.match(browserNotifications, /messageCreatedAt <= readThroughCreatedAt/)
+})

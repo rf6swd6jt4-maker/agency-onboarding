@@ -48,21 +48,34 @@ self.addEventListener("push", (event) => {
     }
   }
 
-  const title = typeof payload.title === "string" ? payload.title : "Betelgeze";
-  const options = {
-    body: typeof payload.body === "string" ? payload.body : "A Betelgeze update is ready.",
-    icon: typeof payload.icon === "string" ? payload.icon : "/icons/betelgeze-icon-192.png",
-    badge: "/icons/betelgeze-icon-192.png",
-    tag: typeof payload.tag === "string" ? payload.tag : undefined,
-    renotify: typeof payload.tag === "string",
-    data: {
-      url: typeof payload.url === "string" && payload.url.startsWith("/") ? payload.url : "/",
-      category: typeof payload.category === "string" ? payload.category : "update",
-      conversationId: typeof payload.conversationId === "string" ? payload.conversationId : null,
-    },
-  };
+  event.waitUntil(
+    (async () => {
+      const title = typeof payload.title === "string" ? payload.title : "Betelgeze";
+      const tag = typeof payload.tag === "string" ? payload.tag : undefined;
+      const existing = tag ? await self.registration.getNotifications({ tag }) : [];
+      const previousMessageAt = Number(existing[0]?.data?.lastMessageAt) || 0;
+      const now = Date.now();
+      const renotify = Boolean(tag && existing.length > 0 && now - previousMessageAt >= 60_000);
+      const options = {
+        body: typeof payload.body === "string" ? payload.body : "A Betelgeze update is ready.",
+        icon: typeof payload.icon === "string" ? payload.icon : "/icons/betelgeze-icon-192.png",
+        badge: "/icons/betelgeze-icon-192.png",
+        tag,
+        renotify,
+        data: {
+          url: typeof payload.url === "string" && payload.url.startsWith("/") ? payload.url : "/",
+          category: typeof payload.category === "string" ? payload.category : "update",
+          conversationId: typeof payload.conversationId === "string" ? payload.conversationId : null,
+          messageId: typeof payload.messageId === "string" ? payload.messageId : null,
+          messageCreatedAt: typeof payload.messageCreatedAt === "string" ? payload.messageCreatedAt : null,
+          unreadCount: Number.isSafeInteger(payload.unreadCount) ? payload.unreadCount : 1,
+          lastMessageAt: now,
+        },
+      };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+      await self.registration.showNotification(title, options);
+    })()
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {

@@ -16,6 +16,7 @@ import { keepComposerCurrentLineCentered } from "@/components/communications/com
 import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabActive"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
+import { dismissReadChatNotification } from "@/lib/push/browser-notifications"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import type { CommunicationAttachment, CommunicationSticker } from "@/lib/communications/types"
@@ -239,9 +240,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         readRequestRef.current = cursor.lastReadMessageId
         try {
             const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: cursor.conversationId, messageId: cursor.lastReadMessageId }) })
-            const result = await response.json().catch(() => null) as { cursor?: NativeReadCursor; error?: string } | null
+            const result = await response.json().catch(() => null) as { cursor?: NativeReadCursor; notificationReadThrough?: string; error?: string } | null
             if (!response.ok || !result?.cursor) throw new Error(result?.error ?? "Could not save the read position.")
             setReadCursors((current) => mergeCursor(current, result.cursor!))
+            if (result.notificationReadThrough) void dismissReadChatNotification(cursor.conversationId, result.notificationReadThrough)
             if (pendingReadRef.current?.conversationId === cursor.conversationId && pendingReadRef.current.lastReadMessageId === cursor.lastReadMessageId) pendingReadRef.current = null
         } finally {
             if (readRequestRef.current === cursor.lastReadMessageId) readRequestRef.current = null
