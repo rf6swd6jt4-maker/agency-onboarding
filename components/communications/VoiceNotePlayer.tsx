@@ -18,7 +18,7 @@ function PlayIcon({ playing }: { playing: boolean }) {
         : <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current"><path d="m8 5 11 7-11 7z" /></svg>
 }
 
-export function VoiceNotePlayer({ src, fileName, light = false }: { src: string; fileName: string; light?: boolean }) {
+export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = false }: { src: string; fileName: string; light?: boolean; whiteOnColor?: boolean }) {
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const [duration, setDuration] = useState(0)
     const [currentTime, setCurrentTime] = useState(() => playbackPositions.get(src) ?? 0)
@@ -65,7 +65,7 @@ export function VoiceNotePlayer({ src, fileName, light = false }: { src: string;
         }
     }
 
-    return <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} className={`mb-1.5 w-60 max-w-full rounded-xl border px-2.5 py-2 ${light ? "border-black/10 bg-black/5 text-neutral-800" : "border-white/10 bg-black/20 text-neutral-200"}`}>
+    return <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} className={`mb-1.5 w-60 max-w-full rounded-xl border px-2.5 py-2 ${whiteOnColor ? "border-white/15 bg-white/10 text-white" : light ? "border-black/10 bg-black/5 text-neutral-800" : "border-white/10 bg-black/20 text-neutral-200"}`}>
         <audio
             ref={audioRef}
             src={src}
@@ -82,10 +82,10 @@ export function VoiceNotePlayer({ src, fileName, light = false }: { src: string;
             <button type="button" onClick={() => void togglePlayback()} aria-label={`${playing ? "Pause" : "Play"} ${fileName}`} className="inline-flex h-9 w-9 shrink-0 items-center justify-center bg-transparent text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"><PlayIcon playing={playing} /></button>
             <div className="min-w-0 flex-1">
                 <div className="relative flex h-7 items-center gap-[2px]" aria-hidden="true">
-                    {WAVEFORM.map((height, index) => <span key={index} style={{ height }} className={`min-w-px flex-1 rounded-full transition-colors ${index / WAVEFORM.length <= progress ? "bg-white" : light ? "bg-neutral-400" : "bg-neutral-600"}`} />)}
+                    {WAVEFORM.map((height, index) => <span key={index} style={{ height }} className={`min-w-px flex-1 rounded-full transition-colors ${index / WAVEFORM.length <= progress ? "bg-white" : whiteOnColor ? "bg-white/35" : light ? "bg-neutral-400" : "bg-neutral-600"}`} />)}
                     <input aria-label={`Seek ${fileName}`} type="range" min={0} max={duration || 0} step={0.1} value={Math.min(currentTime, duration || 0)} onChange={(event) => seek(Number(event.target.value))} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
                 </div>
-                <div className={`mt-0.5 flex items-center justify-between text-[10px] tabular-nums ${failed ? "text-red-500" : light ? "text-neutral-500" : "text-neutral-500"}`}><span>{failed ? "Audio unavailable" : formatPlaybackTime(currentTime)}</span><span>{formatPlaybackTime(duration)}</span></div>
+                <div className={`mt-0.5 flex items-center justify-between text-[10px] tabular-nums ${failed ? "text-red-500" : whiteOnColor ? "text-white/65" : "text-neutral-500"}`}><span>{failed ? "Audio unavailable" : formatPlaybackTime(currentTime)}</span><span>{formatPlaybackTime(duration)}</span></div>
             </div>
         </div>
     </div>

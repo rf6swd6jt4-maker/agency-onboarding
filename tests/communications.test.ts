@@ -97,10 +97,19 @@ test("direct omnichannel sending is durable and idempotent", async () => {
     )
 })
 
-test("client chat uses provider colour while retaining compact delivery ticks", async () => {
-    const workspace = await readFile("components/communications/CommunicationsWorkspace.tsx", "utf8")
+test("client chat colours only inbound WhatsApp bubbles while retaining compact delivery ticks", async () => {
+    const [workspace, voiceNote] = await Promise.all([
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/VoiceNotePlayer.tsx", "utf8"),
+    ])
     assert.match(workspace, /function usesWhatsApp/)
-    assert.match(workspace, /bg-\[#25D366\]/)
+    assert.match(workspace, /message\.direction === "inbound" && usesWhatsApp\(message\)/)
+    assert.match(workspace, /bg-\[#154D37\] text-white/)
+    assert.match(workspace, /message\.direction === "outbound" \? "bg-neutral-100 text-neutral-950"/)
+    assert.match(workspace, /whiteOnColor=\{isWhatsAppClientMessage\}/)
+    assert.match(voiceNote, /whiteOnColor \? "border-white\/15 bg-white\/10 text-white"/)
+    assert.match(voiceNote, /whiteOnColor \? "bg-white\/35"/)
+    assert.doesNotMatch(workspace, /#25D366/)
     assert.match(workspace, /<DoubleDeliveryCheckIcon/)
     assert.doesNotMatch(workspace, />\{label\} \{mark\}</)
 })
