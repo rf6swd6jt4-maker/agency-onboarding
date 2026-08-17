@@ -3,7 +3,7 @@ import { getRequiredEnv } from "@/lib/env"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { stripeAccountMode } from "@/lib/stripe/mode"
 
-export const INTEGRATION_PROVIDERS = ["stripe", "meta_whatsapp"] as const
+export const INTEGRATION_PROVIDERS = ["stripe", "meta_whatsapp", "twilio_sms"] as const
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number]
 export type IntegrationConfig = Record<string, string>
 export type ConnectionAuthMethod = "legacy" | "oauth" | "embedded_signup" | "manual"
@@ -65,10 +65,14 @@ export function integrationHint(provider: IntegrationProvider, config: Integrati
         account_id: config.account_id || null,
         mode: config.livemode === "true" ? "live" : config.livemode === "false" ? "test" : null,
     }
-    return {
+    if (provider === "meta_whatsapp") return {
         phone_number_id: config.phone_number_id || null,
         waba_id: config.waba_id || null,
         template: config.consent_template_name || null,
+    }
+    return {
+        account_sid: config.account_sid || null,
+        phone_number: config.phone_number || null,
     }
 }
 
@@ -225,13 +229,92 @@ async function verifyWhatsAppCandidate(config: IntegrationConfig) {
     }
 }
 
+function twilioAuthorization(config: IntegrationConfig) {
+    if (!config.account_sid || !config.auth_token) {
+        throw new Error("Twilio requires an Account SID and Auth Token.")
+    }
+    return `Basic ${Buffer.from(`${config.account_sid}:${config.auth_token}`).toString("base64")}`
+}
+
+async function twilioRequest(config: IntegrationConfig, path: string, init?: RequestInit) {
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(config.account_sid)}/${path}`, {
+        ...init,
+        headers: {
+            Authorization: twilioAuthorization(config),
+            accept: "application/json",
+            ...(init?.headers ?? {}),
+        },
+        cache: "no-store",
+    })
+    const payload = await response.json().catch(() => ({})) as { message?: string; [key: string]: unknown }
+    if (!response.ok) throw new Error(payload.message || `Twilio rejected this connection (${response.status}).`)
+    return payload
+}
+
+function normalizeTwilioNumber(value: string) {
+    const digits = value.trim().replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "")
+    if (!digits) return ""
+    if (digits.startsWith("+")) return digits
+    if (/^\d{10}$/.test(digits)) return `+1${digits}`
+    return `+${digits}`
+}
+
+async function verifyTwilioCandidate(config: IntegrationConfig) {
+    const phoneNumber = normalizeTwilioNumber(config.phone_number || "")
+    if (!phoneNumber) throw new Error("Twilio requires the SMS/MMS phone number in international format.")
+    const numbers = await twilioRequest(config, `IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(phoneNumber)}&PageSize=20`)
+    const number = Array.isArray(numbers.incoming_phone_numbers)
+        ? numbers.incoming_phone_numbers.find((value) => value && typeof value === "object" && (value as { phone_number?: unknown }).phone_number === phoneNumber) as {
+            sid?: string
+            phone_number?: string
+            friendly_name?: string
+            capabilities?: { sms?: boolean; mms?: boolean }
+        } | undefined
+        : undefined
+    if (!number?.sid) throw new Error("Twilio authenticated, but that phone number is not owned by this account.")
+    if (!number.capabilities?.sms) throw new Error("The selected Twilio number is not SMS-capable.")
+
+    const webhookUrl = new URL("/api/client-messages/twilio", process.env.NEXT_PUBLIC_SITE_URL ?? "https://app.betelgeze.com").toString()
+    const webhookBody = new URLSearchParams({ SmsUrl: webhookUrl, SmsMethod: "POST" })
+    await twilioRequest(config, `IncomingPhoneNumbers/${encodeURIComponent(number.sid)}.json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: webhookBody,
+    })
+
+    return {
+        ...integrationHint("twilio_sms", { ...config, phone_number: phoneNumber }),
+        account_id: config.account_sid,
+        account_sid: config.account_sid,
+        account_name: null,
+        phone_number: phoneNumber,
+        phone_number_sid: number.sid,
+        friendly_name: number.friendly_name ?? phoneNumber,
+        verified_at: new Date().toISOString(),
+        capabilities: {
+            phone_access: true,
+            outbound_messages: true,
+            webhook_subscribed: true,
+            mms: Boolean(number.capabilities?.mms),
+        },
+    }
+}
+
+async function verifyCandidate(provider: IntegrationProvider, config: IntegrationConfig) {
+    if (provider === "stripe") return verifyStripeCandidate(config)
+    if (provider === "meta_whatsapp") return verifyWhatsAppCandidate(config)
+    return verifyTwilioCandidate(config)
+}
+
 export async function verifyAndActivateWorkspaceIntegrationCandidate(workspaceId: string, provider: IntegrationProvider) {
     const candidate = await candidateConfig(workspaceId, provider)
     try {
-        const hint = provider === "stripe" ? await verifyStripeCandidate(candidate.config) : await verifyWhatsAppCandidate(candidate.config)
+        const hint = await verifyCandidate(provider, candidate.config)
         const externalAccountId = provider === "stripe"
             ? (hint as Record<string, unknown>).account_id
-            : (hint as Record<string, unknown>).waba_id
+            : provider === "meta_whatsapp"
+                ? (hint as Record<string, unknown>).waba_id
+                : (hint as Record<string, unknown>).account_sid
         if (typeof externalAccountId === "string" && externalAccountId) {
             const { data: alreadyConnected, error: connectedLookupError } = await supabaseAdmin.from("workspace_integrations")
                 .select("workspace_id")
@@ -243,7 +326,7 @@ export async function verifyAndActivateWorkspaceIntegrationCandidate(workspaceId
                 .limit(1)
                 .maybeSingle()
             if (connectedLookupError) throw new Error(`Betelgeze could not confirm that this provider account is unique: ${connectedLookupError.message}`)
-            if (alreadyConnected) throw new Error(`This ${provider === "stripe" ? "Stripe" : "WhatsApp"} account is already connected to another Betelgeze workspace.`)
+            if (alreadyConnected) throw new Error(`This ${provider === "stripe" ? "Stripe" : provider === "meta_whatsapp" ? "WhatsApp" : "Twilio"} account is already connected to another Betelgeze workspace.`)
         }
         const hintUpdate = await supabaseAdmin.from("workspace_integrations").update({ candidate_config_hint: hint }).eq("workspace_id", workspaceId).eq("provider", provider)
         if (hintUpdate.error) throw new Error(hintUpdate.error.message)
@@ -326,7 +409,7 @@ export async function finishConnectionAttempt(id: string, error?: string) {
 
 export async function verifyWorkspaceIntegration(workspaceId: string, provider: IntegrationProvider) {
     const config = await getWorkspaceProviderConfig(workspaceId, provider)
-    const hint = provider === "stripe" ? await verifyStripeCandidate(config) : await verifyWhatsAppCandidate(config)
+    const hint = await verifyCandidate(provider, config)
     const { error } = await supabaseAdmin.from("workspace_integrations").update({ config_hint: hint, capabilities: hint.capabilities, connection_status: "connected", last_verified_at: new Date().toISOString(), last_error: null }).eq("workspace_id", workspaceId).eq("provider", provider).eq("mode", "connected")
     if (error) throw new Error("Could not record the successful connection check.")
 }
@@ -343,13 +426,14 @@ function legacyConfig(provider: IntegrationProvider): IntegrationConfig {
         webhook_secret: getRequiredEnv("STRIPE_WEBHOOK_SECRET"),
         default_currency: process.env.STRIPE_DEFAULT_CURRENCY ?? "usd",
     }
-    return {
+    if (provider === "meta_whatsapp") return {
         access_token: getRequiredEnv("META_WHATSAPP_ACCESS_TOKEN"),
         phone_number_id: getRequiredEnv("META_WHATSAPP_PHONE_NUMBER_ID"),
         webhook_verify_token: getRequiredEnv("META_WHATSAPP_WEBHOOK_VERIFY_TOKEN"),
         consent_template_name: process.env.META_WHATSAPP_CONSENT_TEMPLATE_NAME ?? process.env.META_WHATSAPP_ONBOARDING_TEMPLATE_NAME ?? "",
         consent_template_language: process.env.META_WHATSAPP_CONSENT_TEMPLATE_LANGUAGE ?? process.env.META_WHATSAPP_ONBOARDING_TEMPLATE_LANGUAGE ?? "en_US",
     }
+    throw new Error("Twilio does not have a platform legacy connection. Connect it in Workspace Settings.")
 }
 
 async function refreshStripeOAuth(workspaceId: string, config: IntegrationConfig): Promise<IntegrationConfig> {
@@ -395,6 +479,18 @@ export async function getWorkspaceIdForWhatsAppPhoneNumber(phoneNumberId: string
         if (item.mode === "platform_legacy" || forceSavedLegacy(item.previous_mode)) return process.env.META_WHATSAPP_PHONE_NUMBER_ID === phoneNumberId
         return item.mode === "connected" && (item.config_hint as Record<string, unknown>)?.phone_number_id === phoneNumberId
     })
+    return match?.workspace_id ?? null
+}
+
+export async function getWorkspaceIdForTwilioNumber(phoneNumber: string) {
+    const normalized = normalizeTwilioNumber(phoneNumber)
+    const { data } = await supabaseAdmin
+        .from("workspace_integrations")
+        .select("workspace_id, config_hint")
+        .eq("provider", "twilio_sms")
+        .eq("enabled", true)
+        .eq("mode", "connected")
+    const match = (data ?? []).find((item) => normalizeTwilioNumber(String((item.config_hint as Record<string, unknown>)?.phone_number ?? "")) === normalized)
     return match?.workspace_id ?? null
 }
 

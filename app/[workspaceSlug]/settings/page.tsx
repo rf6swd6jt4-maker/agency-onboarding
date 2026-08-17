@@ -50,7 +50,7 @@ const settingsSections = [
     { id: "onboarding", label: "Onboarding", detail: "Domain and session builder" },
     { id: "client-portal", label: "Client Portal", detail: "Future portal settings" },
     { id: "agency-branding", label: "Agency Branding", detail: "Onboarding and portal colours" },
-    { id: "connections", label: "Connections", detail: "Stripe and WhatsApp" },
+    { id: "connections", label: "Connections", detail: "Stripe, WhatsApp, and Twilio" },
     { id: "users", label: "Users", detail: "Access and invitations" },
     { id: "teams", label: "Teams", detail: "People and responsibility routing" },
     { id: "leadgen", label: "Lead Gen", detail: "Automation, targeting, and sources" },

@@ -1,6 +1,5 @@
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
-import { metaWhatsAppFailureIsUncertain, sendMetaWhatsAppMessage } from "@/lib/client-messages/meta-whatsapp"
-import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-attribution"
+import { resolveCommunicationDestinations, sendCommunicationDeliveries } from "@/lib/client-messages/omnichannel"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { deleteOnboardingUploads } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -67,12 +66,6 @@ function payloadText(payload: Record<string, unknown>, key: string, maximum: num
 function payloadId(payload: Record<string, unknown>, key: string) {
     const value = payload[key]
     return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value) ? value : null
-}
-
-function providerMessageId(response: unknown) {
-    if (!response || typeof response !== "object" || Array.isArray(response)) return null
-    const messages = (response as { messages?: Array<{ id?: unknown }> }).messages
-    return typeof messages?.[0]?.id === "string" ? messages[0].id : null
 }
 
 function outboxErrorCode(error: unknown, fallback: string) {
@@ -219,6 +212,9 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
 
         const context = await deliveryContext(row)
         const body = deliveryBody(row, context.onboardingUrl)
+        const channels = await resolveCommunicationDestinations({ workspaceId: row.workspace_id, relationshipId: context.relationshipId })
+        if (!channels.destinations.length) throw new Error("The relationship has no connected messaging destination")
+        const primaryDestination = channels.destinations.find((destination) => destination.primary) ?? channels.destinations[0]
         const payload = payloadRecord(row.payload)
         const clientId = payloadId(payload, "client_id")
         const saleId = payloadId(payload, "sale_id")
@@ -235,7 +231,9 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
             const { error } = await supabaseAdmin.from("client_messages").update({
                 relationship_id: context.relationshipId,
                 client_id: clientId,
-                to_address: row.destination,
+                communication_channel_id: primaryDestination.channelId,
+                provider: channels.destinations.length > 1 ? "omnichannel" : primaryDestination.provider,
+                to_address: primaryDestination.address,
                 body,
                 status: "sending",
                 error: null,
@@ -251,8 +249,9 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
                 relationship_id: context.relationshipId,
                 client_id: clientId,
                 direction: "outbound",
-                provider: "meta_whatsapp",
-                to_address: row.destination,
+                communication_channel_id: primaryDestination.channelId,
+                provider: channels.destinations.length > 1 ? "omnichannel" : primaryDestination.provider,
+                to_address: primaryDestination.address,
                 body,
                 status: "sending",
                 sender_kind: "automation",
@@ -263,17 +262,20 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
             if (error || !messageLog) throw error ?? new Error("Could not create onboarding delivery message log")
             messageLogId = messageLog.id
         }
+        if (!messageLogId) throw new Error("Could not resolve onboarding delivery message log")
 
-        const providerResponse = await sendMetaWhatsAppMessage({ workspaceId: row.workspace_id, to: row.destination, body: formatWhatsAppAttributedMessage("Scaylup", body), callbackData: messageLogId })
-        providerSent = true
-        sentProviderId = providerMessageId(providerResponse)
-        const messageUpdate = await supabaseAdmin.from("client_messages").update({
-            status: "whatsapp_sent",
-            provider_message_id: sentProviderId,
-            whatsapp_message_id: sentProviderId,
-            sent_at: new Date().toISOString(),
-            error: null,
-        }).eq("workspace_id", row.workspace_id).eq("id", messageLogId).in("status", ["sending", "send_uncertain", "send_failed", "sent", "whatsapp_sent"])
+        const delivery = await sendCommunicationDeliveries({
+            workspaceId: row.workspace_id,
+            relationshipId: context.relationshipId,
+            messageId: messageLogId,
+            body,
+            destinations: channels.destinations,
+        })
+        const successful = delivery.results.filter((result) => result.ok)
+        providerSent = successful.length > 0
+        sentProviderId = (successful.find((result) => result.primary) ?? successful[0])?.providerMessageId ?? null
+        if (!providerSent) throw new Error(delivery.error ?? "Every onboarding message delivery failed")
+        const messageUpdate = await supabaseAdmin.from("client_messages").select("id").eq("workspace_id", row.workspace_id).eq("id", messageLogId).maybeSingle()
         const finished = await finishDelivery(row, true, sentProviderId, null, null)
         if (messageUpdate.error) {
             await reportOutboxFailure({
@@ -285,7 +287,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
                 attemptCount: row.attempt_count,
                 category: "communications",
                 operation: "record_delivery_message",
-                summary: "Delivered onboarding WhatsApp message could not be finalized in the message log",
+                summary: "Delivered onboarding message could not be finalized in the message log",
                 error: messageUpdate.error,
                 fallbackCode: "ONBOARDING_DELIVERY_LOG_FAILED",
                 kind: row.kind,
@@ -294,14 +296,6 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
         if (finished.error) throw finished.error
         return true
     } catch (error) {
-        if (!providerSent && messageLogId && metaWhatsAppFailureIsUncertain(error)) {
-            await supabaseAdmin.from("client_messages").update({
-                status: "send_uncertain",
-                error: "Meta did not return a response. Betelgeze will wait for the provider callback instead of risking a duplicate message.",
-            }).eq("workspace_id", row.workspace_id).eq("id", messageLogId).in("status", ["sending", "send_uncertain", "send_failed"])
-            const finished = await finishDelivery(row, true, null, null, null)
-            if (!finished.error) return true
-        }
         const reported = await reportOutboxFailure({
             workspaceId: row.workspace_id,
             relationshipId: row.relationship_id,
@@ -311,7 +305,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
             attemptCount: row.attempt_count,
             category: "communications",
             operation: providerSent ? "finish_delivery" : "send_delivery",
-            summary: providerSent ? "Delivered onboarding WhatsApp message could not be finalized" : "Onboarding WhatsApp delivery failed",
+            summary: providerSent ? "Delivered onboarding message could not be finalized" : "Onboarding message delivery failed",
             error,
             fallbackCode: providerSent ? "ONBOARDING_DELIVERY_FINISH_FAILED" : "ONBOARDING_DELIVERY_FAILED",
             kind: row.kind,

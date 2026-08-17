@@ -59,10 +59,12 @@ test("client and native unread chat indicators use the neutral white accent", as
     }
 })
 
-test("direct WhatsApp sending is durable and idempotent", async () => {
-    const [migration, route, meta, webhook] = await Promise.all([
+test("direct omnichannel sending is durable and idempotent", async () => {
+    const [migration, omnichannelMigration, route, omnichannel, meta, webhook] = await Promise.all([
         readFile("supabase/migrations/20260814200000_communications_workspace.sql", "utf8"),
+        readFile("supabase/migrations/20260817110000_twilio_omnichannel_messaging.sql", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/messages/route.ts", "utf8"),
+        readFile("lib/client-messages/omnichannel.ts", "utf8"),
         readFile("lib/client-messages/meta-whatsapp.ts", "utf8"),
         readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
     ])
@@ -72,8 +74,10 @@ test("direct WhatsApp sending is durable and idempotent", async () => {
     assert.match(route, /requireWorkspace\(workspaceSlug\)/)
     assert.match(route, /client_request_id/)
     assert.match(route, /existing && !\(input\?\.retry === true/)
-    assert.match(route, /callbackData: messageId/)
-    assert.match(route, /if \(!relationship\.client_id\) return \{ id: null, external_address: address \}/)
+    assert.match(route, /sendCommunicationDeliveries/)
+    assert.match(omnichannel, /callbackData: input\.messageId/)
+    assert.match(omnichannel, /if \(!input\.clientId\) return null/)
+    assert.match(omnichannelMigration, /communication_message_deliveries/)
     assert.match(meta, /biz_opaque_callback_data: callbackData/)
     assert.match(webhook, /biz_opaque_callback_data/)
     assert.match(webhook, /findStatusMessage/)
@@ -91,9 +95,10 @@ test("direct WhatsApp sending is durable and idempotent", async () => {
     )
 })
 
-test("WhatsApp replies remain linked in both directions", async () => {
-    const [route, meta, webhook, server, workspace] = await Promise.all([
+test("logical replies remain linked while WhatsApp receives native reply context", async () => {
+    const [route, omnichannel, meta, webhook, server, workspace] = await Promise.all([
         readFile("app/api/workspaces/[workspaceSlug]/communications/messages/route.ts", "utf8"),
+        readFile("lib/client-messages/omnichannel.ts", "utf8"),
         readFile("lib/client-messages/meta-whatsapp.ts", "utf8"),
         readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
         readFile("lib/communications/server.ts", "utf8"),
@@ -102,12 +107,14 @@ test("WhatsApp replies remain linked in both directions", async () => {
     assert.match(webhook, /reply_to_whatsapp_message_id: replyToWhatsAppMessageId/)
     assert.match(server, /reply_to_whatsapp_message_id/)
     assert.match(route, /replyToMessageId/)
-    assert.match(route, /reply_to_whatsapp_message_id: replyToProviderMessageId/)
+    assert.match(route, /reply_to_message_id: replyToMessageId/)
+    assert.match(omnichannel, /communication_message_deliveries/)
+    assert.match(omnichannel, /replyToMessageId: input\.replyToMessageId/)
     assert.match(meta, /context: replyToMessageId \? \{ message_id: replyToMessageId \} : undefined/)
     assert.match(workspace, /Replying to \{senderName\(replyingTo\)\}/)
     assert.match(workspace, /start\.maxDeltaX > 52/)
     assert.match(workspace, /start\.verticalAtMax < 42/)
-    assert.match(workspace, /message\.replyToProviderMessageId/)
+    assert.match(workspace, /message\.replyToMessageId/)
 })
 
 test("automated onboarding messages are attributed and reuse their durable message log", async () => {
@@ -120,14 +127,14 @@ test("automated onboarding messages are attributed and reuse their durable messa
     ])
     assert.match(outbox, /contains\("raw_payload", \{ outbox_id: row\.id \}\)/)
     assert.match(outbox, /sender_kind: "automation"/)
-    assert.match(outbox, /callbackData: messageLogId/)
+    assert.match(outbox, /sendCommunicationDeliveries/)
     assert.match(automation, /automation_label: "Consent request"/)
     assert.match(automation, /automation_label: "Onboarding link"/)
     assert.match(automation, /callbackData: messageLog\.id/)
-    assert.match(outbox, /formatWhatsAppAttributedMessage\("Scaylup", body\)/)
+    assert.match(outbox, /resolveCommunicationDestinations/)
     assert.match(automation, /formatWhatsAppAttributedMessage\("Scaylup", outboundBody\)/)
     assert.match(directMessages, /select\("display_name, username"\)/)
-    assert.match(directMessages, /body: providerBody/)
+    assert.match(directMessages, /senderName: profile\?\.display_name/)
     assert.match(profiles, /profile\?\.display_name\?\.trim\(\) \|\| profile\?\.username/)
     assert.match(migration, /add column if not exists display_name text/)
     assert.doesNotMatch(migration, /display_name text unique/)

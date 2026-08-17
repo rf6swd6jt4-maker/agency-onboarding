@@ -48,6 +48,8 @@ type RelationshipDetails = {
     primaryContactRole: string
     primaryPhone: string
     whatsappPhone: string
+    communicationPrimaryProvider: "meta_whatsapp" | "twilio_sms"
+    communicationDeliveryMode: "primary_only" | "primary_with_fallback" | "mirror"
     primaryEmail: string
     sellerUserId: string
     fulfilmentManagerUserId: string
@@ -77,8 +79,8 @@ function emailIssue(value: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? null : "Enter a usable billing email"
 }
 
-function whatsappIssue(value: string) {
-    return value.replace(/\D/g, "").length >= 8 ? null : "WhatsApp number required"
+function phoneIssue(value: string, label: string) {
+    return value.replace(/\D/g, "").length >= 8 ? null : `${label} number required`
 }
 
 function priceLabel(cents: number, currency: string) {
@@ -103,6 +105,8 @@ function buildInitialDraft(details: RelationshipDetails, services: DealService[]
         primaryContactRole: details.primaryContactRole,
         primaryPhone: details.primaryPhone,
         whatsappPhone: details.whatsappPhone,
+        communicationPrimaryProvider: details.communicationPrimaryProvider,
+        communicationDeliveryMode: details.communicationDeliveryMode,
         primaryEmail: details.primaryEmail,
         sellerUserId: details.sellerUserId,
         fulfilmentManagerUserId: details.fulfilmentManagerUserId,
@@ -125,6 +129,8 @@ function backgroundDetailsKey(draft: Draft) {
         primaryContactRole: draft.primaryContactRole,
         primaryPhone: draft.primaryPhone,
         whatsappPhone: draft.whatsappPhone,
+        communicationPrimaryProvider: draft.communicationPrimaryProvider,
+        communicationDeliveryMode: draft.communicationDeliveryMode,
         primaryEmail: draft.primaryEmail,
         description: draft.description,
     })
@@ -163,6 +169,7 @@ export function RelationshipDealWorkspace({
     help,
     schemaReady,
     whatsappVerified,
+    twilioVerified,
     commercialLocked,
     plan,
     canEdit,
@@ -181,6 +188,7 @@ export function RelationshipDealWorkspace({
     help: OnboardingHelpSettings
     schemaReady: boolean
     whatsappVerified: boolean
+    twilioVerified: boolean
     commercialLocked: boolean
     plan: RelationshipGanttPlan
     canEdit: boolean
@@ -219,14 +227,16 @@ export function RelationshipDealWorkspace({
     const relationshipIssues = [
         missingText(draft.primaryPersonName, "Client name required"),
         emailIssue(draft.primaryEmail),
-        whatsappIssue(draft.whatsappPhone),
+        draft.communicationPrimaryProvider === "twilio_sms" ? phoneIssue(draft.primaryPhone, "SMS") : phoneIssue(draft.whatsappPhone, "WhatsApp"),
         draft.selectedCodes.length ? null : "Select at least one service",
         draft.fulfilmentTeamId ? null : "Choose a fulfilment team",
         draft.fulfilmentTeamId && missingTeamServices.length ? `${selectedFulfilmentTeam?.name ?? "This team"} does not cover: ${missingTeamServices.map((service) => service.name).join(", ")}` : null,
     ].filter((issue): issue is string => Boolean(issue))
     const onboardingIssues = [
         schemaReady ? null : "The Builder schema is not available",
-        whatsappVerified ? null : "The workspace WhatsApp connection is not verified",
+        draft.communicationPrimaryProvider === "twilio_sms"
+            ? twilioVerified ? null : "The workspace Twilio connection is not verified"
+            : whatsappVerified ? null : "The workspace WhatsApp connection is not verified",
         assignedModules.length ? null : "The selected services do not produce a published onboarding",
     ].filter((issue): issue is string => Boolean(issue))
     const pricingIssues = [
@@ -276,6 +286,8 @@ export function RelationshipDealWorkspace({
                     primaryContactRole: source.primaryContactRole,
                     primaryPhone: source.primaryPhone,
                     whatsappPhone: source.whatsappPhone,
+                    communicationPrimaryProvider: source.communicationPrimaryProvider,
+                    communicationDeliveryMode: source.communicationDeliveryMode,
                     primaryEmail: source.primaryEmail,
                     description: source.description,
                     expectedUpdatedAt: backgroundVersionRef.current,
@@ -295,6 +307,8 @@ export function RelationshipDealWorkspace({
                     primaryContactRole: source.primaryContactRole,
                     primaryPhone: source.primaryPhone,
                     whatsappPhone: source.whatsappPhone,
+                    communicationPrimaryProvider: source.communicationPrimaryProvider,
+                    communicationDeliveryMode: source.communicationDeliveryMode,
                     primaryEmail: source.primaryEmail,
                     description: source.description,
                 }))
@@ -325,10 +339,10 @@ export function RelationshipDealWorkspace({
         return () => {
             if (autosaveTimerRef.current) window.clearTimeout(autosaveTimerRef.current)
         }
-    }, [backgroundDirty, canEdit, draft.primaryPersonName, draft.businessName, draft.primaryContactRole, draft.primaryPhone, draft.whatsappPhone, draft.primaryEmail, draft.description, saveBackground])
+    }, [backgroundDirty, canEdit, draft.primaryPersonName, draft.businessName, draft.primaryContactRole, draft.primaryPhone, draft.whatsappPhone, draft.communicationPrimaryProvider, draft.communicationDeliveryMode, draft.primaryEmail, draft.description, saveBackground])
 
     function update<K extends keyof Draft>(key: K, value: Draft[K]) {
-        if (["primaryPersonName", "businessName", "primaryContactRole", "primaryPhone", "whatsappPhone", "primaryEmail", "description"].includes(key)) {
+        if (["primaryPersonName", "businessName", "primaryContactRole", "primaryPhone", "whatsappPhone", "communicationPrimaryProvider", "communicationDeliveryMode", "primaryEmail", "description"].includes(key)) {
             setAutosaveState("dirty")
             setError(null)
         }
@@ -359,6 +373,8 @@ export function RelationshipDealWorkspace({
             primaryContactRole: source.primaryContactRole,
             primaryPhone: source.primaryPhone,
             whatsappPhone: source.whatsappPhone,
+            communicationPrimaryProvider: source.communicationPrimaryProvider,
+            communicationDeliveryMode: source.communicationDeliveryMode,
             primaryEmail: source.primaryEmail,
             sellerUserId: source.sellerUserId,
             fulfilmentManagerUserId: source.fulfilmentManagerUserId,
@@ -430,11 +446,11 @@ export function RelationshipDealWorkspace({
                 }
                 setInvoiceOpen(false)
                 setNotice({
-                    label: "WhatsApp confirmation sent",
+                    label: `Confirmation sent via ${draft.communicationDeliveryMode === "mirror" && whatsappVerified && twilioVerified ? "WhatsApp and SMS" : draft.communicationPrimaryProvider === "twilio_sms" ? "SMS" : "WhatsApp"}`,
                 })
                 router.refresh()
                 postGanttSync(workspaceSlug)
-            })().catch(() => setError("The WhatsApp confirmation could not be sent. Please try again."))
+            })().catch(() => setError("The client confirmation could not be sent. Please try again."))
         })
     }
 
@@ -444,8 +460,10 @@ export function RelationshipDealWorkspace({
             <DetailField label="Company" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} value={draft.businessName} onChange={(event) => update("businessName", event.target.value)} onBlur={() => void saveBackground()} placeholder="No company" className={inputClass} /></DetailField>
             <DetailField label="Role" icon="identity"><input disabled={!canEdit} value={draft.primaryContactRole} onChange={(event) => update("primaryContactRole", event.target.value)} onBlur={() => void saveBackground()} placeholder="Not set" className={inputClass} /></DetailField>
             <DetailField label="SMS number" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="tel" value={draft.primaryPhone} onChange={(event) => update("primaryPhone", event.target.value)} onBlur={() => void saveBackground()} placeholder="Not set" className={inputClass} /></DetailField>
-            <DetailField label="WhatsApp" icon="contact"><input disabled={!canEdit} type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} onBlur={() => void saveBackground()} placeholder="Required before selling" className={inputClass} /></DetailField>
+            <DetailField label="WhatsApp" icon="contact"><input disabled={!canEdit} type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} onBlur={() => void saveBackground()} placeholder="Optional alternate channel" className={inputClass} /></DetailField>
             <DetailField label="Email" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><input disabled={!canEdit} type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} onBlur={() => void saveBackground()} placeholder="Required before selling" className={inputClass} /></DetailField>
+            <DetailField label="Primary messaging" icon="contact"><select disabled={!canEdit} value={draft.communicationPrimaryProvider} onChange={(event) => update("communicationPrimaryProvider", event.target.value as Draft["communicationPrimaryProvider"])} onBlur={() => void saveBackground()} className={inputClass}><option value="twilio_sms">SMS (Twilio)</option><option value="meta_whatsapp">WhatsApp</option></select></DetailField>
+            <DetailField label="Outbound delivery" icon="contact" className="lg:border-l lg:border-neutral-900 lg:pl-8"><select disabled={!canEdit} value={draft.communicationDeliveryMode} onChange={(event) => update("communicationDeliveryMode", event.target.value as Draft["communicationDeliveryMode"])} onBlur={() => void saveBackground()} className={inputClass}><option value="mirror">Send to every connected channel</option><option value="primary_with_fallback">Primary, or fallback if unavailable</option><option value="primary_only">Primary only</option></select></DetailField>
             <DetailField label="Seller" icon="person"><select disabled={!canEdit} value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className={inputClass}><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label="Fulfilment manager" icon="person" className="lg:border-l lg:border-neutral-900 lg:pl-8"><select disabled={!canEdit} value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className={inputClass}><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></DetailField>
             <DetailField label="Fulfilment team" icon="person" className="lg:col-span-2"><select disabled={!canEdit || commercialLocked} value={draft.fulfilmentTeamId} onChange={(event) => update("fulfilmentTeamId", event.target.value)} className={inputClass}><option value="">Choose fulfilment team</option>{fulfilmentTeams.map((team) => { const missing = selectedServices.filter((service) => !service.serviceId || !team.responsibilities.some((responsibility) => responsibility.serviceId === service.serviceId)); return <option key={team.id} value={team.id} disabled={missing.length > 0}>{team.name}{missing.length ? ` · missing ${missing.map((service) => service.name).join(", ")}` : ""}</option> })}</select>{draft.fulfilmentTeamId && missingTeamServices.length ? <MissingHint message={`${selectedFulfilmentTeam?.name ?? "This team"} does not cover ${missingTeamServices.map((service) => service.name).join(", ")}.`} /> : null}</DetailField>
@@ -476,7 +494,9 @@ export function RelationshipDealWorkspace({
                     <label className="text-xs text-neutral-500">Company<input value={draft.businessName} onChange={(event) => update("businessName", event.target.value)} placeholder="Optional" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /></label>
                     <label className="text-xs text-neutral-500">Role<input value={draft.primaryContactRole} onChange={(event) => update("primaryContactRole", event.target.value)} placeholder="Optional" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /></label>
                     <label className="text-xs text-neutral-500">SMS number<input type="tel" value={draft.primaryPhone} onChange={(event) => update("primaryPhone", event.target.value)} placeholder="Optional" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /></label>
-                    <label className="text-xs text-neutral-500">WhatsApp number<input type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /><MissingHint message={whatsappIssue(draft.whatsappPhone)} /></label>
+                    <label className="text-xs text-neutral-500">WhatsApp number<input type="tel" value={draft.whatsappPhone} onChange={(event) => update("whatsappPhone", event.target.value)} placeholder="Optional alternate channel" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /><MissingHint message={draft.communicationPrimaryProvider === "meta_whatsapp" ? phoneIssue(draft.whatsappPhone, "WhatsApp") : null} /></label>
+                    <label className="text-xs text-neutral-500">Primary messaging<select value={draft.communicationPrimaryProvider} onChange={(event) => update("communicationPrimaryProvider", event.target.value as Draft["communicationPrimaryProvider"])} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="twilio_sms">SMS (Twilio)</option><option value="meta_whatsapp">WhatsApp</option></select><MissingHint message={draft.communicationPrimaryProvider === "twilio_sms" ? phoneIssue(draft.primaryPhone, "SMS") : null} /></label>
+                    <label className="text-xs text-neutral-500">Outbound delivery<select value={draft.communicationDeliveryMode} onChange={(event) => update("communicationDeliveryMode", event.target.value as Draft["communicationDeliveryMode"])} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="mirror">Every connected channel</option><option value="primary_with_fallback">Primary with fallback</option><option value="primary_only">Primary only</option></select></label>
                     <label className="text-xs text-neutral-500">Billing email<input type="email" value={draft.primaryEmail} onChange={(event) => update("primaryEmail", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white" /><MissingHint message={emailIssue(draft.primaryEmail)} /></label>
                     <label className="text-xs text-neutral-500">Seller<select value={draft.sellerUserId} onChange={(event) => update("sellerUserId", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="">Unassigned</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
                     <label className="text-xs text-neutral-500">Fulfilment manager<select value={draft.fulfilmentManagerUserId} onChange={(event) => update("fulfilmentManagerUserId", event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white"><option value="">Choose before fulfilment</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>
@@ -501,11 +521,11 @@ export function RelationshipDealWorkspace({
                         {service.serviceType === "retainer" ? <label className="text-xs text-neutral-500">Recurring<input type="number" min="0" step="0.01" value={(draft.recurringPrices[service.code] ?? 0) / 100} onChange={(event) => setDraft((current) => ({ ...current, recurringPrices: { ...current.recurringPrices, [service.code]: Math.round(Number(event.target.value || 0) * 100) } }))} className="mt-1 h-9 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2 text-sm text-white" /></label> : null}
                     </div>)}</div>
                     <div className="grid gap-3 border-t border-neutral-800 pt-4 sm:grid-cols-3"><div><p className="text-xs text-neutral-500">Upfront fees</p><p className="mt-1 text-lg font-semibold">{priceLabel(upfrontTotalCents, draft.currency)}</p></div><div><p className="text-xs text-neutral-500">Recurring total</p><p className="mt-1 text-lg font-semibold">{priceLabel(recurringTotalCents, draft.currency)}</p></div><div className="sm:text-right"><p className="text-xs text-neutral-500">Due at Checkout</p><p className="mt-1 text-2xl font-semibold">{priceLabel(dueTodayCents, draft.currency)}</p></div></div>
-                    <p className="text-right text-xs leading-5 text-neutral-600">Due at Checkout includes the upfront fees and the first recurring period. Sending the WhatsApp confirmation freezes these services, prices and onboarding.</p>
+                    <p className="text-right text-xs leading-5 text-neutral-600">Due at Checkout includes the upfront fees and the first recurring period. Sending the client confirmation freezes these services, prices and onboarding.</p>
                 </div> : null}
                 {error ? <p role="alert" className="mt-4 rounded-lg border border-red-500/20 bg-red-950/20 px-3 py-2.5 text-sm text-red-300">{error}</p> : null}
             </div>
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? "Sending confirmation…" : "Send WA confirmation"}</button>}</footer>
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? "Sending confirmation…" : `Send ${draft.communicationPrimaryProvider === "twilio_sms" ? "SMS" : "WhatsApp"} confirmation`}</button>}</footer>
         </section>
     </div>, parentDocument.body) : null
 

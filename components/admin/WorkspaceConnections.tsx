@@ -38,10 +38,11 @@ declare global {
     }
 }
 
-const titles: Record<IntegrationProvider, string> = { stripe: "Stripe", meta_whatsapp: "WhatsApp" }
+const titles: Record<IntegrationProvider, string> = { stripe: "Stripe", meta_whatsapp: "WhatsApp", twilio_sms: "Twilio" }
 const descriptions: Record<IntegrationProvider, string> = {
     stripe: "Create invoices and receive payment events from this agency's Stripe account.",
     meta_whatsapp: "Send confirmations and onboarding links from this agency's WhatsApp number.",
+    twilio_sms: "Send and receive SMS/MMS from this agency's Twilio number.",
 }
 
 const inputClass = "mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white outline-none focus:border-neutral-400"
@@ -58,7 +59,8 @@ function statusFor(connection: WorkspaceConnection): { label: string; tone: Stat
 function connectionDetail(connection: WorkspaceConnection) {
     const hint = connection.config_hint ?? {}
     if (connection.provider === "stripe") return [hint.account_name, hint.account_id, hint.mode].filter(Boolean).join(" · ")
-    return [hint.display_phone_number ?? hint.phone_number_id, hint.verified_name].filter(Boolean).join(" · ")
+    if (connection.provider === "meta_whatsapp") return [hint.display_phone_number ?? hint.phone_number_id, hint.verified_name].filter(Boolean).join(" · ")
+    return [hint.phone_number, hint.friendly_name, hint.account_sid].filter(Boolean).join(" · ")
 }
 
 function Modal({ title, description, error, onClose, children }: { title: string; description: string; error: string | null; onClose: () => void; children: ReactNode }) {
@@ -78,7 +80,9 @@ function Modal({ title, description, error, onClose, children }: { title: string
 function CapabilityList({ connection }: { connection: WorkspaceConnection }) {
     const labels: Record<string, string> = connection.provider === "stripe"
         ? { account_access: "Account accessible", invoice_access: "Invoice access granted", webhook_routing: "Payment events routed" }
-        : { phone_access: "Phone number accessible", outbound_messages: "Outbound messaging allowed", webhook_subscribed: "Incoming events routed", consent_template_approved: "Confirmation template approved" }
+        : connection.provider === "meta_whatsapp"
+            ? { phone_access: "Phone number accessible", outbound_messages: "Outbound messaging allowed", webhook_subscribed: "Incoming events routed", consent_template_approved: "Confirmation template approved" }
+            : { phone_access: "Phone number accessible", outbound_messages: "Outbound SMS allowed", webhook_subscribed: "Incoming messages routed", mms: "MMS media supported" }
     const capabilities = connection.capabilities ?? (connection.config_hint?.capabilities as Record<string, unknown> | undefined) ?? {}
     return <div className="grid gap-2 sm:grid-cols-2">{Object.entries(labels).map(([key, label]) => <div key={key} className="flex items-center gap-2 text-sm text-neutral-300"><Status compact label={capabilities[key] ? "Ready" : "Not verified"} tone={capabilities[key] ? "green" : "grey"} /><span>{label}</span></div>)}</div>
 }
@@ -89,10 +93,14 @@ function ManualFields({ provider }: { provider: IntegrationProvider }) {
         <label className="block text-sm text-neutral-300">Webhook signing secret<input className={inputClass} name="webhook_secret" type="password" required placeholder="whsec_…" /></label>
         <label className="block text-sm text-neutral-300">Default currency<input className={inputClass} name="default_currency" defaultValue="usd" maxLength={3} required /></label>
     </>
-    return <>
+    if (provider === "meta_whatsapp") return <>
         <label className="block text-sm text-neutral-300">Permanent access token<input className={inputClass} name="access_token" type="password" required /></label>
         <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Phone number ID<input className={inputClass} name="phone_number_id" required /></label><label className="block text-sm text-neutral-300">WhatsApp Business Account ID<input className={inputClass} name="waba_id" required /></label></div>
         <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Confirmation template<input className={inputClass} name="consent_template_name" required placeholder="onboarding_confirmation" /></label><label className="block text-sm text-neutral-300">Template language<input className={inputClass} name="consent_template_language" required defaultValue="en_US" /></label></div>
+    </>
+    return <>
+        <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Account SID<input className={inputClass} name="account_sid" required placeholder="AC…" autoComplete="off" /></label><label className="block text-sm text-neutral-300">Auth Token<input className={inputClass} name="auth_token" type="password" required autoComplete="new-password" /></label></div>
+        <label className="block text-sm text-neutral-300">Twilio phone number<input className={inputClass} name="phone_number" type="tel" required placeholder="+15551234567" /></label>
     </>
 }
 
@@ -206,7 +214,7 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
 
     return <section className={showHeader ? "mt-8" : ""}>
         {showHeader ? <><h2 className="text-lg font-semibold">Connections</h2><p className="mt-1 text-sm text-neutral-400">Connect each agency&apos;s own provider accounts without exposing credentials.</p></> : null}
-        <div className={`${showHeader ? "mt-4 " : ""}grid gap-4 md:grid-cols-2`}>{connections.map((item) => {
+        <div className={`${showHeader ? "mt-4 " : ""}grid gap-4 md:grid-cols-2 xl:grid-cols-3`}>{connections.map((item) => {
             const state = statusFor(item)
             const detail = connectionDetail(item)
             return <article key={item.provider} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
@@ -225,7 +233,8 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
                 <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-neutral-500">{connection.last_verified_at ? `Last verified ${new Date(connection.last_verified_at).toLocaleString()}${connection.last_webhook_at ? ` · last webhook ${new Date(connection.last_webhook_at).toLocaleString()}` : ""}` : "Connection has not been re-verified yet"}</p>{connection.enabled ? <button type="button" disabled={pending} onClick={() => run(() => verifyAction(selected))} className="h-8 rounded-lg border border-neutral-700 px-3 text-xs text-neutral-300 transition hover:border-neutral-500 hover:text-white disabled:opacity-50">{pending ? "Verifying…" : "Verify now"}</button> : null}</div>
 
                 {selected === "stripe" ? <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Stripe</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Stripe opens in a separate secure window. Betelgeze receives only the permissions declared by its Stripe App.</p><label className="mt-4 block text-sm text-neutral-300">Account mode<select value={stripeMode} onChange={(event) => setStripeMode(event.target.value as "test" | "live")} className={inputClass}><option value="live">Live account</option><option value="test">Test account</option></select></label><button type="button" disabled={pending} onClick={startStripe} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue to Stripe</button></div>
-                : <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Meta</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Choose the agency&apos;s Meta business and WhatsApp number. Betelgeze then subscribes its webhook and verifies the confirmation template.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Confirmation template<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} className={inputClass} /></label><label className="block text-sm text-neutral-300">Language<input value={templateLanguage} onChange={(event) => setTemplateLanguage(event.target.value)} className={inputClass} /></label></div><button type="button" disabled={pending || !templateName.trim()} onClick={startWhatsApp} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue with Meta</button></div>}
+                : selected === "meta_whatsapp" ? <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Meta</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Choose the agency&apos;s Meta business and WhatsApp number. Betelgeze then subscribes its webhook and verifies the confirmation template.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Confirmation template<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} className={inputClass} /></label><label className="block text-sm text-neutral-300">Language<input value={templateLanguage} onChange={(event) => setTemplateLanguage(event.target.value)} className={inputClass} /></label></div><button type="button" disabled={pending || !templateName.trim()} onClick={startWhatsApp} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue with Meta</button></div>
+                : <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect a Twilio number</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Use the account SID, Auth Token, and an SMS-capable number owned by that account. Betelgeze verifies the number and configures its incoming-message webhook.</p><button type="button" onClick={() => setAdvanced(true)} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black">Enter Twilio credentials</button></div>}
 
                 <div className="border-t border-neutral-800 pt-4"><button type="button" onClick={() => setAdvanced((value) => !value)} className="text-sm text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-white">{advanced ? "Hide manual connection" : "Use manual credentials"}</button>{advanced ? <form onSubmit={submitManual} className="mt-4 space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"><p className="text-xs leading-5 text-neutral-500">Credentials are encrypted before storage and are never returned to the browser. The current connection is replaced only after verification succeeds.</p><ManualFields provider={selected} /><button disabled={pending} className="h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Verifying…" : "Save and verify"}</button></form> : null}</div>
 

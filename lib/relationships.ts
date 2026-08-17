@@ -31,6 +31,8 @@ export type RelationshipRecord = {
     fulfilment_team_id: string | null
     project_timeframe_days: number | null
     communication_pinned_message_id: string | null
+    communication_primary_provider: "meta_whatsapp" | "twilio_sms"
+    communication_delivery_mode: "primary_only" | "primary_with_fallback" | "mirror"
     lifecycle_phase: RelationshipPhase
     status: RelationshipStatus
     source_metadata: Record<string, unknown>
@@ -136,7 +138,7 @@ type ClientRow = {
     is_test?: boolean | null
 }
 
-const RELATIONSHIP_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, website_url, industry_value, location_value, address, source_label, primary_contact_role, notes_summary, started_onboarding_at, seller_user_id, fulfilment_manager_user_id, fulfilment_team_id, project_timeframe_days, communication_pinned_message_id, lifecycle_phase, status, source_metadata, created_at, updated_at"
+const RELATIONSHIP_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, whatsapp_phone, business_name, website_url, industry_value, location_value, address, source_label, primary_contact_role, notes_summary, started_onboarding_at, seller_user_id, fulfilment_manager_user_id, fulfilment_team_id, project_timeframe_days, communication_pinned_message_id, communication_primary_provider, communication_delivery_mode, lifecycle_phase, status, source_metadata, created_at, updated_at"
 const RELATIONSHIP_LEGACY_SELECT = "id, workspace_id, client_id, leadgen_company_id, source_type, primary_person_name, primary_email, primary_phone, business_name, website_url, lifecycle_phase, status, source_metadata, created_at, updated_at"
 
 function isMissingRelationshipSchema(error: QueryError) {
@@ -163,6 +165,8 @@ function isRelationshipColumnDrift(error: QueryError) {
         message.includes("fulfilment_manager_user_id") ||
         message.includes("fulfilment_team_id") ||
         message.includes("project_timeframe_days") ||
+        message.includes("communication_primary_provider") ||
+        message.includes("communication_delivery_mode") ||
         message.includes("relationship_assets")
     ))
 }
@@ -234,6 +238,8 @@ function fallbackRelationshipFromClient(client: ClientRow): RelationshipRecord {
         fulfilment_team_id: null,
         project_timeframe_days: null,
         communication_pinned_message_id: null,
+        communication_primary_provider: "meta_whatsapp",
+        communication_delivery_mode: "mirror",
         lifecycle_phase: client.archived_at ? "completed_lost" : "onboarding",
         status: client.archived_at ? "archived" : "active",
         source_metadata: { fallback_from: "clients", is_test: Boolean(client.is_test) },
@@ -276,7 +282,7 @@ export async function listRelationshipsForWorkspace(workspaceId: string): Promis
         return clients
     }
 
-    const relationships = ((relationshipsResult.data ?? []) as RelationshipRecord[]).map((relationship) => ({
+    const relationships = ((relationshipsResult.data ?? []) as RelationshipRecord[]).map((relationship): RelationshipRecord => ({
         ...relationship,
         lifecycle_phase: normalizeRelationshipPhase(relationship.lifecycle_phase),
         source_metadata: relationship.source_metadata ?? {},
@@ -293,6 +299,8 @@ export async function listRelationshipsForWorkspace(workspaceId: string): Promis
         fulfilment_team_id: relationship.fulfilment_team_id ?? null,
         project_timeframe_days: relationship.project_timeframe_days ?? null,
         communication_pinned_message_id: relationship.communication_pinned_message_id ?? null,
+        communication_primary_provider: relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp",
+        communication_delivery_mode: relationship.communication_delivery_mode ?? "mirror",
     }))
     const wrappedClientIds = new Set(relationships.map((relationship) => relationship.client_id).filter(Boolean))
     const missingClientFallbacks = clients.filter((client) => client.client_id && !wrappedClientIds.has(client.client_id))
@@ -335,6 +343,8 @@ export async function getRelationship(workspaceId: string, relationshipId: strin
             fulfilment_team_id: relationship.fulfilment_team_id ?? null,
             project_timeframe_days: relationship.project_timeframe_days ?? null,
             communication_pinned_message_id: relationship.communication_pinned_message_id ?? null,
+            communication_primary_provider: relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp",
+            communication_delivery_mode: relationship.communication_delivery_mode ?? "mirror",
         }
     }
 
@@ -365,6 +375,8 @@ export async function getRelationship(workspaceId: string, relationshipId: strin
                 fulfilment_team_id: relationship.fulfilment_team_id ?? null,
                 project_timeframe_days: relationship.project_timeframe_days ?? null,
                 communication_pinned_message_id: relationship.communication_pinned_message_id ?? null,
+                communication_primary_provider: relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp",
+                communication_delivery_mode: relationship.communication_delivery_mode ?? "mirror",
             }
         }
     }

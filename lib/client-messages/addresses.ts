@@ -10,7 +10,7 @@ const TRUNK_ZERO_COUNTRY_CODES = [
     "64",
 ]
 
-function normalizePhoneNumber(value: string): string {
+export function normalizePhoneNumber(value: string): string {
     let compactAddress = value
         .replace(/\b(?:ext|extension|x)\.?\s*\d+$/iu, "")
         .replace(/[^\d+]/g, "")
@@ -68,6 +68,18 @@ export function normalizeMessageAddress(value: string): string {
     if (!normalizedAddress) return ""
 
     return `${channel}:${normalizedAddress}`
+}
+
+export function normalizeProviderAddress(provider: "meta_whatsapp" | "twilio_sms", value: string): string {
+    const address = value.includes(":") ? value.split(":", 2)[1] : value
+    const normalized = normalizePhoneNumber(address)
+    if (!normalized) return ""
+    return `${provider === "meta_whatsapp" ? "whatsapp" : "sms"}:${normalized}`
+}
+
+export function toE164Recipient(value: string): string {
+    const source = value.includes(":") ? value.split(":", 2)[1] : value
+    return normalizePhoneNumber(source)
 }
 
 export function getEquivalentMessageAddresses(value: string): string[] {

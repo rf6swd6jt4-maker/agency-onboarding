@@ -12,6 +12,9 @@ const whatsapp = readFileSync("lib/client-messages/meta-whatsapp.ts", "utf8")
 const whatsappWebhook = readFileSync("app/api/client-messages/meta/whatsapp/route.ts", "utf8")
 const saleAutomation = readFileSync("lib/client-sales/automation.ts", "utf8")
 const outbox = readFileSync("lib/onboarding/outbox.ts", "utf8")
+const twilio = readFileSync("lib/client-messages/twilio.ts", "utf8")
+const twilioWebhook = readFileSync("app/api/client-messages/twilio/route.ts", "utf8")
+const omnichannelMigration = readFileSync("supabase/migrations/20260817110000_twilio_omnichannel_messaging.sql", "utf8")
 
 test("connection candidates activate atomically and keep a one-generation rollback", () => {
     assert.match(migration, /candidate_config_encrypted/u)
@@ -35,6 +38,7 @@ test("Settings uses one popup lifecycle with automatic and manual connection pat
     assert.match(settingsUi, /role="dialog"/u)
     assert.match(settingsUi, /Continue to Stripe/u)
     assert.match(settingsUi, /Continue with Meta/u)
+    assert.match(settingsUi, /Enter Twilio credentials/u)
     assert.match(settingsUi, /Use manual credentials/u)
     assert.match(settingsUi, /The current connection remains active until the replacement passes every required check/u)
     assert.match(settingsUi, /Restore previous/u)
@@ -50,7 +54,9 @@ test("provider runtime operations use the workspace connection", () => {
     assert.match(whatsapp, /getWorkspaceProviderConfig\(workspaceId, "meta_whatsapp"\)/u)
     assert.match(saleAutomation, /workspaceId: sale\.workspace_id/u)
     assert.match(outbox, /workspaceId: row\.workspace_id/u)
-    assert.match(saleAutomation, /whatsappConfig\.consent_template_name/u)
+    assert.match(saleAutomation, /getWorkspaceProviderConfig\(sale\.workspace_id, "meta_whatsapp"\)/u)
+    assert.match(saleAutomation, /sendCommunicationDeliveries/u)
+    assert.match(outbox, /sendCommunicationDeliveries/u)
 })
 
 test("webhooks resolve workspace identity before processing tenant data", () => {
@@ -64,8 +70,20 @@ test("webhooks resolve workspace identity before processing tenant data", () => 
     assert.match(integrations, /STRIPE_APP_LIVE_WEBHOOK_SECRET/u)
     assert.match(whatsappWebhook, /getWorkspaceIdForWhatsAppPhoneNumber\(phoneNumberIds\[0\]\)/u)
     assert.match(whatsappWebhook, /handleSaleConsentConfirmation\(\{\s*workspaceId,/u)
+    assert.match(twilioWebhook, /getWorkspaceIdForTwilioNumber\(businessNumber\)/u)
+    assert.match(twilioWebhook, /validateTwilioSignature/u)
+    assert.match(twilioWebhook, /provider: "twilio_sms"/u)
     assert.match(saleAutomation, /findPendingConfirmedSale\(fromAddress, workspaceId\)/u)
     assert.match(saleAutomation, /\.eq\("workspace_id", workspaceId\)/u)
+})
+
+test("Twilio is workspace-owned and messages retain per-provider delivery state", () => {
+    assert.match(integrations, /"twilio_sms"/u)
+    assert.match(twilio, /getWorkspaceProviderConfig\(input\.workspaceId, "twilio_sms"\)/u)
+    assert.match(twilio, /StatusCallback/u)
+    assert.match(omnichannelMigration, /communication_message_deliveries/u)
+    assert.match(omnichannelMigration, /communication_primary_provider/u)
+    assert.match(omnichannelMigration, /communication_delivery_mode/u)
 })
 
 test("legacy Stripe and WhatsApp credentials remain available during cutover", () => {

@@ -136,6 +136,7 @@ export async function saveWorkspaceConnection(slug: string, provider: Integratio
     const required: Record<IntegrationProvider, string[]> = {
         stripe: ["secret_key", "webhook_secret"],
         meta_whatsapp: ["access_token", "phone_number_id", "webhook_verify_token"],
+        twilio_sms: ["account_sid", "auth_token", "phone_number"],
     }
     if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in all required connection details before saving.")
     await saveWorkspaceIntegration(workspace.id, provider, config, user.id)
@@ -171,6 +172,7 @@ export async function stageManualWorkspaceConnection(slug: string, provider: Int
         const required: Record<IntegrationProvider, string[]> = {
             stripe: ["secret_key", "webhook_secret"],
             meta_whatsapp: ["access_token", "phone_number_id", "waba_id", "consent_template_name"],
+            twilio_sms: ["account_sid", "auth_token", "phone_number"],
         }
         if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in every required connection detail before continuing.")
         await stageWorkspaceIntegrationCandidate({ workspaceId: workspace.id, provider, config, authMethod: "manual", userId: user.id })

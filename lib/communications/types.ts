@@ -19,6 +19,17 @@ export type CommunicationReaction = {
     updatedAt: string
 }
 
+export type CommunicationDelivery = {
+    provider: "meta_whatsapp" | "twilio_sms"
+    providerMessageId: string | null
+    status: string
+    error: string | null
+    sentAt: string | null
+    deliveredAt: string | null
+    readAt: string | null
+    failedAt: string | null
+}
+
 export type CommunicationSticker = {
     id: string
     fileName: string
@@ -44,6 +55,8 @@ export type CommunicationMessage = {
     attachment: CommunicationAttachment | null
     providerMessageId: string | null
     replyToProviderMessageId: string | null
+    replyToMessageId?: string | null
+    deliveries?: CommunicationDelivery[]
     createdAt: string
     sentAt: string | null
     deliveredAt: string | null
@@ -71,6 +84,8 @@ export type ClientConversation = {
     subtitle: string | null
     isTest: boolean
     canSend: boolean
+    channels?: Array<"meta_whatsapp" | "twilio_sms">
+    primaryProvider?: "meta_whatsapp" | "twilio_sms"
     pinnedMessageId: string | null
     messages: CommunicationMessage[]
 }

@@ -540,6 +540,22 @@ async function handleStatusUpdate({
                 },
             })
             .eq("id", message.id)
+        await supabaseAdmin
+            .from("communication_message_deliveries")
+            .update({
+                provider_message_id: messageId,
+                status: messageStatus === "failed" ? "delivery_failed" : messageStatus,
+                sent_at: message.sent_at ?? (["sent", "delivered", "read"].includes(messageStatus) ? eventAt : null),
+                delivered_at: message.delivered_at ?? (["delivered", "read"].includes(messageStatus) ? eventAt : null),
+                read_at: message.read_at ?? (messageStatus === "read" ? eventAt : null),
+                failed_at: messageStatus === "failed" ? eventAt : null,
+                error: errorMessage,
+                raw_payload: { meta_status: status, meta_status_payload: payload },
+                updated_at: eventAt,
+            })
+            .eq("workspace_id", workspaceId)
+            .eq("client_message_id", message.id)
+            .eq("provider", "meta_whatsapp")
     }
 
     if (messageStatus === "failed") {

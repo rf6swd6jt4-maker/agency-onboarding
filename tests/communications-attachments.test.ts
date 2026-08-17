@@ -33,11 +33,13 @@ test("stored WhatsApp media becomes a stable authenticated chat attachment", () 
     })
 })
 
-test("Communications uploads to R2 and sends verified media through Meta", async () => {
-    const [uploadRoute, messageRoute, meta, workspace, mediaRoute, voiceNotePlayer] = await Promise.all([
+test("Communications uploads to R2 and sends verified media through each messaging channel", async () => {
+    const [uploadRoute, messageRoute, omnichannel, meta, twilio, workspace, mediaRoute, voiceNotePlayer] = await Promise.all([
         readFile("app/api/workspaces/[workspaceSlug]/communications/attachments/route.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/messages/route.ts", "utf8"),
+        readFile("lib/client-messages/omnichannel.ts", "utf8"),
         readFile("lib/client-messages/meta-whatsapp.ts", "utf8"),
+        readFile("lib/client-messages/twilio.ts", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("app/api/client-messages/media/[...path]/route.ts", "utf8"),
         readFile("components/communications/VoiceNotePlayer.tsx", "utf8"),
@@ -45,7 +47,10 @@ test("Communications uploads to R2 and sends verified media through Meta", async
     assert.match(uploadRoute, /createSignedClientMessageUpload/)
     assert.match(uploadRoute, /ensurePlatformDirectUploads/)
     assert.match(messageRoute, /verifyClientMessageUpload/)
-    assert.match(messageRoute, /sendMetaWhatsAppMedia/)
+    assert.match(messageRoute, /sendCommunicationDeliveries/)
+    assert.match(omnichannel, /sendMetaWhatsAppMedia/)
+    assert.match(omnichannel, /sendTwilioMessage/)
+    assert.match(twilio, /body\.append\("MediaUrl"/)
     assert.match(meta, /\[kind\]: media/)
     assert.match(meta, /context: replyToMessageId/)
     assert.match(workspace, /Attach image or file/)

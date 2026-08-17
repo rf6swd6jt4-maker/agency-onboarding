@@ -36,7 +36,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
     await ensureCurrentRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: user.id })
     const plan = await getRelationshipGanttPlan(workspace.slug, relationship)
     const planRanges = effectiveGanttRanges(plan.items)
-    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult] = await Promise.all([
+    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult] = await Promise.all([
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id),
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
@@ -49,6 +49,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             .limit(1)
             .maybeSingle(),
         loadWorkspaceTeams(workspace.id),
+        supabaseAdmin.from("workspace_integrations").select("enabled, connection_status").eq("workspace_id", workspace.id).eq("provider", "twilio_sms").maybeSingle(),
     ])
     const memberIds = (membershipsResult.data ?? []).map((member) => member.user_id)
     const profilesResult = memberIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name").in("user_id", memberIds).order("username") : { data: [] }
@@ -141,6 +142,8 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                     primaryContactRole: relationship.primary_contact_role ?? "",
                                     primaryPhone: relationship.primary_phone ?? "",
                                     whatsappPhone: relationship.whatsapp_phone ?? "",
+                                    communicationPrimaryProvider: relationship.communication_primary_provider,
+                                    communicationDeliveryMode: relationship.communication_delivery_mode,
                                     primaryEmail: relationship.primary_email ?? "",
                                     sellerUserId: relationship.seller_user_id ?? user.id,
                                     fulfilmentManagerUserId: relationship.fulfilment_manager_user_id ?? "",
@@ -157,6 +160,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                 help={onboardingConfiguration.help}
                                 schemaReady={onboardingConfiguration.schemaReady}
                                 whatsappVerified={onboardingConfiguration.help.whatsappVerified}
+                                twilioVerified={Boolean(twilioConnectionResult.data?.enabled && twilioConnectionResult.data.connection_status === "connected")}
                                 commercialLocked={Boolean(currentSale)}
                                 plan={plan}
                                 canEdit={role === "owner" || role === "admin"}

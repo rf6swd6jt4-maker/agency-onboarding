@@ -46,6 +46,8 @@ export type RelationshipDealDetailsInput = {
     primaryContactRole: string
     primaryPhone: string
     whatsappPhone: string
+    communicationPrimaryProvider: "meta_whatsapp" | "twilio_sms"
+    communicationDeliveryMode: "primary_only" | "primary_with_fallback" | "mirror"
     primaryEmail: string
     sellerUserId: string
     fulfilmentManagerUserId: string
@@ -64,7 +66,7 @@ export type RelationshipDealDetailsInput = {
 }
 
 export type RelationshipBackgroundDetailsInput = Pick<RelationshipDealDetailsInput,
-    "primaryPersonName" | "businessName" | "primaryContactRole" | "primaryPhone" | "whatsappPhone" | "primaryEmail" | "description"
+    "primaryPersonName" | "businessName" | "primaryContactRole" | "primaryPhone" | "whatsappPhone" | "communicationPrimaryProvider" | "communicationDeliveryMode" | "primaryEmail" | "description"
 > & { expectedUpdatedAt: string }
 
 function formString(formData: FormData, key: string) {
@@ -184,6 +186,11 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const managerId = nullableFormString(formData, "fulfilment_manager_user_id")
     const submittedTeamId = nullableFormString(formData, "fulfilment_team_id")
     const whatsappPhone = nullableFormString(formData, "whatsapp_phone")
+    const communicationPrimaryProvider = formString(formData, "communication_primary_provider") === "twilio_sms" ? "twilio_sms" : "meta_whatsapp"
+    const requestedDeliveryMode = formString(formData, "communication_delivery_mode")
+    const communicationDeliveryMode = (["primary_only", "primary_with_fallback", "mirror"] as const).includes(requestedDeliveryMode as "primary_only" | "primary_with_fallback" | "mirror")
+        ? requestedDeliveryMode as "primary_only" | "primary_with_fallback" | "mirror"
+        : "mirror"
     const timeframe = Number(formData.get("project_timeframe_days") ?? 0)
     const includesRelationshipDetails = formData.has("primary_person_name")
     const primaryPersonName = formString(formData, "primary_person_name")
@@ -309,7 +316,12 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
             ? "The dual-price sale migration is not applied yet"
             : saveError.message)
     }
-    const { error: teamSaveError } = await supabaseAdmin.from("relationships").update({ fulfilment_team_id: fulfilmentTeamId, updated_at: new Date().toISOString() }).eq("workspace_id", workspace.id).eq("id", relationshipId)
+    const { error: teamSaveError } = await supabaseAdmin.from("relationships").update({
+        fulfilment_team_id: fulfilmentTeamId,
+        communication_primary_provider: communicationPrimaryProvider,
+        communication_delivery_mode: communicationDeliveryMode,
+        updated_at: new Date().toISOString(),
+    }).eq("workspace_id", workspace.id).eq("id", relationshipId)
     if (teamSaveError) throw new Error(teamSaveError.message)
     if (relationship.lifecycle_phase === "potential_client") await ensureSalesStage({ workspaceId: workspace.id, relationshipId, sellerId })
     relationshipRevalidatePaths(slug, relationshipId)
@@ -325,6 +337,8 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
     formData.set("primary_contact_role", input.primaryContactRole)
     formData.set("primary_phone", input.primaryPhone)
     formData.set("whatsapp_phone", input.whatsappPhone)
+    formData.set("communication_primary_provider", input.communicationPrimaryProvider)
+    formData.set("communication_delivery_mode", input.communicationDeliveryMode)
     formData.set("primary_email", input.primaryEmail)
     formData.set("seller_user_id", input.sellerUserId)
     formData.set("fulfilment_manager_user_id", input.fulfilmentManagerUserId)
@@ -376,6 +390,8 @@ export async function saveRelationshipBackgroundDetails(slug: string, relationsh
         primary_contact_role: input.primaryContactRole.trim() || null,
         primary_phone: input.primaryPhone.trim() || null,
         whatsapp_phone: input.whatsappPhone.trim() || null,
+        communication_primary_provider: input.communicationPrimaryProvider,
+        communication_delivery_mode: input.communicationDeliveryMode,
         primary_email: input.primaryEmail.trim() || null,
         notes_summary: input.description.trim() || null,
         updated_at: nextVersion,
@@ -469,7 +485,7 @@ export async function proceedRelationshipCurrentWork(
                 billingIntervalCount: payment?.billingIntervalCount,
             })
             const consent = await sendSaleConsentTemplate(sale.saleId, workspace.id)
-            if (!consent.ok) throw new Error(consent.error ?? "The WhatsApp confirmation could not be sent")
+            if (!consent.ok) throw new Error(consent.error ?? "The client confirmation could not be sent")
             if (!("inProgress" in consent && consent.inProgress)) {
                 await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: sale.saleId })
             }
@@ -487,6 +503,8 @@ export async function proceedRelationshipCurrentWork(
         const saleValidationMessage = workflowAction === "sell_client" && [
             "Add a billing",
             "Add a usable client WhatsApp",
+            "Add a usable client phone",
+            "This relationship has no connected messaging",
             "Verify and enable",
             "Every selected service",
             "Publish the mandatory",
@@ -501,7 +519,7 @@ export async function proceedRelationshipCurrentWork(
         const safeMessage = saleValidationMessage || message.endsWith("is not connected for this workspace.") || message === "Work item not found" || message === "Work item does not belong to this relationship" || message === "This work item is not assigned to you" || message === "This stage advances automatically when the external step completes" || message === "Choose a fulfilment manager before completing onboarding review" || message === "Complete every required review work item before moving to fulfilment"
             ? message
             : workflowAction === "sell_client"
-                ? "Could not send the WhatsApp confirmation. Check the connection and commercial details, then try again."
+                ? "Could not send the client confirmation. Check the messaging connection and commercial details, then try again."
                 : "Could not proceed with this work item. Please try again."
         return { ok: false as const, error: safeMessage }
     }

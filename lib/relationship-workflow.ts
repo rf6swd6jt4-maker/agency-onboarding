@@ -3,7 +3,7 @@ import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import type { RelationshipPhase } from "@/lib/relationship-phases"
-import { normalizeMessageAddress } from "@/lib/client-messages/addresses"
+import { resolveCommunicationDestinations } from "@/lib/client-messages/omnichannel"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import { versionedServiceDefinitionForDeal } from "@/lib/onboarding/runtime-mode"
@@ -578,15 +578,19 @@ function versionedInvoiceConfigurationIssue(
 
 async function preflightRelationshipSale(input: {
     workspaceId: string
-    whatsappPhone: string
+    relationshipId: string
+    primaryProvider: "meta_whatsapp" | "twilio_sms"
     services: RelationshipInvoiceService[]
 }) {
     const configuration = await loadPublishedOnboardingConfiguration(input.workspaceId)
-    const normalizedPhone = normalizeMessageAddress(input.whatsappPhone)
-    if (!normalizedPhone || normalizedPhone.replace(/\D/g, "").length < 8) throw new Error("Add a usable client WhatsApp number before selling the client")
-    if (configuration.schemaReady && !configuration.help.whatsappVerified) {
+    const channels = await resolveCommunicationDestinations({ workspaceId: input.workspaceId, relationshipId: input.relationshipId })
+    const primaryDestination = channels.destinations.find((destination) => destination.provider === input.primaryProvider)
+        ?? channels.destinations[0]
+    if (!primaryDestination) throw new Error("Add a usable client phone number and connect its selected messaging provider before selling the client")
+    if (input.primaryProvider === "meta_whatsapp" && configuration.schemaReady && !configuration.help.whatsappVerified) {
         throw new Error("Verify the workspace WhatsApp connection before selling the client")
     }
+    if (input.primaryProvider === "twilio_sms") await getWorkspaceProviderConfig(input.workspaceId, "twilio_sms")
     const currencies = new Set(input.services.map((service) => (service.currency ?? "usd").toUpperCase()))
     if (currencies.size !== 1) throw new Error("Every selected service must use the same currency")
     const versionedServiceDefinitions = input.services.map((selected) =>
@@ -600,7 +604,8 @@ async function preflightRelationshipSale(input: {
     if (versionedIssue) throw new Error(versionedIssue)
     return {
         configuration,
-        normalizedPhone,
+        normalizedPhone: primaryDestination.address,
+        destinations: channels.destinations,
         serviceDefinitions: versionedServiceDefinitions,
     }
 }
@@ -636,7 +641,7 @@ export async function prepareRelationshipSale(input: {
 }) {
     void input.workItemId
     const { data: relationship, error: relationshipError } = await supabaseAdmin.from("relationships")
-        .select("primary_person_name, primary_email, whatsapp_phone, business_name, project_timeframe_days")
+        .select("primary_person_name, primary_email, primary_phone, whatsapp_phone, communication_primary_provider, communication_delivery_mode, business_name, project_timeframe_days")
         .eq("workspace_id", input.workspaceId)
         .eq("id", input.relationshipId)
         .single()
@@ -651,7 +656,7 @@ export async function prepareRelationshipSale(input: {
     const selectedServices = (serviceResult.data ?? []) as RelationshipInvoiceService[]
     if (
         !relationship?.primary_email ||
-        !relationship.whatsapp_phone ||
+        !(relationship.communication_primary_provider === "twilio_sms" ? relationship.primary_phone : relationship.whatsapp_phone) ||
         !selectedServices.length ||
         selectedServices.some((service) =>
             Math.max(0, service.upfront_price_cents ?? 0) === 0 &&
@@ -659,7 +664,7 @@ export async function prepareRelationshipSale(input: {
         )
     ) {
         throw new Error(
-            "Add a billing email, WhatsApp phone, and an upfront or recurring price for every selected service before selling the client"
+            "Add a billing email, the selected messaging phone number, and an upfront or recurring price for every selected service before selling the client"
         )
     }
 
@@ -695,7 +700,8 @@ export async function prepareRelationshipSale(input: {
     const resumableSale = await findResumableFrozenSale(input.workspaceId, input.relationshipId)
     const preflight = await preflightRelationshipSale({
         workspaceId: input.workspaceId,
-        whatsappPhone: relationship.whatsapp_phone,
+        relationshipId: input.relationshipId,
+        primaryProvider: relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp",
         services: selectedServices,
     })
     const currency = (selectedServices[0]?.currency ?? "usd").toLowerCase()
@@ -777,7 +783,7 @@ export async function prepareRelationshipSale(input: {
         workspaceId: input.workspaceId,
         category: "billing",
         eventKey: "client_sale.confirmation_prepared",
-        summary: "Client sale frozen and prepared for WhatsApp confirmation",
+        summary: "Client sale frozen and prepared for messaging confirmation",
         entityType: "client_sale",
         entityId: sale.id,
         actorUserId: input.actorId,
@@ -793,6 +799,9 @@ export async function prepareRelationshipSale(input: {
             currency,
             billing_interval: billingInterval,
             billing_interval_count: billingIntervalCount,
+            communication_primary_provider: relationship.communication_primary_provider,
+            communication_delivery_mode: relationship.communication_delivery_mode,
+            communication_providers: preflight.destinations.map((destination) => destination.provider),
         },
     })
     return {

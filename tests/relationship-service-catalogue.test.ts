@@ -266,12 +266,14 @@ test("relationship selling uses the visible details workspace and three-stage re
         "Review Onboarding",
         "Pricing",
         "Sell client",
-        "Send WA confirmation",
-        "WhatsApp confirmation sent",
+        "Primary messaging",
+        "Outbound delivery",
+        "Confirmation sent via",
         "Upfront fees",
         "Recurring total",
         "Due at Checkout",
     ]) assert.match(workspace, new RegExp(label))
+    assert.match(workspace, /Send \$\{draft\.communicationPrimaryProvider/)
     assert.match(workspace, /<BuilderPreview/)
     assert.doesNotMatch(workspace, /service_assignee_/)
     assert.match(gantt, /onInvoiceRequest\(\)/)

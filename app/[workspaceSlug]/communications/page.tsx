@@ -19,18 +19,25 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
     const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => relationship.status !== "archived")
     const clientIds = relationships.flatMap((relationship) => relationship.client_id ? [relationship.client_id] : [])
-    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult, nativeBootstrap] = await Promise.all([
+    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult, integrationResult, nativeBootstrap] = await Promise.all([
         loadCommunicationMessages({ workspaceId: workspace.id }),
         loadCommunicationReadCursors(workspace.id),
         loadCommunicationReactions(workspace.id),
         loadCommunicationStickers(workspace.id),
         loadCommunicationPeople(workspace.id, user.id),
         clientIds.length
-            ? supabaseAdmin.from("client_communication_channels").select("client_id").eq("workspace_id", workspace.id).eq("provider", "meta_whatsapp").eq("is_active", true).in("client_id", clientIds)
+            ? supabaseAdmin.from("client_communication_channels").select("client_id, provider").eq("workspace_id", workspace.id).in("provider", ["meta_whatsapp", "twilio_sms"]).eq("is_active", true).in("client_id", clientIds)
             : Promise.resolve({ data: [], error: null }),
+        supabaseAdmin.from("workspace_integrations").select("provider").eq("workspace_id", workspace.id).eq("enabled", true).in("provider", ["meta_whatsapp", "twilio_sms"]),
         loadNativeCommunications({ workspaceId: workspace.id, workspaceSlug: workspace.slug, currentUserId: user.id, role, requestedConversationId: query.nativeConversation, requestedDmUserId: query.dm }),
     ])
-    const channelClientIds = new Set((channelResult.data ?? []).map((channel) => channel.client_id))
+    const channelsByClient = new Map<string, Set<string>>()
+    for (const channel of channelResult.data ?? []) {
+        const providers = channelsByClient.get(channel.client_id) ?? new Set<string>()
+        providers.add(channel.provider)
+        channelsByClient.set(channel.client_id, providers)
+    }
+    const connectedProviders = new Set((integrationResult.data ?? []).map((integration) => integration.provider))
     const messagesByRelationship = new Map<string, typeof messageResult.messages>()
     for (const message of messageResult.messages) {
         const existing = messagesByRelationship.get(message.relationshipId) ?? []
@@ -43,7 +50,16 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
         title: relationship.business_name ? `${relationship.primary_person_name} – ${relationship.business_name}` : relationship.primary_person_name,
         subtitle: relationship.whatsapp_phone ?? relationship.primary_phone ?? relationship.primary_email,
         isTest: relationship.source_metadata.is_test === true,
-        canSend: Boolean((relationship.client_id && channelClientIds.has(relationship.client_id)) || relationship.whatsapp_phone || relationship.primary_phone),
+        canSend: Boolean(
+            (connectedProviders.has("twilio_sms") && relationship.primary_phone)
+            || (connectedProviders.has("meta_whatsapp") && (relationship.whatsapp_phone || relationship.primary_phone))
+            || (relationship.client_id && channelsByClient.get(relationship.client_id)?.size)
+        ),
+        channels: ([
+            connectedProviders.has("meta_whatsapp") && (relationship.whatsapp_phone || relationship.primary_phone) ? "meta_whatsapp" : null,
+            connectedProviders.has("twilio_sms") && relationship.primary_phone ? "twilio_sms" : null,
+        ].filter(Boolean) as Array<"meta_whatsapp" | "twilio_sms">),
+        primaryProvider: (relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp") as "twilio_sms" | "meta_whatsapp",
         pinnedMessageId: relationship.communication_pinned_message_id,
         messages: messagesByRelationship.get(relationship.id) ?? [],
     })).sort((left, right) => {

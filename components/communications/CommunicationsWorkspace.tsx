@@ -15,7 +15,7 @@ import { ResizableConversationColumns } from "@/components/communications/Resiza
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
 import { SquarePill } from "@/components/ui"
-import type { CommunicationAttachment, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
+import type { CommunicationAttachment, CommunicationDelivery, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
@@ -58,6 +58,7 @@ function realtimeMessage(value: unknown): CommunicationMessage | null {
         attachment: communicationAttachmentFromRawPayload(row.raw_payload),
         providerMessageId: stringValue(row.whatsapp_message_id) ?? stringValue(row.provider_message_id),
         replyToProviderMessageId: stringValue(row.reply_to_whatsapp_message_id),
+        replyToMessageId: stringValue(row.reply_to_message_id),
         createdAt,
         sentAt: stringValue(row.sent_at),
         deliveredAt: stringValue(row.delivered_at),
@@ -116,6 +117,14 @@ function MessageBody({ body }: { body: string }) {
 }
 
 function DeliveryTicks({ message }: { message: CommunicationMessage }) {
+    if (message.deliveries?.length) return <span className="inline-flex items-center gap-1" aria-label="Channel delivery status">{message.deliveries.map((delivery) => {
+        const status = delivery.status.toLowerCase()
+        const label = delivery.provider === "meta_whatsapp" ? "WA" : "SMS"
+        const failed = status.includes("failed") || status.includes("error")
+        const pending = status === "sending" || status.includes("queued") || status.includes("pending")
+        const mark = failed ? "!" : pending ? "◷" : delivery.readAt || status.includes("read") ? "✓✓" : delivery.deliveredAt || status.includes("delivered") ? "✓✓" : "✓"
+        return <span key={delivery.provider} title={`${label}: ${delivery.error ?? status}`} className={failed ? "text-red-500" : delivery.readAt || status.includes("read") ? "text-sky-500" : ""}>{label} {mark}</span>
+    })}</span>
     const status = message.status.toLowerCase()
     if (status === "sending" || status.includes("queued") || status.includes("pending")) return <span title="Sending" aria-label="Sending">◷</span>
     if (status === "send_failed" || status === "delivery_failed" || status.includes("error")) return <span className="text-red-500" title={message.error ?? "Message failed"} aria-label="Message failed">!</span>
@@ -341,7 +350,6 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     }, [bootstrap.workspaceId, bootstrap.workspaceSlug, syncConversationUrl])
 
     function beginReply(message: CommunicationMessage) {
-        if (!message.providerMessageId) return
         setReplyingTo(message)
         setActionMessageId(null)
         window.requestAnimationFrame(() => composerRef.current?.focus())
@@ -484,7 +492,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             relationshipId: selected.id,
             body: attachmentPlaceholder(stickerAttachment),
             direction: "outbound",
-            provider: "meta_whatsapp",
+            provider: "omnichannel",
             status: "sending",
             error: null,
             senderKind: "staff",
@@ -494,6 +502,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             attachment: stickerAttachment,
             providerMessageId: null,
             replyToProviderMessageId: replyTarget?.providerMessageId ?? null,
+            replyToMessageId: replyTarget?.id ?? null,
             createdAt: new Date().toISOString(),
             sentAt: null,
             deliveredAt: null,
@@ -597,6 +606,29 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     const message = realtimeMessage(payload.new)
                     if (message) updateConversationMessages(message.relationshipId, [message], true)
                 })
+                .on("postgres_changes", { event: "*", schema: "public", table: "communication_message_deliveries", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
+                    const row = record(payload.new)
+                    const messageId = stringValue(row.client_message_id)
+                    const provider = row.provider === "meta_whatsapp" || row.provider === "twilio_sms" ? row.provider : null
+                    if (!messageId || !provider) return
+                    const delivery: CommunicationDelivery = {
+                        provider,
+                        providerMessageId: stringValue(row.provider_message_id),
+                        status: stringValue(row.status) ?? "sending",
+                        error: stringValue(row.error),
+                        sentAt: stringValue(row.sent_at),
+                        deliveredAt: stringValue(row.delivered_at),
+                        readAt: stringValue(row.read_at),
+                        failedAt: stringValue(row.failed_at),
+                    }
+                    setConversations((current) => current.map((conversation) => ({
+                        ...conversation,
+                        messages: conversation.messages.map((message) => message.id === messageId ? {
+                            ...message,
+                            deliveries: [...(message.deliveries ?? []).filter((candidate) => candidate.provider !== provider), delivery],
+                        } : message),
+                    })))
+                })
                 .on("postgres_changes", { event: "*", schema: "public", table: "communication_read_cursors", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.new)
                     const relationshipId = stringValue(row.relationship_id)
@@ -631,6 +663,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         if (!selected || !bootstrap.schemaReady || !selected.canSend) return
         const messageAttachment = messageToRetry?.attachment ?? attachment
         const replyTarget = messageToRetry ? null : replyingTo
+        const replyMessageId = messageToRetry?.replyToMessageId ?? replyTarget?.id ?? null
         const typedBody = messageToRetry ? (messageToRetry.attachment && messageToRetry.body === attachmentPlaceholder(messageToRetry.attachment) ? "" : messageToRetry.body) : draft.trim()
         if (!typedBody && !messageAttachment) return
         const body = typedBody || (messageAttachment ? attachmentPlaceholder(messageAttachment) : "")
@@ -641,7 +674,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             relationshipId: selected.id,
             body,
             direction: "outbound",
-            provider: "meta_whatsapp",
+            provider: "omnichannel",
             status: "sending",
             error: null,
             senderKind: "staff",
@@ -651,6 +684,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             attachment: messageAttachment,
             providerMessageId: null,
             replyToProviderMessageId: replyTarget?.providerMessageId ?? null,
+            replyToMessageId: replyTarget?.id ?? null,
             createdAt: new Date().toISOString(),
             sentAt: null,
             deliveredAt: null,
@@ -664,7 +698,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             setReplyingTo(null)
             localStorage.removeItem(`betelgeze:communications:draft:${bootstrap.workspaceId}:${selected.id}`)
         }
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId: selected.id, body: typedBody, attachment: messageAttachment, replyToMessageId: replyTarget?.id, clientRequestId, retry: Boolean(messageToRetry) }) }).catch(() => null)
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId: selected.id, body: typedBody, attachment: messageAttachment, replyToMessageId: replyMessageId, clientRequestId, retry: Boolean(messageToRetry) }) }).catch(() => null)
         if (!response) {
             updateConversationMessages(selected.id, [{ ...optimistic, status: "send_uncertain", error: "Delivery is being confirmed." }])
             return
@@ -725,9 +759,11 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
-                            const repliedMessage = message.replyToProviderMessageId
-                                ? selected.messages.find((candidate) => candidate.providerMessageId === message.replyToProviderMessageId) ?? null
-                                : null
+                            const repliedMessage = message.replyToMessageId
+                                ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null
+                                : message.replyToProviderMessageId
+                                    ? selected.messages.find((candidate) => candidate.providerMessageId === message.replyToProviderMessageId) ?? null
+                                    : null
                             const messageReactions = reactions.filter((reaction) => reaction.messageId === message.id)
                             const teamReaction = messageReactions.find((reaction) => reaction.direction === "outbound") ?? null
                             const canInteract = Boolean(message.providerMessageId) && new Date(message.createdAt).getTime() >= reactionCutoff
@@ -742,7 +778,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                 <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
                                     <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
-                                    {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={message.providerMessageId ? () => beginReply(message) : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                     <article
                                         role="button"
                                         tabIndex={0}
@@ -787,7 +823,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                                 start.maxDeltaX = touch.clientX - start.x
                                                 start.verticalAtMax = Math.abs(touch.clientY - start.y)
                                             }
-                                            const completed = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42 && message.providerMessageId)
+                                            const completed = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42)
                                             setSwipePosition({ id: message.id, offset: 0, active: false })
                                             window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 180)
                                             if (completed) {
@@ -804,19 +840,19 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                         className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
                                     >
                                         <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : "mb-0.5 leading-none text-neutral-500"} text-[10px] font-semibold`}>{sender}</p>
-                                        {message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
+                                        {message.replyToMessageId || message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
                                         {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={message.direction === "outbound"} /> : null}
                                         {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
                                         {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${message.direction === "outbound" ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                         <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><span className="flex min-w-0 items-center -space-x-1">{readers.map((person) => <button data-icon-button type="button" key={person.id} onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(person.id) }} title={`Read in Betelgeze by ${person.name}`} aria-label={`Open ${person.name} profile`} className="relative inline-flex h-4 w-4 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full border border-black p-0 leading-none"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full object-center" /></button>)}</span><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
-                                        {message.status === "send_failed" && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry</button> : null}
+                                        {["send_failed", "partial_sent"].includes(message.status) && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry failed channel{message.status === "partial_sent" ? "" : "s"}</button> : null}
                                     </article>
-                                    {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={message.providerMessageId ? () => beginReply(message) : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
                                 </div>
                                 {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                             </Fragment>
-                        }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here arrive from the shared workspace WhatsApp number.</p></div></div>}</div>
+                        }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here use this relationship&apos;s connected SMS and WhatsApp channels.</p></div></div>}</div>
                     </div>
                     {showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}
                     </div>
@@ -837,7 +873,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                         <MessageComposer
                             textareaRef={composerRef}
                             draft={draft}
-                            placeholder={selected.canSend ? `Message ${selected.title}` : "Add a WhatsApp number to this relationship"}
+                            placeholder={selected.canSend ? `Message ${selected.title}` : "Add a phone number and connect SMS or WhatsApp"}
                             disabled={!bootstrap.schemaReady || !selected.canSend}
                             sendDisabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !bootstrap.schemaReady || !selected.canSend}
                             onDraftChange={setDraft}
