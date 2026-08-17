@@ -1,10 +1,11 @@
-import { NextRequest } from "next/server"
+import { after, NextRequest } from "next/server"
 
 import { handleSaleConsentConfirmation } from "@/lib/client-sales/automation"
 import { getEquivalentMessageAddresses, normalizeProviderAddress } from "@/lib/client-messages/addresses"
 import { downloadTwilioMedia, validateTwilioSignature } from "@/lib/client-messages/twilio"
 import { communicationAttachmentKind } from "@/lib/communications/attachments"
 import { storeClientMessageMedia } from "@/lib/onboarding/uploads"
+import { notifyClientChatMessage } from "@/lib/push/chat-notifications"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { getWorkspaceIdForTwilioNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
 
@@ -248,6 +249,6 @@ export async function POST(request: NextRequest) {
         status: "received",
         raw_payload: Object.fromEntries(params.entries()),
     })
+    after(() => notifyClientChatMessage({ workspaceId, relationshipId: destination.relationshipId, messageId: message.id, senderName: "A client" }))
     return twimlResponse()
 }
-

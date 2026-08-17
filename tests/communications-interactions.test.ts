@@ -90,12 +90,13 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerScroll, page, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
+    const [clients, team, composer, composerScroll, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
+        readFile("lib/communications/bootstrap.ts", "utf8"),
         readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
         readFile("lib/communications/types.ts", "utf8"),
         readFile("components/communications/MessageInteractionIcons.tsx", "utf8"),
@@ -198,7 +199,8 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(clients, /selected\.canSend \? `Message \$\{selected\.title\}`/)
     assert.match(team, /selected\.canWrite \? `Message \$\{selected\.title\}`/)
     assert.match(clients, /<SquarePill tone="yellow" className="!min-h-5/)
-    assert.match(page, /isTest: relationship\.source_metadata\.is_test === true/)
+    assert.match(page, /loadClientCommunicationsBootstrap/)
+    assert.match(bootstrap, /isTest: relationship\.source_metadata\.is_test === true/)
     assert.match(types, /isTest: boolean/)
     assert.match(icons, /function DoubleDeliveryCheckIcon/)
     assert.match(icons, /function CopyIcon/)

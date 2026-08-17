@@ -13,7 +13,7 @@ import {
 import { storeClientMessageMedia } from "@/lib/onboarding/uploads"
 import { handleSaleConsentConfirmation } from "@/lib/client-sales/automation"
 import { getWorkspaceIdForWhatsAppPhoneNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
-import { notifyWhatsAppChatMessage } from "@/lib/push/chat-notifications"
+import { notifyClientChatMessage } from "@/lib/push/chat-notifications"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -907,7 +907,7 @@ async function handleInboundMessage({
         await recordClientAdminActivity({ clientId: destination.clientId, category: "communications", eventKey: "whatsapp.webhook.received", summary: "WhatsApp message received", entityType: "client_message", entityId: insertedMessage.id, direction: "inbound", metadata: { provider_message_id: messageId, message_type: message.type ?? "unknown" } })
     }
 
-    if (relationshipId) after(() => notifyWhatsAppChatMessage({ workspaceId, relationshipId, messageId: insertedMessage.id, senderName: client?.name?.trim() || "A client" }))
+    if (relationshipId) after(() => notifyClientChatMessage({ workspaceId, relationshipId, messageId: insertedMessage.id, senderName: client?.name?.trim() || "A client" }))
 
     let content: InboundMessageContent | null = null
 

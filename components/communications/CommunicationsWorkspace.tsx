@@ -5,6 +5,7 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Avatar } from "@/components/account/Avatar"
+import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
 import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
@@ -14,8 +15,10 @@ import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
+import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { SquarePill } from "@/components/ui"
-import type { CommunicationAttachment, CommunicationDelivery, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
+import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabActive"
+import type { ClientConversation, CommunicationAttachment, CommunicationDelivery, CommunicationMessage, CommunicationReaction, CommunicationReadCursor, CommunicationSticker, CommunicationsBootstrap } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
@@ -207,6 +210,9 @@ function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onRea
 }
 
 function mergeCursor(current: CommunicationReadCursor[], incoming: CommunicationReadCursor) {
+    const existing = current.find((cursor) => cursor.relationshipId === incoming.relationshipId && cursor.userId === incoming.userId)
+    if (existing && existing.lastReadAt > incoming.lastReadAt) return current
+    if (existing && existing.lastReadAt === incoming.lastReadAt && existing.lastReadMessageId === incoming.lastReadMessageId) return current
     return [...current.filter((cursor) => !(cursor.relationshipId === incoming.relationshipId && cursor.userId === incoming.userId)), incoming]
 }
 
@@ -214,9 +220,24 @@ function mergeReaction(current: CommunicationReaction[], incoming: Communication
     return [...current.filter((reaction) => !(reaction.messageId === incoming.messageId && reaction.direction === incoming.direction)), incoming]
 }
 
-export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: CommunicationsBootstrap; onOpenTeam?: () => void }) {
+function reconcileConversations(current: ClientConversation[], incoming: ClientConversation[]) {
+    const currentById = new Map(current.map((conversation) => [conversation.id, conversation]))
+    return incoming.map((conversation) => ({
+        ...conversation,
+        messages: mergeMessages(currentById.get(conversation.id)?.messages ?? [], conversation.messages),
+    })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title))
+}
+
+export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenTeam, onSelectedConversationChange }: {
+    active: boolean
+    bootstrap: CommunicationsBootstrap
+    onConnectionStateChange?: (state: CommunicationsConnectionState) => void
+    onOpenTeam?: () => void
+    onSelectedConversationChange?: (conversationId: string | null) => void
+}) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
     const [conversations, setConversations] = useState(bootstrap.conversations)
+    const [schemaReady, setSchemaReady] = useState(bootstrap.schemaReady)
     const [selectedId, setSelectedId] = useState(bootstrap.selectedConversationId)
     const [search, setSearch] = useState("")
     const [draft, setDraft] = useState("")
@@ -236,6 +257,8 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+    const [atLatest, setAtLatest] = useState(true)
+    const [documentVisible, setDocumentVisible] = useState(() => typeof document !== "undefined" && document.visibilityState === "visible")
     const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
     const [reactionCutoff] = useState(() => Date.now() - 30 * 24 * 60 * 60 * 1_000)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
@@ -252,11 +275,21 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const swipedMessageRef = useRef<string | null>(null)
     const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
+    const pendingReadRef = useRef<CommunicationReadCursor | null>(null)
+    const readRequestRef = useRef<string | null>(null)
+    const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
 
     useEffect(() => {
         selectedRef.current = selectedId
-    }, [selectedId])
+        onSelectedConversationChange?.(selectedId)
+    }, [onSelectedConversationChange, selectedId])
+
+    useEffect(() => {
+        const update = () => setDocumentVisible(document.visibilityState === "visible")
+        document.addEventListener("visibilitychange", update)
+        return () => document.removeEventListener("visibilitychange", update)
+    }, [])
 
     useEffect(() => {
         const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0)
@@ -320,7 +353,33 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         }
     }, [])
 
+    const persistReadCursor = useCallback(async (cursor: CommunicationReadCursor) => {
+        pendingReadRef.current = cursor
+        setReadCursors((current) => mergeCursor(current, cursor))
+        if (readRequestRef.current === cursor.lastReadMessageId) return
+        readRequestRef.current = cursor.lastReadMessageId
+        try {
+            const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/read`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ relationshipId: cursor.relationshipId, messageId: cursor.lastReadMessageId }),
+            })
+            const result = await response.json().catch(() => null) as { cursor?: CommunicationReadCursor; error?: string } | null
+            if (!response.ok || !result?.cursor) throw new Error(result?.error ?? "Could not save the read position.")
+            setReadCursors((current) => mergeCursor(current, result.cursor!))
+            if (pendingReadRef.current?.relationshipId === cursor.relationshipId && pendingReadRef.current.lastReadMessageId === cursor.lastReadMessageId) pendingReadRef.current = null
+        } finally {
+            if (readRequestRef.current === cursor.lastReadMessageId) readRequestRef.current = null
+        }
+    }, [bootstrap.workspaceSlug])
+
+    const flushPendingRead = useCallback(async () => {
+        const pending = pendingReadRef.current
+        if (pending) await persistReadCursor(pending)
+    }, [persistReadCursor])
+
     const selectConversation = useCallback((conversationId: string | null) => {
+        void flushPendingRead().catch(() => undefined)
         const pendingAttachment = attachmentRef.current
         const previousRelationshipId = selectedRef.current
         if (pendingAttachment && previousRelationshipId) {
@@ -331,6 +390,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
             }).catch(() => undefined)
         }
         followLatestRef.current = true
+        setAtLatest(true)
         setShowJumpToLatest(false)
         setSelectedId(conversationId)
         setAttachment(null)
@@ -343,7 +403,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
         setSwipePosition(null)
         setDraft(conversationId ? localStorage.getItem(`betelgeze:communications:draft:${bootstrap.workspaceId}:${conversationId}`) ?? "" : "")
         syncConversationUrl(conversationId)
-    }, [bootstrap.workspaceId, bootstrap.workspaceSlug, syncConversationUrl])
+    }, [bootstrap.workspaceId, bootstrap.workspaceSlug, flushPendingRead, syncConversationUrl])
 
     function beginReply(message: CommunicationMessage) {
         setReplyingTo(message)
@@ -478,7 +538,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     }
 
     async function sendSticker(sticker: CommunicationSticker) {
-        if (!selected || !bootstrap.schemaReady || !selected.canSend) return
+        if (!selected || !schemaReady || !selected.canSend) return
         const replyTarget = replyingTo
         const clientRequestId = crypto.randomUUID()
         const stickerAttachment: CommunicationAttachment = { kind: "sticker", fileName: sticker.fileName, mimeType: "image/webp", size: sticker.size, storagePath: sticker.storagePath, url: sticker.url }
@@ -572,32 +632,11 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     }, [bootstrap.workspaceSlug, selectedId, updateConversationMessages])
 
     useEffect(() => {
-        if (!selectedId || !selected?.messages.length || !bootstrap.schemaReady) return
-        const latest = selected.messages.at(-1)!
-        const cursor: CommunicationReadCursor = { relationshipId: selectedId, userId: bootstrap.currentUser.id, lastReadMessageId: latest.id, lastReadAt: new Date().toISOString() }
-        const timer = window.setTimeout(() => {
-            setReadCursors((current) => mergeCursor(current, cursor))
-            void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/read`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId: selectedId, messageId: latest.id }) }).catch(() => undefined)
-        }, 250)
-        return () => window.clearTimeout(timer)
-    }, [bootstrap.currentUser.id, bootstrap.schemaReady, bootstrap.workspaceSlug, selected?.messages, selectedId])
-
-    useEffect(() => {
         if (!selectedId || !followLatestRef.current) return
         window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 }))
     }, [selected?.messages.length, selectedId])
 
-    useEffect(() => {
-        let disposed = false
-        let channel: ReturnType<typeof supabase.channel> | null = null
-        async function connect() {
-            const session = await supabase.auth.getSession()
-            const accessToken = session.data.session?.access_token
-            if (!accessToken || disposed) return
-            await supabase.realtime.setAuth(accessToken)
-            if (disposed) return
-            channel = supabase.channel(`communications:${bootstrap.workspaceSlug}`, { config: { private: true } })
-            channel
+    const registerRealtime = useCallback((channel: ReturnType<typeof supabase.channel>) => channel
                 .on("postgres_changes", { event: "*", schema: "public", table: "client_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const message = realtimeMessage(payload.new)
                     if (message) updateConversationMessages(message.relationshipId, [message], true)
@@ -648,15 +687,46 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     const relationshipId = stringValue(row.id)
                     if (!relationshipId || !("communication_pinned_message_id" in row)) return
                     setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId: stringValue(row.communication_pinned_message_id) } : conversation))
-                })
-                .subscribe()
-        }
-        void connect().catch(() => undefined)
-        return () => { disposed = true; if (channel) void supabase.removeChannel(channel) }
-    }, [bootstrap.currentUser, bootstrap.workspaceId, bootstrap.workspaceSlug, supabase, updateConversationMessages])
+                }), [bootstrap.workspaceId, supabase, updateConversationMessages])
+
+    const synchronize = useCallback(async () => {
+        const conversationId = selectedRef.current
+        const search = conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ""
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/sync${search}`, { cache: "no-store" })
+        const result = await response.json().catch(() => null) as CommunicationsBootstrap | { error?: string } | null
+        if (!response.ok || !result || !("conversations" in result)) throw new Error(result && "error" in result ? result.error ?? "Could not check for missed messages." : "Could not check for missed messages.")
+        result.conversations.forEach((conversation) => conversation.messages.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message))))
+        setSchemaReady(result.schemaReady)
+        setConversations((current) => reconcileConversations(current, result.conversations))
+        setReadCursors((current) => result.readCursors.reduce((next, cursor) => mergeCursor(next, cursor), current))
+        setReactions(result.reactions)
+        setStickers(result.stickers)
+        await flushPendingRead()
+    }, [bootstrap.workspaceSlug, flushPendingRead])
+
+    const connection = useReliableCommunicationsRealtime({
+        active,
+        connectionKey: bootstrap.workspaceSlug,
+        register: registerRealtime,
+        schemaReady,
+        supabase,
+        synchronize,
+    })
+
+    useEffect(() => onConnectionStateChange?.(connection.state), [connection.state, onConnectionStateChange])
+
+    useEffect(() => {
+        if (!active || !workspaceTabActive || !documentVisible || !atLatest || !selectedId || !selected?.messages.length || !schemaReady) return
+        const latest = selected.messages.at(-1)!
+        const current = readCursors.find((cursor) => cursor.relationshipId === selectedId && cursor.userId === bootstrap.currentUser.id)
+        if (current?.lastReadMessageId === latest.id) return
+        const cursor: CommunicationReadCursor = { relationshipId: selectedId, userId: bootstrap.currentUser.id, lastReadMessageId: latest.id, lastReadAt: latest.createdAt }
+        const timer = window.setTimeout(() => { void persistReadCursor(cursor).catch(() => undefined) }, 0)
+        return () => window.clearTimeout(timer)
+    }, [active, atLatest, bootstrap.currentUser.id, documentVisible, persistReadCursor, readCursors, schemaReady, selected?.messages, selectedId, workspaceTabActive])
 
     async function sendMessage(messageToRetry?: CommunicationMessage) {
-        if (!selected || !bootstrap.schemaReady || !selected.canSend) return
+        if (!selected || !schemaReady || !selected.canSend) return
         const messageAttachment = messageToRetry?.attachment ?? attachment
         const replyTarget = messageToRetry ? null : replyingTo
         const replyMessageId = messageToRetry?.replyToMessageId ?? replyTarget?.id ?? null
@@ -716,7 +786,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
     const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId ? "Pinned message unavailable" : null
 
     return <section aria-label="Client communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
-        {!bootstrap.schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
+        {!schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
 
         <ResizableConversationColumns>
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>
@@ -724,6 +794,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     <div role="tablist" aria-label="Communication conversations" className="flex items-center gap-1">
                         <button type="button" role="tab" aria-selected="true" className="inline-flex h-8 items-center gap-2 rounded-lg bg-neutral-800 px-3 text-xs font-semibold text-white">Clients<span className="text-[10px] font-medium text-neutral-400">{visibleConversations.length}</span></button>
                         <button type="button" role="tab" aria-selected="false" onClick={onOpenTeam} className="h-8 rounded-lg px-3 text-xs font-medium text-neutral-400 hover:bg-neutral-900 hover:text-white">Team</button>
+                        <span className="ml-auto"><CommunicationsConnectionStatus state={connection.state} error={connection.error} /></span>
                     </div>
                     <label className="relative mt-3 block"><span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-600"><SearchIcon /></span><input ref={searchRef} type="search" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search conversations" placeholder="Search conversations" className="h-10 w-full rounded-lg border border-neutral-800 bg-black pl-9 pr-3 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600" /></label>
                 </div>
@@ -731,7 +802,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                     const latest = conversation.messages.at(-1)
                     const ownCursor = readCursors.find((cursor) => cursor.relationshipId === conversation.id && cursor.userId === bootstrap.currentUser.id)
                     const cursorIndex = ownCursor?.lastReadMessageId ? conversation.messages.findIndex((message) => message.id === ownCursor.lastReadMessageId) : -1
-                    const unread = conversation.messages.slice(cursorIndex + 1).filter((message) => message.direction === "inbound").length
+                    const unread = conversation.messages.filter((message, index) => message.direction === "inbound" && (cursorIndex >= 0 ? index > cursorIndex : !ownCursor || message.createdAt > ownCursor.lastReadAt)).length
                     return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} aria-current={selectedId === conversation.id ? "page" : undefined} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left transition ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}>
                         <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-800 text-sm font-semibold text-neutral-200">{initials(conversation.title)}</span>
                         <span className="min-w-0"><span className="flex min-w-0 items-start justify-between gap-3"><span className="min-w-0 flex-1 truncate text-sm font-semibold">{conversation.title}</span><span className="flex shrink-0 items-center gap-2">{conversation.isTest ? <SquarePill tone="yellow" className="!min-h-5 !px-2 !py-0.5 !text-[10px] !leading-3">Test</SquarePill> : null}{latest ? <time dateTime={latest.createdAt} className={`text-[11px] ${unread ? "text-white" : "text-neutral-600"}`}>{formatRelativeTime(latest.createdAt)}</time> : null}</span></span><span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-neutral-500">{latest?.direction === "outbound" ? <DeliveryTicks message={latest} /> : null}<span className="truncate">{latest?.body || "No messages yet"}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span>
@@ -747,11 +818,12 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-800 text-xs font-semibold">{initials(selected.title)}</span>
                             <span className="min-w-0"><span className="flex min-w-0 items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-semibold">{selected.title}</span>{selected.isTest ? <SquarePill tone="yellow" className="!min-h-5 !px-2 !py-0.5 !text-[10px] !leading-3">Test</SquarePill> : null}</span><span className="block truncate text-[11px] text-neutral-600">{selected.subtitle ?? "WhatsApp client"}</span></span>
                         </Link>
+                        <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
 
                     <div className="relative min-h-0 flex-1">
-                    <div ref={messagePaneRef} onClick={() => composerRef.current?.blur()} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; followLatestRef.current = !messagePaneIsAwayFromBottom(event.currentTarget, 24); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
+                    <div ref={messagePaneRef} onClick={() => composerRef.current?.blur()} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; const following = !messagePaneIsAwayFromBottom(event.currentTarget, 24); followLatestRef.current = following; setAtLatest(following); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
                         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
@@ -851,7 +923,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             </Fragment>
                         }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here use this relationship&apos;s connected SMS and WhatsApp channels.</p></div></div>}</div>
                     </div>
-                    {showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}
+                    {showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}
                     </div>
 
                     <footer className="relative z-10 shrink-0 touch-none border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
@@ -871,13 +943,13 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             textareaRef={composerRef}
                             draft={draft}
                             placeholder={selected.canSend ? `Message ${selected.title}` : "Add a phone number and connect SMS or WhatsApp"}
-                            disabled={!bootstrap.schemaReady || !selected.canSend}
-                            sendDisabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !bootstrap.schemaReady || !selected.canSend}
+                            disabled={!schemaReady || !selected.canSend}
+                            sendDisabled={(!draft.trim() && !attachment) || attachmentState === "uploading" || !schemaReady || !selected.canSend}
                             onDraftChange={setDraft}
                             onSend={() => void sendMessage()}
                             leadingActions={<>
-                                <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!bootstrap.schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><AttachmentIcon /></button>
-                                <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setInteractionError(null) }} disabled={!bootstrap.schemaReady || !selected.canSend} aria-label="Open sticker tray" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><StickerIcon /></button>
+                                <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!schemaReady || !selected.canSend || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><AttachmentIcon /></button>
+                                <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setInteractionError(null) }} disabled={!schemaReady || !selected.canSend} aria-label="Open sticker tray" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><StickerIcon /></button>
                             </>}
                         />
                     </footer>

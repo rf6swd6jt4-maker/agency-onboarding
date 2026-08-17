@@ -3,14 +3,15 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 test("Communications is an opaque local-first client chat workspace", async () => {
-    const [page, workspace] = await Promise.all([
+    const [page, workspace, bootstrap] = await Promise.all([
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("lib/communications/bootstrap.ts", "utf8"),
     ])
     assert.match(page, /fixed inset-0 overflow-hidden bg-black/)
     assert.doesNotMatch(page, /WorkspaceBanner|PanelTabs|area=/)
-    assert.match(page, /relationship\.status !== "archived"/)
-    assert.doesNotMatch(page, /relationship\.status !== "archived" && relationship\.client_id/)
+    assert.match(bootstrap, /relationship\.status !== "archived"/)
+    assert.doesNotMatch(bootstrap, /relationship\.status !== "archived" && relationship\.client_id/)
     assert.match(workspace, /useState\(bootstrap\.selectedConversationId\)/)
     assert.match(workspace, /window\.history\.replaceState/)
     assert.match(workspace, /type: "location-replace"/)
@@ -56,6 +57,35 @@ test("client and native unread chat indicators use the neutral white accent", as
         assert.match(workspace, /unread \? "[^"]*text-white"/)
         assert.match(workspace, /\{unread \? <span className="[^"]*bg-white[^"]*text-black"/)
         assert.doesNotMatch(workspace, /unread[^\n]*emerald/)
+    }
+})
+
+test("client and team chats reconcile missed Realtime events without a reload", async () => {
+    const [hook, panel, clients, team, syncRoute] = await Promise.all([
+        readFile("components/communications/useReliableCommunicationsRealtime.ts", "utf8"),
+        readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/sync/route.ts", "utf8"),
+    ])
+
+    assert.match(hook, /status === "SUBSCRIBED"/)
+    assert.match(hook, /synchronizeRef\.current\(\)/)
+    assert.match(hook, /window\.addEventListener\("online", recoverWhenAvailable\)/)
+    assert.match(hook, /window\.addEventListener\("focus", recoverWhenAvailable\)/)
+    assert.match(hook, /document\.addEventListener\("visibilitychange", recoverWhenAvailable\)/)
+    assert.match(hook, /SAFETY_SYNC_MS = 20_000/)
+    assert.match(hook, /RETRY_DELAYS_MS/)
+    assert.match(panel, /className=\{mode === "clients" \? "absolute inset-0" : "hidden"\}/)
+    assert.match(panel, /className=\{mode === "team" \? "absolute inset-0" : "hidden"\}/)
+    assert.match(clients, /communications\/sync/)
+    assert.match(team, /communications\/native\/conversations/)
+    assert.match(syncRoute, /loadClientCommunicationsBootstrap/)
+    for (const workspace of [clients, team]) {
+        assert.match(workspace, /persistReadCursor/)
+        assert.match(workspace, /lastReadAt > incoming\.lastReadAt/)
+        assert.match(workspace, /message\.createdAt > ownCursor\.lastReadAt/)
+        assert.match(workspace, /<CommunicationsConnectionStatus/)
     }
 })
 

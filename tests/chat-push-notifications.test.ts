@@ -34,14 +34,19 @@ test("profile toggle registers from the user gesture and recovers after returnin
     assert.match(subscriptionRoute, /httpOnly: true/)
 })
 
-test("chat push delivery suppresses all devices while a Communications tab is active", async () => {
-    const [delivery, tracker, panel] = await Promise.all([
+test("chat push delivery is suppressed only for the exact visible live conversation", async () => {
+    const [delivery, tracker, panel, contextMigration] = await Promise.all([
         readFile("lib/push/chat-notifications.ts", "utf8"),
         readFile("components/communications/CommunicationsActivityTracker.tsx", "utf8"),
         readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
+        readFile("supabase/migrations/20260817160000_reliable_communications_sessions.sql", "utf8"),
     ])
     assert.match(delivery, /communications_active_sessions/)
     assert.match(delivery, /activeUsers\.has\(subscription\.user_id\)/)
+    assert.match(delivery, /eq\("workspace_id", push\.workspaceId\)/)
+    assert.match(delivery, /eq\("conversation_kind", push\.conversationKind\)/)
+    assert.match(delivery, /eq\("conversation_id", push\.conversationId\)/)
+    assert.match(delivery, /eq\("connection_live", true\)/)
     assert.match(delivery, /workspace_native_conversation_participants/)
     assert.match(delivery, /userId !== input\.senderUserId/)
     assert.match(delivery, /workspace_memberships/)
@@ -53,18 +58,23 @@ test("chat push delivery suppresses all devices while a Communications tab is ac
     assert.doesNotMatch(delivery, /body: `From /)
     assert.match(tracker, /useWorkspaceTabActive\(\)/)
     assert.match(tracker, /document\.visibilityState === "visible"/)
+    assert.match(tracker, /connectionState === "live"/)
     assert.match(tracker, /navigator\.sendBeacon/)
     assert.match(panel, /<CommunicationsActivityTracker/)
+    assert.match(contextMigration, /conversation_kind/)
+    assert.match(contextMigration, /connection_live/)
 })
 
-test("native and inbound WhatsApp message writes schedule chat pushes after their responses", async () => {
-    const [nativeRoute, whatsappRoute, worker] = await Promise.all([
+test("native, WhatsApp, and Twilio message writes schedule chat pushes after their responses", async () => {
+    const [nativeRoute, whatsappRoute, twilioRoute, worker] = await Promise.all([
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
         readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
+        readFile("app/api/client-messages/twilio/route.ts", "utf8"),
         readFile("public/sw.js", "utf8"),
     ])
     assert.match(nativeRoute, /after\(\(\) => notifyNativeChatMessage/)
-    assert.match(whatsappRoute, /after\(\(\) => notifyWhatsAppChatMessage/)
+    assert.match(whatsappRoute, /after\(\(\) => notifyClientChatMessage/)
+    assert.match(twilioRoute, /after\(\(\) => notifyClientChatMessage/)
     assert.match(worker, /self\.addEventListener\("push"/)
     assert.match(worker, /payload\.url\.startsWith\("\/"\)/)
     assert.match(worker, /conversationId/)

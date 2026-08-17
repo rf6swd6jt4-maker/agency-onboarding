@@ -16,6 +16,8 @@ type StoredSubscription = {
 }
 
 type ChatPush = {
+    workspaceId: string
+    conversationKind: "client" | "native"
     messageId: string
     conversationId: string
     title: string
@@ -47,6 +49,12 @@ function attachmentMessage(value: unknown) {
     return label ? (label === "File" && fileName ? `${label}: ${fileName}` : label) : ""
 }
 
+function missingActivityContext(error: { code?: string; message?: string } | null) {
+    const message = error?.message?.toLowerCase() ?? ""
+    return error?.code === "42703" || error?.code === "42P01" || error?.code === "PGRST204"
+        || message.includes("conversation_kind") || message.includes("conversation_id") || message.includes("connection_live") || message.includes("workspace_id")
+}
+
 export function chatNotificationText(chatName: string, messageBody: unknown, attachment?: unknown) {
     return {
         title: notificationLine(chatName, 80) || "Betelgeze chat",
@@ -66,15 +74,16 @@ async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
 
     const activeSince = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString()
     const [{ data: activeRows, error: activeError }, { data: subscriptionRows, error: subscriptionError }] = await Promise.all([
-        supabaseAdmin.from("communications_active_sessions").select("user_id").in("user_id", recipients).gte("last_seen_at", activeSince),
+        supabaseAdmin.from("communications_active_sessions").select("user_id").in("user_id", recipients).eq("workspace_id", push.workspaceId).eq("conversation_kind", push.conversationKind).eq("conversation_id", push.conversationId).eq("connection_live", true).gte("last_seen_at", activeSince),
         supabaseAdmin.from("web_push_subscriptions").select("id, user_id, endpoint, p256dh, auth").in("user_id", recipients),
     ])
-    if (activeError || subscriptionError) {
+    if (subscriptionError || (activeError && !missingActivityContext(activeError))) {
         console.error("Could not resolve chat push recipients", activeError ?? subscriptionError)
         return
     }
+    if (activeError) console.warn("Chat push activity context is not migrated; delivering without active-chat suppression")
 
-    const activeUsers = new Set((activeRows ?? []).map((row) => row.user_id))
+    const activeUsers = new Set((activeError ? [] : activeRows ?? []).map((row) => row.user_id))
     const subscriptions = (subscriptionRows ?? []) as StoredSubscription[]
     const payload = JSON.stringify({
         category: "chat",
@@ -148,6 +157,8 @@ export async function notifyNativeChatMessage(input: {
     await deliverChatPush(
         (participants ?? []).map((participant) => participant.user_id).filter((userId) => userId !== input.senderUserId),
         {
+            workspaceId: input.workspaceId,
+            conversationKind: "native",
             messageId: input.messageId,
             conversationId: input.conversationId,
             title: notification.title,
@@ -157,7 +168,7 @@ export async function notifyNativeChatMessage(input: {
     )
 }
 
-export async function notifyWhatsAppChatMessage(input: {
+export async function notifyClientChatMessage(input: {
     workspaceId: string
     relationshipId: string
     messageId: string
@@ -175,13 +186,15 @@ export async function notifyWhatsAppChatMessage(input: {
         supabaseAdmin.from("client_messages").select("body").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).eq("id", input.messageId).maybeSingle(),
     ])
     if (membershipError || workspaceError || relationshipError || messageError || !workspace || !message) {
-        console.error("Could not prepare WhatsApp chat push", membershipError ?? workspaceError ?? relationshipError ?? messageError)
+        console.error("Could not prepare client chat push", membershipError ?? workspaceError ?? relationshipError ?? messageError)
         return
     }
     const primaryName = relationship?.primary_person_name?.trim() || input.senderName
     const businessName = relationship?.business_name?.trim()
     const notification = chatNotificationText(businessName ? `${primaryName} – ${businessName}` : primaryName, message.body)
     await deliverChatPush((memberships ?? []).map((membership) => membership.user_id), {
+        workspaceId: input.workspaceId,
+        conversationKind: "client",
         messageId: input.messageId,
         conversationId: input.relationshipId,
         title: notification.title,
