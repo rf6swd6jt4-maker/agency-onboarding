@@ -16,6 +16,7 @@ const twilio = readFileSync("lib/client-messages/twilio.ts", "utf8")
 const twilioWebhook = readFileSync("app/api/client-messages/twilio/route.ts", "utf8")
 const omnichannelMigration = readFileSync("supabase/migrations/20260817110000_twilio_omnichannel_messaging.sql", "utf8")
 const privacy = readFileSync("app/privacy/page.tsx", "utf8")
+const terms = readFileSync("app/terms/page.tsx", "utf8")
 
 test("connection candidates activate atomically and keep a one-generation rollback", () => {
     assert.match(migration, /candidate_config_encrypted/u)
@@ -94,6 +95,18 @@ test("public privacy policy includes Twilio messaging disclosures", () => {
     assert.match(privacy, /reply STOP/u)
     assert.match(privacy, /reply HELP/u)
     assert.match(privacy, /do not sell, rent, or share mobile phone numbers, SMS opt-in data, or messaging consent/u)
+})
+
+test("public messaging terms include A2P campaign disclosures", () => {
+    assert.match(terms, /Betelgeze Client Messaging/u)
+    assert.match(terms, /Message frequency varies/u)
+    assert.match(terms, /Message and data rates may apply/u)
+    assert.match(terms, /reply HELP/u)
+    assert.match(terms, /reply STOP/u)
+    assert.match(terms, /mailto:support@betelgeze\.com/u)
+    assert.match(terms, /Carriers are not liable for any delayed or undelivered messages/u)
+    assert.match(terms, /href="\/privacy"/u)
+    assert.match(privacy, /href="\/terms"/u)
 })
 
 test("legacy Stripe and WhatsApp credentials remain available during cutover", () => {

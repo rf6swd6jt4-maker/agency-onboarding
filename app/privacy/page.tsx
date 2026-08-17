@@ -131,6 +131,9 @@ export default function PrivacyPage() {
                         message our team through your active project
                         communication channel.
                     </p>
+                    <p className="mt-3 leading-7 text-slate-700">
+                        SMS and MMS participation is also governed by the <Link href="/terms" className="font-medium text-[#1E3A5F] underline underline-offset-2">Betelgeze Terms and Conditions</Link>.
+                    </p>
                 </section>
             </article>
         </main>
