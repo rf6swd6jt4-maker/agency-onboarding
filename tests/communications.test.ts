@@ -77,6 +77,8 @@ test("direct omnichannel sending is durable and idempotent", async () => {
     assert.match(route, /sendCommunicationDeliveries/)
     assert.match(omnichannel, /callbackData: input\.messageId/)
     assert.match(omnichannel, /if \(!input\.clientId\) return null/)
+    assert.match(omnichannel, /relationship\.whatsapp_phone \?\? ""/)
+    assert.doesNotMatch(omnichannel, /whatsapp_phone \?\? relationship\.primary_phone/)
     assert.match(omnichannelMigration, /communication_message_deliveries/)
     assert.match(meta, /biz_opaque_callback_data: callbackData/)
     assert.match(webhook, /biz_opaque_callback_data/)
@@ -93,6 +95,14 @@ test("direct omnichannel sending is durable and idempotent", async () => {
             webhook.indexOf('from("client_communication_channels")'),
         "current relationships must win over legacy channels when a phone number is reused"
     )
+})
+
+test("client chat uses provider colour while retaining compact delivery ticks", async () => {
+    const workspace = await readFile("components/communications/CommunicationsWorkspace.tsx", "utf8")
+    assert.match(workspace, /function usesWhatsApp/)
+    assert.match(workspace, /bg-\[#25D366\]/)
+    assert.match(workspace, /<DoubleDeliveryCheckIcon/)
+    assert.doesNotMatch(workspace, />\{label\} \{mark\}</)
 })
 
 test("logical replies remain linked while WhatsApp receives native reply context", async () => {

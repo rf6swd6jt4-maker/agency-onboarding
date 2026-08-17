@@ -42,8 +42,13 @@ export async function sendTwilioMessage(input: {
     }
     const to = toE164Recipient(input.to)
     if (!to) throw new Error("The SMS destination is invalid.")
+    const from = toE164Recipient(config.phone_number)
+    if (!from) throw new Error("The Twilio sending number is invalid.")
+    if (to === from) {
+        throw new TwilioMessagingError("The client SMS number cannot be the workspace Twilio sending number.", 400)
+    }
     const body = new URLSearchParams({ To: to, Body: input.body })
-    body.set("From", toE164Recipient(config.phone_number))
+    body.set("From", from)
     const statusCallback = new URL("/api/client-messages/twilio", process.env.NEXT_PUBLIC_SITE_URL ?? "https://app.betelgeze.com")
     if (input.callbackData) statusCallback.searchParams.set("messageId", input.callbackData)
     body.set("StatusCallback", statusCallback.toString())

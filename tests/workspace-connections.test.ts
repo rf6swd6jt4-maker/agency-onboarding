@@ -15,6 +15,7 @@ const outbox = readFileSync("lib/onboarding/outbox.ts", "utf8")
 const twilio = readFileSync("lib/client-messages/twilio.ts", "utf8")
 const twilioWebhook = readFileSync("app/api/client-messages/twilio/route.ts", "utf8")
 const omnichannelMigration = readFileSync("supabase/migrations/20260817110000_twilio_omnichannel_messaging.sql", "utf8")
+const privacy = readFileSync("app/privacy/page.tsx", "utf8")
 
 test("connection candidates activate atomically and keep a one-generation rollback", () => {
     assert.match(migration, /candidate_config_encrypted/u)
@@ -81,9 +82,18 @@ test("Twilio is workspace-owned and messages retain per-provider delivery state"
     assert.match(integrations, /"twilio_sms"/u)
     assert.match(twilio, /getWorkspaceProviderConfig\(input\.workspaceId, "twilio_sms"\)/u)
     assert.match(twilio, /StatusCallback/u)
+    assert.match(twilio, /to === from/u)
     assert.match(omnichannelMigration, /communication_message_deliveries/u)
     assert.match(omnichannelMigration, /communication_primary_provider/u)
     assert.match(omnichannelMigration, /communication_delivery_mode/u)
+})
+
+test("public privacy policy includes Twilio messaging disclosures", () => {
+    assert.match(privacy, /SMS and MMS Communications/u)
+    assert.match(privacy, /Message and data rates may apply/u)
+    assert.match(privacy, /reply STOP/u)
+    assert.match(privacy, /reply HELP/u)
+    assert.match(privacy, /do not sell, rent, or share mobile phone numbers, SMS opt-in data, or messaging consent/u)
 })
 
 test("legacy Stripe and WhatsApp credentials remain available during cutover", () => {

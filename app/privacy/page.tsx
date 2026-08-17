@@ -11,8 +11,8 @@ const SECTIONS = [
     {
         title: "Information We Collect",
         body: [
-            "We collect information clients provide during onboarding, including name, email address, WhatsApp number, business information, project requirements, uploaded files, form responses, and messages sent to our team.",
-            "We may also collect technical information needed to operate the portal, such as timestamps, progress status, session identifiers, and delivery or webhook records for client communications.",
+            "We collect information clients provide during onboarding, including name, email address, mobile and WhatsApp numbers, business information, project requirements, uploaded files, form responses, communication preferences, and messages sent to an agency through Betelgeze.",
+            "We may also collect technical information needed to operate the portal, such as timestamps, progress status, session identifiers, message delivery records, webhook records, and records of SMS consent or opt-out requests.",
         ],
     },
     {
@@ -30,16 +30,26 @@ const SECTIONS = [
         ],
     },
     {
+        title: "SMS and MMS Communications",
+        body: [
+            "Betelgeze enables agencies to send and receive SMS and MMS through Twilio using an agency-owned phone number. Messages may include a consent confirmation, a secure onboarding link, service or project updates, requested information, and direct replies within an active client conversation. The agency identified in the message is the sender, and Betelgeze provides the communication technology used to route and retain the conversation.",
+            "SMS consent must be freely given for the identified sender and stated purpose. Providing a mobile number alone does not authorize unrelated promotional messages, consent is not transferred between agencies, and agencies using Betelgeze are responsible for obtaining and retaining any consent required for their messages.",
+            "Message frequency varies according to the client's onboarding, project activity, and conversation with the agency. Message and data rates may apply. Recipients can reply STOP to opt out of SMS messages and may reply HELP for assistance. After an opt-out, no further SMS messages will be sent unless the recipient later gives valid consent again, apart from a permitted final confirmation that the opt-out was processed.",
+            "We do not sell, rent, or share mobile phone numbers, SMS opt-in data, or messaging consent with third parties or affiliates for marketing or promotional purposes. Operational providers such as Twilio may process mobile information only as needed to transmit messages, provide delivery and compliance functions, secure the service, and support Betelgeze's operation; they do not receive that information from us for their own marketing.",
+        ],
+    },
+    {
         title: "Service Providers",
         body: [
             "We use trusted service providers to operate our systems, including hosting, database, file storage, project management, analytics, and communication providers. These providers process information only as needed to support our services.",
-            "Examples may include Vercel, Supabase, Cloudflare R2, Meta WhatsApp Business Platform, and similar operational tools.",
+            "Examples may include Vercel, Supabase, Cloudflare R2, Twilio, Meta WhatsApp Business Platform, and similar operational tools.",
         ],
     },
     {
         title: "Data Retention",
         body: [
             "We keep client information for as long as needed to provide services, maintain project records, comply with legal obligations, resolve disputes, and support legitimate business operations.",
+            "Messaging and consent records may be retained for as long as needed to document the communication, honour opt-out requests, meet legal or carrier requirements, and demonstrate when and how consent was obtained or withdrawn.",
             "Clients may request deletion of information where applicable, subject to records we must keep for legal, security, or business reasons.",
         ],
     },
@@ -52,7 +62,7 @@ const SECTIONS = [
     {
         title: "Client Choices",
         body: [
-            "Clients can ask us to correct, update, export, or delete personal information where applicable. Clients can also stop messaging us on WhatsApp at any time.",
+            "Clients can ask us to correct, update, export, or delete personal information where applicable. Clients can stop messaging through WhatsApp at any time and can reply STOP to an SMS to withdraw SMS consent.",
         ],
     },
     {
@@ -79,7 +89,7 @@ export default function PrivacyPage() {
                 </h1>
 
                 <p className="mt-3 text-sm text-slate-500">
-                    Effective date: 3 June 2026
+                    Effective date: 17 August 2026
                 </p>
 
                 <p className="mt-6 leading-7 text-slate-700">

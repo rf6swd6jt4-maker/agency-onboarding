@@ -12,7 +12,9 @@ import {
     displayMessageAddress,
     formatClientInboundMessage,
     getEquivalentMessageAddresses,
+    isUsablePhoneNumber,
     normalizeMessageAddress,
+    resolvePrimaryMessagingProvider,
     toMetaWhatsAppRecipient,
 } from "../lib/client-messages/addresses.ts"
 import { shouldIgnoreClickUpMessage } from "../lib/client-messages/clickup-message-filters.ts"
@@ -298,6 +300,26 @@ test("normalizes WhatsApp bridge addresses", () => {
         normalizeMessageAddress("whatsapp:+44 (0) 7700 900123"),
         "whatsapp:+447700900123"
     )
+})
+
+test("selects whichever client messaging number is actually available", () => {
+    assert.equal(isUsablePhoneNumber("+353 89 983 1234"), true)
+    assert.equal(isUsablePhoneNumber(""), false)
+    assert.equal(resolvePrimaryMessagingProvider({
+        requestedProvider: "meta_whatsapp",
+        smsPhone: "+353 89 983 1234",
+        whatsappPhone: "",
+    }), "twilio_sms")
+    assert.equal(resolvePrimaryMessagingProvider({
+        requestedProvider: "twilio_sms",
+        smsPhone: "",
+        whatsappPhone: "+353 89 983 1234",
+    }), "meta_whatsapp")
+    assert.equal(resolvePrimaryMessagingProvider({
+        requestedProvider: "meta_whatsapp",
+        smsPhone: "+353 89 983 1234",
+        whatsappPhone: "+353 89 983 5678",
+    }), "meta_whatsapp")
 })
 
 test("matches legacy Irish WhatsApp number variants", () => {

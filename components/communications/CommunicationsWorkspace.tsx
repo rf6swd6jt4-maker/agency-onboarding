@@ -117,21 +117,17 @@ function MessageBody({ body }: { body: string }) {
 }
 
 function DeliveryTicks({ message }: { message: CommunicationMessage }) {
-    if (message.deliveries?.length) return <span className="inline-flex items-center gap-1" aria-label="Channel delivery status">{message.deliveries.map((delivery) => {
-        const status = delivery.status.toLowerCase()
-        const label = delivery.provider === "meta_whatsapp" ? "WA" : "SMS"
-        const failed = status.includes("failed") || status.includes("error")
-        const pending = status === "sending" || status.includes("queued") || status.includes("pending")
-        const mark = failed ? "!" : pending ? "◷" : delivery.readAt || status.includes("read") ? "✓✓" : delivery.deliveredAt || status.includes("delivered") ? "✓✓" : "✓"
-        return <span key={delivery.provider} title={`${label}: ${delivery.error ?? status}`} className={failed ? "text-red-500" : delivery.readAt || status.includes("read") ? "text-sky-500" : ""}>{label} {mark}</span>
-    })}</span>
     const status = message.status.toLowerCase()
     if (status === "sending" || status.includes("queued") || status.includes("pending")) return <span title="Sending" aria-label="Sending">◷</span>
     if (status === "send_failed" || status === "delivery_failed" || status.includes("error")) return <span className="text-red-500" title={message.error ?? "Message failed"} aria-label="Message failed">!</span>
     if (status === "send_uncertain") return <span className="text-amber-600" title="Delivery is being confirmed. Betelgeze will not resend automatically." aria-label="Delivery confirmation pending">?</span>
-    if (message.readAt || status.includes("read")) return <span className="inline-flex shrink-0 text-sky-500" title="Read in WhatsApp" aria-label="Read in WhatsApp"><DoubleDeliveryCheckIcon /></span>
-    if (message.deliveredAt || status.includes("delivered")) return <span className="inline-flex shrink-0" title="Delivered to WhatsApp" aria-label="Delivered to WhatsApp"><DoubleDeliveryCheckIcon /></span>
-    return <span className="font-bold" title="Sent to WhatsApp" aria-label="Sent to WhatsApp">✓</span>
+    if (message.readAt || status.includes("read")) return <span className="inline-flex shrink-0 text-sky-500" title="Read" aria-label="Read"><DoubleDeliveryCheckIcon /></span>
+    if (message.deliveredAt || status.includes("delivered")) return <span className="inline-flex shrink-0" title="Delivered" aria-label="Delivered"><DoubleDeliveryCheckIcon /></span>
+    return <span className="font-bold" title="Sent" aria-label="Sent">✓</span>
+}
+
+function usesWhatsApp(message: CommunicationMessage) {
+    return message.provider === "meta_whatsapp" || Boolean(message.deliveries?.some((delivery) => delivery.provider === "meta_whatsapp"))
 }
 
 function SearchIcon() {
@@ -769,6 +765,7 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                             const canInteract = Boolean(message.providerMessageId) && new Date(message.createdAt).getTime() >= reactionCutoff
                             const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                             const isSticker = message.attachment?.kind === "sticker"
+                            const isWhatsAppMessage = usesWhatsApp(message)
                             const stickerSaved = Boolean(isSticker && stickers.some((sticker) => sticker.storagePath === message.attachment?.storagePath))
                             const canPin = message.clientRequestId !== message.id
                             const showActions = actionMessageId === message.id
@@ -837,14 +834,14 @@ export function CommunicationsWorkspace({ bootstrap, onOpenTeam }: { bootstrap: 
                                             window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
                                         }}
                                         style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
-                                        className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
+                                        className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${message.direction === "outbound" ? "rounded-br-md" : "rounded-bl-md"} ${isWhatsAppMessage ? "bg-[#25D366] text-[#081c15]" : message.direction === "outbound" ? "bg-neutral-100 text-neutral-950" : "border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-black focus-visible:ring-2 focus-visible:ring-neutral-500`}
                                     >
-                                        <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : "mb-0.5 leading-none text-neutral-500"} text-[10px] font-semibold`}>{sender}</p>
+                                        <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : `mb-0.5 leading-none ${isWhatsAppMessage ? "text-[#0b3b24]/70" : "text-neutral-500"}`} text-[10px] font-semibold`}>{sender}</p>
                                         {message.replyToMessageId || message.replyToProviderMessageId ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${message.direction === "outbound" ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
-                                        {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={message.direction === "outbound"} /> : null}
+                                        {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={message.direction === "outbound" || isWhatsAppMessage} /> : null}
                                         {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
                                         {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${message.direction === "outbound" ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
-                                        <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><span className="flex min-w-0 items-center -space-x-1">{readers.map((person) => <button data-icon-button type="button" key={person.id} onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(person.id) }} title={`Read in Betelgeze by ${person.name}`} aria-label={`Open ${person.name} profile`} className="relative inline-flex h-4 w-4 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full border border-black p-0 leading-none"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full object-center" /></button>)}</span><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
+                                        <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : isWhatsAppMessage ? "text-[#0b3b24]/70" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><span className="flex min-w-0 items-center -space-x-1">{readers.map((person) => <button data-icon-button type="button" key={person.id} onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(person.id) }} title={`Read in Betelgeze by ${person.name}`} aria-label={`Open ${person.name} profile`} className="relative inline-flex h-4 w-4 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full border border-black p-0 leading-none"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full object-center" /></button>)}</span><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {["send_failed", "partial_sent"].includes(message.status) && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry failed channel{message.status === "partial_sent" ? "" : "s"}</button> : null}
                                     </article>

@@ -19,6 +19,7 @@ import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage,
 import { sendSaleConsentTemplate } from "@/lib/client-sales/automation"
 import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
+import { resolvePrimaryMessagingProvider } from "@/lib/client-messages/addresses"
 
 const creatablePhases = new Set<RelationshipPhase>([
     "lead",
@@ -186,7 +187,7 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const managerId = nullableFormString(formData, "fulfilment_manager_user_id")
     const submittedTeamId = nullableFormString(formData, "fulfilment_team_id")
     const whatsappPhone = nullableFormString(formData, "whatsapp_phone")
-    const communicationPrimaryProvider = formString(formData, "communication_primary_provider") === "twilio_sms" ? "twilio_sms" : "meta_whatsapp"
+    const requestedPrimaryProvider = formString(formData, "communication_primary_provider") === "twilio_sms" ? "twilio_sms" : "meta_whatsapp"
     const requestedDeliveryMode = formString(formData, "communication_delivery_mode")
     const communicationDeliveryMode = (["primary_only", "primary_with_fallback", "mirror"] as const).includes(requestedDeliveryMode as "primary_only" | "primary_with_fallback" | "mirror")
         ? requestedDeliveryMode as "primary_only" | "primary_with_fallback" | "mirror"
@@ -199,6 +200,11 @@ export async function saveRelationshipCommercialDetails(slug: string, relationsh
     const primaryPhone = nullableFormString(formData, "primary_phone")
     const primaryEmail = nullableFormString(formData, "primary_email")
     const description = nullableFormString(formData, "description")
+    const communicationPrimaryProvider = resolvePrimaryMessagingProvider({
+        requestedProvider: requestedPrimaryProvider,
+        smsPhone: primaryPhone,
+        whatsappPhone,
+    })
     if (includesRelationshipDetails && !primaryPersonName) throw new Error("Add the client's name before saving the relationship")
     const [{ data: relationship, error: relationshipError }, existingServicesResult, { data: frozenSales }, configuration] = await Promise.all([
         supabaseAdmin.from("relationships").select("lifecycle_phase, seller_user_id, fulfilment_team_id").eq("workspace_id", workspace.id).eq("id", relationshipId).maybeSingle(),
@@ -384,13 +390,18 @@ export async function saveRelationshipBackgroundDetails(slug: string, relationsh
     }
 
     const nextVersion = new Date().toISOString()
+    const communicationPrimaryProvider = resolvePrimaryMessagingProvider({
+        requestedProvider: input.communicationPrimaryProvider,
+        smsPhone: input.primaryPhone,
+        whatsappPhone: input.whatsappPhone,
+    })
     let update = supabaseAdmin.from("relationships").update({
         primary_person_name: primaryPersonName,
         business_name: input.businessName.trim() || null,
         primary_contact_role: input.primaryContactRole.trim() || null,
         primary_phone: input.primaryPhone.trim() || null,
         whatsapp_phone: input.whatsappPhone.trim() || null,
-        communication_primary_provider: input.communicationPrimaryProvider,
+        communication_primary_provider: communicationPrimaryProvider,
         communication_delivery_mode: input.communicationDeliveryMode,
         primary_email: input.primaryEmail.trim() || null,
         notes_summary: input.description.trim() || null,

@@ -77,6 +77,25 @@ export function normalizeProviderAddress(provider: "meta_whatsapp" | "twilio_sms
     return `${provider === "meta_whatsapp" ? "whatsapp" : "sms"}:${normalized}`
 }
 
+export function isUsablePhoneNumber(value: string | null | undefined): boolean {
+    return normalizePhoneNumber(value ?? "").replace(/\D/g, "").length >= 8
+}
+
+export function resolvePrimaryMessagingProvider(input: {
+    requestedProvider: "meta_whatsapp" | "twilio_sms"
+    smsPhone: string | null | undefined
+    whatsappPhone: string | null | undefined
+}): "meta_whatsapp" | "twilio_sms" {
+    const smsAvailable = isUsablePhoneNumber(input.smsPhone)
+    const whatsappAvailable = isUsablePhoneNumber(input.whatsappPhone)
+
+    if (input.requestedProvider === "twilio_sms" && smsAvailable) return "twilio_sms"
+    if (input.requestedProvider === "meta_whatsapp" && whatsappAvailable) return "meta_whatsapp"
+    if (smsAvailable) return "twilio_sms"
+    if (whatsappAvailable) return "meta_whatsapp"
+    return input.requestedProvider
+}
+
 export function toE164Recipient(value: string): string {
     const source = value.includes(":") ? value.split(":", 2)[1] : value
     return normalizePhoneNumber(source)

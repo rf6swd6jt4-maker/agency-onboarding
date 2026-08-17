@@ -1,4 +1,4 @@
-import { normalizeProviderAddress } from "@/lib/client-messages/addresses"
+import { normalizeProviderAddress, resolvePrimaryMessagingProvider } from "@/lib/client-messages/addresses"
 import {
     metaWhatsAppFailureIsSafeToRetry,
     sendMetaWhatsAppMedia,
@@ -90,13 +90,18 @@ export async function resolveCommunicationDestinations(input: {
         .maybeSingle()
     if (error) throw new Error(error.message)
     if (!relationship || relationship.status === "archived") throw new Error("Conversation not found.")
-    const primaryProvider = (relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp") as ClientMessageProvider
+    const requestedPrimaryProvider = (relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp") as ClientMessageProvider
+    const primaryProvider = resolvePrimaryMessagingProvider({
+        requestedProvider: requestedPrimaryProvider,
+        smsPhone: relationship.primary_phone,
+        whatsappPhone: relationship.whatsapp_phone,
+    })
     const deliveryMode = (["primary_only", "primary_with_fallback", "mirror"] as const).includes(relationship.communication_delivery_mode as CommunicationDeliveryMode)
         ? relationship.communication_delivery_mode as CommunicationDeliveryMode
         : "mirror"
     const connected = await activeMessagingProviders(input.workspaceId)
     const addresses: Record<ClientMessageProvider, string> = {
-        meta_whatsapp: normalizeProviderAddress("meta_whatsapp", relationship.whatsapp_phone ?? relationship.primary_phone ?? ""),
+        meta_whatsapp: normalizeProviderAddress("meta_whatsapp", relationship.whatsapp_phone ?? ""),
         twilio_sms: normalizeProviderAddress("twilio_sms", relationship.primary_phone ?? ""),
     }
     let selected = (["meta_whatsapp", "twilio_sms"] as ClientMessageProvider[])

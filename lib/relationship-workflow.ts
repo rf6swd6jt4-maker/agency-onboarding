@@ -9,6 +9,7 @@ import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configura
 import { versionedServiceDefinitionForDeal } from "@/lib/onboarding/runtime-mode"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
 import { relationshipFulfilmentServiceDefinition } from "@/lib/onboarding/service-display"
+import { toE164Recipient } from "@/lib/client-messages/addresses"
 
 type WorkflowRole = "task" | "lifecycle_stage" | "service_group" | "review" | "automation"
 type StagePhase = Exclude<RelationshipPhase, "nurturing" | "completed_lost">
@@ -579,18 +580,22 @@ function versionedInvoiceConfigurationIssue(
 async function preflightRelationshipSale(input: {
     workspaceId: string
     relationshipId: string
-    primaryProvider: "meta_whatsapp" | "twilio_sms"
     services: RelationshipInvoiceService[]
 }) {
     const configuration = await loadPublishedOnboardingConfiguration(input.workspaceId)
     const channels = await resolveCommunicationDestinations({ workspaceId: input.workspaceId, relationshipId: input.relationshipId })
-    const primaryDestination = channels.destinations.find((destination) => destination.provider === input.primaryProvider)
+    const primaryDestination = channels.destinations.find((destination) => destination.provider === channels.primaryProvider)
         ?? channels.destinations[0]
     if (!primaryDestination) throw new Error("Add a usable client phone number and connect its selected messaging provider before selling the client")
-    if (input.primaryProvider === "meta_whatsapp" && configuration.schemaReady && !configuration.help.whatsappVerified) {
+    if (channels.primaryProvider === "meta_whatsapp" && configuration.schemaReady && !configuration.help.whatsappVerified) {
         throw new Error("Verify the workspace WhatsApp connection before selling the client")
     }
-    if (input.primaryProvider === "twilio_sms") await getWorkspaceProviderConfig(input.workspaceId, "twilio_sms")
+    if (channels.primaryProvider === "twilio_sms") {
+        const twilio = await getWorkspaceProviderConfig(input.workspaceId, "twilio_sms")
+        if (toE164Recipient(primaryDestination.address) === toE164Recipient(twilio.phone_number ?? "")) {
+            throw new Error("The client SMS number cannot be the workspace Twilio sending number")
+        }
+    }
     const currencies = new Set(input.services.map((service) => (service.currency ?? "usd").toUpperCase()))
     if (currencies.size !== 1) throw new Error("Every selected service must use the same currency")
     const versionedServiceDefinitions = input.services.map((selected) =>
@@ -656,7 +661,7 @@ export async function prepareRelationshipSale(input: {
     const selectedServices = (serviceResult.data ?? []) as RelationshipInvoiceService[]
     if (
         !relationship?.primary_email ||
-        !(relationship.communication_primary_provider === "twilio_sms" ? relationship.primary_phone : relationship.whatsapp_phone) ||
+        !(relationship.primary_phone || relationship.whatsapp_phone) ||
         !selectedServices.length ||
         selectedServices.some((service) =>
             Math.max(0, service.upfront_price_cents ?? 0) === 0 &&
@@ -664,7 +669,7 @@ export async function prepareRelationshipSale(input: {
         )
     ) {
         throw new Error(
-            "Add a billing email, the selected messaging phone number, and an upfront or recurring price for every selected service before selling the client"
+            "Add a billing email, an SMS or WhatsApp number, and an upfront or recurring price for every selected service before selling the client"
         )
     }
 
@@ -701,7 +706,6 @@ export async function prepareRelationshipSale(input: {
     const preflight = await preflightRelationshipSale({
         workspaceId: input.workspaceId,
         relationshipId: input.relationshipId,
-        primaryProvider: relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp",
         services: selectedServices,
     })
     const currency = (selectedServices[0]?.currency ?? "usd").toLowerCase()
