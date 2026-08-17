@@ -4,11 +4,12 @@ export async function dismissReadChatNotification(conversationId: string, readTh
     try {
         const registration = await navigator.serviceWorker.getRegistration("/")
         if (!registration) return
-        const notifications = await registration.getNotifications({ tag: `chat:${conversationId}` })
+        const notifications = await registration.getNotifications()
         for (const notification of notifications) {
             const data = notification.data && typeof notification.data === "object"
                 ? notification.data as Record<string, unknown>
                 : {}
+            if (data.conversationId !== conversationId && notification.tag !== `chat:${conversationId}`) continue
             const messageCreatedAt = typeof data.messageCreatedAt === "string" ? data.messageCreatedAt : null
             if (!messageCreatedAt || messageCreatedAt <= readThroughCreatedAt) notification.close()
         }

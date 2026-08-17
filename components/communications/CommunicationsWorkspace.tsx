@@ -721,7 +721,10 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         if (!active || !workspaceTabActive || !documentVisible || !atLatest || !selectedId || !selected?.messages.length || !schemaReady) return
         const latest = selected.messages.at(-1)!
         const current = readCursors.find((cursor) => cursor.relationshipId === selectedId && cursor.userId === bootstrap.currentUser.id)
-        if (current?.lastReadMessageId === latest.id) return
+        if (current?.lastReadMessageId === latest.id) {
+            void dismissReadChatNotification(selectedId, latest.createdAt)
+            return
+        }
         const cursor: CommunicationReadCursor = { relationshipId: selectedId, userId: bootstrap.currentUser.id, lastReadMessageId: latest.id, lastReadAt: latest.createdAt }
         const timer = window.setTimeout(() => { void persistReadCursor(cursor).catch(() => undefined) }, 0)
         return () => window.clearTimeout(timer)

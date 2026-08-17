@@ -72,6 +72,37 @@ function chatNotificationBody(preview: string, unreadCount: number) {
     return unreadCount > 1 ? `${unreadCount} new messages · ${preview}` : preview
 }
 
+async function claimChatPush(subscriptionId: string, push: ChatPush) {
+    const { data, error } = await supabaseAdmin.rpc("claim_chat_push_notification", {
+        p_subscription_id: subscriptionId,
+        p_workspace_id: push.workspaceId,
+        p_conversation_kind: push.conversationKind,
+        p_conversation_id: push.conversationId,
+        p_message_id: push.messageId,
+        p_message_created_at: push.messageCreatedAt,
+    })
+    if (error) {
+        console.error("Could not claim chat push notification", error)
+        return false
+    }
+    return data === true
+}
+
+export async function clearReadChatPushNotifications(input: {
+    userId: string
+    conversationKind: "client" | "native"
+    conversationId: string
+    readThroughCreatedAt: string
+}) {
+    const { error } = await supabaseAdmin.rpc("clear_read_chat_push_notifications", {
+        p_user_id: input.userId,
+        p_conversation_kind: input.conversationKind,
+        p_conversation_id: input.conversationId,
+        p_read_through: input.readThroughCreatedAt,
+    })
+    if (error) throw new Error(`Could not clear the chat notification state: ${error.message}`)
+}
+
 async function unreadCounts(recipientUserIds: string[], push: ChatPush) {
     const counts = new Map<string, number>()
     if (recipientUserIds.length === 0) return counts
@@ -133,6 +164,7 @@ async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
 
     await Promise.all(subscriptions.filter((subscription) => !activeUsers.has(subscription.user_id) && (counts.get(subscription.user_id) ?? 1) > 0).map(async (subscription) => {
         const unreadCount = counts.get(subscription.user_id) ?? 1
+        if (!await claimChatPush(subscription.id, push)) return
         const payload = JSON.stringify({
             category: "chat",
             title: push.title,
@@ -163,7 +195,10 @@ async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
                 return
             }
             console.error("Chat push delivery failed", error)
-            await supabaseAdmin.rpc("increment_web_push_failure", { subscription_id: subscription.id }).then(() => undefined)
+            await Promise.all([
+                supabaseAdmin.rpc("increment_web_push_failure", { subscription_id: subscription.id }).then(() => undefined),
+                supabaseAdmin.from("chat_push_notification_states").delete().eq("subscription_id", subscription.id).eq("conversation_kind", push.conversationKind).eq("conversation_id", push.conversationId).eq("message_id", push.messageId),
+            ])
         }
     }))
 }

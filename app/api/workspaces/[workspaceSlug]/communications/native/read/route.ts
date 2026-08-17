@@ -1,4 +1,5 @@
 import { assertNativeConversationAccess } from "@/lib/teams/server"
+import { clearReadChatPushNotifications } from "@/lib/push/chat-notifications"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -16,9 +17,13 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const { data: message } = await supabaseAdmin.from("workspace_native_messages").select("id, created_at").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).maybeSingle()
     if (!message) return Response.json({ error: "Message not found." }, { status: 404 })
     const { data: current } = await supabaseAdmin.from("workspace_native_read_cursors").select("last_read_message_id, last_read_at").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("user_id", user.id).maybeSingle()
-    if (current?.last_read_at && current.last_read_at >= message.created_at) return Response.json({ cursor: { conversationId, userId: user.id, lastReadMessageId: current.last_read_message_id, lastReadAt: current.last_read_at }, notificationReadThrough: current.last_read_at })
+    if (current?.last_read_at && current.last_read_at >= message.created_at) {
+        await clearReadChatPushNotifications({ userId: user.id, conversationKind: "native", conversationId, readThroughCreatedAt: current.last_read_at })
+        return Response.json({ cursor: { conversationId, userId: user.id, lastReadMessageId: current.last_read_message_id, lastReadAt: current.last_read_at }, notificationReadThrough: current.last_read_at })
+    }
     const lastReadAt = message.created_at
     const { error } = await supabaseAdmin.from("workspace_native_read_cursors").upsert({ workspace_id: workspace.id, conversation_id: conversationId, user_id: user.id, last_read_message_id: messageId, last_read_at: lastReadAt }, { onConflict: "conversation_id,user_id" })
     if (error) return Response.json({ error: error.message }, { status: 503 })
+    await clearReadChatPushNotifications({ userId: user.id, conversationKind: "native", conversationId, readThroughCreatedAt: message.created_at })
     return Response.json({ cursor: { conversationId, userId: user.id, lastReadMessageId: messageId, lastReadAt }, notificationReadThrough: message.created_at })
 }
