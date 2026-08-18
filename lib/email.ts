@@ -34,6 +34,9 @@ function smtpTransporter() {
         secure,
         requireTLS: port === 587 && !secure,
         authMethod: "LOGIN",
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 15_000,
         auth: { user: getSmtpEnv("SMTP_USER"), pass: getSmtpEnv("SMTP_PASSWORD") },
     })
 }

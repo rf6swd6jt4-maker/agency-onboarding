@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, type WorkspaceRole } from "@/lib/workspaces"
-import { sendWorkspaceInvitation } from "@/lib/email"
+import { emailDeliveryFailureDetails, sendWorkspaceInvitation } from "@/lib/email"
+import { recordAdminActivity } from "@/lib/admin/activity"
+
+export type WorkspaceInvitationActionState = {
+    ok?: boolean
+    message?: string
+}
 
 function invitedRole(value: FormDataEntryValue | null) {
     const role = normalizeWorkspaceRole(value)
@@ -15,13 +21,18 @@ async function requireUserManager(slug: string) {
     return requireWorkspace(slug, "admin")
 }
 
-export async function inviteWorkspaceUser(slug: string, formData: FormData) {
+export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitationActionState, formData: FormData): Promise<WorkspaceInvitationActionState> {
     const { workspace, role, user } = await requireUserManager(slug)
     const email = String(formData.get("email") ?? "").trim().toLowerCase()
-    const requestedRole = invitedRole(formData.get("role"))
-    if (!email) throw new Error("Email is required")
+    if (!email) return { ok: false, message: "Enter an email address." }
+    let requestedRole: "staff" | "admin"
+    try {
+        requestedRole = invitedRole(formData.get("role"))
+    } catch {
+        return { ok: false, message: "Choose a valid workspace role." }
+    }
     if (role !== "owner" && requestedRole !== "staff") {
-        throw new Error("Only workspace owners can invite admins")
+        return { ok: false, message: "Only workspace owners can invite admins." }
     }
 
     const { data: existingInvitation, error: lookupError } = await supabaseAdmin
@@ -30,16 +41,54 @@ export async function inviteWorkspaceUser(slug: string, formData: FormData) {
         .eq("workspace_id", workspace.id)
         .eq("email", email)
         .maybeSingle()
-    if (lookupError) throw new Error(lookupError.message)
+    if (lookupError) return { ok: false, message: "Invitation failed before the email was sent. Nothing was saved." }
 
     const invitationId = existingInvitation?.id ?? crypto.randomUUID()
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
     const inviteUrl = `https://betelgeze.com/invitation?token=${invitationId}&email=${encodeURIComponent(email)}`
-    await sendWorkspaceInvitation({ to: email, workspaceName: workspace.name, inviteUrl })
+    try {
+        await sendWorkspaceInvitation({ to: email, workspaceName: workspace.name, inviteUrl })
+    } catch (error) {
+        const details = emailDeliveryFailureDetails(error)
+        console.error("Workspace invitation email failed", {
+            workspaceId: workspace.id,
+            kind: details.kind,
+            providerCode: details.providerCode,
+            providerCommand: details.providerCommand,
+            providerResponseCode: details.providerResponseCode,
+            providerResponse: details.providerResponse,
+        })
+        await recordAdminActivity({
+            workspaceId: workspace.id,
+            category: "integrations",
+            level: "error",
+            eventKey: "workspace.invitation.email.failed",
+            summary: "Workspace invitation email failed",
+            sourceHref: `/${slug}/settings#users`,
+            actorUserId: user.id,
+            actorKind: "staff",
+            outcome: "failed",
+            metricClassification: "external_call",
+            diagnostics: {
+                kind: details.kind,
+                provider_code: details.providerCode,
+                provider_command: details.providerCommand,
+                provider_response_code: details.providerResponseCode,
+                provider_response: details.providerResponse,
+            },
+        })
+        const reason = details.kind === "authentication"
+            ? "the email service rejected Betelgeze's login"
+            : details.kind === "connection" || details.kind === "tls"
+                ? "Betelgeze could not connect securely to the email service"
+                : "the email service rejected the message"
+        return { ok: false, message: `Invitation failed because ${reason}. Nothing was saved.` }
+    }
 
     const { error } = await supabaseAdmin.from("workspace_invitations").upsert({ id: invitationId, workspace_id: workspace.id, email, role: requestedRole, invited_by: user.id, expires_at: expiresAt, accepted_at: null }, { onConflict: "workspace_id,email" })
-    if (error) throw new Error(error.message)
+    if (error) return { ok: false, message: "The email was sent, but Betelgeze could not save the invitation. Please try again." }
     revalidatePath(`/${slug}/settings`)
+    return { ok: true, message: `Invitation sent to ${email}.` }
 }
 
 export async function updateWorkspaceUserRole(slug: string, formData: FormData) {

@@ -1,5 +1,6 @@
 import { WorkspaceIdentityEditor } from "@/components/admin/WorkspaceIdentityEditor"
 import { PendingWorkspaceInvitations } from "@/components/admin/PendingWorkspaceInvitations"
+import { WorkspaceInvitationForm } from "@/components/admin/WorkspaceInvitationForm"
 import { WorkspaceConnections } from "@/components/admin/WorkspaceConnections"
 import { WorkspaceOnboardingDomain } from "@/components/admin/WorkspaceOnboardingDomain"
 import { WorkspaceTeamSettings } from "@/components/settings/WorkspaceTeamSettings"
@@ -258,14 +259,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Users"
                             description="Invite teammates and control workspace access."
                         >
-                            <form action={inviteWorkspaceUser.bind(null, workspace.slug)} data-workspace-mutation="background" className="grid gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:grid-cols-[1fr_auto_auto] sm:p-5">
-                                <input name="email" type="email" required placeholder="person@business.com" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2" />
-                                <select name="role" defaultValue="staff" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
-                                    <option value="staff">Staff</option>
-                                    {isOwner && <option value="admin">Admin</option>}
-                                </select>
-                                <WorkspaceActionButton pendingLabel="Inviting…" className="rounded-lg bg-white px-4 py-2 font-medium text-black">Invite user</WorkspaceActionButton>
-                            </form>
+                            <WorkspaceInvitationForm action={inviteWorkspaceUser.bind(null, workspace.slug)} canInviteAdmins={isOwner} />
                             <div className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
                                 <PendingWorkspaceInvitations workspaceId={workspace.id} removeAction={removeWorkspaceInvitation.bind(null, workspace.slug)} />
                                 {users.map(({ user: workspaceUser, role: assignedRole }) => (
