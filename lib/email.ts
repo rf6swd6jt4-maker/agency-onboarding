@@ -22,12 +22,19 @@ function getSmtpEnv(name: string) {
     return value
 }
 
-function smtpTransporter() {
+type SmtpConnection = { port: number; secure: boolean }
+
+function smtpConnection(): SmtpConnection {
     const port = Number(process.env.SMTP_PORT ?? "587")
     if (!Number.isInteger(port) || port < 1 || port > 65_535) {
         throw new EmailDeliveryError("Email delivery is misconfigured. SMTP_PORT must be a valid port number.", "configuration", "SMTP_PORT")
     }
     const secure = process.env.SMTP_SECURE?.trim().toLowerCase() === "true"
+    return { port, secure }
+}
+
+function smtpTransporter(connection = smtpConnection()) {
+    const { port, secure } = connection
     return nodemailer.createTransport({
         host: getSmtpEnv("SMTP_HOST"),
         port,
@@ -83,10 +90,22 @@ function classifiedEmailError(error: unknown) {
 }
 
 async function deliverEmail(message: Parameters<ReturnType<typeof smtpTransporter>["sendMail"]>[0]) {
+    const connection = smtpConnection()
     try {
-        return await smtpTransporter().sendMail(message)
+        return await smtpTransporter(connection).sendMail(message)
     } catch (error) {
-        throw classifiedEmailError(error)
+        const classified = classifiedEmailError(error)
+        const host = process.env.SMTP_HOST?.trim().toLowerCase()
+        const shouldTryNamecheapSsl = classified.kind === "authentication"
+            && host === "mail.privateemail.com"
+            && connection.port === 587
+            && !connection.secure
+        if (!shouldTryNamecheapSsl) throw classified
+        try {
+            return await smtpTransporter({ port: 465, secure: true }).sendMail(message)
+        } catch (fallbackError) {
+            throw classifiedEmailError(fallbackError)
+        }
     }
 }
 

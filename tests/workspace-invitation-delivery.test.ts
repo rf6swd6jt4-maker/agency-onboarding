@@ -26,6 +26,8 @@ test("SMTP uses LOGIN and retains safe provider diagnostics", () => {
     assert.match(email, /authMethod: "LOGIN"/)
     assert.match(email, /connectionTimeout: 10_000/)
     assert.match(email, /socketTimeout: 15_000/)
+    assert.match(email, /host === "mail\.privateemail\.com"/)
+    assert.match(email, /smtpTransporter\(\{ port: 465, secure: true \}\)\.sendMail\(message\)/)
     assert.match(email, /providerCommand: classified\.providerCommand/)
     assert.match(email, /providerResponseCode: classified\.providerResponseCode/)
     assert.match(email, /providerResponse: classified\.providerResponse/)
