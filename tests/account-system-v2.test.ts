@@ -141,8 +141,16 @@ test("guarded reset defaults to rollback and requires exact identities", () => {
     assert.match(cleanup, /DELETE ALL BETELGEZE TEST ACCOUNTS/)
     assert.match(cleanup, /update public\.work_items\s+set execution_owner_id/)
     assert.match(cleanup, /betelgeze_preserved_invariants/)
-    assert.match(cleanup, /ScaylUp preserved-data invariant failed/)
+    assert.match(cleanup, /ScaylUp preserved-data invariant failed; transaction rolled back\. Mismatches/)
+    assert.match(cleanup, /'before_hash', before_state\.payload_hash/)
+    assert.match(cleanup, /'after_hash', after_state\.payload_hash/)
     assert.match(cleanup, /participant_account_removed/)
+    assert.equal((cleanup.match(/null::uuid/g) ?? []).length, 2)
+    assert.match(cleanup, /disable trigger enforce_workspace_okr_definition_lock/)
+    assert.match(cleanup, /set created_by = null[\s\S]*target\.id = okr\.created_by/)
+    assert.match(cleanup, /enable trigger enforce_workspace_okr_definition_lock/)
+    assert.match(cleanup, /disable trigger work_items_updated_at[\s\S]*target\.id = item\.created_by[\s\S]*enable trigger work_items_updated_at/)
+    assert.match(cleanup, /disable trigger relationship_onboarding_sessions_updated_at[\s\S]*target\.id = session\.created_by[\s\S]*enable trigger relationship_onboarding_sessions_updated_at/)
     assert.match(cleanup, /\\else\s+rollback;/)
 })
 
@@ -160,6 +168,12 @@ test("account removal retains Builder and Communications authorship", () => {
     assert.match(migration, /conversation\.archived_at is null/)
     assert.match(teams, /formerPeople/)
     assert.match(teams, /Former member · read-only history/)
+})
+
+test("workspace deletion does not recreate system teams during membership cascades", () => {
+    const migration = source("supabase/migrations/20260821140000_guard_system_team_sync_on_workspace_delete.sql")
+    assert.match(migration, /if not exists \(\s*select 1\s*from public\.workspaces\s*where id = target_workspace/)
+    assert.match(migration, /if tg_op = 'DELETE' then\s*return old;\s*end if;\s*return new;/)
 })
 
 test("administrative MFA reset is role-gated, strongly confirmed, and audited", () => {

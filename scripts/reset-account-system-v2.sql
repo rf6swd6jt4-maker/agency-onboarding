@@ -198,7 +198,7 @@ select 'external_orphan_review' as report,
     on conflict (conversation_id, user_id) do nothing;
 
     insert into public.workspace_team_members (workspace_id, team_id, user_id, added_by)
-    select distinct member.workspace_id, member.team_id, current_setting('betelgeze.reset.protected_user_id')::uuid, null
+    select distinct member.workspace_id, member.team_id, current_setting('betelgeze.reset.protected_user_id')::uuid, null::uuid
     from public.workspace_team_members member
     where member.workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
       and member.user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid
@@ -219,11 +219,20 @@ select 'external_orphan_review' as report,
     where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
       and assignee_user_id is not null
       and assignee_user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
+    alter table public.work_items disable trigger work_items_updated_at;
     update public.work_items
     set execution_owner_id = current_setting('betelgeze.reset.protected_user_id')::uuid
     where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
       and execution_owner_id is not null
       and execution_owner_id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
+    update public.work_items item
+    set created_by = null
+    where exists (
+        select 1
+        from betelgeze_users_to_remove target
+        where target.id = item.created_by
+    );
+    alter table public.work_items enable trigger work_items_updated_at;
     update public.onboarding_service_revisions
     set default_assignee_user_id = current_setting('betelgeze.reset.protected_user_id')::uuid
     where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
@@ -250,7 +259,7 @@ select 'external_orphan_review' as report,
       and responsible_user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
 
     insert into public.work_item_assignees (work_item_id, user_id, workspace_id, assigned_by)
-    select distinct assignment.work_item_id, current_setting('betelgeze.reset.protected_user_id')::uuid, assignment.workspace_id, null
+    select distinct assignment.work_item_id, current_setting('betelgeze.reset.protected_user_id')::uuid, assignment.workspace_id, null::uuid
     from public.work_item_assignees assignment
     where assignment.workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
       and assignment.user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid
@@ -277,6 +286,30 @@ select 'external_orphan_review' as report,
             raise exception 'Blocking active account references remain after reassignment.';
         end if;
     end $$;
+
+    -- Historical OKR authorship is nullable, but the normal definition-lock
+    -- trigger also blocks the FK's ON DELETE SET NULL maintenance update.
+    -- Disable only that trigger long enough to clear authorship for the exact
+    -- identities being removed, then restore it inside the same transaction.
+    alter table public.workspace_okrs disable trigger enforce_workspace_okr_definition_lock;
+    update public.workspace_okrs okr
+    set created_by = null
+    where exists (
+        select 1
+        from betelgeze_users_to_remove target
+        where target.id = okr.created_by
+    );
+    alter table public.workspace_okrs enable trigger enforce_workspace_okr_definition_lock;
+
+    alter table public.relationship_onboarding_sessions disable trigger relationship_onboarding_sessions_updated_at;
+    update public.relationship_onboarding_sessions session
+    set created_by = null
+    where exists (
+        select 1
+        from betelgeze_users_to_remove target
+        where target.id = session.created_by
+    );
+    alter table public.relationship_onboarding_sessions enable trigger relationship_onboarding_sessions_updated_at;
 
     delete from public.workspace_invitations where accepted_at is null;
     delete from public.workspaces where id <> current_setting('betelgeze.reset.workspace_id')::uuid;
@@ -324,17 +357,26 @@ select 'external_orphan_review' as report,
     where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid;
 
     do $$
+    declare
+        v_mismatches jsonb;
     begin
-        if exists (
-            select 1
-            from betelgeze_preserved_invariants before_state
-            full join betelgeze_after_invariants after_state using (name)
-            where before_state.name is null
-               or after_state.name is null
-               or before_state.row_count is distinct from after_state.row_count
-               or before_state.payload_hash is distinct from after_state.payload_hash
-        ) then
-            raise exception 'ScaylUp preserved-data invariant failed; the reset transaction will roll back.';
+        select jsonb_agg(jsonb_build_object(
+            'name', coalesce(before_state.name, after_state.name),
+            'before_count', before_state.row_count,
+            'after_count', after_state.row_count,
+            'before_hash', before_state.payload_hash,
+            'after_hash', after_state.payload_hash
+        ) order by coalesce(before_state.name, after_state.name))
+        into v_mismatches
+        from betelgeze_preserved_invariants before_state
+        full join betelgeze_after_invariants after_state using (name)
+        where before_state.name is null
+           or after_state.name is null
+           or before_state.row_count is distinct from after_state.row_count
+           or before_state.payload_hash is distinct from after_state.payload_hash;
+
+        if v_mismatches is not null then
+            raise exception 'ScaylUp preserved-data invariant failed; transaction rolled back. Mismatches: %', v_mismatches;
         end if;
     end $$;
 
