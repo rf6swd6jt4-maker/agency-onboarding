@@ -11,6 +11,7 @@ export type AccountErrorCode =
     | "rate_limited"
     | "aal2_required"
     | "configuration_error"
+    | "email_delivery_failed"
     | "unknown"
 
 export function accountErrorMessage(code: AccountErrorCode) {
@@ -27,6 +28,7 @@ export function accountErrorMessage(code: AccountErrorCode) {
         case "rate_limited": return "Please wait a moment before requesting another email."
         case "aal2_required": return "Confirm your authenticator before continuing."
         case "configuration_error": return "Betelgeze could not complete this security step. The problem has been recorded."
+        case "email_delivery_failed": return "Betelgeze could not send your verification email, so no account was created. Please try again in a moment."
         default: return "Something interrupted this step. Your progress is safe; please try again."
     }
 }
@@ -44,5 +46,6 @@ export function classifyAccountError(error: unknown): AccountErrorCode {
     if (message.includes("onboarding_session")) return "onboarding_expired"
     if (message.includes("expired")) return "expired_otp"
     if (message.includes("rate") || message.includes("too many")) return "rate_limited"
+    if (message.includes("returned from hook") || message.includes("email delivery")) return "email_delivery_failed"
     return "unknown"
 }

@@ -15,6 +15,18 @@ test("username suggestions are deterministic and schema-compatible", () => {
     assert.equal(normalizeUsername(" --A Very Odd Name-- "), "a-very-odd-name")
     assert.equal(usernameValidationMessage("ab"), "Use at least 3 characters.")
     assert.equal(usernameValidationMessage("valid-user"), null)
+    assert.match(usernameValidationMessage("valid user") ?? "", /lowercase letters/)
+})
+
+test("username entry preserves raw typing and validates instead of rewriting", () => {
+    const flow = source("components/auth/AccountOnboardingFlow.tsx")
+    const availability = source("app/api/account/username/route.ts")
+    const onboarding = source("app/api/account/onboarding/route.ts")
+    assert.match(flow, /setUsername\(event\.target\.value\)/)
+    assert.doesNotMatch(flow, /setUsername\(normalizeUsername\(event\.target\.value\)\)/)
+    assert.doesNotMatch(flow, /maxLength=\{30\}/)
+    assert.match(availability, /const username = request\.nextUrl\.searchParams\.get\("value"\) \?\? ""/)
+    assert.match(onboarding, /const username = String\(body\?\.username \?\? ""\)/)
 })
 
 test("password requirements reject short or one-class passwords", () => {
@@ -87,9 +99,18 @@ test("account emails share one template and verify both webhook boundaries", () 
     assert.match(authHook, /email_change_current/)
     assert.match(authHook, /email_change_new/)
     assert.match(authHook, /magic_link" \? "magiclink"/)
+    assert.match(authHook, /userId: null, purpose: "signup_otp"/)
     assert.match(resendHook, /webhooks\.verify/)
     assert.match(resendHook, /email\.delivery_delayed/)
     assert.match(resendHook, /record_account_email_delivery_event/)
+})
+
+test("account field feedback opts into wrapping status content", () => {
+    const status = source("components/ui/Status.tsx")
+    const feedback = source("components/auth/AuthFieldFeedback.tsx")
+    assert.match(status, /wrap \? "min-w-0 items-start whitespace-normal"/)
+    assert.match(status, /min-w-0 break-words/)
+    assert.match(feedback, /tone=\{tone\} wrap/)
 })
 
 test("account email template renders accessible HTML and matching plain text", async () => {

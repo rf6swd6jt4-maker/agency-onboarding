@@ -25,7 +25,7 @@ function callbackUrl(tokenHash: string, type: string, next: string) {
     return url.toString()
 }
 
-async function sendHookEmail({ to, userId, purpose, subject, preview, heading, body, token, tokenHash, type, next }: { to: string; userId: string; purpose: AccountEmailPurpose; subject: string; preview: string; heading: string; body: string; token: string; tokenHash: string; type: string; next: string }) {
+async function sendHookEmail({ to, userId, purpose, subject, preview, heading, body, token, tokenHash, type, next }: { to: string; userId: string | null; purpose: AccountEmailPurpose; subject: string; preview: string; heading: string; body: string; token: string; tokenHash: string; type: string; next: string }) {
     return sendAccountEmail({
         to,
         userId,
@@ -69,7 +69,9 @@ export async function POST(request: NextRequest) {
         } else if (email.email_action_type === "recovery") {
             await sendHookEmail({ to: user.email, userId: user.id, purpose: "password_recovery_otp", subject: "Your Betelgeze password recovery code", preview: `Your recovery code is ${email.token}.`, heading: "Recover your password", body: "Enter this six-digit code in the Betelgeze recovery page. The code alone does not disable your authenticator.", token: email.token, tokenHash: email.token_hash, type: "recovery", next: "/forgot-password/new-password" })
         } else if (email.email_action_type === "signup" || email.email_action_type === "invite") {
-            await sendHookEmail({ to: user.email, userId: user.id, purpose: "signup_otp", subject: "Verify your Betelgeze email", preview: `Your verification code is ${email.token}.`, heading: "Verify your email", body: "Enter this code in the account setup flow to confirm that this invitation belongs to you.", token: email.token, tokenHash: email.token_hash, type: email.email_action_type === "invite" ? "invite" : "signup", next: "/sign-up/about" })
+            // Auth invokes this hook before a newly-created user is committed. A separate
+            // database request cannot safely reference that user through a foreign key yet.
+            await sendHookEmail({ to: user.email, userId: null, purpose: "signup_otp", subject: "Verify your Betelgeze email", preview: `Your verification code is ${email.token}.`, heading: "Verify your email", body: "Enter this code in the account setup flow to confirm that this invitation belongs to you.", token: email.token, tokenHash: email.token_hash, type: email.email_action_type === "invite" ? "invite" : "signup", next: "/sign-up/about" })
         } else {
             const otpType = email.email_action_type === "magic_link" ? "magiclink" : email.email_action_type === "email" ? "email" : "reauthentication"
             await sendHookEmail({ to: user.email, userId: user.id, purpose: "reauthentication", subject: "Confirm your Betelgeze security action", preview: `Your confirmation code is ${email.token}.`, heading: "Confirm it’s you", body: "A sensitive account action needs fresh confirmation. Enter this code only in Betelgeze.", token: email.token, tokenHash: email.token_hash, type: otpType, next: "/workspaces" })

@@ -11,7 +11,7 @@ import { OtpField } from "@/components/auth/OtpField"
 import { PasswordField } from "@/components/auth/PasswordField"
 import type { AuthStep, FieldValidationState, OnboardingContext } from "@/lib/auth/account-flow-types"
 import { passwordRequirements } from "@/lib/auth/password"
-import { normalizeUsername, usernameFromEmail, usernameValidationMessage } from "@/lib/auth/username"
+import { usernameFromEmail, usernameValidationMessage } from "@/lib/auth/username"
 
 type ApiResult = { next?: string; error?: string; code?: string; alternatives?: string[] }
 
@@ -100,7 +100,7 @@ function UsernameStep({ context }: { context: OnboardingContext }) {
     return <StepFrame context={context} step="username" title="Choose your username" description="We generated a suggestion from your email. You can keep it or make it your own.">
         <form onSubmit={submit}>
             <label htmlFor="signup-username" className="text-sm font-medium text-neutral-200">Username</label>
-            <input id="signup-username" name="username" value={username} onChange={(event) => setUsername(normalizeUsername(event.target.value))} onBlur={() => setTouched(true)} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} minLength={3} maxLength={30} className={authInput} aria-describedby="username-status" aria-invalid={displayedValidation.state === "invalid"} />
+            <input id="signup-username" name="username" value={username} onChange={(event) => { setUsername(event.target.value); if (event.target.value.length >= 3) setTouched(true) }} onBlur={() => setTouched(true)} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} minLength={3} className={authInput} aria-describedby="username-status" aria-invalid={displayedValidation.state === "invalid"} />
             <AuthFieldFeedback id="username-status" tone={displayedValidation.tone} message={displayedValidation.message} />
             {!syntaxError && alternatives.length ? <div className="mt-3 flex flex-wrap gap-2">{alternatives.map((alternative) => <button key={alternative} type="button" onClick={() => setUsername(alternative)} className="rounded-md border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:border-neutral-500">@{alternative}</button>)}</div> : null}
             <button disabled={loading || displayedValidation.state !== "valid"} className={`${authPrimaryButton} mt-6`}>{loading ? "Reserving…" : "Continue"}</button>

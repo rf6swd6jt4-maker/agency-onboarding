@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { accountErrorMessage, classifyAccountError } from "@/lib/auth/errors"
 import { accountFlowV2Enabled, getOnboardingContext, ONBOARDING_COOKIE, updateOnboardingSession } from "@/lib/auth/account-flow"
-import { normalizeUsername, usernameAlternatives, usernameValidationMessage } from "@/lib/auth/username"
+import { usernameAlternatives, usernameValidationMessage } from "@/lib/auth/username"
 import { passwordRequirements } from "@/lib/auth/password"
 import { createSupabaseRouteClient } from "@/lib/supabase/route"
 import { carrySessionResponse } from "@/lib/supabase/session-cookies"
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (action === "username") {
-            const username = normalizeUsername(String(body?.username ?? ""))
+            const username = String(body?.username ?? "")
             const message = usernameValidationMessage(username)
             if (message) return NextResponse.json({ code: "invalid_username", error: message }, { status: 400 })
             if (!(await usernameIsAvailable(username, context.existingAccount ? undefined : null))) {

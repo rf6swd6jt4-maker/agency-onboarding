@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { accountFlowV2Enabled, getOnboardingContext, ONBOARDING_COOKIE } from "@/lib/auth/account-flow"
-import { normalizeUsername, usernameAlternatives, usernameValidationMessage } from "@/lib/auth/username"
+import { usernameAlternatives, usernameValidationMessage } from "@/lib/auth/username"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 
 export async function GET(request: NextRequest) {
     if (!accountFlowV2Enabled()) return NextResponse.json({ code: "flow_disabled" }, { status: 503 })
     const context = await getOnboardingContext(request.cookies.get(ONBOARDING_COOKIE)?.value)
     if (!context) return NextResponse.json({ code: "onboarding_expired" }, { status: 401 })
-    const username = normalizeUsername(request.nextUrl.searchParams.get("value") ?? "")
+    const username = request.nextUrl.searchParams.get("value") ?? ""
     const validation = usernameValidationMessage(username)
     if (validation) return NextResponse.json({ available: false, message: validation, alternatives: [] }, { status: 400 })
 
