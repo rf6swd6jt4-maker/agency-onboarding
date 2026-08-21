@@ -373,7 +373,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_team_members", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
         , [bootstrap.currentUser.id, bootstrap.workspaceId, refresh, supabase, updateConversationMessages])
 
-    const connection = useReliableCommunicationsRealtime({ active, connectionKey: bootstrap.workspaceSlug, register: registerRealtime, schemaReady, supabase, synchronize: refresh })
+    const connection = useReliableCommunicationsRealtime({ active, privateChannel: true, register: registerRealtime, schemaReady, supabase, synchronize: refresh, topic: `communications:${bootstrap.workspaceSlug}` })
     const sendRealtimeBroadcast = connection.sendBroadcast
 
     const stopNativeTyping = useCallback((conversationId: string | null) => {

@@ -13,18 +13,20 @@ const COMMUNICATIONS_RECOVERY_EVENT = "betelgeze:communications-recover"
 
 export function useReliableCommunicationsRealtime({
     active,
-    connectionKey,
+    privateChannel,
     register,
     schemaReady,
     supabase,
     synchronize,
+    topic,
 }: {
     active: boolean
-    connectionKey: string
+    privateChannel: boolean
     register: (channel: RealtimeChannel) => RealtimeChannel
     schemaReady: boolean
     supabase: SupabaseClient
     synchronize: () => Promise<void>
+    topic: string
 }) {
     const workspaceTabActive = useWorkspaceTabActive()
     const activeRef = useRef(active)
@@ -149,7 +151,7 @@ export function useReliableCommunicationsRealtime({
                 await synchronizeRef.current()
                 await refreshRealtimeAuth()
                 if (disposed) return
-                const candidate = registerRef.current(supabase.channel(`communications:${connectionKey}`, { config: { private: true, broadcast: { self: false, ack: true } } }))
+                const candidate = registerRef.current(supabase.channel(topic, { config: { private: privateChannel, broadcast: { self: false, ack: true } } }))
                 channel = candidate
                 channelRef.current = candidate
                 candidate.subscribe((status, subscribeError) => {
@@ -218,7 +220,7 @@ export function useReliableCommunicationsRealtime({
                 void supabase.removeChannel(channel)
             }
         }
-    }, [connectionKey, schemaReady, supabase, updateState])
+    }, [privateChannel, schemaReady, supabase, topic, updateState])
 
     return { state, error, workspaceTabActive, sendBroadcast }
 }

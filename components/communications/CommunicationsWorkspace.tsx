@@ -721,11 +721,12 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
 
     const connection = useReliableCommunicationsRealtime({
         active,
-        connectionKey: bootstrap.workspaceSlug,
+        privateChannel: false,
         register: registerRealtime,
         schemaReady,
         supabase,
         synchronize,
+        topic: `communications-client:${bootstrap.workspaceSlug}`,
     })
 
     const clearPendingWhatsAppTyping = useCallback(() => {
