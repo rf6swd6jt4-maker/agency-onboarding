@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer"
+import { Resend, type CreateEmailOptions, type ErrorResponse } from "resend"
 
 export type EmailDeliveryFailureKind = "authentication" | "connection" | "tls" | "sender" | "recipient" | "configuration" | "unknown"
 
@@ -16,43 +16,14 @@ export class EmailDeliveryError extends Error {
     }
 }
 
-function getSmtpEnv(name: string) {
+const RESEND_COMMAND = "POST /emails"
+
+function getEmailEnv(name: string) {
     const value = process.env[name]?.trim()
-    if (!value) throw new Error(`Missing ${name}`)
-    return value
-}
-
-type SmtpConnection = { port: number; secure: boolean }
-
-function smtpConnection(): SmtpConnection {
-    const port = Number(process.env.SMTP_PORT ?? "587")
-    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-        throw new EmailDeliveryError("Email delivery is misconfigured. SMTP_PORT must be a valid port number.", "configuration", "SMTP_PORT")
+    if (!value) {
+        throw new EmailDeliveryError(`Email delivery is misconfigured. ${name} is missing.`, "configuration", name)
     }
-    const secure = process.env.SMTP_SECURE?.trim().toLowerCase() === "true"
-    return { port, secure }
-}
-
-function smtpTransporter(connection = smtpConnection()) {
-    const { port, secure } = connection
-    return nodemailer.createTransport({
-        host: getSmtpEnv("SMTP_HOST"),
-        port,
-        secure,
-        requireTLS: port === 587 && !secure,
-        authMethod: "LOGIN",
-        connectionTimeout: 10_000,
-        greetingTimeout: 10_000,
-        socketTimeout: 15_000,
-        auth: { user: getSmtpEnv("SMTP_USER"), pass: getSmtpEnv("SMTP_PASSWORD") },
-    })
-}
-
-type MailProviderError = Error & {
-    code?: string
-    command?: string
-    responseCode?: number
-    response?: string
+    return value
 }
 
 function safeProviderResponse(response: string | undefined) {
@@ -63,54 +34,47 @@ function safeProviderResponse(response: string | undefined) {
         .slice(0, 500)
 }
 
-function classifiedEmailError(error: unknown) {
-    if (error instanceof EmailDeliveryError) return error
-    const provider = error instanceof Error ? error as MailProviderError : null
-    const code = provider?.code?.toUpperCase() ?? null
-    const responseCode = provider?.responseCode ?? null
-    const command = provider?.command ?? null
-    const response = safeProviderResponse(provider?.response)
-    const providerCode = code ?? (responseCode ? String(responseCode) : null)
-    if (code === "EAUTH" || responseCode === 530 || responseCode === 534 || responseCode === 535) {
-        return new EmailDeliveryError("Email delivery authentication failed. Check SMTP credentials and the provider response in Vercel.", "authentication", providerCode, command, responseCode, response)
+function classifyResendApiError(error: ErrorResponse) {
+    const providerCode = error.name
+    const responseCode = error.statusCode
+    const response = safeProviderResponse(error.message)
+    const message = error.message.toLowerCase()
+
+    if (providerCode === "missing_api_key") {
+        return new EmailDeliveryError("Email delivery is misconfigured. RESEND_API_KEY is missing.", "configuration", providerCode, RESEND_COMMAND, responseCode, response)
     }
-    if (["ECONNECTION", "ECONNREFUSED", "ETIMEDOUT", "EDNS"].includes(code ?? "")) {
-        return new EmailDeliveryError("Betelgeze could not reach the email server. Check SMTP_HOST, SMTP_PORT and SMTP_SECURE in Vercel, then redeploy.", "connection", providerCode, command, responseCode, response)
+    if (["invalid_api_key", "restricted_api_key", "invalid_access", "security_error"].includes(providerCode) || responseCode === 401 || responseCode === 403) {
+        return new EmailDeliveryError("Resend rejected Betelgeze's API credentials. Check RESEND_API_KEY in Vercel and redeploy.", "authentication", providerCode, RESEND_COMMAND, responseCode, response)
     }
-    if (code === "ESOCKET" || provider?.message.toLowerCase().includes("tls") || provider?.message.toLowerCase().includes("certificate")) {
-        return new EmailDeliveryError("The email server rejected the secure connection. Use SMTP_PORT 587 with SMTP_SECURE=false, or port 465 with SMTP_SECURE=true.", "tls", providerCode, command, responseCode, response)
+    if (providerCode === "invalid_from_address" || message.includes("from address") || message.includes("sender") || message.includes("domain is not verified")) {
+        return new EmailDeliveryError("Resend rejected Betelgeze's sender address. Confirm betelgeze.com is verified for sending in Resend.", "sender", providerCode, RESEND_COMMAND, responseCode, response)
     }
-    if (provider?.command === "MAIL FROM" || responseCode === 553) {
-        return new EmailDeliveryError("The email server rejected Betelgeze's sender address. Check SMTP_FROM and make sure it uses the authenticated mailbox.", "sender", providerCode, command, responseCode, response)
+    if (message.includes("recipient") || message.includes("to address")) {
+        return new EmailDeliveryError("Resend rejected the recipient address. Check the email address and try again.", "recipient", providerCode, RESEND_COMMAND, responseCode, response)
     }
-    if (provider?.command === "RCPT TO" || responseCode === 550 || responseCode === 551) {
-        return new EmailDeliveryError("The email server rejected the recipient address. Check the client's billing email and try again.", "recipient", providerCode, command, responseCode, response)
-    }
-    return new EmailDeliveryError(`Email delivery failed${providerCode ? ` (${providerCode})` : ""}. Check the SMTP connection in Vercel and try again.`, "unknown", providerCode, command, responseCode, response)
+    return new EmailDeliveryError(`Resend rejected the email${providerCode ? ` (${providerCode})` : ""}. Check the provider response in Vercel and try again.`, "unknown", providerCode, RESEND_COMMAND, responseCode, response)
 }
 
-async function deliverEmail(message: Parameters<ReturnType<typeof smtpTransporter>["sendMail"]>[0]) {
-    const connection = smtpConnection()
+function classifyResendFailure(error: unknown) {
+    if (error instanceof EmailDeliveryError) return error
+    const provider = error instanceof Error ? error : null
+    const response = safeProviderResponse(provider?.message)
+    return new EmailDeliveryError("Betelgeze could not reach Resend. Check the network connection and try again.", "connection", provider?.name ?? null, RESEND_COMMAND, null, response)
+}
+
+async function deliverEmail(message: CreateEmailOptions) {
     try {
-        return await smtpTransporter(connection).sendMail(message)
+        const resend = new Resend(getEmailEnv("RESEND_API_KEY"))
+        const result = await resend.emails.send(message)
+        if (result.error) throw classifyResendApiError(result.error)
+        return result.data
     } catch (error) {
-        const classified = classifiedEmailError(error)
-        const host = process.env.SMTP_HOST?.trim().toLowerCase()
-        const shouldTryNamecheapSsl = classified.kind === "authentication"
-            && host === "mail.privateemail.com"
-            && connection.port === 587
-            && !connection.secure
-        if (!shouldTryNamecheapSsl) throw classified
-        try {
-            return await smtpTransporter({ port: 465, secure: true }).sendMail(message)
-        } catch (fallbackError) {
-            throw classifiedEmailError(fallbackError)
-        }
+        throw classifyResendFailure(error)
     }
 }
 
 export function emailDeliveryFailureDetails(error: unknown) {
-    const classified = classifiedEmailError(error)
+    const classified = classifyResendFailure(error)
     return {
         message: classified.message,
         kind: classified.kind,
@@ -131,12 +95,12 @@ function escapeHtml(value: string) {
 }
 
 export function assertEmailDeliveryConfigured() {
-    for (const name of ["SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"]) getSmtpEnv(name)
+    getEmailEnv("RESEND_API_KEY")
 }
 
 export async function sendWorkspaceInvitation({ to, workspaceName, inviteUrl }: { to: string; workspaceName: string; inviteUrl: string }) {
     await deliverEmail({
-        from: process.env.SMTP_FROM ?? "Betelgeze <noreply@betelgeze.com>",
+        from: process.env.EMAIL_FROM?.trim() || "Betelgeze <noreply@betelgeze.com>",
         to,
         subject: `You’re invited to ${workspaceName} on Betelgeze`,
         text: `You have been invited to ${workspaceName} on Betelgeze. Open your invitation: ${inviteUrl}`,

@@ -77,11 +77,15 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
                 provider_response: details.providerResponse,
             },
         })
-        const reason = details.kind === "authentication"
-            ? "the email service rejected Betelgeze's login"
+        const reason = details.kind === "authentication" || details.kind === "configuration"
+            ? "Betelgeze's Resend connection is not configured correctly"
             : details.kind === "connection" || details.kind === "tls"
-                ? "Betelgeze could not connect securely to the email service"
-                : "the email service rejected the message"
+                ? "Betelgeze could not connect securely to Resend"
+                : details.kind === "sender"
+                    ? "Resend rejected Betelgeze's sender address"
+                    : details.kind === "recipient"
+                        ? "Resend rejected the recipient address"
+                        : "Resend rejected the message"
         return { ok: false, message: `Invitation failed because ${reason}. Nothing was saved.` }
     }
 

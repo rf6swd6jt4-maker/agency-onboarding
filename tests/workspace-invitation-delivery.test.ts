@@ -6,7 +6,7 @@ function source(path: string) {
     return readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
 }
 
-test("workspace invitations are persisted only after SMTP accepts the message", () => {
+test("workspace invitations are persisted only after Resend accepts the message", () => {
     const action = source("app/[workspaceSlug]/users/actions.ts")
     const start = action.indexOf("export async function inviteWorkspaceUser")
     const end = action.indexOf("export async function updateWorkspaceUserRole", start)
@@ -20,14 +20,14 @@ test("workspace invitations are persisted only after SMTP accepts the message", 
     assert.match(invitationAction, /return \{ ok: false, message: `Invitation failed because \$\{reason\}\. Nothing was saved\.` \}/)
 })
 
-test("SMTP uses LOGIN and retains safe provider diagnostics", () => {
+test("transactional email uses Resend and retains safe provider diagnostics", () => {
     const email = source("lib/email.ts")
 
-    assert.match(email, /authMethod: "LOGIN"/)
-    assert.match(email, /connectionTimeout: 10_000/)
-    assert.match(email, /socketTimeout: 15_000/)
-    assert.match(email, /host === "mail\.privateemail\.com"/)
-    assert.match(email, /smtpTransporter\(\{ port: 465, secure: true \}\)\.sendMail\(message\)/)
+    assert.match(email, /import \{ Resend, type CreateEmailOptions, type ErrorResponse \} from "resend"/)
+    assert.match(email, /new Resend\(getEmailEnv\("RESEND_API_KEY"\)\)/)
+    assert.match(email, /await resend\.emails\.send\(message\)/)
+    assert.match(email, /Betelgeze <noreply@betelgeze\.com>/)
+    assert.doesNotMatch(email, /SMTP_|nodemailer|sendMail/)
     assert.match(email, /providerCommand: classified\.providerCommand/)
     assert.match(email, /providerResponseCode: classified\.providerResponseCode/)
     assert.match(email, /providerResponse: classified\.providerResponse/)
