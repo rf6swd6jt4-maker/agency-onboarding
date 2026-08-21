@@ -89,7 +89,15 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
         return Response.json({ error: error instanceof Error ? `Message saved, but encrypted confirmation failed: ${error.message}` : "Message saved, but encrypted confirmation failed." }, { status: 503 })
     }
     if (!message) return Response.json({ error: "Message saved, but its encrypted copy could not be confirmed. Refresh the conversation before retrying." }, { status: 503 })
-    if (message) after(() => notifyNativeChatMessage({ workspaceId: workspace.id, workspaceSlug: workspace.slug, conversationId, messageId: message.id, senderUserId: user.id }))
+    if (message) after(() => notifyNativeChatMessage({
+        workspaceId: workspace.id,
+        workspaceSlug: workspace.slug,
+        conversationId,
+        messageId: message.id,
+        senderUserId: user.id,
+        previewBody: body,
+        attachment: storedAttachment ? { kind: storedAttachment.kind, fileName: storedAttachment.fileName } : null,
+    }))
     return Response.json({ message })
 }
 

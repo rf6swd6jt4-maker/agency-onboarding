@@ -899,7 +899,17 @@ async function handleInboundMessage({
         await recordClientAdminActivity({ clientId: destination.clientId, category: "communications", eventKey: "whatsapp.webhook.received", summary: "WhatsApp message received", entityType: "client_message", entityId: insertedMessage.id, direction: "inbound", metadata: { provider_message_id: messageId, message_type: message.type ?? "unknown" } })
     }
 
-    if (relationshipId) after(() => notifyClientChatMessage({ workspaceId, relationshipId, messageId: insertedMessage.id, senderName: client?.name?.trim() || "A client" }))
+    const notify = (previewBody: string, media?: InboundMessageContent["media"]) => {
+        if (!relationshipId) return
+        after(() => notifyClientChatMessage({
+            workspaceId,
+            relationshipId,
+            messageId: insertedMessage.id,
+            senderName: client?.name?.trim() || "A client",
+            previewBody,
+            attachment: media ? { kind: media.type, fileName: media.fileName } : null,
+        }))
+    }
 
     let content: InboundMessageContent | null = null
 
@@ -928,6 +938,7 @@ async function handleInboundMessage({
             })
             .eq("id", insertedMessage.id)
 
+        notify(fallbackBody)
         return
     }
 
@@ -940,6 +951,7 @@ async function handleInboundMessage({
             })
             .eq("id", insertedMessage.id)
 
+        notify(initialBody)
         return
     }
 
@@ -954,6 +966,8 @@ async function handleInboundMessage({
             },
         })
         .eq("id", insertedMessage.id)
+
+    notify(content.body, content.media)
 }
 
 export async function GET(request: NextRequest) {

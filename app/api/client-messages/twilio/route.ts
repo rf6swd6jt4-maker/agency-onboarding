@@ -249,6 +249,13 @@ export async function POST(request: NextRequest) {
         status: "received",
         raw_payload: Object.fromEntries(params.entries()),
     })
-    after(() => notifyClientChatMessage({ workspaceId, relationshipId: destination.relationshipId, messageId: message.id, senderName: "A client" }))
+    after(() => notifyClientChatMessage({
+        workspaceId,
+        relationshipId: destination.relationshipId,
+        messageId: message.id,
+        senderName: "A client",
+        previewBody: body,
+        attachment: media ? { kind: media.kind, fileName: media.fileName } : null,
+    }))
     return twimlResponse()
 }

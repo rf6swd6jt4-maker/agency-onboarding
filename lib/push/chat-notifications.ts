@@ -26,6 +26,11 @@ type ChatPush = {
     url: string
 }
 
+type ChatPushAttachment = {
+    kind?: unknown
+    fileName?: unknown
+}
+
 type ReadCursor = {
     user_id: string
     last_read_at: string
@@ -165,6 +170,9 @@ async function deliverChatPush(recipientUserIds: string[], push: ChatPush) {
     await Promise.all(subscriptions.filter((subscription) => !activeUsers.has(subscription.user_id) && (counts.get(subscription.user_id) ?? 1) > 0).map(async (subscription) => {
         const unreadCount = counts.get(subscription.user_id) ?? 1
         if (!await claimChatPush(subscription.id, push)) return
+        // `web-push` encrypts this payload separately for the subscription's
+        // p256dh/auth keys. The Push service receives ciphertext and only the
+        // recipient browser can expose the preview to this app's service worker.
         const payload = JSON.stringify({
             category: "chat",
             title: push.title,
@@ -209,6 +217,8 @@ export async function notifyNativeChatMessage(input: {
     conversationId: string
     messageId: string
     senderUserId: string
+    previewBody: string
+    attachment?: ChatPushAttachment | null
 }) {
     const [
         { data: participants, error: participantsError },
@@ -235,7 +245,7 @@ export async function notifyNativeChatMessage(input: {
         }
         chatName = team?.name?.trim() || "Team chat"
     }
-    const notification = chatNotificationText(chatName, "New encrypted message")
+    const notification = chatNotificationText(chatName, input.previewBody, input.attachment)
     await deliverChatPush(
         (participants ?? []).map((participant) => participant.user_id).filter((userId) => userId !== input.senderUserId),
         {
@@ -256,6 +266,8 @@ export async function notifyClientChatMessage(input: {
     relationshipId: string
     messageId: string
     senderName: string
+    previewBody: string
+    attachment?: ChatPushAttachment | null
 }) {
     const [
         { data: memberships, error: membershipError },
@@ -274,7 +286,7 @@ export async function notifyClientChatMessage(input: {
     }
     const primaryName = relationship?.primary_person_name?.trim() || input.senderName
     const businessName = relationship?.business_name?.trim()
-    const notification = chatNotificationText(businessName ? `${primaryName} – ${businessName}` : primaryName, "New encrypted message")
+    const notification = chatNotificationText(businessName ? `${primaryName} – ${businessName}` : primaryName, input.previewBody, input.attachment)
     await deliverChatPush((memberships ?? []).map((membership) => membership.user_id), {
         workspaceId: input.workspaceId,
         conversationKind: "client",
