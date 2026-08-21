@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 test("new Communications content is encrypted with non-database root keys", async () => {
-    const [migration, hardeningMigration, realtimeMigration, keyRoundtripMigration, clientServer, nativeServer, nativeRoute, metaWebhook, clientWorkspace, nativeWorkspace] = await Promise.all([
+    const [migration, hardeningMigration, realtimeMigration, keyRoundtripMigration, vaultKeyMigration, clientServer, nativeServer, nativeRoute, metaWebhook, clientWorkspace, nativeWorkspace] = await Promise.all([
         readFile("supabase/migrations/20260821150000_encrypted_communications.sql", "utf8"),
         readFile("supabase/migrations/20260821153000_encrypt_communication_delivery_payloads.sql", "utf8"),
         readFile("supabase/migrations/20260821154500_encrypted_communication_realtime_reads.sql", "utf8"),
         readFile("supabase/migrations/20260821230000_fix_communication_key_roundtrip.sql", "utf8"),
+        readFile("supabase/migrations/20260821234500_use_vault_decrypted_communication_keys.sql", "utf8"),
         readFile("lib/communications/server.ts", "utf8"),
         readFile("lib/teams/server.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
@@ -37,6 +38,10 @@ test("new Communications content is encrypted with non-database root keys", asyn
     assert.match(keyRoundtripMigration, /return stored_secret/)
     assert.match(keyRoundtripMigration, /try_decrypt_text/)
     assert.match(keyRoundtripMigration, /message\.body_ciphertext is null or message\.decrypted_body is not null/)
+    assert.match(vaultKeyMigration, /decrypted\.decrypted_secret/)
+    assert.match(vaultKeyMigration, /extensions\.pgp_sym_decrypt\(message\.body_ciphertext, vault_secret\.secret\)/)
+    assert.match(vaultKeyMigration, /missing_communication_key_function/)
+    assert.match(vaultKeyMigration, /native_communication_key_repair_incomplete/)
     assert.doesNotMatch(metaWebhook, /STATUS_MESSAGE_COLUMNS = [^\n]*raw_payload/)
     assert.match(clientServer, /rpc\("communication_client_messages"/)
     assert.match(clientServer, /rpc\("communication_client_message"/)
@@ -84,6 +89,9 @@ test("new chat attachments use R2 SSE-C and client media is referenced from Asse
     assert.match(migration, /'client_message_attachment'/)
     assert.match(uploads, /SSECustomerAlgorithm: "AES256"/)
     assert.match(uploads, /SSECustomerKeyMD5/)
+    assert.match(uploads, /keyBase64\.length !== 44/)
+    assert.match(uploads, /bytes\.byteLength !== 32/)
+    assert.match(uploads, /The attachment encryption key is invalid\./)
     assert.match(uploads, /createCommunicationFileKey/)
     assert.match(uploads, /const encryptMedia = Boolean\(encrypt && workspaceId && relationshipId\)/)
     assert.match(media, /createEncryptedPrivateUploadSignedRequest/)

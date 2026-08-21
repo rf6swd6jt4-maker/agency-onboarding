@@ -41,19 +41,29 @@ function getR2BucketName() {
     return getRequiredEnv("R2_BUCKET_NAME")
 }
 
+function validatedCustomerEncryptionKey(keyBase64: string) {
+    const bytes = Buffer.from(keyBase64, "base64")
+    if (keyBase64.length !== 44 || /\s/u.test(keyBase64) || bytes.byteLength !== 32 || bytes.toString("base64") !== keyBase64) {
+        throw new Error("The attachment encryption key is invalid.")
+    }
+    return { keyBase64, keyMd5: createHash("md5").update(bytes).digest("base64") }
+}
+
 function customerEncryptionHeaders(keyBase64: string) {
+    const key = validatedCustomerEncryptionKey(keyBase64)
     return {
         "x-amz-server-side-encryption-customer-algorithm": "AES256",
-        "x-amz-server-side-encryption-customer-key": keyBase64,
-        "x-amz-server-side-encryption-customer-key-MD5": createHash("md5").update(Buffer.from(keyBase64, "base64")).digest("base64"),
+        "x-amz-server-side-encryption-customer-key": key.keyBase64,
+        "x-amz-server-side-encryption-customer-key-MD5": key.keyMd5,
     }
 }
 
 function customerEncryptionInput(keyBase64: string) {
+    const key = validatedCustomerEncryptionKey(keyBase64)
     return {
         SSECustomerAlgorithm: "AES256",
-        SSECustomerKey: keyBase64,
-        SSECustomerKeyMD5: createHash("md5").update(Buffer.from(keyBase64, "base64")).digest("base64"),
+        SSECustomerKey: key.keyBase64,
+        SSECustomerKeyMD5: key.keyMd5,
     }
 }
 
