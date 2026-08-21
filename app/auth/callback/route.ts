@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createSupabaseRouteClient } from "@/lib/supabase/route"
 import { clearLegacyHostOnlyAuthCookies } from "@/lib/supabase/legacy-cookies"
+import { getOnboardingContext, ONBOARDING_COOKIE, updateOnboardingSession } from "@/lib/auth/account-flow"
+import { isEmailConfirmed } from "@/lib/auth/users"
 
 export async function GET(request: NextRequest) {
     const url = request.nextUrl
@@ -26,6 +28,15 @@ export async function GET(request: NextRequest) {
             failed.searchParams.set("reason", "invalid-or-expired")
             response.headers.set("location", failed.toString())
             return response
+        }
+
+        if (type === "signup" || type === "invite") {
+            const onboarding = await getOnboardingContext(request.cookies.get(ONBOARDING_COOKIE)?.value)
+            const { data: authData } = await supabase.auth.getUser()
+            const user = authData.user
+            if (onboarding?.currentStep === "verify-email" && user && isEmailConfirmed(user) && user.email?.toLowerCase() === onboarding.email.toLowerCase()) {
+                await updateOnboardingSession(onboarding.sessionId, { auth_user_id: user.id, current_step: "about" })
+            }
         }
 
         clearLegacyHostOnlyAuthCookies(request, response)

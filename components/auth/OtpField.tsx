@@ -2,10 +2,20 @@
 
 import { useRef, useState } from "react"
 
-export function OtpField({ value, onChange, onComplete, label = "Six-digit code", disabled = false, autoFocus = true, invalid = false }: { value: string; onChange: (value: string) => void; onComplete?: (value: string) => void; label?: string; disabled?: boolean; autoFocus?: boolean; invalid?: boolean }) {
+export function OtpField({ value, onChange, onComplete, onLengthMismatch, label = "Six-digit code", disabled = false, autoFocus = true, invalid = false }: { value: string; onChange: (value: string) => void; onComplete?: (value: string) => void; onLengthMismatch?: (receivedLength: number) => void; label?: string; disabled?: boolean; autoFocus?: boolean; invalid?: boolean }) {
     const input = useRef<HTMLInputElement>(null)
     const [focused, setFocused] = useState(false)
     const digits = Array.from({ length: 6 }, (_, index) => value[index] ?? "")
+    function acceptCandidate(candidate: string) {
+        const next = candidate.replace(/\D/g, "")
+        if (next.length > 6) {
+            onChange("")
+            onLengthMismatch?.(next.length)
+            return
+        }
+        onChange(next)
+        if (next.length === 6 && next !== value) onComplete?.(next)
+    }
     return (
         <div>
             <label htmlFor="one-time-code" className="text-sm font-medium text-neutral-200">{label}</label>
@@ -15,10 +25,10 @@ export function OtpField({ value, onChange, onComplete, label = "Six-digit code"
                     id="one-time-code"
                     name="code"
                     value={value}
-                    onChange={(event) => { const next = event.target.value.replace(/\D/g, "").slice(0, 6); onChange(next); if (next.length === 6 && next !== value) onComplete?.(next) }}
+                    onChange={(event) => acceptCandidate(event.target.value)}
                     onPaste={(event) => {
-                        const pasted = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6)
-                        if (pasted) { event.preventDefault(); onChange(pasted); if (pasted.length === 6 && pasted !== value) onComplete?.(pasted) }
+                        const pasted = event.clipboardData.getData("text")
+                        if (pasted) { event.preventDefault(); acceptCandidate(pasted) }
                     }}
                     type="text"
                     inputMode="numeric"
@@ -26,7 +36,6 @@ export function OtpField({ value, onChange, onComplete, label = "Six-digit code"
                     autoComplete="one-time-code"
                     enterKeyHint="done"
                     minLength={6}
-                    maxLength={6}
                     autoFocus={autoFocus}
                     disabled={disabled}
                     aria-invalid={invalid}

@@ -40,10 +40,10 @@ export async function POST(request: NextRequest) {
     const supabase = createSupabaseRouteClient(request, sessionResponse)
 
     if (action === "verify") {
-        const code = typeof body?.code === "string" ? body.code.replace(/\D/g, "").slice(0, 6) : ""
-        if (!/^\d{6}$/.test(code)) return withSession(sessionResponse, { code: "invalid_otp", error: accountErrorMessage("invalid_otp") }, { status: 400 })
+        const code = typeof body?.code === "string" ? body.code.replace(/\D/g, "") : ""
+        if (!/^\d{6}$/.test(code)) return withSession(sessionResponse, { code: "invalid_otp_length", error: accountErrorMessage("invalid_otp_length") }, { status: 400 })
         const { data, error } = await supabase.auth.verifyOtp({ email, token: code, type: "recovery" })
-        if (error || !data.user) return withSession(sessionResponse, { code: "invalid_otp", error: accountErrorMessage(error?.message.toLowerCase().includes("expired") ? "expired_otp" : "invalid_otp") }, { status: 400 })
+        if (error || !data.user) return withSession(sessionResponse, { code: "invalid_or_expired_otp", error: accountErrorMessage("invalid_or_expired_otp") }, { status: 400 })
         const recoveryToken = createAccountToken()
         const { error: recoverySessionError } = await supabaseAdmin.from("account_password_recovery_sessions").insert({
             browser_token_hash: hashAccountToken(recoveryToken),

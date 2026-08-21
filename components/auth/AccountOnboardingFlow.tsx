@@ -142,6 +142,11 @@ function VerifyEmailStep({ context }: { context: OnboardingContext }) {
     const [message, setMessage] = useState<{ tone: "yellow" | "green" | "red"; text: string }>({ tone: "yellow", text: "A six-digit code is on its way." })
     const [seconds, setSeconds] = useState(60)
     useEffect(() => { if (!seconds) return; const timer = window.setInterval(() => setSeconds((current) => Math.max(0, current - 1)), 1000); return () => window.clearInterval(timer) }, [seconds])
+    useEffect(() => {
+        let active = true
+        void postOnboarding("resume-verified-email").then((result) => { if (active && result.next) window.location.assign(result.next) }).catch(() => undefined)
+        return () => { active = false }
+    }, [])
     const submit = useCallback(async (submittedCode = code) => {
         if (loading || submittedCode.length !== 6) return
         setLoading(true); setMessage({ tone: "yellow", text: "Checking the newest code…" })
@@ -151,7 +156,7 @@ function VerifyEmailStep({ context }: { context: OnboardingContext }) {
     }, [code, loading])
     return <StepFrame context={context} step="verify-email" title="Verify your email" description={`Enter the code sent to ${context.email}. Only the newest code will work.`}>
         <form onSubmit={(event) => { event.preventDefault(); void submit() }}>
-            <OtpField value={code} onChange={setCode} onComplete={(value) => void submit(value)} disabled={loading} invalid={message.tone === "red"} />
+            <OtpField value={code} onChange={setCode} onComplete={(value) => void submit(value)} onLengthMismatch={(length) => { setCode(""); setMessage({ tone: "red", text: `That code contains ${length} digits, but Betelgeze requires six. Request a fresh code and do not shorten it.` }) }} disabled={loading} invalid={message.tone === "red"} />
             <AuthFieldFeedback tone={message.tone} message={message.text} />
             <button type="submit" disabled={loading || code.length !== 6} className={`${authPrimaryButton} mt-6`}>{loading ? "Verifying…" : "Verify email"}</button>
         </form>

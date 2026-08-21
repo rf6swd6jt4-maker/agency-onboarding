@@ -122,11 +122,21 @@ export async function POST(request: NextRequest) {
             return jsonWithSession(sessionResponse, { next: data.session ? "/sign-up/about" : "/sign-up/verify-email" })
         }
 
+        if (action === "resume-verified-email") {
+            const { data: authData } = await supabase.auth.getUser()
+            const verifiedUser = authData.user
+            if (context.currentStep === "verify-email" && verifiedUser && isEmailConfirmed(verifiedUser) && verifiedUser.email?.toLowerCase() === context.email.toLowerCase()) {
+                await updateOnboardingSession(context.sessionId, { auth_user_id: verifiedUser.id, current_step: "about" })
+                return jsonWithSession(sessionResponse, { next: "/sign-up/about" })
+            }
+            return jsonWithSession(sessionResponse, { ok: true })
+        }
+
         if (action === "verify-email") {
-            const code = String(body?.code ?? "").replace(/\D/g, "").slice(0, 6)
-            if (!/^\d{6}$/.test(code)) return jsonWithSession(sessionResponse, { code: "invalid_otp", error: accountErrorMessage("invalid_otp") }, { status: 400 })
+            const code = String(body?.code ?? "").replace(/\D/g, "")
+            if (!/^\d{6}$/.test(code)) return jsonWithSession(sessionResponse, { code: "invalid_otp_length", error: accountErrorMessage("invalid_otp_length") }, { status: 400 })
             const { data, error } = await supabase.auth.verifyOtp({ email: context.email, token: code, type: "signup" })
-            if (error || !data.user) return jsonWithSession(sessionResponse, { code: "invalid_otp", error: accountErrorMessage(error?.message.toLowerCase().includes("expired") ? "expired_otp" : "invalid_otp") }, { status: 400 })
+            if (error || !data.user) return jsonWithSession(sessionResponse, { code: "invalid_or_expired_otp", error: accountErrorMessage("invalid_or_expired_otp") }, { status: 400 })
             await updateOnboardingSession(context.sessionId, { auth_user_id: data.user.id, current_step: "about" })
             return jsonWithSession(sessionResponse, { next: "/sign-up/about" })
         }

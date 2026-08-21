@@ -46,6 +46,32 @@ test("password signup names the verification-email side effect and rate-limit st
     assert.match(errors, /No verification email was sent\./)
 })
 
+test("OTP input rejects wrong-length paste and APIs never truncate codes", () => {
+    const field = source("components/auth/OtpField.tsx")
+    const onboarding = source("app/api/account/onboarding/route.ts")
+    const recovery = source("app/api/auth/recovery/route.ts")
+    const errors = source("lib/auth/errors.ts")
+    assert.match(field, /if \(next\.length > 6\)/)
+    assert.match(field, /onLengthMismatch\?\.\(next\.length\)/)
+    assert.doesNotMatch(field, /slice\(0, 6\)/)
+    assert.doesNotMatch(field, /maxLength=\{6\}/)
+    assert.doesNotMatch(onboarding, /replace\(\/\\D\/g, ""\)\.slice\(0, 6\)/)
+    assert.doesNotMatch(recovery, /replace\(\/\\D\/g, ""\)\.slice\(0, 6\)/)
+    assert.match(errors, /invalid_or_expired_otp/)
+})
+
+test("signup OTP emails are code-only and confirmed sessions resume onboarding", () => {
+    const authHook = source("app/api/auth/send-email-hook/route.ts")
+    const onboarding = source("app/api/account/onboarding/route.ts")
+    const flow = source("components/auth/AccountOnboardingFlow.tsx")
+    const callback = source("app/auth/callback/route.ts")
+    assert.match(authHook, /purpose: "signup_otp"[\s\S]*includeAction: false/)
+    assert.match(authHook, /purpose: "password_recovery_otp"[\s\S]*includeAction: false/)
+    assert.match(onboarding, /action === "resume-verified-email"/)
+    assert.match(flow, /postOnboarding\("resume-verified-email"\)/)
+    assert.match(callback, /updateOnboardingSession\(onboarding\.sessionId, \{ auth_user_id: user\.id, current_step: "about" \}\)/)
+})
+
 test("account onboarding completion is transactional and AAL2-gated", () => {
     const migration = source("supabase/migrations/20260821120000_account_system_v2.sql")
     assert.match(migration, /auth\.jwt\(\) ->> 'aal'/)
