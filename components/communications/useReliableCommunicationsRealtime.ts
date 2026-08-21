@@ -75,12 +75,24 @@ export function useReliableCommunicationsRealtime({
             return activeRef.current && workspaceTabActiveRef.current && document.visibilityState === "visible"
         }
 
+        async function refreshRealtimeAuth() {
+            const session = await supabase.auth.getSession()
+            const accessToken = session.data.session?.access_token
+            if (!accessToken) throw new Error("Sign in again to restore live messages.")
+            // Proxy refreshes the shared session cookie during Communications
+            // requests. Realtime is a long-lived socket, so explicitly give it
+            // the newest token after those requests instead of leaving the
+            // socket on the JWT it mounted with.
+            await supabase.realtime.setAuth(accessToken)
+        }
+
         async function runSync(showState: boolean) {
             if (disposed) return
             if (syncPromise) return syncPromise
             if (showState) updateState("syncing")
             syncPromise = synchronizeRef.current()
-                .then(() => {
+                .then(async () => {
+                    await refreshRealtimeAuth()
                     if (!disposed && subscribed) updateState("live")
                 })
                 .finally(() => { syncPromise = null })
@@ -123,14 +135,12 @@ export function useReliableCommunicationsRealtime({
                     if (channelRef.current === previous) channelRef.current = null
                     await supabase.removeChannel(previous)
                 }
-                const session = await supabase.auth.getSession()
-                if (!session.data.session?.access_token) {
-                    updateState("offline", "Sign in again to restore live messages.")
-                    return
-                }
-                // Use the client's access-token callback instead of pinning this
-                // channel to one JWT for the lifetime of a mounted workspace tab.
-                await supabase.realtime.setAuth()
+                // Refresh through the authenticated HTTP path before opening a
+                // socket. This lets Proxy rotate an expired shared cookie after
+                // a suspended PWA or a long-lived workspace tab. A second sync
+                // after SUBSCRIBED closes the small sync-to-subscribe race.
+                await synchronizeRef.current()
+                await refreshRealtimeAuth()
                 if (disposed) return
                 const candidate = registerRef.current(supabase.channel(`communications:${connectionKey}`, { config: { private: true } }))
                 channel = candidate
