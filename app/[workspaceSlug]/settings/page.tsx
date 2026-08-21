@@ -14,6 +14,7 @@ import { ServiceCatalogue } from "@/components/settings/ServiceCatalogue"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { WorkspaceAutosaveForm } from "@/components/workspace/WorkspaceAutosaveForm"
 import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
+import { AdminMfaResetButton } from "@/components/admin/AdminMfaResetButton"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
@@ -23,7 +24,7 @@ import { loadWorkspaceTeams, loadWorkspaceMemberProfiles } from "@/lib/teams/ser
 import { INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
-import { inviteWorkspaceUser, removeWorkspaceUser, updateWorkspaceUserRole } from "../users/actions"
+import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa, updateWorkspaceUserRole } from "../users/actions"
 import {
     cancelWorkspaceOnboardingDomain,
     completeWhatsAppEmbeddedSignup,
@@ -280,6 +281,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                                         <WorkspaceActionButton pendingLabel="Saving…" className="rounded-lg border border-neutral-700 px-3 py-1 text-sm">Save</WorkspaceActionButton>
                                                     </form>
                                                 )}
+                                                {(isOwner || normalizeWorkspaceRole(assignedRole) === "staff") ? <AdminMfaResetButton email={workspaceUser?.email ?? "this user"} userId={workspaceUser?.id ?? ""} action={resetWorkspaceUserMfa.bind(null, workspace.slug)} /> : null}
                                                 <form action={removeWorkspaceUser.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex-1 sm:flex-none">
                                                     <input type="hidden" name="userId" value={workspaceUser?.id} />
                                                     <WorkspaceActionButton pendingLabel="Removing…" confirmMessage={`Remove ${workspaceUser?.email ?? "this user"} from the workspace?`} className="w-full rounded-lg border border-red-900 px-3 py-1 text-sm text-red-300 sm:w-auto">Remove</WorkspaceActionButton>

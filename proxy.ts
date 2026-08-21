@@ -33,8 +33,12 @@ async function refreshSession(request: NextRequest) {
     })
     // getClaims verifies locally when the project uses asymmetric signing
     // keys, while still refreshing an expired session when needed.
-    await supabase.auth.getClaims()
-    return response
+    const { data } = await supabase.auth.getClaims()
+    return {
+        response,
+        aal: typeof data?.claims?.aal === "string" ? data.claims.aal : null,
+        userId: typeof data?.claims?.sub === "string" ? data.claims.sub : null,
+    }
 }
 
 function requestHostname(request: NextRequest) {
@@ -47,9 +51,18 @@ const ONBOARDING_HOST = "onboarding.betelgeze.com"
 const AUTH_HOST = "auth.betelgeze.com"
 const AUTH_PATHS = [
     "/login", "/mfa", "/forgot-password", "/update-password",
-    "/email-confirmed", "/check-email", "/auth", "/logout", "/privacy",
+    "/email-confirmed", "/check-email", "/sign-up", "/invitation",
+    "/auth", "/logout", "/privacy",
 ]
-const APEX_ACCOUNT_PATHS = ["/sign-up", "/invitation"]
+const AUTH_API_PATHS = [
+    "/api/account/onboarding", "/api/account/username", "/api/account/welcome",
+    "/api/auth/login", "/api/auth/mfa", "/api/auth/recovery", "/api/auth/session-recovery",
+    "/api/auth/send-email-hook", "/api/email/resend-webhook",
+]
+
+function isAuthHostPath(path: string) {
+    return [...AUTH_PATHS, ...AUTH_API_PATHS].some((authPath) => path === authPath || path.startsWith(`${authPath}/`))
+}
 
 function withRewrite(request: NextRequest, pathname: string, headers = request.headers) {
     const url = request.nextUrl.clone()
@@ -119,19 +132,18 @@ export async function proxy(request: NextRequest) {
     // Refresh before constructing rewrites. Supabase may replace an expired
     // token, and those updated request cookies must be present in the headers
     // forwarded to the route that renders this same request.
-    const sessionResponse = shouldRefreshSessionForDomain(domain)
+    const sessionState = shouldRefreshSessionForDomain(domain)
         ? await refreshSession(request)
-        : NextResponse.next({ request: { headers: requestHeadersWithCurrentPath(request) } })
+        : { response: NextResponse.next({ request: { headers: requestHeadersWithCurrentPath(request) } }), aal: null, userId: null }
+    const sessionResponse = sessionState.response
 
     function withSession(response: NextResponse) {
         return carrySessionResponse(sessionResponse, response)
     }
 
     const isCentralAuthRoute = AUTH_PATHS.some((authPath) => path === authPath || path.startsWith(`${authPath}/`))
-    const isApexAccountRoute = APEX_ACCOUNT_PATHS.some((accountPath) => path === accountPath || path.startsWith(`${accountPath}/`))
-
-    if (domain && domain !== "betelgeze.com" && domain !== "www.betelgeze.com" && isApexAccountRoute) {
-        const destination = new URL(`https://betelgeze.com${path}`)
+    if (domain && domain !== AUTH_HOST && isCentralAuthRoute && isPlatformHost(domain)) {
+        const destination = new URL(`https://${AUTH_HOST}${path}`)
         destination.search = request.nextUrl.search
         return withSession(NextResponse.redirect(destination))
     }
@@ -139,14 +151,21 @@ export async function proxy(request: NextRequest) {
     if ((domain === "betelgeze.com" || domain === "www.betelgeze.com") && path === "/" && (request.nextUrl.searchParams.has("code") || request.nextUrl.searchParams.has("token_hash"))) {
         const destination = new URL(`https://${AUTH_HOST}/auth/callback`)
         request.nextUrl.searchParams.forEach((value, key) => destination.searchParams.set(key, value))
-        if (!destination.searchParams.has("next")) destination.searchParams.set("next", "/email-confirmed")
-        destination.searchParams.set("confirmed_redirect", "1")
+        if (!destination.searchParams.has("next")) {
+            const type = destination.searchParams.get("type")
+            destination.searchParams.set("next", type === "recovery" ? "/forgot-password/new-password" : type === "signup" ? "/sign-up/about" : "/login")
+        }
         return withSession(NextResponse.redirect(destination))
     }
 
     // Clean up legacy /dashboard links copied from old emails or browser state.
     // Workspace pages now live directly under /[workspaceSlug]/...
     if (isAppHost(domain)) {
+        if (sessionState.userId && sessionState.aal !== "aal2") {
+            const destination = new URL(`https://${AUTH_HOST}/mfa`)
+            destination.searchParams.set("next", `https://${domain}${requestCurrentPath(request)}`)
+            return withSession(NextResponse.redirect(destination))
+        }
         if (path === "/dashboard") return withSession(withRedirect(request, "/workspaces"))
         if (path.startsWith("/dashboard/")) return withSession(withRedirect(request, path.slice("/dashboard".length)))
         if (path === "/leadgen" || path.startsWith("/leadgen/")) {
@@ -173,8 +192,7 @@ export async function proxy(request: NextRequest) {
 
     if (domain === AUTH_HOST) {
         if (path === "/") return withSession(withRewrite(request, "/login"))
-        const isAuthPath = AUTH_PATHS.some((authPath) => path === authPath || path.startsWith(`${authPath}/`))
-        if (!isAuthPath) {
+        if (!isAuthHostPath(path)) {
             const destination = new URL(`https://${APP_HOST}${path}`)
             destination.search = request.nextUrl.search
             return withSession(NextResponse.redirect(destination))
@@ -199,12 +217,6 @@ export async function proxy(request: NextRequest) {
             return withSession(NextResponse.redirect(destination))
         }
         const destination = new URL(`https://${APP_HOST}/workspaces`)
-        destination.search = request.nextUrl.search
-        return withSession(NextResponse.redirect(destination))
-    }
-
-    if ((domain === "betelgeze.com" || domain === "www.betelgeze.com") && isCentralAuthRoute) {
-        const destination = new URL(`https://${AUTH_HOST}${path}`)
         destination.search = request.nextUrl.search
         return withSession(NextResponse.redirect(destination))
     }

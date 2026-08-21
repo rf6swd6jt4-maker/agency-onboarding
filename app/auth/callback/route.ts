@@ -7,38 +7,28 @@ export async function GET(request: NextRequest) {
     const code = url.searchParams.get("code")
     const tokenHash = url.searchParams.get("token_hash")
     const type = url.searchParams.get("type")
-    const confirmedRedirect = url.searchParams.get("confirmed_redirect") === "1"
-    const requestedNext = url.searchParams.get("next") || "/email-confirmed"
+    const requestedNext = url.searchParams.get("next") || (type === "recovery" ? "/forgot-password/new-password" : type === "signup" ? "/sign-up/about" : "/login")
     const suiteNext = /^https:\/\/(app|dashboard|onboarding|leadgen)\.betelgeze\.com(?:\/|$)/.test(requestedNext)
     const next = suiteNext ? requestedNext : requestedNext.startsWith("/") && !requestedNext.startsWith("//") ? requestedNext : "/workspaces"
     const response = NextResponse.redirect(new URL(next, url.origin))
 
     if (code || tokenHash) {
         const supabase = createSupabaseRouteClient(request, response)
+        const supportedOtpTypes = new Set(["signup", "recovery", "email_change", "invite", "magiclink", "reauthentication", "email"])
         const { error } = code
             ? await supabase.auth.exchangeCodeForSession(code)
-            : type === "signup"
-                ? await supabase.auth.verifyOtp({ token_hash: tokenHash!, type: "signup" })
+            : type && supportedOtpTypes.has(type)
+                ? await supabase.auth.verifyOtp({ token_hash: tokenHash!, type: type as "signup" | "recovery" | "email_change" | "invite" | "magiclink" | "reauthentication" | "email" })
                 : { error: new Error("Unsupported confirmation link.") }
 
         if (error) {
-            if (next === "/email-confirmed" || next.startsWith("/email-confirmed?")) {
-                const confirmed = new URL("/email-confirmed", url.origin)
-                confirmed.searchParams.set(confirmedRedirect ? "status" : "error", confirmedRedirect ? "confirmed" : "confirmation_failed")
-                response.headers.set("location", confirmed.toString())
-            }
+            const failed = new URL(type === "recovery" ? "/forgot-password" : type === "signup" ? "/sign-up" : "/login", url.origin)
+            failed.searchParams.set("reason", "invalid-or-expired")
+            response.headers.set("location", failed.toString())
             return response
         }
 
-        const { data } = await supabase.auth.getUser()
         clearLegacyHostOnlyAuthCookies(request, response)
-        if (next === "/login" || next === "/email-confirmed" || next.startsWith("/email-confirmed?")) {
-            const confirmed = new URL("/email-confirmed", url.origin)
-            confirmed.searchParams.set("email", data.user?.email ?? "")
-            const invite = new URL(next, url.origin).searchParams.get("invite")
-            if (invite) confirmed.searchParams.set("invite", invite)
-            response.headers.set("location", confirmed.toString())
-        }
     }
 
     return response

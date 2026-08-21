@@ -1,13 +1,11 @@
 import { redirect } from "next/navigation"
-import { redirectToLogin } from "@/lib/auth/server-redirects"
-import { getVerifiedUser } from "@/lib/auth/verified-user"
+import { requireAal2User } from "@/lib/auth/aal"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 
 export default async function WorkspacesRedirectPage() {
     const supabase = await createSupabaseServerClient()
-    const user = await getVerifiedUser(supabase)
-    if (!user) return await redirectToLogin()
+    const user = await requireAal2User(supabase)
 
     const { data: memberships } = await supabaseAdmin
         .from("workspace_memberships")
@@ -28,6 +26,6 @@ export default async function WorkspacesRedirectPage() {
         .select("username")
         .eq("user_id", user.id)
         .maybeSingle()
-    if (!profile) return await redirectToLogin()
+    if (!profile) redirect("/login")
     redirect(`/users/${profile.username}`)
 }

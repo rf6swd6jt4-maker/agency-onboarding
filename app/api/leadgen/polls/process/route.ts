@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { processLeadgenPoll } from "@/lib/leadgen/poll-runner"
+import { getAal2User } from "@/lib/auth/aal"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -31,7 +32,7 @@ async function runningPollShouldResume(workspaceId: string, pollId: string, star
 
 export async function POST(request: Request) {
     const supabase = await createSupabaseServerClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getAal2User(supabase)
     if (!user) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
 
     const url = new URL(request.url)

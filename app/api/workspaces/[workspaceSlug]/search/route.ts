@@ -17,6 +17,7 @@ import { shortId } from "@/lib/ui/relative-time"
 import { okrDisplayTitle, type WorkspaceOkrType } from "@/lib/admin/okr-title"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, WORKSPACE_PANELS, workspacePanelHref } from "@/lib/workspace-panels"
 import { normalizeWorkspaceRole, type WorkspaceRole } from "@/lib/workspaces"
+import { getAal2User } from "@/lib/auth/aal"
 
 export const dynamic = "force-dynamic"
 
@@ -106,8 +107,7 @@ function staticNavigationResults(workspace: { name: string; slug: string }, quer
 
 async function requireSearchWorkspace(workspaceSlug: string) {
     const supabase = await createSupabaseServerClient()
-    const { data: userData } = await supabase.auth.getUser()
-    const user = userData.user
+    const user = await getAal2User(supabase)
     if (!user) return null
 
     const { data: workspace } = await supabaseAdmin

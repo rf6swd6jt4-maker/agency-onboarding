@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, type WorkspaceRole } from "@/lib/workspaces"
-import { emailDeliveryFailureDetails, sendWorkspaceInvitation } from "@/lib/email"
+import { emailDeliveryFailureDetails, sendSecurityNotice, sendWorkspaceInvitation } from "@/lib/email"
 import { recordAdminActivity } from "@/lib/admin/activity"
+import { createAccountToken, hashAccountToken } from "@/lib/auth/account-tokens"
+import { accountFlowV2Enabled } from "@/lib/auth/account-flow"
 
 export type WorkspaceInvitationActionState = {
     ok?: boolean
@@ -22,6 +24,7 @@ async function requireUserManager(slug: string) {
 }
 
 export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitationActionState, formData: FormData): Promise<WorkspaceInvitationActionState> {
+    if (!accountFlowV2Enabled()) return { ok: false, message: "New account invitations are paused until Account Flow V2 is enabled." }
     const { workspace, role, user } = await requireUserManager(slug)
     const email = String(formData.get("email") ?? "").trim().toLowerCase()
     if (!email) return { ok: false, message: "Enter an email address." }
@@ -35,25 +38,32 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
         return { ok: false, message: "Only workspace owners can invite admins." }
     }
 
-    const { data: existingInvitation, error: lookupError } = await supabaseAdmin
-        .from("workspace_invitations")
-        .select("id")
-        .eq("workspace_id", workspace.id)
-        .eq("email", email)
-        .maybeSingle()
-    if (lookupError) return { ok: false, message: "Invitation failed before the email was sent. Nothing was saved." }
-
-    const invitationId = existingInvitation?.id ?? crypto.randomUUID()
+    const proposedInvitationId = crypto.randomUUID()
+    const invitationToken = createAccountToken()
+    const invitationTokenHash = hashAccountToken(invitationToken)
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-    const inviteUrl = `https://betelgeze.com/invitation?token=${invitationId}&email=${encodeURIComponent(email)}`
+    const inviteUrl = `https://auth.betelgeze.com/invitation?token=${encodeURIComponent(invitationToken)}`
     const { data: inviterProfile } = await supabaseAdmin
         .from("user_profiles")
         .select("display_name, username")
         .eq("user_id", user.id)
         .maybeSingle()
     const inviterName = inviterProfile?.display_name?.trim() || inviterProfile?.username || user.email || "A workspace administrator"
+    const { data: persistedInvitation, error: persistError } = await supabaseAdmin.rpc("rotate_workspace_invitation", {
+        p_invitation_id: proposedInvitationId,
+        p_workspace_id: workspace.id,
+        p_email: email,
+        p_role: requestedRole,
+        p_invited_by: user.id,
+        p_expires_at: expiresAt,
+        p_token_hash: invitationTokenHash,
+    })
+    if (persistError || !persistedInvitation) return { ok: false, message: "Betelgeze could not safely save the invitation, so no email was sent." }
+    const invitationId = (persistedInvitation as { invitation_id: string }).invitation_id
+
     try {
-        await sendWorkspaceInvitation({ to: email, workspaceName: workspace.name, inviterName, inviteUrl })
+        const delivery = await sendWorkspaceInvitation({ to: email, workspaceName: workspace.name, inviterName, inviteUrl, invitationId })
+        await supabaseAdmin.from("workspace_invitations").update({ delivery_status: "sent", provider_message_id: delivery.providerMessageId, sent_at: new Date().toISOString() }).eq("id", invitationId).eq("token_hash", invitationTokenHash)
     } catch (error) {
         const details = emailDeliveryFailureDetails(error)
         console.error("Workspace invitation email failed", {
@@ -64,6 +74,7 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
             providerResponseCode: details.providerResponseCode,
             providerResponse: details.providerResponse,
         })
+        await supabaseAdmin.from("workspace_invitations").update({ delivery_status: "failed", delivery_failed_at: new Date().toISOString(), delivery_failure_code: details.providerCode ?? details.kind }).eq("id", invitationId).eq("token_hash", invitationTokenHash)
         await recordAdminActivity({
             workspaceId: workspace.id,
             category: "integrations",
@@ -92,13 +103,10 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
                     : details.kind === "recipient"
                         ? "Resend rejected the recipient address"
                         : "Resend rejected the message"
-        return { ok: false, message: `Invitation failed because ${reason}. Nothing was saved.` }
+        return { ok: false, message: `The invitation was saved, but its email failed because ${reason}. Resend it after the connection is fixed.` }
     }
-
-    const { error } = await supabaseAdmin.from("workspace_invitations").upsert({ id: invitationId, workspace_id: workspace.id, email, role: requestedRole, invited_by: user.id, expires_at: expiresAt, accepted_at: null }, { onConflict: "workspace_id,email" })
-    if (error) return { ok: false, message: "The email was sent, but Betelgeze could not save the invitation. Please try again." }
     revalidatePath(`/${slug}/settings`)
-    return { ok: true, message: `Invitation sent to ${email}.` }
+    return { ok: true, message: `Invitation accepted by Resend for ${email}. Delivery is being tracked.` }
 }
 
 export async function updateWorkspaceUserRole(slug: string, formData: FormData) {
@@ -133,4 +141,44 @@ export async function removeWorkspaceUser(slug: string, formData: FormData) {
         .eq("workspace_id", workspace.id)
         .eq("user_id", userId)
     revalidatePath(`/${slug}/users`)
+}
+
+export type AdminMfaResetActionState = { ok: boolean; message: string }
+
+async function performWorkspaceUserMfaReset(slug: string, formData: FormData) {
+    const { workspace, role: actingRole, user: actor } = await requireUserManager(slug)
+    const targetUserId = String(formData.get("userId") ?? "")
+    const { data: targetMembership } = await supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspace.id).eq("user_id", targetUserId).maybeSingle()
+    const targetRole = normalizeWorkspaceRole(targetMembership?.role)
+    if (!targetRole || targetRole === "owner") throw new Error("Owner MFA resets use the documented break-glass procedure.")
+    if (actingRole === "admin" && targetRole !== "staff") throw new Error("Administrators can only reset staff MFA.")
+    const { data: targetUser } = await supabaseAdmin.auth.admin.getUserById(targetUserId)
+    const email = targetUser.user?.email?.toLowerCase()
+    if (!email || String(formData.get("confirmation") ?? "") !== `RESET ${email}`) throw new Error("The MFA reset confirmation did not match.")
+    const { data: factors, error: factorsError } = await supabaseAdmin.auth.admin.mfa.listFactors({ userId: targetUserId })
+    if (factorsError) throw new Error("Betelgeze could not inspect that account's factors.")
+    const { error: profileError } = await supabaseAdmin.from("user_profiles").update({ mfa_reenrollment_required: true, updated_at: new Date().toISOString() }).eq("user_id", targetUserId)
+    if (profileError) throw new Error("Betelgeze could not safely require authenticator re-enrolment, so no factors were removed.")
+    const deletionResults = await Promise.all(factors.factors.map(async (factor) => ({ factor, result: await supabaseAdmin.auth.admin.mfa.deleteFactor({ userId: targetUserId, id: factor.id }) })))
+    const failures = deletionResults.filter(({ result }) => result.error)
+    const removedCount = deletionResults.length - failures.length
+    const { error: auditError } = await supabaseAdmin.from("account_security_events").insert({ user_id: targetUserId, actor_user_id: actor.id, workspace_id: workspace.id, event_type: "mfa_admin_reset", metadata: { requested_factor_count: factors.factors.length, removed_factor_count: removedCount, failed_factor_count: failures.length, actor_role: actingRole } })
+    try { await sendSecurityNotice({ to: email, userId: targetUserId, heading: failures.length ? "Your Betelgeze authenticator reset needs review" : "Your Betelgeze authenticator was reset", body: failures.length ? `A ${workspace.name} administrator requested an authenticator reset, but not every factor could be removed. Your account is blocked from workspace access until the reset is reviewed and authenticator setup is completed.` : `A ${workspace.name} administrator removed the authenticator factors from your account. You must set up an authenticator again before accessing Betelgeze.` }) }
+    catch (error) { console.error("MFA reset security notice failed", { workspaceId: workspace.id, targetUserId, error }) }
+    revalidatePath(`/${slug}/settings`)
+    if (failures.length) throw new Error("The MFA reset was only partially completed. Workspace access is blocked; review the account in Supabase before retrying.")
+    if (auditError) throw new Error("The authenticators were reset, but the security audit record failed. Review the account before continuing.")
+}
+
+export async function resetWorkspaceUserMfa(slug: string, formData: FormData): Promise<AdminMfaResetActionState> {
+    try {
+        await performWorkspaceUserMfaReset(slug, formData)
+        return { ok: true, message: "Authenticator reset complete. The user must enrol again before workspace access." }
+    } catch (error) {
+        console.error("Administrative MFA reset failed", { slug, error })
+        return {
+            ok: false,
+            message: error instanceof Error ? error.message : "The authenticator reset could not be completed safely.",
+        }
+    }
 }

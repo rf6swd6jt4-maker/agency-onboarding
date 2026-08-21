@@ -120,11 +120,11 @@ export async function removeWorkspaceInvitation(slug: string, invitationId: stri
     const { workspace } = await requireWorkspace(slug, "admin")
     const { error } = await supabaseAdmin
         .from("workspace_invitations")
-        .delete()
+        .update({ revoked_at: new Date().toISOString(), delivery_status: "revoked", token_hash: null })
         .eq("id", invitationId)
         .eq("workspace_id", workspace.id)
         .is("accepted_at", null)
-    if (error) throw new Error("Could not remove this invitation.")
+    if (error) throw new Error("Could not revoke this invitation.")
     refresh(slug)
 }
 

@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation"
 import { redirectToLogin } from "@/lib/auth/server-redirects"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { getCurrentUser, normalizeWorkspaceRole } from "@/lib/workspaces"
+import { getCurrentUser } from "@/lib/workspaces"
 import { deleteOnboardingUploads, storeProfileAvatar } from "@/lib/onboarding/uploads"
 import { normalizeChatDisplayName } from "@/lib/client-messages/whatsapp-attribution"
 
@@ -31,20 +31,6 @@ export async function createWorkspace(username: string, formData: FormData) {
     if (error || !workspace) throw new Error(error?.code === "23505" ? "That dashboard URL is already taken." : "Could not create dashboard.")
     await supabaseAdmin.from("workspace_memberships").insert({ workspace_id: workspace.id, user_id: user.id, role: "owner" })
     redirect(`/${workspace.slug}`)
-}
-
-export async function acceptWorkspaceInvitation(username: string, formData: FormData) {
-    const user = await getCurrentUser()
-    if (!user?.email) return await redirectToLogin()
-    const token = String(formData.get("token") ?? "")
-    const { data: invite } = await supabaseAdmin.from("workspace_invitations").select("id, workspace_id, email, role, expires_at, accepted_at").eq("id", token).maybeSingle()
-    if (!invite || invite.accepted_at || new Date(invite.expires_at) < new Date() || invite.email.toLowerCase() !== user.email.toLowerCase()) throw new Error("This invitation is no longer available.")
-    const role = normalizeWorkspaceRole(invite.role)
-    if (!role) throw new Error("This invitation has an invalid role.")
-    const { error } = await supabaseAdmin.from("workspace_memberships").upsert({ workspace_id: invite.workspace_id, user_id: user.id, role })
-    if (error) throw new Error(error.message)
-    await supabaseAdmin.from("workspace_invitations").update({ accepted_at: new Date().toISOString() }).eq("id", invite.id)
-    redirect(`/users/${username}`)
 }
 
 export async function uploadProfileAvatar(username: string, formData: FormData) {
