@@ -35,6 +35,17 @@ test("password requirements reject short or one-class passwords", () => {
     assert.equal(passwordRequirements("Calm-Password-2026").every((item) => item.met), true)
 })
 
+test("password signup names the verification-email side effect and rate-limit state", () => {
+    const flow = source("components/auth/AccountOnboardingFlow.tsx")
+    const onboarding = source("app/api/account/onboarding/route.ts")
+    const errors = source("lib/auth/errors.ts")
+    assert.match(flow, /Creating the account will send a six-digit verification code/)
+    assert.match(flow, /Create account and send code/)
+    assert.match(onboarding, /error\.code === "over_email_send_rate_limit"/)
+    assert.match(onboarding, /code: "verification_email_rate_limited"/)
+    assert.match(errors, /No verification email was sent\./)
+})
+
 test("account onboarding completion is transactional and AAL2-gated", () => {
     const migration = source("supabase/migrations/20260821120000_account_system_v2.sql")
     assert.match(migration, /auth\.jwt\(\) ->> 'aal'/)

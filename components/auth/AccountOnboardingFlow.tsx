@@ -125,13 +125,13 @@ function PasswordStep({ context }: { context: OnboardingContext }) {
             setError(apiError.message)
         } finally { setLoading(false) }
     }
-    return <StepFrame context={context} step="password" title="Create a password" description="Use a unique password and let your password manager remember it.">
+    return <StepFrame context={context} step="password" title="Create a password" description="Use a unique password and let your password manager remember it. Creating the account will send a six-digit verification code to your invited email.">
         <form onSubmit={submit}>
             <PasswordField value={password} onChange={setPassword} disabled={loading} />
             <div className="mt-5"><PasswordField value={confirm} onChange={(value) => { setConfirm(value); setConfirmTouched(true) }} name="confirm-password" label="Confirm password" showRequirements={false} disabled={loading} invalid={confirmTouched && confirm !== password} /></div>
             {confirmTouched ? <AuthFieldFeedback tone={confirm && confirm === password ? "green" : "red"} message={confirm && confirm === password ? "Passwords match." : "Enter the same password again."} /> : <AuthFieldFeedback tone="grey" message="Repeat your password to catch typing mistakes." />}
             {error ? <AuthFieldFeedback tone="red" message={error} /> : null}
-            <button disabled={loading || !valid} className={`${authPrimaryButton} mt-6`}>{loading ? "Creating account…" : "Create account"}</button>
+            <button disabled={loading || !valid} className={`${authPrimaryButton} mt-6`}>{loading ? "Creating account and sending code…" : "Create account and send code"}</button>
         </form>
     </StepFrame>
 }

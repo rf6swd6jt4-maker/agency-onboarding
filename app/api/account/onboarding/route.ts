@@ -105,6 +105,9 @@ export async function POST(request: NextRequest) {
                 },
             })
             if (error) {
+                if (error.code === "over_email_send_rate_limit" || error.message.toLowerCase().includes("email rate limit")) {
+                    return jsonWithSession(sessionResponse, { code: "verification_email_rate_limited", error: accountErrorMessage("verification_email_rate_limited") }, { status: 429 })
+                }
                 const collision = error.message.toLowerCase().includes("database error")
                 if (collision) {
                     await updateOnboardingSession(context.sessionId, { current_step: "username" })
