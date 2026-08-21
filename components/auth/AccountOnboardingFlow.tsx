@@ -1,12 +1,12 @@
 "use client"
 
-/* eslint-disable @next/next/no-img-element */
-
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { Avatar } from "@/components/account/Avatar"
+import { ProfileAvatarEditButton } from "@/components/account/ProfileAvatarEditButton"
 import { AuthFieldFeedback } from "@/components/auth/AuthFieldFeedback"
 import { AuthFlowShell, authInput, authPrimaryButton, authSecondaryButton } from "@/components/auth/AuthFlowShell"
-import { MfaGuide } from "@/components/auth/MfaGuide"
+import { MfaGuide, type MfaGuideStage } from "@/components/auth/MfaGuide"
 import { OtpField } from "@/components/auth/OtpField"
 import { PasswordField } from "@/components/auth/PasswordField"
 import type { AuthStep, FieldValidationState, OnboardingContext } from "@/lib/auth/account-flow-types"
@@ -190,7 +190,10 @@ function ProfileStep({ context }: { context: OnboardingContext }) {
     const [preview, setPreview] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    return <StepFrame context={context} step="profile" title="Make the account yours" description="Both fields are optional. You can change them later from your profile.">
+    const avatarInput = useRef<HTMLInputElement>(null)
+    const fallbackName = context.usernameCandidate ?? usernameFromEmail(context.email)
+    useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+    return <StepFrame context={context} step="profile" title="Make the account yours" description="Add the name and picture people will recognize. Both are optional and can be changed later.">
         <form encType="multipart/form-data" onSubmit={async (event) => {
             event.preventDefault(); setLoading(true); setError(null)
             const data = new FormData(event.currentTarget); data.set("action", "profile")
@@ -198,15 +201,18 @@ function ProfileStep({ context }: { context: OnboardingContext }) {
             catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save your profile.") }
             finally { setLoading(false) }
         }}>
-            <label htmlFor="display-name" className="text-sm font-medium text-neutral-200">Display name <span className="font-normal text-neutral-500">Optional</span></label>
+            <div className="flex flex-col items-center text-center">
+                <div className="relative">
+                    <Avatar src={preview} name={fallbackName} className="h-28 w-28 border-2 border-neutral-700 bg-neutral-800 sm:h-36 sm:w-36" />
+                    <ProfileAvatarEditButton onClick={() => avatarInput.current?.click()} disabled={loading} className="absolute bottom-0 right-0 h-11 w-11 translate-x-1/4 translate-y-1/4 sm:h-10 sm:w-10" />
+                </div>
+                <p className="mt-5 text-sm font-medium text-neutral-200">Profile picture <span className="font-normal text-neutral-500">Optional</span></p>
+                <p className="mt-1 max-w-xs text-xs leading-5 text-neutral-500">Choose a PNG, JPEG, WebP, AVIF, GIF, or HEIC image up to 10MB.</p>
+                <input ref={avatarInput} id="profile-avatar" name="avatar" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/heic,image/heif" className="sr-only" disabled={loading} onChange={(event) => { const file = event.target.files?.[0]; setPreview(file ? URL.createObjectURL(file) : null) }} />
+            </div>
+            <label htmlFor="display-name" className="mt-8 block text-sm font-medium text-neutral-200">Display name <span className="font-normal text-neutral-500">Optional</span></label>
             <input id="display-name" name="displayName" maxLength={50} autoComplete="name" placeholder={context.usernameCandidate ?? usernameFromEmail(context.email)} className={authInput} />
-            <AuthFieldFeedback tone="grey" message="Shown to teammates and clients in communications." />
-            <label htmlFor="profile-avatar" className="mt-5 block text-sm font-medium text-neutral-200">Profile picture <span className="font-normal text-neutral-500">Optional</span></label>
-            <label htmlFor="profile-avatar" className="mt-3 flex cursor-pointer items-center gap-4 rounded-xl border border-dashed border-neutral-700 bg-neutral-950 p-4 hover:border-neutral-500">
-                <span className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-neutral-800 text-sm text-neutral-400">{preview ? <img src={preview} alt="Selected profile preview" className="h-full w-full object-cover" /> : "Photo"}</span>
-                <span><span className="block text-sm font-medium text-neutral-200">Choose an image</span><span className="mt-1 block text-xs text-neutral-500">PNG, JPEG, WebP, AVIF, GIF, or HEIC · 10MB max</span></span>
-            </label>
-            <input id="profile-avatar" name="avatar" type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/avif,image/heic,image/heif" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (preview) URL.revokeObjectURL(preview); setPreview(file ? URL.createObjectURL(file) : null) }} />
+            <AuthFieldFeedback tone="grey" message={`Your display name is shown in conversations and can include spaces or capitals. Your username, @${fallbackName}, is your unique Betelgeze account address.`} />
             {error ? <AuthFieldFeedback tone="red" message={error} /> : null}
             <button disabled={loading} className={`${authPrimaryButton} mt-6`}>{loading ? "Saving…" : "Continue"}</button>
         </form>
@@ -215,8 +221,17 @@ function ProfileStep({ context }: { context: OnboardingContext }) {
 
 function TwoFactorStep({ context }: { context: OnboardingContext }) {
     const router = useRouter()
+    const [stage, setStage] = useState<MfaGuideStage>("checking")
     const onVerified = useCallback(() => { router.replace("/sign-up/complete"); router.refresh() }, [router])
-    return <StepFrame context={context} step="2fa" title="Secure your account" description="Two-factor authentication is required for every Betelgeze account before workspace access."><MfaGuide onVerified={onVerified} setupLabel="Betelgeze primary" /></StepFrame>
+    const onStageChange = useCallback((nextStage: MfaGuideStage) => setStage(nextStage), [])
+    const copy = stage === "setup"
+        ? { title: "Connect your authenticator", description: "Scan the QR code or switch to the manual key. The verification code comes on the next page." }
+        : stage === "verification"
+            ? { title: "Verify your authenticator", description: "Now use the six-digit code shown in your authenticator app to confirm the connection." }
+            : stage === "introduction"
+                ? { title: "Secure your account", description: "Two-factor authentication is required before workspace access. We’ll guide you through connecting an authenticator app." }
+                : { title: "Checking account security", description: "We’re checking whether an authenticator is already connected to this account." }
+    return <StepFrame context={context} step="2fa" title={copy.title} description={copy.description}><MfaGuide onVerified={onVerified} onStageChange={onStageChange} setupLabel="Betelgeze primary" /></StepFrame>
 }
 
 function CompleteStep({ context }: { context: OnboardingContext }) {

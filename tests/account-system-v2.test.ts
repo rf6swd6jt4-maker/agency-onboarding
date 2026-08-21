@@ -150,6 +150,24 @@ test("account field feedback opts into wrapping status content", () => {
     assert.match(feedback, /tone=\{tone\} wrap/)
 })
 
+test("profile customization and MFA setup use separate guided surfaces", () => {
+    const onboarding = source("components/auth/AccountOnboardingFlow.tsx")
+    const mfa = source("components/auth/MfaGuide.tsx")
+    const avatarEditor = source("components/account/ProfileAvatarEditor.tsx")
+    assert.match(onboarding, /sm:h-36 sm:w-36/)
+    assert.match(onboarding, /Your display name is shown in conversations/)
+    assert.match(onboarding, /Your username, @\$\{fallbackName\}, is your unique Betelgeze account address/)
+    assert.match(onboarding, /stage === "setup"[\s\S]*Connect your authenticator/)
+    assert.match(onboarding, /stage === "verification"[\s\S]*Verify your authenticator/)
+    assert.match(mfa, /role="tablist" aria-label="Authenticator setup method"/)
+    assert.match(mfa, />QR code<\/button>/)
+    assert.match(mfa, />Manual key<\/button>/)
+    assert.match(mfa, /if \(state === "setup"\) return/)
+    assert.match(mfa, /Continue to verification/)
+    assert.match(mfa, /Back to setup instructions/)
+    assert.match(avatarEditor, /ProfileAvatarEditButton/)
+})
+
 test("account email template renders accessible HTML and matching plain text", async () => {
     const compiled = ts.transpileModule(source("lib/email/AccountEmail.tsx"), {
         compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
