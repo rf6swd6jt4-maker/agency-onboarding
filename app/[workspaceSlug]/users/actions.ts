@@ -7,6 +7,7 @@ import { emailDeliveryFailureDetails, sendSecurityNotice, sendWorkspaceInvitatio
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { createAccountToken, hashAccountToken } from "@/lib/auth/account-tokens"
 import { accountFlowV2Enabled } from "@/lib/auth/account-flow"
+import { authOrigin } from "@/lib/auth/origin"
 
 export type WorkspaceInvitationActionState = {
     ok?: boolean
@@ -42,7 +43,7 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
     const invitationToken = createAccountToken()
     const invitationTokenHash = hashAccountToken(invitationToken)
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-    const inviteUrl = `https://auth.betelgeze.com/invitation?token=${encodeURIComponent(invitationToken)}`
+    const inviteUrl = `${authOrigin()}/invitation?token=${encodeURIComponent(invitationToken)}`
     const { data: inviterProfile } = await supabaseAdmin
         .from("user_profiles")
         .select("display_name, username")

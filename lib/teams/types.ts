@@ -69,6 +69,7 @@ export type NativeCommunicationsBootstrap = {
     workspaceSlug: string
     currentUser: CommunicationPerson
     people: CommunicationPerson[]
+    formerPeople: CommunicationPerson[]
     conversations: NativeConversation[]
     teams: WorkspaceTeam[]
     reactions: NativeReaction[]

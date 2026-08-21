@@ -1,4 +1,5 @@
--- Guarded Betelgeze account/workspace reset.
+-- Guarded Betelgeze account/workspace reset. ScaylUp workspace-owned history is
+-- retained; removable Auth identities are snapshotted before their login rows go.
 --
 -- Dry run (mandatory first):
 --   psql "$DATABASE_URL" -v execute=false \
@@ -68,11 +69,63 @@ begin
     from public.workspaces
     where id = current_setting('betelgeze.reset.workspace_id')::uuid
       and slug = 'scaylup'
-      and name = 'ScaylUp';
+      and name = 'Scaylup.com';
     if v_workspace_count <> 1 then
         raise exception 'ScaylUp workspace identity mismatch. Expected one exact UUID/slug/name match; found %.', v_workspace_count;
     end if;
 end $$;
+
+create temporary table betelgeze_users_to_remove on commit drop as
+select id, email
+from auth.users
+where id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
+
+create temporary table betelgeze_preserved_invariants (
+    name text primary key,
+    row_count bigint not null,
+    payload_hash text not null
+) on commit drop;
+
+insert into betelgeze_preserved_invariants
+select 'builder_documents', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['updated_by', 'release_locked_by'] order by workspace_id)::text, '[]'))
+from public.onboarding_builder_documents row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'builder_updates', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by sequence)::text, '[]'))
+from public.onboarding_builder_updates row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'relationships', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['seller_user_id', 'fulfilment_manager_user_id'] order by id)::text, '[]'))
+from public.relationships row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'relationship_onboarding_sessions', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - 'created_by' order by id)::text, '[]'))
+from public.relationship_onboarding_sessions row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'native_conversations', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['created_by', 'archived_at', 'archived_reason'] order by id)::text, '[]'))
+from public.workspace_native_conversations row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'native_messages', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by id)::text, '[]'))
+from public.workspace_native_messages row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'native_reactions', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by id)::text, '[]'))
+from public.workspace_native_reactions row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'client_messages', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by id)::text, '[]'))
+from public.client_messages row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'work_items', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['execution_owner_id', 'created_by'] order by id)::text, '[]'))
+from public.work_items row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+union all
+select 'assets', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - 'created_by' order by id)::text, '[]'))
+from public.assets row_value
+where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid;
 
 create temporary table betelgeze_reset_manifest on commit drop as
 select jsonb_build_object(
@@ -89,13 +142,16 @@ select jsonb_build_object(
         'workspace_memberships_removed', (select count(*) from public.workspace_memberships where user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid or workspace_id <> current_setting('betelgeze.reset.workspace_id')::uuid),
         'pending_invitations_removed', (select count(*) from public.workspace_invitations where accepted_at is null),
         'onboarding_sessions_removed', (select count(*) from public.account_onboarding_sessions session join public.workspace_invitations invitation on invitation.id = session.invitation_id where invitation.accepted_at is null),
-        'native_messages_removed', (select count(*) from public.workspace_native_messages where sender_user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid),
-        'native_reactions_removed', (select count(*) from public.workspace_native_reactions where reactor_user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid),
+        'native_messages_preserved', (select count(*) from public.workspace_native_messages where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid),
+        'native_reactions_preserved', (select count(*) from public.workspace_native_reactions where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid),
+        'builder_updates_preserved', (select count(*) from public.onboarding_builder_updates where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid),
+        'direct_conversations_archived', (select count(*) from public.workspace_native_conversations where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid and kind = 'direct' and (direct_user_one <> current_setting('betelgeze.reset.protected_user_id')::uuid or direct_user_two <> current_setting('betelgeze.reset.protected_user_id')::uuid)),
         'security_events_removed', (select count(*) from public.account_security_events where user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid)
     )
 ) as manifest;
 
 select manifest as dry_run_manifest from betelgeze_reset_manifest;
+select * from betelgeze_preserved_invariants order by name;
 
 select 'external_orphan_review' as report,
        (select count(*) from public.client_sales where workspace_id <> current_setting('betelgeze.reset.workspace_id')::uuid and stripe_invoice_id is not null) as non_scaylup_stripe_sales,
@@ -120,6 +176,33 @@ select 'external_orphan_review' as report,
     insert into public.workspace_memberships (workspace_id, user_id, role)
     values (current_setting('betelgeze.reset.workspace_id')::uuid, current_setting('betelgeze.reset.protected_user_id')::uuid, 'owner')
     on conflict (workspace_id, user_id) do update set role = 'owner';
+
+    update public.account_user_attributions attribution
+    set removed_at = now(), updated_at = now()
+    where exists (select 1 from betelgeze_users_to_remove target where target.id = attribution.user_id);
+
+    update public.workspace_native_conversations conversation
+    set archived_at = coalesce(conversation.archived_at, now()),
+        archived_reason = coalesce(conversation.archived_reason, 'participant_account_removed')
+    where conversation.workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+      and conversation.kind = 'direct'
+      and (conversation.direct_user_one <> current_setting('betelgeze.reset.protected_user_id')::uuid
+           or conversation.direct_user_two <> current_setting('betelgeze.reset.protected_user_id')::uuid);
+
+    insert into public.workspace_native_conversation_participants (workspace_id, conversation_id, user_id)
+    select conversation.workspace_id, conversation.id, current_setting('betelgeze.reset.protected_user_id')::uuid
+    from public.workspace_native_conversations conversation
+    where conversation.workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+      and conversation.kind = 'direct'
+      and conversation.archived_at is not null
+    on conflict (conversation_id, user_id) do nothing;
+
+    insert into public.workspace_team_members (workspace_id, team_id, user_id, added_by)
+    select distinct member.workspace_id, member.team_id, current_setting('betelgeze.reset.protected_user_id')::uuid, null
+    from public.workspace_team_members member
+    where member.workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+      and member.user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid
+    on conflict (team_id, user_id) do nothing;
 
     update public.relationships
     set seller_user_id = current_setting('betelgeze.reset.protected_user_id')::uuid
@@ -176,12 +259,6 @@ select 'external_orphan_review' as report,
     where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
       and user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
 
-    insert into public.workspace_team_members (workspace_id, team_id, user_id, added_by)
-    select distinct member.workspace_id, member.team_id, current_setting('betelgeze.reset.protected_user_id')::uuid, null
-    from public.workspace_team_members member
-    where member.workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
-      and member.user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid
-    on conflict (team_id, user_id) do nothing;
     delete from public.workspace_team_members
     where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
       and user_id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
@@ -205,6 +282,62 @@ select 'external_orphan_review' as report,
     delete from public.workspaces where id <> current_setting('betelgeze.reset.workspace_id')::uuid;
     delete from auth.users where id <> current_setting('betelgeze.reset.protected_user_id')::uuid;
 
+    create temporary table betelgeze_after_invariants on commit drop as
+    select 'builder_documents' as name, count(*) as row_count, md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['updated_by', 'release_locked_by'] order by workspace_id)::text, '[]')) as payload_hash
+    from public.onboarding_builder_documents row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'builder_updates', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by sequence)::text, '[]'))
+    from public.onboarding_builder_updates row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'relationships', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['seller_user_id', 'fulfilment_manager_user_id'] order by id)::text, '[]'))
+    from public.relationships row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'relationship_onboarding_sessions', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - 'created_by' order by id)::text, '[]'))
+    from public.relationship_onboarding_sessions row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'native_conversations', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['created_by', 'archived_at', 'archived_reason'] order by id)::text, '[]'))
+    from public.workspace_native_conversations row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'native_messages', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by id)::text, '[]'))
+    from public.workspace_native_messages row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'native_reactions', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by id)::text, '[]'))
+    from public.workspace_native_reactions row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'client_messages', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) order by id)::text, '[]'))
+    from public.client_messages row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'work_items', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - array['execution_owner_id', 'created_by'] order by id)::text, '[]'))
+    from public.work_items row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid
+    union all
+    select 'assets', count(*), md5(coalesce(jsonb_agg(to_jsonb(row_value) - 'created_by' order by id)::text, '[]'))
+    from public.assets row_value
+    where workspace_id = current_setting('betelgeze.reset.workspace_id')::uuid;
+
+    do $$
+    begin
+        if exists (
+            select 1
+            from betelgeze_preserved_invariants before_state
+            full join betelgeze_after_invariants after_state using (name)
+            where before_state.name is null
+               or after_state.name is null
+               or before_state.row_count is distinct from after_state.row_count
+               or before_state.payload_hash is distinct from after_state.payload_hash
+        ) then
+            raise exception 'ScaylUp preserved-data invariant failed; the reset transaction will roll back.';
+        end if;
+    end $$;
+
     do $$
     begin
         if (select count(*) from auth.users) <> 1 then raise exception 'Final auth-user invariant failed.'; end if;
@@ -216,6 +349,12 @@ select 'external_orphan_review' as report,
               and user_id = current_setting('betelgeze.reset.protected_user_id')::uuid
               and role = 'owner'
         ) then raise exception 'Protected owner membership invariant failed.'; end if;
+        if exists (
+            select 1
+            from betelgeze_users_to_remove target
+            left join public.account_user_attributions attribution on attribution.user_id = target.id
+            where attribution.user_id is null or attribution.removed_at is null
+        ) then raise exception 'Former-user attribution invariant failed.'; end if;
     end $$;
 
     commit;

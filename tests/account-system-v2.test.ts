@@ -54,6 +54,7 @@ test("invitation and continuation secrets are stored only as hashes", () => {
 
 test("canonical auth routing and recovery preserve MFA", () => {
     const proxy = source("proxy.ts")
+    const origin = source("lib/auth/origin.ts")
     const recovery = source("app/api/auth/recovery/route.ts")
     const loginPage = source("app/login/page.tsx")
     const login = source("components/auth/LoginV2.tsx")
@@ -63,6 +64,9 @@ test("canonical auth routing and recovery preserve MFA", () => {
     assert.match(proxy, /"\/api\/account\/onboarding"/)
     assert.match(proxy, /"\/api\/auth\/mfa"/)
     assert.match(proxy, /isAuthHostPath\(path\)/)
+    assert.match(proxy, /authHostname\(\)/)
+    assert.match(origin, /NEXT_PUBLIC_AUTH_URL/)
+    assert.match(origin, /new URL\(candidate\)\.origin/)
     assert.match(recovery, /verifyOtp\(\{ email, token: code, type: "recovery" \}\)/)
     assert.match(recovery, /account_password_recovery_sessions/)
     assert.match(recovery, /recoverySession\.auth_user_id !== authData\.user\.id/)
@@ -136,7 +140,26 @@ test("guarded reset defaults to rollback and requires exact identities", () => {
     assert.match(cleanup, /ScaylUp workspace identity mismatch/)
     assert.match(cleanup, /DELETE ALL BETELGEZE TEST ACCOUNTS/)
     assert.match(cleanup, /update public\.work_items\s+set execution_owner_id/)
+    assert.match(cleanup, /betelgeze_preserved_invariants/)
+    assert.match(cleanup, /ScaylUp preserved-data invariant failed/)
+    assert.match(cleanup, /participant_account_removed/)
     assert.match(cleanup, /\\else\s+rollback;/)
+})
+
+test("account removal retains Builder and Communications authorship", () => {
+    const migration = source("supabase/migrations/20260821130000_preserve_workspace_history_on_account_removal.sql")
+    const teams = source("lib/teams/server.ts")
+    for (const constraint of [
+        "onboarding_builder_updates_actor_user_id_fkey",
+        "workspace_native_messages_sender_user_id_fkey",
+        "workspace_native_reactions_reactor_user_id_fkey",
+        "client_messages_sender_user_id_fkey",
+        "communication_reactions_reactor_user_id_fkey",
+    ]) assert.match(migration, new RegExp(constraint))
+    assert.match(migration, /account_user_attributions/)
+    assert.match(migration, /conversation\.archived_at is null/)
+    assert.match(teams, /formerPeople/)
+    assert.match(teams, /Former member · read-only history/)
 })
 
 test("administrative MFA reset is role-gated, strongly confirmed, and audited", () => {

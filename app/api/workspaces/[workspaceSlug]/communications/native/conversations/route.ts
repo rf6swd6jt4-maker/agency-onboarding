@@ -22,7 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const { data: target } = await supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id).eq("user_id", targetUserId).maybeSingle()
     if (!target) return Response.json({ error: "Workspace member not found." }, { status: 404 })
     const [directUserOne, directUserTwo] = [user.id, targetUserId].sort()
-    const existing = await supabaseAdmin.from("workspace_native_conversations").select("id").eq("workspace_id", workspace.id).eq("kind", "direct").eq("direct_user_one", directUserOne).eq("direct_user_two", directUserTwo).maybeSingle()
+    const existing = await supabaseAdmin.from("workspace_native_conversations").select("id").eq("workspace_id", workspace.id).eq("kind", "direct").eq("direct_user_one", directUserOne).eq("direct_user_two", directUserTwo).is("archived_at", null).maybeSingle()
     if (existing.data) return Response.json({ conversationId: existing.data.id, reused: true })
     const inserted = await supabaseAdmin.from("workspace_native_conversations").insert({ workspace_id: workspace.id, kind: "direct", direct_user_one: directUserOne, direct_user_two: directUserTwo, created_by: user.id }).select("id").single()
     if (!inserted.error && inserted.data) return Response.json({ conversationId: inserted.data.id, reused: false })

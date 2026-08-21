@@ -9,6 +9,7 @@ import { createSupabaseRouteClient } from "@/lib/supabase/route"
 import { carrySessionResponse } from "@/lib/supabase/session-cookies"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { sendPasswordChangedNotice } from "@/lib/email"
+import { authOrigin } from "@/lib/auth/origin"
 
 function withSession<T>(source: NextResponse, body: T, init?: ResponseInit) {
     return carrySessionResponse(source, NextResponse.json(body, init))
@@ -21,9 +22,9 @@ export async function POST(request: NextRequest) {
     if (action === "request") {
         const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : ""
         if (!/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 })
-        const authOrigin = process.env.NODE_ENV === "production" ? "https://auth.betelgeze.com" : request.nextUrl.origin
+        const accountOrigin = authOrigin(request.nextUrl.origin)
         const supabase = createClient(getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL"), getRequiredEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), { auth: { persistSession: false, autoRefreshToken: false } })
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${authOrigin}/forgot-password/new-password` })
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${accountOrigin}/forgot-password/new-password` })
         if (error) console.warn("Password recovery request was not delivered", { code: error.code, status: error.status })
         const response = NextResponse.json({ ok: true, next: "/forgot-password/code" })
         response.cookies.set(RECOVERY_EMAIL_COOKIE, encodeURIComponent(email), accountCookieOptions(15 * 60, { hostOnly: true }))
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "resend") {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${request.nextUrl.origin}/forgot-password/new-password` })
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${authOrigin(request.nextUrl.origin)}/forgot-password/new-password` })
         if (error) return withSession(sessionResponse, { code: "rate_limited", error: accountErrorMessage(error.message.toLowerCase().includes("rate") ? "rate_limited" : "unknown") }, { status: 400 })
         return withSession(sessionResponse, { ok: true })
     }

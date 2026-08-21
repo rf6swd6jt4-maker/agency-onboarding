@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { Webhook } from "standardwebhooks"
 import { sendAccountEmail } from "@/lib/email"
 import type { AccountEmailPurpose } from "@/lib/auth/account-flow-types"
+import { authOrigin } from "@/lib/auth/origin"
 
 type HookPayload = {
     user: { id: string; email: string; new_email?: string }
@@ -17,8 +18,7 @@ type HookPayload = {
 }
 
 function callbackUrl(tokenHash: string, type: string, next: string) {
-    const origin = process.env.NODE_ENV === "production" ? "https://auth.betelgeze.com" : (process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "http://localhost:3000")
-    const url = new URL("/auth/callback", origin)
+    const url = new URL("/auth/callback", authOrigin())
     url.searchParams.set("token_hash", tokenHash)
     url.searchParams.set("type", type)
     url.searchParams.set("next", next)

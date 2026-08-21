@@ -68,6 +68,7 @@ export type CommunicationPerson = {
     id: string
     name: string
     avatarSrc: string | null
+    former?: boolean
 }
 
 export type CommunicationReadCursor = {

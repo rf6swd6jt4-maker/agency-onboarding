@@ -98,6 +98,7 @@ export async function loadNativeCommunications(input: {
         workspaceSlug: input.workspaceSlug,
         currentUser: peopleResult.currentUser,
         people: peopleResult.people,
+        formerPeople: [] as CommunicationPerson[],
         stickers: stickerResult.stickers,
         teams,
         services,
@@ -110,7 +111,7 @@ export async function loadNativeCommunications(input: {
     if (!schemaReady) return { ...base, conversations: [], reactions: [], readCursors: [], schemaReady: false }
 
     const [conversationResult, participantResult, messageResult, reactionResult, cursorResult, membershipResult] = await Promise.all([
-        supabaseAdmin.from("workspace_native_conversations").select("id, kind, team_id, direct_user_one, direct_user_two, pinned_message_id, updated_at").eq("workspace_id", input.workspaceId).order("updated_at", { ascending: false }),
+        supabaseAdmin.from("workspace_native_conversations").select("id, kind, team_id, direct_user_one, direct_user_two, archived_at, pinned_message_id, updated_at").eq("workspace_id", input.workspaceId).order("updated_at", { ascending: false }),
         supabaseAdmin.from("workspace_native_conversation_participants").select("conversation_id, user_id").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspace_native_messages").select("id, client_request_id, conversation_id, sender_user_id, body, reply_to_message_id, attachment, created_at").eq("workspace_id", input.workspaceId).order("created_at").limit(4000),
         supabaseAdmin.from("workspace_native_reactions").select("id, conversation_id, message_id, reactor_user_id, emoji, updated_at").eq("workspace_id", input.workspaceId),
@@ -119,7 +120,23 @@ export async function loadNativeCommunications(input: {
     ])
     const fatal = [conversationResult.error, participantResult.error, messageResult.error, reactionResult.error, cursorResult.error, membershipResult.error].find(Boolean)
     if (fatal) throw new Error(fatal!.message)
-    const peopleById = new Map(peopleResult.people.map((person) => [person.id, person]))
+    const activePeopleById = new Map(peopleResult.people.map((person) => [person.id, person]))
+    const historicalIds = [...new Set([
+        ...(messageResult.data ?? []).map((message) => message.sender_user_id),
+        ...(reactionResult.data ?? []).map((reaction) => reaction.reactor_user_id),
+        ...(conversationResult.data ?? []).flatMap((conversation) => [conversation.direct_user_one, conversation.direct_user_two]),
+    ].filter((id): id is string => Boolean(id) && !activePeopleById.has(id)))]
+    const attributionResult = historicalIds.length
+        ? await supabaseAdmin.from("account_user_attributions").select("user_id, username, display_name, avatar_path, removed_at").in("user_id", historicalIds)
+        : { data: [], error: null }
+    if (attributionResult.error && attributionResult.error.code !== "42P01") throw new Error(attributionResult.error.message)
+    const formerPeople: CommunicationPerson[] = (attributionResult.data ?? []).map((profile) => ({
+        id: profile.user_id,
+        name: profile.display_name?.trim() || profile.username || "Former member",
+        avatarSrc: profile.avatar_path ? profileAvatarUrl(profile.username, profile.avatar_path) : null,
+        former: Boolean(profile.removed_at),
+    }))
+    const peopleById = new Map([...peopleResult.people, ...formerPeople].map((person) => [person.id, person]))
     const teamById = new Map(teams.map((team) => [team.id, team]))
     const participants = new Map<string, string[]>()
     for (const participant of participantResult.data ?? []) participants.set(participant.conversation_id, [...(participants.get(participant.conversation_id) ?? []), participant.user_id])
@@ -133,9 +150,12 @@ export async function loadNativeCommunications(input: {
         if (conversation.kind === "direct") {
             const memberIds = participants.get(conversation.id) ?? []
             if (!memberIds.includes(input.currentUserId)) return []
-            const otherId = memberIds.find((id) => id !== input.currentUserId) ?? input.currentUserId
-            const person = peopleById.get(otherId) ?? { id: otherId, name: "Workspace member", avatarSrc: null }
-            return [{ id: conversation.id, kind: "direct" as const, teamId: null, title: person.name, subtitle: "Direct message", avatarSrc: person.avatarSrc, memberIds, archived: false, canWrite: true, pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
+            const otherId = [conversation.direct_user_one, conversation.direct_user_two].find((id) => id && id !== input.currentUserId)
+                ?? memberIds.find((id) => id !== input.currentUserId)
+                ?? input.currentUserId
+            const person: CommunicationPerson = peopleById.get(otherId) ?? { id: otherId, name: "Workspace member", avatarSrc: null, former: false }
+            const archived = Boolean(conversation.archived_at) || Boolean(person.former)
+            return [{ id: conversation.id, kind: "direct" as const, teamId: null, title: person.name, subtitle: archived ? "Former member · read-only history" : "Direct message", avatarSrc: person.avatarSrc, memberIds, archived, canWrite: !archived, pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
         }
         const team = conversation.team_id ? teamById.get(conversation.team_id) : null
         if (!team) return []
@@ -146,7 +166,7 @@ export async function loadNativeCommunications(input: {
     const conversationIds = new Set(conversations.map((conversation) => conversation.id))
     const reactions: NativeReaction[] = (reactionResult.data ?? []).flatMap((reaction) => conversationIds.has(reaction.conversation_id) ? [{ id: reaction.id, conversationId: reaction.conversation_id, messageId: reaction.message_id, reactorUserId: reaction.reactor_user_id, emoji: reaction.emoji, updatedAt: reaction.updated_at }] : [])
     const readCursors: NativeReadCursor[] = (cursorResult.data ?? []).flatMap((cursor) => conversationIds.has(cursor.conversation_id) ? [{ conversationId: cursor.conversation_id, userId: cursor.user_id, lastReadMessageId: cursor.last_read_message_id, lastReadAt: cursor.last_read_at }] : [])
-    return { ...base, conversations, reactions, readCursors, schemaReady: true }
+    return { ...base, formerPeople, conversations, reactions, readCursors, schemaReady: true }
 }
 
 export function nativeAttachmentFromInput(value: unknown): CommunicationAttachment | null {

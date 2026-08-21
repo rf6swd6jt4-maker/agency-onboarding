@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 import { migrateLegacyAuthCookies } from "@/lib/supabase/legacy-cookies"
 import { applySessionResponseHeaders, carrySessionResponse, persistentSessionOptions, sessionCookieDomain, sessionCookieOptions } from "@/lib/supabase/session-cookies"
+import { authHostname, authOrigin } from "@/lib/auth/origin"
 
 async function refreshSession(request: NextRequest) {
     const headers = requestHeadersWithCurrentPath(request)
@@ -48,7 +49,7 @@ function requestHostname(request: NextRequest) {
 const DASHBOARD_HOST = "dashboard.betelgeze.com"
 const APP_HOST = "app.betelgeze.com"
 const ONBOARDING_HOST = "onboarding.betelgeze.com"
-const AUTH_HOST = "auth.betelgeze.com"
+const AUTH_HOST = authHostname()
 const AUTH_PATHS = [
     "/login", "/mfa", "/forgot-password", "/update-password",
     "/email-confirmed", "/check-email", "/sign-up", "/invitation",
@@ -143,13 +144,13 @@ export async function proxy(request: NextRequest) {
 
     const isCentralAuthRoute = AUTH_PATHS.some((authPath) => path === authPath || path.startsWith(`${authPath}/`))
     if (domain && domain !== AUTH_HOST && isCentralAuthRoute && isPlatformHost(domain)) {
-        const destination = new URL(`https://${AUTH_HOST}${path}`)
+        const destination = new URL(path, authOrigin())
         destination.search = request.nextUrl.search
         return withSession(NextResponse.redirect(destination))
     }
 
     if ((domain === "betelgeze.com" || domain === "www.betelgeze.com") && path === "/" && (request.nextUrl.searchParams.has("code") || request.nextUrl.searchParams.has("token_hash"))) {
-        const destination = new URL(`https://${AUTH_HOST}/auth/callback`)
+        const destination = new URL("/auth/callback", authOrigin())
         request.nextUrl.searchParams.forEach((value, key) => destination.searchParams.set(key, value))
         if (!destination.searchParams.has("next")) {
             const type = destination.searchParams.get("type")
@@ -162,7 +163,7 @@ export async function proxy(request: NextRequest) {
     // Workspace pages now live directly under /[workspaceSlug]/...
     if (isAppHost(domain)) {
         if (sessionState.userId && sessionState.aal !== "aal2") {
-            const destination = new URL(`https://${AUTH_HOST}/mfa`)
+            const destination = new URL("/mfa", authOrigin())
             destination.searchParams.set("next", `https://${domain}${requestCurrentPath(request)}`)
             return withSession(NextResponse.redirect(destination))
         }
@@ -201,7 +202,7 @@ export async function proxy(request: NextRequest) {
 
     if (domain === "leadgen.betelgeze.com") {
         if (isCentralAuthRoute) {
-            const destination = new URL(`https://${AUTH_HOST}${path}`)
+            const destination = new URL(path, authOrigin())
             destination.search = request.nextUrl.search
             return withSession(NextResponse.redirect(destination))
         }

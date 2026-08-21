@@ -8,6 +8,7 @@ import { carrySessionResponse } from "@/lib/supabase/session-cookies"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { storeProfileAvatar } from "@/lib/onboarding/uploads"
 import { findAuthUserByEmail, isEmailConfirmed } from "@/lib/auth/users"
+import { authOrigin } from "@/lib/auth/origin"
 
 const intendedUseOptions = new Set(["communications", "point-of-sale", "onboarding", "operations", "just-exploring", "prefer-not-to-say"])
 const roleOptions = new Set(["owner", "operations", "sales", "client-services", "other", "prefer-not-to-say"])
@@ -94,13 +95,13 @@ export async function POST(request: NextRequest) {
                 await updateOnboardingSession(context.sessionId, { current_step: "username" })
                 return jsonWithSession(sessionResponse, { code: "username_unavailable", error: accountErrorMessage("username_unavailable"), alternatives: await availableUsernameAlternatives(username) }, { status: 409 })
             }
-            const authOrigin = process.env.NODE_ENV === "production" ? "https://auth.betelgeze.com" : request.nextUrl.origin
+            const accountOrigin = authOrigin(request.nextUrl.origin)
             const { data, error } = await supabase.auth.signUp({
                 email: context.email,
                 password,
                 options: {
                     data: { username },
-                    emailRedirectTo: `${authOrigin}/auth/callback?next=${encodeURIComponent("/sign-up/about")}`,
+                    emailRedirectTo: `${accountOrigin}/auth/callback?next=${encodeURIComponent("/sign-up/about")}`,
                 },
             })
             if (error) {
