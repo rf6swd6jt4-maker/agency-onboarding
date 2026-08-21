@@ -115,6 +115,7 @@ test("native typing is conversation scoped, animated, previewed, and self expiri
         readFile("app/globals.css", "utf8"),
     ])
     assert.match(realtime, /channel\.send\(\{ type: "broadcast", event, payload \}\)/)
+    assert.match(realtime, /broadcast: \{ self: false, ack: true \}/)
     assert.match(workspace, /\.on\("broadcast", \{ event: NATIVE_TYPING_EVENT \}/)
     assert.match(workspace, /NATIVE_TYPING_EXPIRY_MS = 6_000/)
     assert.match(workspace, /NATIVE_TYPING_REFRESH_MS = 2_000/)

@@ -51,11 +51,18 @@ export function useReliableCommunicationsRealtime({
         const channel = channelRef.current
         if (!channel || stateRef.current !== "live") return false
         try {
-            return await channel.send({ type: "broadcast", event, payload }) === "ok"
+            const sent = await channel.send({ type: "broadcast", event, payload }) === "ok"
+            if (!sent) {
+                updateState("reconnecting", "Live activity could not be sent. Reconnecting…")
+                window.dispatchEvent(new Event(COMMUNICATIONS_RECOVERY_EVENT))
+            }
+            return sent
         } catch {
+            updateState("reconnecting", "Live activity could not be sent. Reconnecting…")
+            window.dispatchEvent(new Event(COMMUNICATIONS_RECOVERY_EVENT))
             return false
         }
-    }, [])
+    }, [updateState])
 
     useEffect(() => {
         if (!schemaReady) {
@@ -142,7 +149,7 @@ export function useReliableCommunicationsRealtime({
                 await synchronizeRef.current()
                 await refreshRealtimeAuth()
                 if (disposed) return
-                const candidate = registerRef.current(supabase.channel(`communications:${connectionKey}`, { config: { private: true } }))
+                const candidate = registerRef.current(supabase.channel(`communications:${connectionKey}`, { config: { private: true, broadcast: { self: false, ack: true } } }))
                 channel = candidate
                 channelRef.current = candidate
                 candidate.subscribe((status, subscribeError) => {

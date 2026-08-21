@@ -56,6 +56,15 @@ test("workspace navigation keeps frame content mounted and reports progress inli
     assert.match(shell, /hidden=\{!active\}/)
 })
 
+test("workspace frames acknowledge readiness with the current activation state", () => {
+    const shell = source("components/workspace/WorkspaceTopBarClient.tsx")
+    const bridge = source("components/workspace/WorkspaceTabBridge.tsx")
+
+    assert.match(bridge, /type: "location"/)
+    assert.match(shell, /message\.type === "location"[\s\S]*postToTab\(message\.tabId, \{ type: "activate", active: message\.tabId === activeTabIdRef\.current, refresh: false \}\)/)
+    assert.match(shell, /message\.type === "location-replace"[\s\S]*postToTab\(message\.tabId, \{ type: "activate", active: message\.tabId === activeTabIdRef\.current, refresh: false \}\)/)
+})
+
 test("workspace mutations treat business failures as failures and forms opt into background behavior explicitly", () => {
     const runtime = source("lib/workspace-mutations.ts")
     const overlay = source("components/GlobalLoadingOverlay.tsx")

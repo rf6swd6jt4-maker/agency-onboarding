@@ -911,6 +911,12 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             if (message.type === "location-replace" && message.url) {
                 const url = normalizeWorkspaceUrl(message.url)
                 readyTabIdsRef.current.add(message.tabId)
+                // The frame only reports its location after its bridge effects
+                // have mounted. Reply here as the reliable activation
+                // handshake instead of relying solely on the iframe load
+                // event, which can fire before the frame installs its message
+                // listener.
+                postToTab(message.tabId, { type: "activate", active: message.tabId === activeTabIdRef.current, refresh: false })
                 pendingNavigationRef.current.delete(message.tabId)
                 completeTabNavigation(message.tabId)
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
@@ -932,6 +938,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 const url = normalizeWorkspaceUrl(message.url)
                 const pendingUrl = pendingNavigationRef.current.get(message.tabId)
                 readyTabIdsRef.current.add(message.tabId)
+                postToTab(message.tabId, { type: "activate", active: message.tabId === activeTabIdRef.current, refresh: false })
                 if (pendingUrl && pendingUrl !== url) {
                     // This is the initial location handshake for a frame that
                     // was still booting when navigation was requested. The
@@ -1056,7 +1063,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         window.addEventListener("message", receiveFrameMessage)
         return () => window.removeEventListener("message", receiveFrameMessage)
-    }, [beginTabNavigation, completeTabNavigation, normalizeWorkspaceUrl, openWorkspaceTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [beginTabNavigation, completeTabNavigation, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
 
     useEffect(() => {
         function start(event: Event) {
