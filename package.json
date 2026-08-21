@@ -28,7 +28,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "resend": "^6.21.0",
-    "sharp": "^0.35.0",
+    "sharp": "^0.34.5",
     "standardwebhooks": "^1.0.0",
     "web-push": "^3.6.7",
     "yjs": "^13.6.32"
