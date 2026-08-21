@@ -162,7 +162,14 @@ function reconcileConversations(current: NativeConversation[], incoming: NativeC
     const currentById = new Map(current.map((conversation) => [conversation.id, conversation]))
     return incoming.map((conversation) => ({
         ...conversation,
-        messages: mergeMessages(currentById.get(conversation.id)?.messages ?? [], conversation.messages),
+        // Server-persisted messages are authoritative during recovery. Keep
+        // only local sends that have not received their durable row yet; an
+        // additive merge would otherwise resurrect messages deleted while a
+        // Realtime event was missed.
+        messages: mergeMessages(
+            (currentById.get(conversation.id)?.messages ?? []).filter((message) => message.clientRequestId === message.id),
+            conversation.messages,
+        ),
     })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt))
 }
 
@@ -357,7 +364,16 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     if (payload.eventType === "DELETE") {
                         const deleted = record(payload.old); const messageId = text(deleted.id); const conversationId = text(deleted.conversation_id)
-                        if (messageId && conversationId) setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== messageId) } : conversation))
+                        if (messageId) {
+                            setConversations((current) => current.map((conversation) => !conversationId || conversation.id === conversationId ? {
+                                ...conversation,
+                                pinnedMessageId: conversation.pinnedMessageId === messageId ? null : conversation.pinnedMessageId,
+                                messages: conversation.messages.filter((message) => message.id !== messageId),
+                            } : conversation))
+                            setReactions((current) => current.filter((reaction) => reaction.messageId !== messageId))
+                            setReplyingTo((current) => current?.id === messageId ? null : current)
+                            setActionMessageId((current) => current === messageId ? null : current)
+                        }
                         return
                     }
                     const message = realtimeMessage(payload.new); if (message) updateConversationMessages(message.conversationId, [message], true)
@@ -534,9 +550,9 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, pinnedMessageId: conversation.pinnedMessageId === message.id ? null : conversation.pinnedMessageId, messages: conversation.messages.filter((candidate) => candidate.id !== message.id) } : conversation))
         const params = new URLSearchParams({ conversationId: selected.id, messageId: message.id })
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?${params}`, { method: "DELETE" }).catch(() => null)
-        if (!response?.ok) {
+        const result = response ? await response.json().catch(() => null) as { deleted?: boolean; conversationId?: string; messageId?: string; error?: string } | null : null
+        if (!response?.ok || result?.deleted !== true || result.conversationId !== selected.id || result.messageId !== message.id) {
             setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, pinnedMessageId: previousPinnedMessageId, messages: mergeMessages(conversation.messages, previous) } : conversation))
-            const result = response ? await response.json().catch(() => null) as { error?: string } | null : null
             setError(result?.error ?? "Could not delete message.")
         }
     }

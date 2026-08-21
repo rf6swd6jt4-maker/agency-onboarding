@@ -72,12 +72,15 @@ export async function DELETE(request: Request, context: { params: Promise<{ work
 
     const { data: message, error: lookupError } = await supabaseAdmin.from("workspace_native_messages").select("id, sender_user_id, attachment").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).maybeSingle()
     if (lookupError) return Response.json({ error: lookupError.message }, { status: 503 })
-    if (!message) return Response.json({ deleted: true })
+    if (!message) return Response.json({ deleted: true, conversationId, messageId })
     if (message.sender_user_id !== user.id) return Response.json({ error: "You can only delete messages you sent." }, { status: 403 })
 
     const { error } = await supabaseAdmin.from("workspace_native_messages").delete().eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).eq("sender_user_id", user.id)
     if (error) return Response.json({ error: error.message }, { status: 503 })
+    const { data: remaining, error: verificationError } = await supabaseAdmin.from("workspace_native_messages").select("id").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", messageId).maybeSingle()
+    if (verificationError) return Response.json({ error: `Message deletion could not be verified: ${verificationError.message}` }, { status: 503 })
+    if (remaining) return Response.json({ error: "The message is still stored and was not deleted." }, { status: 503 })
     const attachment = nativeAttachmentFromInput(message.attachment)
     if (attachment?.storagePath && attachment.kind !== "sticker") await deleteOnboardingUploads([attachment.storagePath]).catch(() => undefined)
-    return Response.json({ deleted: true })
+    return Response.json({ deleted: true, conversationId, messageId })
 }
