@@ -3,12 +3,14 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 test("new Communications content is encrypted with non-database root keys", async () => {
-    const [migration, hardeningMigration, realtimeMigration, clientServer, nativeServer, metaWebhook, clientWorkspace, nativeWorkspace] = await Promise.all([
+    const [migration, hardeningMigration, realtimeMigration, keyRoundtripMigration, clientServer, nativeServer, nativeRoute, metaWebhook, clientWorkspace, nativeWorkspace] = await Promise.all([
         readFile("supabase/migrations/20260821150000_encrypted_communications.sql", "utf8"),
         readFile("supabase/migrations/20260821153000_encrypt_communication_delivery_payloads.sql", "utf8"),
         readFile("supabase/migrations/20260821154500_encrypted_communication_realtime_reads.sql", "utf8"),
+        readFile("supabase/migrations/20260821230000_fix_communication_key_roundtrip.sql", "utf8"),
         readFile("lib/communications/server.ts", "utf8"),
         readFile("lib/teams/server.ts", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
         readFile("app/api/client-messages/meta/whatsapp/route.ts", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
@@ -30,6 +32,11 @@ test("new Communications content is encrypted with non-database root keys", asyn
     assert.match(realtimeMigration, /communication_client_message\(/)
     assert.match(realtimeMigration, /communication_native_message\(/)
     assert.match(realtimeMigration, /from public, anon, service_role/)
+    assert.match(keyRoundtripMigration, /where decrypted\.id = generated_vault_id/)
+    assert.match(keyRoundtripMigration, /secret := stored_secret/)
+    assert.match(keyRoundtripMigration, /return stored_secret/)
+    assert.match(keyRoundtripMigration, /try_decrypt_text/)
+    assert.match(keyRoundtripMigration, /message\.body_ciphertext is null or message\.decrypted_body is not null/)
     assert.doesNotMatch(metaWebhook, /STATUS_MESSAGE_COLUMNS = [^\n]*raw_payload/)
     assert.match(clientServer, /rpc\("communication_client_messages"/)
     assert.match(clientServer, /rpc\("communication_client_message"/)
@@ -37,6 +44,9 @@ test("new Communications content is encrypted with non-database root keys", asyn
     assert.match(nativeServer, /rpc\("communication_native_message"/)
     assert.match(clientWorkspace, /messageId=\$\{encodeURIComponent\(messageId\)\}/)
     assert.match(nativeWorkspace, /native\/messages\?conversationId=.*&messageId=/)
+    assert.match(nativeRoute, /\.eq\("client_request_id", clientRequestId\)/)
+    assert.match(nativeRoute, /loadNativeMessageForCurrentUser\(\{ workspaceId: workspace\.id, messageId: data\.id \}\)/)
+    assert.doesNotMatch(nativeRoute, /const existingMessages = await loadNativeMessagesForCurrentUser/)
 })
 
 test("private chat policy, recovery views, and participant moderation are database enforced", async () => {

@@ -43,9 +43,23 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const attachment = nativeAttachmentFromInput(input?.attachment)
     if (!UUID_PATTERN.test(conversationId) || !UUID_PATTERN.test(clientRequestId) || (replyToMessageId && !UUID_PATTERN.test(replyToMessageId)) || (!body && !attachment) || body.length > 8000 || (input?.attachment && !attachment)) return Response.json({ error: "A valid message or attachment is required." }, { status: 400 })
     if (!await assertNativeConversationAccess(conversationId, user.id, "write")) return Response.json({ error: "Conversation is unavailable or read-only." }, { status: 403 })
-    const existingMessages = await loadNativeMessagesForCurrentUser({ workspaceId: workspace.id, conversationId, limit: 1000 })
-    const existing = existingMessages.find((message) => message.clientRequestId === clientRequestId)
-    if (existing) return Response.json({ message: existing, reused: true })
+    const existingRow = await supabaseAdmin
+        .from("workspace_native_messages")
+        .select("id")
+        .eq("workspace_id", workspace.id)
+        .eq("conversation_id", conversationId)
+        .eq("client_request_id", clientRequestId)
+        .maybeSingle()
+    if (existingRow.error) return Response.json({ error: `Could not check the message request: ${existingRow.error.message}` }, { status: 503 })
+    if (existingRow.data) {
+        try {
+            const existing = await loadNativeMessageForCurrentUser({ workspaceId: workspace.id, messageId: existingRow.data.id })
+            if (existing) return Response.json({ message: existing, reused: true })
+            return Response.json({ error: "The earlier encrypted message attempt could not be recovered. Please send the message again." }, { status: 409 })
+        } catch (error) {
+            return Response.json({ error: error instanceof Error ? error.message : "Could not recover the earlier message request." }, { status: 503 })
+        }
+    }
     if (replyToMessageId) {
         const { data: replyTarget } = await supabaseAdmin.from("workspace_native_messages").select("id").eq("workspace_id", workspace.id).eq("conversation_id", conversationId).eq("id", replyToMessageId).maybeSingle()
         if (!replyTarget) return Response.json({ error: "The replied message was not found." }, { status: 404 })
@@ -68,7 +82,13 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     }
     const { data, error } = await supabaseAdmin.from("workspace_native_messages").insert({ workspace_id: workspace.id, conversation_id: conversationId, sender_user_id: user.id, client_request_id: clientRequestId, body: body || null, reply_to_message_id: replyToMessageId || null, attachment: storedAttachment }).select("id").single()
     if (error || !data) return Response.json({ error: error?.message ?? "Could not create message." }, { status: 503 })
-    const message = (await loadNativeMessagesForCurrentUser({ workspaceId: workspace.id, conversationId, limit: 1000 })).find((candidate) => candidate.id === data.id) ?? null
+    let message: Awaited<ReturnType<typeof loadNativeMessageForCurrentUser>> = null
+    try {
+        message = await loadNativeMessageForCurrentUser({ workspaceId: workspace.id, messageId: data.id })
+    } catch (error) {
+        return Response.json({ error: error instanceof Error ? `Message saved, but encrypted confirmation failed: ${error.message}` : "Message saved, but encrypted confirmation failed." }, { status: 503 })
+    }
+    if (!message) return Response.json({ error: "Message saved, but its encrypted copy could not be confirmed. Refresh the conversation before retrying." }, { status: 503 })
     if (message) after(() => notifyNativeChatMessage({ workspaceId: workspace.id, workspaceSlug: workspace.slug, conversationId, messageId: message.id, senderUserId: user.id }))
     return Response.json({ message })
 }
