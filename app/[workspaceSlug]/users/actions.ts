@@ -46,8 +46,14 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
     const invitationId = existingInvitation?.id ?? crypto.randomUUID()
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
     const inviteUrl = `https://betelgeze.com/invitation?token=${invitationId}&email=${encodeURIComponent(email)}`
+    const { data: inviterProfile } = await supabaseAdmin
+        .from("user_profiles")
+        .select("display_name, username")
+        .eq("user_id", user.id)
+        .maybeSingle()
+    const inviterName = inviterProfile?.display_name?.trim() || inviterProfile?.username || user.email || "A workspace administrator"
     try {
-        await sendWorkspaceInvitation({ to: email, workspaceName: workspace.name, inviteUrl })
+        await sendWorkspaceInvitation({ to: email, workspaceName: workspace.name, inviterName, inviteUrl })
     } catch (error) {
         const details = emailDeliveryFailureDetails(error)
         console.error("Workspace invitation email failed", {

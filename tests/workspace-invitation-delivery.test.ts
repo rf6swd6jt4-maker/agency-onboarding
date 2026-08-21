@@ -27,11 +27,25 @@ test("transactional email uses Resend and retains safe provider diagnostics", ()
     assert.match(email, /new Resend\(getEmailEnv\("RESEND_API_KEY"\)\)/)
     assert.match(email, /await resend\.emails\.send\(message\)/)
     assert.match(email, /Betelgeze <noreply@betelgeze\.com>/)
+    assert.match(email, /replyTo: process\.env\.EMAIL_REPLY_TO\?\.trim\(\) \|\| "hello@betelgeze\.com"/)
     assert.doesNotMatch(email, /SMTP_|nodemailer|sendMail/)
     assert.match(email, /providerCommand: classified\.providerCommand/)
     assert.match(email, /providerResponseCode: classified\.providerResponseCode/)
     assert.match(email, /providerResponse: classified\.providerResponse/)
     assert.match(email, /\.replace\(\/\[A-Z0-9\._%\+\-\]\+@/)
+})
+
+test("invitation copy identifies the inviter and explains unexpected messages", () => {
+    const email = source("lib/email.ts")
+    const action = source("app/[workspaceSlug]/users/actions.ts")
+
+    assert.match(action, /\.from\("user_profiles"\)/)
+    assert.match(action, /\.select\("display_name, username"\)/)
+    assert.match(action, /sendWorkspaceInvitation\(\{ to: email, workspaceName: workspace\.name, inviterName, inviteUrl \}\)/)
+    assert.match(email, /has invited you to join the \$\{workspaceName\} workspace on Betelgeze/)
+    assert.match(email, /If you were not expecting this invitation, you can safely ignore this email/)
+    assert.match(email, /No account will be created unless you accept it/)
+    assert.match(email, /The button opens betelgeze\.com/)
 })
 
 test("invitation failures stay inline instead of crashing Settings", () => {

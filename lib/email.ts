@@ -94,16 +94,23 @@ function escapeHtml(value: string) {
         .replace(/'/g, "&#039;")
 }
 
+function emailHeaderText(value: string) {
+    return value.replace(/[\r\n]+/g, " ").trim()
+}
+
 export function assertEmailDeliveryConfigured() {
     getEmailEnv("RESEND_API_KEY")
 }
 
-export async function sendWorkspaceInvitation({ to, workspaceName, inviteUrl }: { to: string; workspaceName: string; inviteUrl: string }) {
+export async function sendWorkspaceInvitation({ to, workspaceName, inviterName, inviteUrl }: { to: string; workspaceName: string; inviterName: string; inviteUrl: string }) {
+    const safeWorkspaceName = escapeHtml(workspaceName)
+    const safeInviterName = escapeHtml(inviterName)
     await deliverEmail({
         from: process.env.EMAIL_FROM?.trim() || "Betelgeze <noreply@betelgeze.com>",
+        replyTo: process.env.EMAIL_REPLY_TO?.trim() || "hello@betelgeze.com",
         to,
-        subject: `You’re invited to ${workspaceName} on Betelgeze`,
-        text: `You have been invited to ${workspaceName} on Betelgeze. Open your invitation: ${inviteUrl}`,
-        html: `<p>You have been invited to <strong>${escapeHtml(workspaceName)}</strong> on Betelgeze.</p><p><a href="${escapeHtml(inviteUrl)}">Open your invitation</a></p><p>This invitation expires in seven days.</p>`,
+        subject: `Invitation to join ${emailHeaderText(workspaceName)} on Betelgeze`,
+        text: `${inviterName} has invited you to join the ${workspaceName} workspace on Betelgeze.\n\nReview your invitation: ${inviteUrl}\n\nThis invitation expires in seven days. The link opens betelgeze.com.\n\nIf you were not expecting this invitation, you can safely ignore this email. No account will be created unless you accept it.\n\nBetelgeze\nhttps://betelgeze.com`,
+        html: `<!doctype html><html><body style="margin:0;background:#f5f5f4;color:#171717;font-family:Arial,sans-serif"><div style="max-width:560px;margin:0 auto;padding:40px 20px"><div style="background:#ffffff;border:1px solid #e5e5e5;border-radius:16px;padding:36px"><p style="margin:0 0 24px;color:#059669;font-size:13px;font-weight:700;letter-spacing:0.18em">BETELGEZE</p><h1 style="margin:0 0 18px;font-size:28px;line-height:1.2">Join ${safeWorkspaceName}</h1><p style="margin:0 0 24px;color:#404040;font-size:16px;line-height:1.6"><strong>${safeInviterName}</strong> has invited you to join the ${safeWorkspaceName} workspace on Betelgeze.</p><p style="margin:0 0 24px"><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#171717;color:#ffffff;text-decoration:none;border-radius:10px;padding:14px 20px;font-size:16px;font-weight:700">Review invitation</a></p><p style="margin:0;color:#737373;font-size:14px;line-height:1.6">This invitation expires in seven days. The button opens betelgeze.com.</p><hr style="border:0;border-top:1px solid #e5e5e5;margin:28px 0"><p style="margin:0;color:#737373;font-size:13px;line-height:1.6">If you were not expecting this invitation, you can safely ignore this email. No account will be created unless you accept it.</p></div><p style="margin:18px 0 0;text-align:center;color:#737373;font-size:12px">Betelgeze · <a href="https://betelgeze.com" style="color:#525252">betelgeze.com</a></p></div></body></html>`,
     })
 }
