@@ -3,6 +3,7 @@ import { loadCommunicationPeople, loadCommunicationStickers } from "@/lib/commun
 import { maintenanceCategoryLabel, MAINTENANCE_CATEGORIES } from "@/lib/admin/maintenance"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { createSupabaseServerClient } from "@/lib/supabase/server"
 import type { CommunicationAttachment, CommunicationPerson } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, NativeReaction, NativeReadCursor, WorkspaceTeam, WorkspaceTeamKind } from "@/lib/teams/types"
 
@@ -28,6 +29,7 @@ export function nativeMessageFromRow(value: unknown): NativeMessage | null {
         clientRequestId: text(row.client_request_id),
         conversationId,
         senderUserId,
+        senderWorkspaceRole: row.sender_workspace_role === "owner" || row.sender_workspace_role === "admin" || row.sender_workspace_role === "staff" ? row.sender_workspace_role : null,
         body: typeof row.body === "string" ? row.body : "",
         replyToMessageId: text(row.reply_to_message_id),
         attachment: communicationAttachmentFromValue(row.attachment),
@@ -93,6 +95,7 @@ export async function loadNativeCommunications(input: {
         loadCommunicationPeople(input.workspaceId, input.currentUserId),
         loadCommunicationStickers(input.workspaceId),
     ])
+    const currentUserRole: NativeCommunicationsBootstrap["currentUserRole"] = input.role === "owner" || input.role === "admin" ? input.role : "staff"
     const base = {
         workspaceId: input.workspaceId,
         workspaceSlug: input.workspaceSlug,
@@ -105,15 +108,17 @@ export async function loadNativeCommunications(input: {
         maintenanceCategories: MAINTENANCE_CATEGORIES.map((key) => ({ key, label: maintenanceCategoryLabel(key) })),
         canManageTeams: input.role === "owner" || input.role === "admin",
         isOwner: input.role === "owner",
+        currentUserRole,
         requestedConversationId: input.requestedConversationId && UUID_PATTERN.test(input.requestedConversationId) ? input.requestedConversationId : null,
         requestedDmUserId: input.requestedDmUserId && UUID_PATTERN.test(input.requestedDmUserId) ? input.requestedDmUserId : null,
     }
     if (!schemaReady) return { ...base, conversations: [], reactions: [], readCursors: [], schemaReady: false }
 
+    const supabase = await createSupabaseServerClient()
     const [conversationResult, participantResult, messageResult, reactionResult, cursorResult, membershipResult] = await Promise.all([
         supabaseAdmin.from("workspace_native_conversations").select("id, kind, team_id, direct_user_one, direct_user_two, archived_at, pinned_message_id, updated_at").eq("workspace_id", input.workspaceId).order("updated_at", { ascending: false }),
         supabaseAdmin.from("workspace_native_conversation_participants").select("conversation_id, user_id").eq("workspace_id", input.workspaceId),
-        supabaseAdmin.from("workspace_native_messages").select("id, client_request_id, conversation_id, sender_user_id, body, reply_to_message_id, attachment, created_at").eq("workspace_id", input.workspaceId).order("created_at").limit(4000),
+        supabase.rpc("communication_native_messages", { p_workspace_id: input.workspaceId, p_conversation_id: null, p_limit: 4000 }),
         supabaseAdmin.from("workspace_native_reactions").select("id, conversation_id, message_id, reactor_user_id, emoji, updated_at").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspace_native_read_cursors").select("conversation_id, user_id, last_read_message_id, last_read_at").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", input.workspaceId),
@@ -122,7 +127,7 @@ export async function loadNativeCommunications(input: {
     if (fatal) throw new Error(fatal!.message)
     const activePeopleById = new Map(peopleResult.people.map((person) => [person.id, person]))
     const historicalIds = [...new Set([
-        ...(messageResult.data ?? []).map((message) => message.sender_user_id),
+        ...(messageResult.data ?? []).map((message: { sender_user_id?: string | null }) => message.sender_user_id),
         ...(reactionResult.data ?? []).map((reaction) => reaction.reactor_user_id),
         ...(conversationResult.data ?? []).flatMap((conversation) => [conversation.direct_user_one, conversation.direct_user_two]),
     ].filter((id): id is string => Boolean(id) && !activePeopleById.has(id)))]
@@ -141,11 +146,10 @@ export async function loadNativeCommunications(input: {
     const participants = new Map<string, string[]>()
     for (const participant of participantResult.data ?? []) participants.set(participant.conversation_id, [...(participants.get(participant.conversation_id) ?? []), participant.user_id])
     const messages = new Map<string, NativeMessage[]>()
-    for (const row of messageResult.data ?? []) {
+    for (const row of [...(messageResult.data ?? [])].reverse()) {
         const message = nativeMessageFromRow(row)
         if (message) messages.set(message.conversationId, [...(messages.get(message.conversationId) ?? []), message])
     }
-    const canInspectArchived = input.role === "owner" || input.role === "admin"
     const conversations = (conversationResult.data ?? []).flatMap<NativeConversation>((conversation) => {
         if (conversation.kind === "direct") {
             const memberIds = participants.get(conversation.id) ?? []
@@ -160,13 +164,41 @@ export async function loadNativeCommunications(input: {
         const team = conversation.team_id ? teamById.get(conversation.team_id) : null
         if (!team) return []
         const archived = Boolean(team.archivedAt)
-        if (!team.memberIds.includes(input.currentUserId) && !(archived && canInspectArchived)) return []
+        if (!team.memberIds.includes(input.currentUserId)) return []
         return [{ id: conversation.id, kind: "team" as const, teamId: team.id, title: team.name, subtitle: `${team.memberIds.length} member${team.memberIds.length === 1 ? "" : "s"}`, avatarSrc: null, memberIds: team.memberIds, archived, canWrite: !archived && team.memberIds.includes(input.currentUserId), pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
     }).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt) || left.title.localeCompare(right.title))
     const conversationIds = new Set(conversations.map((conversation) => conversation.id))
     const reactions: NativeReaction[] = (reactionResult.data ?? []).flatMap((reaction) => conversationIds.has(reaction.conversation_id) ? [{ id: reaction.id, conversationId: reaction.conversation_id, messageId: reaction.message_id, reactorUserId: reaction.reactor_user_id, emoji: reaction.emoji, updatedAt: reaction.updated_at }] : [])
     const readCursors: NativeReadCursor[] = (cursorResult.data ?? []).flatMap((cursor) => conversationIds.has(cursor.conversation_id) ? [{ conversationId: cursor.conversation_id, userId: cursor.user_id, lastReadMessageId: cursor.last_read_message_id, lastReadAt: cursor.last_read_at }] : [])
     return { ...base, formerPeople, conversations, reactions, readCursors, schemaReady: true }
+}
+
+export async function loadNativeMessagesForCurrentUser(input: {
+    workspaceId: string
+    conversationId: string
+    limit?: number
+}) {
+    const supabase = await createSupabaseServerClient()
+    const { data, error } = await supabase.rpc("communication_native_messages", {
+        p_workspace_id: input.workspaceId,
+        p_conversation_id: input.conversationId,
+        p_limit: input.limit ?? 1000,
+    })
+    if (error) throw new Error(error.message)
+    return [...(data ?? [])].reverse().flatMap((row: unknown) => nativeMessageFromRow(row) ?? [])
+}
+
+export async function loadNativeMessageForCurrentUser(input: {
+    workspaceId: string
+    messageId: string
+}) {
+    const supabase = await createSupabaseServerClient()
+    const { data, error } = await supabase.rpc("communication_native_message", {
+        p_workspace_id: input.workspaceId,
+        p_message_id: input.messageId,
+    })
+    if (error) throw new Error(error.message)
+    return (data ?? []).flatMap((row: unknown) => nativeMessageFromRow(row) ?? [])[0] ?? null
 }
 
 export function nativeAttachmentFromInput(value: unknown): CommunicationAttachment | null {

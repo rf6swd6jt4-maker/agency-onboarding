@@ -27,6 +27,10 @@ function isImage(asset: RelationshipAsset) {
     return Boolean(asset.content_type?.startsWith("image/"))
 }
 
+function encryptedMessageAssetUrl(storagePath: string) {
+    return `/api/client-messages/media/${storagePath.split("/").map(encodeURIComponent).join("/")}`
+}
+
 export default async function AssetsPage({ params }: PageProps) {
     const { workspaceSlug } = await params
     const { workspace, user } = await requireWorkspace(workspaceSlug)
@@ -36,7 +40,9 @@ export default async function AssetsPage({ params }: PageProps) {
     const uploadCount = assets.filter((asset) => asset.source_kind === "upload").length
     const previewEntries = await Promise.all(assets.slice(0, 24).map(async (asset) => ({
         asset,
-        previewUrl: isImage(asset) && asset.storage_path ? await createUploadSignedUrl(asset.storage_path) : null,
+        previewUrl: isImage(asset) && asset.storage_path
+            ? asset.source_kind === "message" ? encryptedMessageAssetUrl(asset.storage_path) : await createUploadSignedUrl(asset.storage_path)
+            : null,
     })))
 
     return (

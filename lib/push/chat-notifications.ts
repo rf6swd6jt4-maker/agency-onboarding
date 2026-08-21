@@ -219,7 +219,7 @@ export async function notifyNativeChatMessage(input: {
         supabaseAdmin.from("workspace_native_conversation_participants").select("user_id").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId),
         supabaseAdmin.from("user_profiles").select("display_name, username").eq("user_id", input.senderUserId).maybeSingle(),
         supabaseAdmin.from("workspace_native_conversations").select("kind, team_id").eq("workspace_id", input.workspaceId).eq("id", input.conversationId).maybeSingle(),
-        supabaseAdmin.from("workspace_native_messages").select("body, attachment, created_at").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId).eq("id", input.messageId).maybeSingle(),
+        supabaseAdmin.from("workspace_native_messages").select("created_at").eq("workspace_id", input.workspaceId).eq("conversation_id", input.conversationId).eq("id", input.messageId).maybeSingle(),
     ])
     if (participantsError || profileError || conversationError || messageError || !conversation || !message) {
         console.error("Could not prepare native chat push", participantsError ?? profileError ?? conversationError ?? messageError)
@@ -235,7 +235,7 @@ export async function notifyNativeChatMessage(input: {
         }
         chatName = team?.name?.trim() || "Team chat"
     }
-    const notification = chatNotificationText(chatName, message.body, message.attachment)
+    const notification = chatNotificationText(chatName, "New encrypted message")
     await deliverChatPush(
         (participants ?? []).map((participant) => participant.user_id).filter((userId) => userId !== input.senderUserId),
         {
@@ -266,7 +266,7 @@ export async function notifyClientChatMessage(input: {
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspaces").select("slug").eq("id", input.workspaceId).single(),
         supabaseAdmin.from("relationships").select("primary_person_name, business_name").eq("workspace_id", input.workspaceId).eq("id", input.relationshipId).maybeSingle(),
-        supabaseAdmin.from("client_messages").select("body, created_at").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).eq("id", input.messageId).maybeSingle(),
+        supabaseAdmin.from("client_messages").select("created_at").eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId).eq("id", input.messageId).maybeSingle(),
     ])
     if (membershipError || workspaceError || relationshipError || messageError || !workspace || !message) {
         console.error("Could not prepare client chat push", membershipError ?? workspaceError ?? relationshipError ?? messageError)
@@ -274,7 +274,7 @@ export async function notifyClientChatMessage(input: {
     }
     const primaryName = relationship?.primary_person_name?.trim() || input.senderName
     const businessName = relationship?.business_name?.trim()
-    const notification = chatNotificationText(businessName ? `${primaryName} – ${businessName}` : primaryName, message.body)
+    const notification = chatNotificationText(businessName ? `${primaryName} – ${businessName}` : primaryName, "New encrypted message")
     await deliverChatPush((memberships ?? []).map((membership) => membership.user_id), {
         workspaceId: input.workspaceId,
         conversationKind: "client",

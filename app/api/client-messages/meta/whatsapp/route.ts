@@ -408,7 +408,7 @@ function getStatusError(status: WhatsAppStatus) {
         .join(": ")
 }
 
-const STATUS_MESSAGE_COLUMNS = "id, client_id, status, sent_at, delivered_at, read_at, raw_payload"
+const STATUS_MESSAGE_COLUMNS = "id, client_id, status, sent_at, delivered_at, read_at"
 
 async function findStatusMessage(workspaceId: string, messageId: string, callbackId?: string) {
     if (callbackId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(callbackId)) {
@@ -529,15 +529,6 @@ async function handleStatusUpdate({
                 read_at: message.read_at ?? (messageStatus === "read" ? eventAt : null),
                 failed_at: shouldAdvance && messageStatus === "failed" ? eventAt : null,
                 error: shouldAdvance ? errorMessage : null,
-                raw_payload: {
-                    ...(message.raw_payload &&
-                    typeof message.raw_payload === "object" &&
-                    !Array.isArray(message.raw_payload)
-                        ? message.raw_payload
-                        : {}),
-                    meta_status: status,
-                    meta_status_payload: payload,
-                },
             })
             .eq("id", message.id)
         await supabaseAdmin
@@ -758,6 +749,7 @@ async function getInboundMessageContent({
         contentType,
         body: downloadedMedia.bytes,
         appBaseUrl,
+        encrypt: mediaPayload.type !== "sticker",
     })
     const caption = mediaPayload.media.caption?.trim()
     const logBody = formatMediaMessageForLog({

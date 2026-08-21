@@ -2148,6 +2148,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             userId={profileUserId}
             initialProfile={profilePreviewMember ? { displayName: profilePreviewMember.name, avatarSrc: profilePreviewMember.avatarSrc } : null}
             active={profileUserId === currentUserId || activeWorkspaceUsers.some((member) => member.userId === profileUserId)}
+            canMessage={workspaceRole === "owner" || workspaceRole === "admin"}
             onClose={() => setProfileUserId(null)}
             onMessage={(userId) => { setProfileUserId(null); navigateActiveTab(`/${workspace.slug}/communications?mode=team&dm=${userId}`) }}
         /> : null}

@@ -7,6 +7,13 @@ type CorsRule = {
     maxAgeSeconds?: number
 }
 
+const DIRECT_UPLOAD_HEADERS = [
+    "content-type",
+    "x-amz-server-side-encryption-customer-algorithm",
+    "x-amz-server-side-encryption-customer-key",
+    "x-amz-server-side-encryption-customer-key-md5",
+]
+
 async function cloudflareError(response: Response, fallback: string) {
     try {
         const body = await response.json() as { errors?: Array<{ message?: string }> }
@@ -54,7 +61,7 @@ function platformUploadRule(): CorsRule {
     }
     return {
         id: "betelgeze-onboarding-platform",
-        allowed: { origins: [...origins], methods: ["PUT"], headers: ["content-type"] },
+        allowed: { origins: [...origins], methods: ["PUT"], headers: DIRECT_UPLOAD_HEADERS },
         exposeHeaders: ["ETag"],
         maxAgeSeconds: 3600,
     }
@@ -83,7 +90,7 @@ export async function allowDirectUploadsFromDomain(domain: string) {
     const rules = existingRules.filter((rule) => rule.id !== id)
     rules.push({
         id,
-        allowed: { origins: [`https://${domain}`], methods: ["PUT"], headers: ["content-type"] },
+        allowed: { origins: [`https://${domain}`], methods: ["PUT"], headers: DIRECT_UPLOAD_HEADERS },
         exposeHeaders: ["ETag"],
         maxAgeSeconds: 3600,
     })

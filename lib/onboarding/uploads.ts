@@ -12,6 +12,7 @@ import { recordAdminActivity } from "@/lib/admin/activity"
 import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile } from "@/lib/communications/attachments"
 import { convertCommunicationStickerImage } from "@/lib/communications/stickers"
 import { getRequiredEnv } from "@/lib/env"
+import { createCommunicationFileKey, createInboundCommunicationFileKey } from "@/lib/communications/encryption"
 import {
     getUploadKind,
     MAX_ONBOARDING_UPLOAD_SIZE,
@@ -38,6 +39,22 @@ function getR2Client() {
 
 function getR2BucketName() {
     return getRequiredEnv("R2_BUCKET_NAME")
+}
+
+function customerEncryptionHeaders(keyBase64: string) {
+    return {
+        "x-amz-server-side-encryption-customer-algorithm": "AES256",
+        "x-amz-server-side-encryption-customer-key": keyBase64,
+        "x-amz-server-side-encryption-customer-key-MD5": createHash("md5").update(Buffer.from(keyBase64, "base64")).digest("base64"),
+    }
+}
+
+function customerEncryptionInput(keyBase64: string) {
+    return {
+        SSECustomerAlgorithm: "AES256",
+        SSECustomerKey: keyBase64,
+        SSECustomerKeyMD5: createHash("md5").update(Buffer.from(keyBase64, "base64")).digest("base64"),
+    }
 }
 
 function sanitizeFileName(name: string) {
@@ -406,6 +423,17 @@ export async function createPrivateUploadSignedUrl(
     )
 }
 
+export async function createEncryptedPrivateUploadSignedRequest(path: string, customerKey: string, expiresIn = R2_SIGNED_URL_TTL_SECONDS) {
+    return {
+        url: await getSignedUrl(
+            getR2Client(),
+            new GetObjectCommand({ Bucket: getR2BucketName(), Key: path, ...customerEncryptionInput(customerKey) }),
+            { expiresIn }
+        ),
+        headers: customerEncryptionHeaders(customerKey),
+    }
+}
+
 export async function downloadOnboardingUpload(path: string) {
     const response = await getR2Client().send(
         new GetObjectCommand({
@@ -475,6 +503,7 @@ export async function storeClientMessageMedia({
     contentType,
     body,
     appBaseUrl,
+    encrypt = true,
 }: {
     clientId: string | null
     relationshipId?: string | null
@@ -484,10 +513,15 @@ export async function storeClientMessageMedia({
     contentType: string
     body: Uint8Array
     appBaseUrl?: string
+    encrypt?: boolean
 }) {
     const safeFileName = sanitizeFileName(fileName) || "whatsapp-media"
     const ownerPath = clientId ?? (relationshipId ? `relationships/${relationshipId}` : "unmatched")
-    const path = `${workspaceId ? `${workspaceId}/` : ""}${ownerPath}/client-messages/${randomUUID()}-${mediaId}-${safeFileName}`
+    const encryptMedia = Boolean(encrypt && workspaceId && relationshipId)
+    const path = `${workspaceId ? `${workspaceId}/` : ""}${ownerPath}/client-messages/${randomUUID()}${encryptMedia ? ".enc" : `-${mediaId}-${safeFileName}`}`
+    const customerKey = encryptMedia && workspaceId && relationshipId
+        ? await createInboundCommunicationFileKey({ workspaceId, relationshipId, storagePath: path })
+        : null
 
     await getR2Client().send(
         new PutObjectCommand({
@@ -495,6 +529,7 @@ export async function storeClientMessageMedia({
             Key: path,
             Body: body,
             ContentType: contentType || "application/octet-stream",
+            ...(customerKey ? customerEncryptionInput(customerKey) : {}),
         })
     )
 
@@ -520,7 +555,8 @@ export async function createSignedClientMessageUpload(
     if ("error" in validation) throw new Error(validation.error)
     const fileName = sanitizeFileName(file.name) || "attachment"
     const contentType = file.type.toLowerCase().split(";", 1)[0].trim()
-    const path = `${workspaceId}/relationships/${relationshipId}/client-messages/${randomUUID()}-${fileName}`
+    const path = `${workspaceId}/relationships/${relationshipId}/client-messages/${randomUUID()}.enc`
+    const customerKey = await createCommunicationFileKey({ workspaceId, scopeKind: "client", scopeId: relationshipId, storagePath: path })
     const uploadUrl = await getSignedUrl(
         getR2Client(),
         new PutObjectCommand({
@@ -528,11 +564,13 @@ export async function createSignedClientMessageUpload(
             Key: path,
             ContentType: contentType,
             ContentLength: file.size,
+            ...customerEncryptionInput(customerKey),
         }),
         { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }
     )
     return {
         uploadUrl,
+        uploadHeaders: customerEncryptionHeaders(customerKey),
         attachment: {
             kind: validation.kind,
             fileName: fileName.slice(0, 180),
@@ -549,6 +587,7 @@ export async function verifyClientMessageUpload(input: {
     relationshipId: string
     storagePath: string
     mimeType: string
+    customerKey?: string | null
 }) {
     const prefix = `${input.workspaceId}/relationships/${input.relationshipId}/client-messages/`
     if (!input.storagePath.startsWith(prefix) || input.storagePath.slice(prefix.length).includes("/")) {
@@ -557,6 +596,7 @@ export async function verifyClientMessageUpload(input: {
     const response = await getR2Client().send(new HeadObjectCommand({
         Bucket: getR2BucketName(),
         Key: input.storagePath,
+        ...(input.customerKey ? customerEncryptionInput(input.customerKey) : {}),
     }))
     const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
     const kind = communicationAttachmentKind(contentType)
@@ -576,14 +616,16 @@ export async function createSignedNativeMessageUpload(
     if ("error" in validation) throw new Error(validation.error)
     const fileName = sanitizeFileName(file.name) || "attachment"
     const contentType = file.type.toLowerCase().split(";", 1)[0].trim()
-    const path = `${workspaceId}/communications/native/${conversationId}/${randomUUID()}-${fileName}`
+    const path = `${workspaceId}/communications/native/${conversationId}/${randomUUID()}.enc`
+    const customerKey = await createCommunicationFileKey({ workspaceId, scopeKind: "native", scopeId: conversationId, storagePath: path })
     const uploadUrl = await getSignedUrl(
         getR2Client(),
-        new PutObjectCommand({ Bucket: getR2BucketName(), Key: path, ContentType: contentType, ContentLength: file.size }),
+        new PutObjectCommand({ Bucket: getR2BucketName(), Key: path, ContentType: contentType, ContentLength: file.size, ...customerEncryptionInput(customerKey) }),
         { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }
     )
     return {
         uploadUrl,
+        uploadHeaders: customerEncryptionHeaders(customerKey),
         attachment: {
             kind: validation.kind,
             fileName: fileName.slice(0, 180),
@@ -600,10 +642,11 @@ export async function verifyNativeMessageUpload(input: {
     conversationId: string
     storagePath: string
     mimeType: string
+    customerKey?: string | null
 }) {
     const prefix = `${input.workspaceId}/communications/native/${input.conversationId}/`
     if (!input.storagePath.startsWith(prefix) || input.storagePath.slice(prefix.length).includes("/")) throw new Error("Invalid native message attachment path")
-    const response = await getR2Client().send(new HeadObjectCommand({ Bucket: getR2BucketName(), Key: input.storagePath }))
+    const response = await getR2Client().send(new HeadObjectCommand({ Bucket: getR2BucketName(), Key: input.storagePath, ...(input.customerKey ? customerEncryptionInput(input.customerKey) : {}) }))
     const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
     const kind = communicationAttachmentKind(contentType)
     const size = response.ContentLength ?? 0

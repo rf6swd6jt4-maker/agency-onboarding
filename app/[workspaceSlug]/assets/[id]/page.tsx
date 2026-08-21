@@ -77,7 +77,11 @@ export default async function AssetDetailPage({ params }: PageProps) {
     ])
     const contextRelationshipId = relationships[0]?.relationship_id
     const contextRelationship = contextRelationshipId ? await getRelationship(workspace.id, contextRelationshipId) : null
-    const previewUrl = asset.storage_path ? await createUploadSignedUrl(asset.storage_path) : asset.external_url
+    const previewUrl = asset.storage_path
+        ? asset.source_kind === "message"
+            ? `/api/client-messages/media/${asset.storage_path.split("/").map(encodeURIComponent).join("/")}`
+            : await createUploadSignedUrl(asset.storage_path)
+        : asset.external_url
     const formEntries = asset.asset_kind === "form_submission" ? responseEntries(asset.metadata) : []
     const onboardingRelationshipId = metadataValue(asset.metadata, "relationship_id") || contextRelationshipId
     const onboardingStepKey = metadataValue(asset.metadata, "step_key")

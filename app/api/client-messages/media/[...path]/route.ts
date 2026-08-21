@@ -1,7 +1,8 @@
-import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
+import { createEncryptedPrivateUploadSignedRequest, createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { assertNativeConversationAccess } from "@/lib/teams/server"
 import { getCurrentUser } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { communicationFileKeyForCurrentUser, redeemCommunicationMediaGrant } from "@/lib/communications/encryption"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -22,26 +23,37 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
         }
     }
 
-    const user = await getCurrentUser()
+    const grant = new URL(request.url).searchParams.get("grant")
     const workspaceId = path[0] ?? ""
-    if (!user || !workspaceId) return { error: new Response("Unauthorized", { status: 401 }) }
-    const { data: membership } = await supabaseAdmin
-        .from("workspace_memberships")
-        .select("user_id")
-        .eq("workspace_id", workspaceId)
-        .eq("user_id", user.id)
-        .maybeSingle()
-    if (!membership) return { error: new Response("Media not found", { status: 404 }) }
-    if (path[1] === "communications" && path[2] === "native") {
-        const conversationId = path[3] ?? ""
-        if (!await assertNativeConversationAccess(conversationId, user.id, "read")) return { error: new Response("Media not found", { status: 404 }) }
+    if (!workspaceId) return { error: new Response("Media not found", { status: 404 }) }
+    let customerKey: string | null = null
+    if (grant) {
+        customerKey = await redeemCommunicationMediaGrant(storagePath, grant).catch(() => null)
+        if (!customerKey) return { error: new Response("Media grant expired", { status: 404 }) }
+    } else {
+        const user = await getCurrentUser()
+        if (!user) return { error: new Response("Unauthorized", { status: 401 }) }
+        const { data: membership } = await supabaseAdmin
+            .from("workspace_memberships")
+            .select("user_id")
+            .eq("workspace_id", workspaceId)
+            .eq("user_id", user.id)
+            .maybeSingle()
+        if (!membership) return { error: new Response("Media not found", { status: 404 }) }
+        if (path[1] === "communications" && path[2] === "native") {
+            const conversationId = path[3] ?? ""
+            if (!await assertNativeConversationAccess(conversationId, user.id, "read")) return { error: new Response("Media not found", { status: 404 }) }
+        }
+        customerKey = await communicationFileKeyForCurrentUser(storagePath)
     }
 
     try {
-        const signedUrl = await createPrivateUploadSignedUrl(storagePath)
+        const signed = customerKey
+            ? await createEncryptedPrivateUploadSignedRequest(storagePath, customerKey)
+            : { url: await createPrivateUploadSignedUrl(storagePath), headers: {} as Record<string, string> }
         const range = request.headers.get("range")
-        const mediaResponse = await fetch(signedUrl, {
-            headers: range ? { Range: range } : undefined,
+        const mediaResponse = await fetch(signed.url, {
+            headers: { ...signed.headers, ...(range ? { Range: range } : {}) },
         })
 
         if (!mediaResponse.ok) {
@@ -75,7 +87,7 @@ function getSafeFileName(path: string) {
 
 function getMediaHeaders(mediaResponse: Response, storagePath: string) {
     const headers = new Headers({
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": "private, max-age=3600",
         "Content-Disposition": `inline; filename="${getSafeFileName(storagePath)}"`,
         "Content-Type":
             mediaResponse.headers.get("content-type") ??

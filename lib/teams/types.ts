@@ -23,6 +23,7 @@ export type NativeMessage = {
     clientRequestId: string | null
     conversationId: string
     senderUserId: string
+    senderWorkspaceRole: "owner" | "admin" | "staff" | null
     body: string
     replyToMessageId: string | null
     attachment: CommunicationAttachment | null
@@ -79,6 +80,7 @@ export type NativeCommunicationsBootstrap = {
     maintenanceCategories: Array<{ key: string; label: string }>
     canManageTeams: boolean
     isOwner: boolean
+    currentUserRole: "owner" | "admin" | "staff"
     requestedConversationId: string | null
     requestedDmUserId: string | null
     schemaReady: boolean

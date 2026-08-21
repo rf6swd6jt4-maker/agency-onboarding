@@ -17,11 +17,12 @@ type Profile = {
     sharedWorkspaces: Array<{ name: string; slug: string; current: boolean }>
 }
 
-export function WorkspaceMemberProfileModal({ workspaceSlug, userId, initialProfile, active, onClose, onMessage }: {
+export function WorkspaceMemberProfileModal({ workspaceSlug, userId, initialProfile, active, canMessage, onClose, onMessage }: {
     workspaceSlug: string
     userId: string
     initialProfile?: { displayName: string; avatarSrc: string | null } | null
     active: boolean
+    canMessage: boolean
     onClose: () => void
     onMessage: (userId: string) => void
 }) {
@@ -60,7 +61,7 @@ export function WorkspaceMemberProfileModal({ workspaceSlug, userId, initialProf
                     {profile.isSelf && profile.username ? <p className="mt-2 text-sm text-neutral-500">@{profile.username}</p> : null}
                     <p className="mt-2 max-w-full break-all text-sm text-neutral-300">{profile.email}</p>
                     <Status label={active ? "Online" : profile.lastSeenAt ? `Last seen - ${formatRelativeTime(profile.lastSeenAt)}` : "Last seen - unavailable"} tone={active ? "green" : "grey"} className="mt-4" />
-                    {profile.isSelf ? <Link href={`/users/${profile.username}/edit`} className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black">Edit profile</Link> : <button type="button" onClick={() => onMessage(profile.id)} className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-white px-5 text-sm font-semibold text-black">Message</button>}
+                    {profile.isSelf ? <Link href={`/users/${profile.username}/edit`} className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-black">Edit profile</Link> : canMessage ? <button type="button" onClick={() => onMessage(profile.id)} className="mt-5 inline-flex h-10 items-center justify-center rounded-lg bg-white px-5 text-sm font-semibold text-black">Message</button> : null}
                 </section>
                 <section className="border-t border-neutral-800 px-5 py-5">
                     <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">Shared workspaces</h3>

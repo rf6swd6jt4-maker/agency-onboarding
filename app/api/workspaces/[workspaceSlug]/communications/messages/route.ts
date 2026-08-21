@@ -2,7 +2,8 @@ import { NextRequest } from "next/server"
 
 import { recordClientAdminActivity } from "@/lib/admin/activity"
 import { resolveCommunicationDestinations, sendCommunicationDeliveries } from "@/lib/client-messages/omnichannel"
-import { COMMUNICATION_MESSAGE_COLUMNS, communicationMessageFromRow, loadCommunicationMessages } from "@/lib/communications/server"
+import { loadCommunicationMessage, loadCommunicationMessages } from "@/lib/communications/server"
+import { communicationFileKeyForCurrentUser, createCommunicationMediaGrant } from "@/lib/communications/encryption"
 import { communicationAttachmentFromValue, MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH } from "@/lib/communications/attachments"
 import { verifyClientMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -24,9 +25,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
     const { workspaceSlug } = await context.params
     const { workspace } = await requireWorkspace(workspaceSlug)
     const relationshipId = request.nextUrl.searchParams.get("relationshipId") ?? ""
-    if (!UUID_PATTERN.test(relationshipId)) return Response.json({ error: "Invalid conversation" }, { status: 400 })
+    const messageId = request.nextUrl.searchParams.get("messageId") ?? ""
+    if (!UUID_PATTERN.test(relationshipId) || (messageId && !UUID_PATTERN.test(messageId))) return Response.json({ error: "Invalid conversation" }, { status: 400 })
     const relationship = await scopedRelationship(workspace.id, relationshipId)
     if (!relationship) return Response.json({ error: "Conversation not found" }, { status: 404 })
+    if (messageId) {
+        const message = await loadCommunicationMessage({ workspaceId: workspace.id, messageId })
+        return message?.relationshipId === relationshipId
+            ? Response.json({ message, schemaReady: true })
+            : Response.json({ error: "Message not found" }, { status: 404 })
+    }
     return Response.json(await loadCommunicationMessages({ workspaceId: workspace.id, relationshipId, limit: 500 }))
 }
 
@@ -58,9 +66,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
         .maybeSingle()
     if (profileError) return Response.json({ error: "Could not load your chat display name." }, { status: 503 })
 
-    const existingResult = await supabaseAdmin.from("client_messages").select(COMMUNICATION_MESSAGE_COLUMNS).eq("workspace_id", workspace.id).eq("client_request_id", clientRequestId).maybeSingle()
-    if (existingResult.error) return Response.json({ error: existingResult.error.message }, { status: 503 })
-    const existing = communicationMessageFromRow(existingResult.data)
+    const existingMessages = await loadCommunicationMessages({ workspaceId: workspace.id, relationshipId: relationship.id, limit: 500 })
+    const existing = existingMessages.messages.find((message) => message.clientRequestId === clientRequestId) ?? null
     if (existing && !(input?.retry === true && ["send_failed", "partial_sent"].includes(existing.status))) return Response.json({ message: existing, reused: true })
     if (replyToMessageId) {
         const replyTarget = await supabaseAdmin
@@ -104,6 +111,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
                 relationshipId: relationship.id,
                 storagePath: attachment.storagePath,
                 mimeType: attachment.mimeType,
+                customerKey: await communicationFileKeyForCurrentUser(attachment.storagePath),
             })
             attachment = { ...attachment, kind: verified.kind, mimeType: verified.contentType, size: verified.size }
         } catch (error) {
@@ -138,6 +146,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     if (!messageId) return Response.json({ error: "Could not resolve the message log." }, { status: 503 })
 
     try {
+        const mediaGrant = attachment && attachment.kind !== "sticker" ? await createCommunicationMediaGrant(attachment.storagePath) : null
+        const mediaBaseUrl = mediaGrant ? process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/g, "") : null
+        const attachmentAccessUrl = mediaGrant && mediaBaseUrl && attachment
+            ? `${mediaBaseUrl}/api/client-messages/media/${attachment.storagePath.split("/").map(encodeURIComponent).join("/")}?grant=${encodeURIComponent(mediaGrant)}`
+            : null
         const delivery = await sendCommunicationDeliveries({
             workspaceId: workspace.id,
             relationshipId: relationship.id,
@@ -145,6 +158,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
             body: storedBody,
             senderName: profile?.display_name ?? profile?.username,
             attachment,
+            attachmentAccessUrl,
             replyToMessageId: replyToMessageId || null,
             destinations: resolved.destinations,
         })
@@ -155,9 +169,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
         return Response.json({ message, deliveries: delivery.results }, { status: success ? 200 : 502 })
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Message send failed"
-        const failed = await supabaseAdmin.from("client_messages").update({ status: "send_failed", error: errorMessage, failed_at: new Date().toISOString() }).eq("workspace_id", workspace.id).eq("id", messageId).in("status", ["sending", "send_uncertain", "send_failed"]).select(COMMUNICATION_MESSAGE_COLUMNS).maybeSingle()
-        const current = failed.data ? failed : await supabaseAdmin.from("client_messages").select(COMMUNICATION_MESSAGE_COLUMNS).eq("workspace_id", workspace.id).eq("id", messageId).maybeSingle()
-        const data = current.data
-        return Response.json({ error: errorMessage, message: communicationMessageFromRow(data), retryable: true }, { status: 502 })
+        await supabaseAdmin.from("client_messages").update({ status: "send_failed", error: errorMessage, failed_at: new Date().toISOString() }).eq("workspace_id", workspace.id).eq("id", messageId).in("status", ["sending", "send_uncertain", "send_failed"])
+        const current = await loadCommunicationMessages({ workspaceId: workspace.id, relationshipId: relationship.id, limit: 500 }).catch(() => null)
+        return Response.json({ error: errorMessage, message: current?.messages.find((message) => message.id === messageId) ?? null, retryable: true }, { status: 502 })
     }
 }

@@ -15,11 +15,12 @@ export async function GET(request: Request, context: { params: Promise<{ workspa
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
     const input = await request.json().catch(() => null) as { userId?: unknown } | null
     const targetUserId = typeof input?.userId === "string" ? input.userId : ""
     if (!UUID_PATTERN.test(targetUserId) || targetUserId === user.id) return Response.json({ error: "Choose another workspace member." }, { status: 400 })
-    const { data: target } = await supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id).eq("user_id", targetUserId).maybeSingle()
+    if (role !== "owner" && role !== "admin") return Response.json({ error: "Only owners and admins can start private chats." }, { status: 403 })
+    const { data: target } = await supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", workspace.id).eq("user_id", targetUserId).maybeSingle()
     if (!target) return Response.json({ error: "Workspace member not found." }, { status: 404 })
     const [directUserOne, directUserTwo] = [user.id, targetUserId].sort()
     const existing = await supabaseAdmin.from("workspace_native_conversations").select("id").eq("workspace_id", workspace.id).eq("kind", "direct").eq("direct_user_one", directUserOne).eq("direct_user_two", directUserTwo).is("archived_at", null).maybeSingle()

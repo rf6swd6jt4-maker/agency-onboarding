@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server"
 
-import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
+import { loadCommunicationMessages } from "@/lib/communications/server"
 import { deleteOnboardingUploads, prepareStoredCommunicationSticker, storeCommunicationSticker } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -32,16 +32,10 @@ async function savedSticker(workspaceId: string, storagePath: string) {
 }
 
 async function saveStickerFromMessage(workspaceId: string, userId: string, messageId: string) {
-    const { data: message, error: messageError } = await supabaseAdmin
-        .from("client_messages")
-        .select("raw_payload")
-        .eq("workspace_id", workspaceId)
-        .eq("id", messageId)
-        .maybeSingle()
-    if (messageError) return Response.json({ error: messageError.message }, { status: 503 })
+    const message = (await loadCommunicationMessages({ workspaceId, limit: 4000 })).messages.find((candidate) => candidate.id === messageId)
     if (!message) return Response.json({ error: "Message not found." }, { status: 404 })
 
-    const attachment = communicationAttachmentFromRawPayload(message.raw_payload)
+    const attachment = message.attachment
     if (attachment?.kind !== "sticker") {
         return Response.json({ error: "That message does not contain a sticker." }, { status: 400 })
     }

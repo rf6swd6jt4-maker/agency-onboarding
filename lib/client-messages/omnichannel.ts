@@ -167,6 +167,7 @@ async function sendProvider(input: {
     body: string
     senderName?: string | null
     attachment?: CommunicationAttachment | null
+    attachmentAccessUrl?: string | null
     replyToMessageId?: string | null
     whatsappTemplate?: { name: string; language: string } | null
 }) {
@@ -178,7 +179,7 @@ async function sendProvider(input: {
     })
     if (input.destination.provider === "twilio_sms") {
         const mediaUrls = input.attachment && input.attachment.kind !== "sticker"
-            ? [await createPrivateUploadSignedUrl(input.attachment.storagePath)]
+            ? [input.attachmentAccessUrl ?? await createPrivateUploadSignedUrl(input.attachment.storagePath)]
             : []
         const body = input.attachment?.kind === "sticker" && !input.body.trim()
             ? "A sticker was shared in your WhatsApp conversation."
@@ -205,7 +206,7 @@ async function sendProvider(input: {
         return sendMetaWhatsAppSticker({
             workspaceId: input.workspaceId,
             to: input.destination.address,
-            link: await createPrivateUploadSignedUrl(input.attachment.storagePath),
+            link: input.attachmentAccessUrl ?? await createPrivateUploadSignedUrl(input.attachment.storagePath),
             replyToMessageId: replyTo,
             callbackData: input.messageId,
         })
@@ -218,7 +219,7 @@ async function sendProvider(input: {
             workspaceId: input.workspaceId,
             to: input.destination.address,
             kind: input.attachment.kind,
-            link: await createPrivateUploadSignedUrl(input.attachment.storagePath),
+            link: input.attachmentAccessUrl ?? await createPrivateUploadSignedUrl(input.attachment.storagePath),
             caption: attributedBody,
             fileName: input.attachment.fileName,
             replyToMessageId: replyTo,
@@ -241,6 +242,7 @@ export async function sendCommunicationDeliveries(input: {
     body: string
     senderName?: string | null
     attachment?: CommunicationAttachment | null
+    attachmentAccessUrl?: string | null
     replyToMessageId?: string | null
     whatsappTemplate?: { name: string; language: string } | null
     destinations?: ResolvedCommunicationDestination[]

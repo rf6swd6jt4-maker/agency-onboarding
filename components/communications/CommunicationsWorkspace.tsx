@@ -490,11 +490,11 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ relationshipId, name: file.name, size: file.size, type: file.type }),
             })
-            const prepared = await prepareResponse.json().catch(() => null) as { uploadUrl?: string; attachment?: CommunicationAttachment; error?: string } | null
+            const prepared = await prepareResponse.json().catch(() => null) as { uploadUrl?: string; uploadHeaders?: Record<string, string>; attachment?: CommunicationAttachment; error?: string } | null
             if (!prepareResponse.ok || !prepared?.uploadUrl || !prepared.attachment) throw new Error(prepared?.error ?? "Could not prepare attachment.")
             const uploadResponse = await fetch(prepared.uploadUrl, {
                 method: "PUT",
-                headers: { "Content-Type": prepared.attachment.mimeType },
+                headers: { "Content-Type": prepared.attachment.mimeType, ...(prepared.uploadHeaders ?? {}) },
                 body: file,
             })
             if (!uploadResponse.ok) throw new Error("Could not upload attachment.")
@@ -655,6 +655,33 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 .on("postgres_changes", { event: "*", schema: "public", table: "client_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const message = realtimeMessage(payload.new)
                     if (message) updateConversationMessages(message.relationshipId, [message], true)
+                    else {
+                        const row = record(payload.new)
+                        const previous = record(payload.old)
+                        const relationshipId = stringValue(row.relationship_id)
+                        const messageId = stringValue(row.id)
+                        const encryptedContentChanged = row.body_ciphertext !== previous.body_ciphertext || row.raw_payload_ciphertext !== previous.raw_payload_ciphertext
+                        if (payload.eventType === "UPDATE" && relationshipId && messageId && !encryptedContentChanged) {
+                            setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? {
+                                ...conversation,
+                                messages: conversation.messages.map((candidate) => candidate.id === messageId ? {
+                                    ...candidate,
+                                    status: stringValue(row.status) ?? candidate.status,
+                                    error: stringValue(row.error),
+                                    providerMessageId: stringValue(row.whatsapp_message_id) ?? stringValue(row.provider_message_id) ?? candidate.providerMessageId,
+                                    sentAt: stringValue(row.sent_at),
+                                    deliveredAt: stringValue(row.delivered_at),
+                                    readAt: stringValue(row.read_at),
+                                    failedAt: stringValue(row.failed_at),
+                                } : candidate),
+                            } : conversation))
+                            return
+                        }
+                        if (relationshipId && messageId) void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages?relationshipId=${encodeURIComponent(relationshipId)}&messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
+                            .then(async (response) => response.ok ? response.json() as Promise<{ message?: CommunicationMessage }> : null)
+                            .then((result) => { if (result?.message) updateConversationMessages(relationshipId, [result.message], true) })
+                            .catch(() => undefined)
+                    }
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "communication_message_deliveries", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.new)
@@ -702,7 +729,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                     const relationshipId = stringValue(row.id)
                     if (!relationshipId || !("communication_pinned_message_id" in row)) return
                     setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId: stringValue(row.communication_pinned_message_id) } : conversation))
-                }), [bootstrap.workspaceId, supabase, updateConversationMessages])
+                }), [bootstrap.workspaceId, bootstrap.workspaceSlug, supabase, updateConversationMessages])
 
     const synchronize = useCallback(async () => {
         const conversationId = selectedRef.current

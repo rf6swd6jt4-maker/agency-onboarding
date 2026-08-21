@@ -175,9 +175,10 @@ function reconcileConversations(current: NativeConversation[], incoming: NativeC
 
 function realtimeMessage(value: unknown): NativeMessage | null {
     const row = record(value); const id = text(row.id); const conversationId = text(row.conversation_id); const senderUserId = text(row.sender_user_id); const createdAt = text(row.created_at)
+    if (row.body_encryption_version !== null && row.body_encryption_version !== undefined) return null
     if (!id || !conversationId || !senderUserId || !createdAt) return null
     const attachment = row.attachment && typeof row.attachment === "object" && !Array.isArray(row.attachment) ? row.attachment as CommunicationAttachment : null
-    return { id, clientRequestId: text(row.client_request_id), conversationId, senderUserId, body: typeof row.body === "string" ? row.body : "", replyToMessageId: text(row.reply_to_message_id), attachment, createdAt }
+    return { id, clientRequestId: text(row.client_request_id), conversationId, senderUserId, senderWorkspaceRole: row.sender_workspace_role === "owner" || row.sender_workspace_role === "admin" || row.sender_workspace_role === "staff" ? row.sender_workspace_role : null, body: typeof row.body === "string" ? row.body : "", replyToMessageId: text(row.reply_to_message_id), attachment, createdAt }
 }
 
 export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenClients, onSelectedConversationChange }: {
@@ -376,7 +377,17 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         }
                         return
                     }
-                    const message = realtimeMessage(payload.new); if (message) updateConversationMessages(message.conversationId, [message], true)
+                    const message = realtimeMessage(payload.new)
+                    if (message) updateConversationMessages(message.conversationId, [message], true)
+                    else {
+                        const row = record(payload.new)
+                        const conversationId = text(row.conversation_id)
+                        const messageId = text(row.id)
+                        if (conversationId && messageId) void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?conversationId=${encodeURIComponent(conversationId)}&messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
+                            .then(async (response) => response.ok ? response.json() as Promise<{ message?: NativeMessage }> : null)
+                            .then((result) => { if (result?.message) updateConversationMessages(conversationId, [result.message], true) })
+                            .catch(() => undefined)
+                    }
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_reactions", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.eventType === "DELETE" ? payload.old : payload.new); const messageId = text(row.message_id); const reactorUserId = text(row.reactor_user_id)
@@ -387,7 +398,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_read_cursors", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => { const row = record(payload.new); const conversationId = text(row.conversation_id); const userId = text(row.user_id); const lastReadAt = text(row.last_read_at); if (conversationId && userId && lastReadAt) setReadCursors((current) => [...current.filter((cursor) => !(cursor.conversationId === conversationId && cursor.userId === userId)), { conversationId, userId, lastReadMessageId: text(row.last_read_message_id), lastReadAt }]) })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_conversations", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_team_members", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
-        , [bootstrap.currentUser.id, bootstrap.workspaceId, refresh, supabase, updateConversationMessages])
+        , [bootstrap.currentUser.id, bootstrap.workspaceId, bootstrap.workspaceSlug, refresh, supabase, updateConversationMessages])
 
     const connection = useReliableCommunicationsRealtime({ active, privateChannel: true, register: registerRealtime, schemaReady, supabase, synchronize: refresh, topic: `communications:${bootstrap.workspaceSlug}` })
     const sendRealtimeBroadcast = connection.sendBroadcast
@@ -447,9 +458,9 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         setAttachmentState("uploading"); setError(null)
         try {
             const preparedResponse = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/attachments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, name: file.name, size: file.size, type: file.type }) })
-            const prepared = await preparedResponse.json().catch(() => null) as { uploadUrl?: string; attachment?: CommunicationAttachment; error?: string } | null
+            const prepared = await preparedResponse.json().catch(() => null) as { uploadUrl?: string; uploadHeaders?: Record<string, string>; attachment?: CommunicationAttachment; error?: string } | null
             if (!preparedResponse.ok || !prepared?.uploadUrl || !prepared.attachment) throw new Error(prepared?.error ?? "Could not prepare attachment.")
-            const uploaded = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.attachment.mimeType }, body: file })
+            const uploaded = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.attachment.mimeType, ...(prepared.uploadHeaders ?? {}) }, body: file })
             if (!uploaded.ok) throw new Error("Could not upload attachment.")
             setAttachment(prepared.attachment)
         } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.") }
@@ -473,7 +484,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         if (!selected?.canWrite) return
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
         const stickerAttachment: CommunicationAttachment = { kind: "sticker", fileName: sticker.fileName, mimeType: "image/webp", size: sticker.size, storagePath: sticker.storagePath, url: sticker.url }
-        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString() }
+        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString() }
         updateConversationMessages(selected.id, [optimistic], true); setReplyingTo(null); setStickerTrayOpen(false); setError(null)
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body: "", replyToMessageId: replyTarget?.id, attachment: stickerAttachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
@@ -486,7 +497,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         const body = draft.trim(); if (!body && !attachment) return
         stopNativeTyping(selected.id)
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
-        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString() }
+        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString() }
         updateConversationMessages(selected.id, [optimistic], true); setDraft(""); setReplyingTo(null); setAttachment(null); setError(null); localStorage.removeItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selected.id}`)
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body, replyToMessageId: replyTarget?.id, attachment: optimistic.attachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
@@ -541,8 +552,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }
 
     async function deleteMessage(message: NativeMessage) {
-        if (!selected?.canWrite || message.senderUserId !== bootstrap.currentUser.id || message.clientRequestId === message.id) return
-        if (!window.confirm("Delete this message? This cannot be undone.")) return
+        if (!selected || message.clientRequestId === message.id) return
+        if (!window.confirm(message.senderUserId === bootstrap.currentUser.id ? "Delete this message? This cannot be undone." : "Remove this message for everyone? This cannot be undone.")) return
         const previous = selected.messages
         const previousPinnedMessageId = selected.pinnedMessageId
         setActionMessageId(null)
@@ -557,11 +568,25 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         }
     }
 
+    async function clearPrivateChat() {
+        if (!selected || selected.kind !== "direct") return
+        if (!window.confirm("Clear this private chat from your view? The other participant will keep their history.")) return
+        const conversationId = selected.id
+        const previous = selected.messages
+        setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: [] } : conversation))
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/clear`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId }) }).catch(() => null)
+        const result = response ? await response.json().catch(() => null) as { cleared?: boolean; error?: string } | null : null
+        if (!response?.ok || result?.cleared !== true) {
+            setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: mergeMessages(conversation.messages, previous) } : conversation))
+            setError(result?.error ?? "Could not clear this private chat.")
+        }
+    }
+
     const normalizedSearch = search.trim().toLowerCase()
     const visible = conversations.filter((conversation) => (showArchived ? conversation.archived : !conversation.archived) && (!normalizedSearch || `${conversation.title} ${conversation.messages.at(-1)?.body ?? ""}`.toLowerCase().includes(normalizedSearch)))
     const currentTeam = selected?.teamId ? teams.find((team) => team.id === selected.teamId) : null
     const pinnedMessage = selected?.pinnedMessageId ? selected.messages.find((message) => message.id === selected.pinnedMessageId) ?? null : null
-    const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId ? "Pinned message unavailable" : null
+    const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId && selected.kind !== "direct" ? "Pinned message unavailable" : null
     const selectedTypingPeople = selected ? Object.keys(typingByConversation[selected.id] ?? {}).flatMap((userId) => peopleById.get(userId) ?? []) : []
     const selectedTypingLabel = selectedTypingPeople.length > 1
         ? `${selectedTypingPeople.map((person) => person.name).join(", ")} are typing`
@@ -595,6 +620,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                             <span className="h-9 w-9 shrink-0 overflow-hidden rounded-full">{selected.kind === "direct" ? <Avatar src={selected.avatarSrc} name={selected.title} className="h-full w-full" /> : <span className="flex h-full w-full items-center justify-center rounded-full bg-neutral-800"><TeamIcon /></span>}</span>
                             <span className="min-w-0"><span className="block truncate text-sm font-semibold">{selected.title}</span><span className="block truncate text-[11px] text-neutral-600">{selected.archived ? "Archived · read-only" : selected.subtitle}</span></span>
                         </button>
+                        {selected.kind === "direct" ? <button type="button" onClick={() => void clearPrivateChat()} className="h-8 px-2 text-[11px] font-medium text-neutral-500 hover:text-white">Clear</button> : null}
                         <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
@@ -607,7 +633,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         const readers = readCursors.filter((cursor) => cursor.conversationId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                         const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                         const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
-                        const canDelete = own && message.clientRequestId !== message.id
+                        const canModerate = bootstrap.currentUserRole === "owner"
+                            ? message.senderWorkspaceRole === "admin" || message.senderWorkspaceRole === "staff"
+                            : bootstrap.currentUserRole === "admin" && message.senderWorkspaceRole === "staff"
+                        const canDelete = message.clientRequestId !== message.id && (own || canModerate)
                         const canPin = selected.canWrite && message.clientRequestId !== message.id
                         const isSticker = message.attachment?.kind === "sticker"
                         return <Fragment key={message.id}>

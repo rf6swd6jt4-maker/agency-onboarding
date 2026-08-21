@@ -9,6 +9,7 @@ import type {
     CommunicationSticker,
 } from "@/lib/communications/types"
 import { communicationAttachmentFromRawPayload } from "@/lib/communications/attachments"
+import { createSupabaseServerClient } from "@/lib/supabase/server"
 
 export const COMMUNICATION_MESSAGE_COLUMNS = "id, client_request_id, relationship_id, body, direction, provider, provider_message_id, whatsapp_message_id, reply_to_whatsapp_message_id, reply_to_message_id, status, error, sender_kind, sender_user_id, automation_kind, automation_label, created_at, sent_at, delivered_at, read_at, failed_at, raw_payload"
 const legacyMessageColumns = "id, relationship_id, body, direction, provider, provider_message_id, whatsapp_message_id, reply_to_whatsapp_message_id, status, error, created_at, raw_payload"
@@ -98,11 +99,14 @@ export async function loadCommunicationMessages({
     relationshipId?: string
     limit?: number
 }): Promise<{ messages: CommunicationMessage[]; schemaReady: boolean }> {
-    let query = supabaseAdmin.from("client_messages").select(COMMUNICATION_MESSAGE_COLUMNS).eq("workspace_id", workspaceId)
-    if (relationshipId) query = query.eq("relationship_id", relationshipId)
-    const current = await query.order("created_at", { ascending: false }).limit(limit)
+    const supabase = await createSupabaseServerClient()
+    const current = await supabase.rpc("communication_client_messages", {
+        p_workspace_id: workspaceId,
+        p_relationship_id: relationshipId ?? null,
+        p_limit: limit,
+    })
     if (!current.error) {
-        const messages = (current.data ?? []).flatMap((row) => communicationMessageFromRow(row) ?? []).reverse()
+        const messages: CommunicationMessage[] = (current.data ?? []).flatMap((row: unknown) => communicationMessageFromRow(row) ?? []).reverse()
         let deliveryQuery = supabaseAdmin
             .from("communication_message_deliveries")
             .select("client_message_id, provider, provider_message_id, status, error, sent_at, delivered_at, read_at, failed_at")
@@ -130,7 +134,7 @@ export async function loadCommunicationMessages({
             schemaReady: !deliveries.error,
         }
     }
-    if (!missingCommunicationsSchema(current.error)) throw new Error(`Could not load communications: ${current.error.message}`)
+    if (!missingCommunicationsSchema(current.error) && current.error.code !== "PGRST202") throw new Error(`Could not load communications: ${current.error.message}`)
 
     let legacyQuery = supabaseAdmin.from("client_messages").select(legacyMessageColumns).eq("workspace_id", workspaceId)
     if (relationshipId) legacyQuery = legacyQuery.eq("relationship_id", relationshipId)
@@ -139,6 +143,43 @@ export async function loadCommunicationMessages({
     return {
         messages: (legacy.data ?? []).flatMap((row) => communicationMessageFromRow(row) ?? []).reverse(),
         schemaReady: false,
+    }
+}
+
+export async function loadCommunicationMessage({
+    workspaceId,
+    messageId,
+}: {
+    workspaceId: string
+    messageId: string
+}): Promise<CommunicationMessage | null> {
+    const supabase = await createSupabaseServerClient()
+    const current = await supabase.rpc("communication_client_message", {
+        p_workspace_id: workspaceId,
+        p_message_id: messageId,
+    })
+    if (current.error) throw new Error(`Could not load communication message: ${current.error.message}`)
+    const message = (current.data ?? []).flatMap((row: unknown) => communicationMessageFromRow(row) ?? [])[0] ?? null
+    if (!message) return null
+    const deliveries = await supabaseAdmin
+        .from("communication_message_deliveries")
+        .select("provider, provider_message_id, status, error, sent_at, delivered_at, read_at, failed_at")
+        .eq("workspace_id", workspaceId)
+        .eq("client_message_id", messageId)
+        .order("created_at", { ascending: true })
+    if (deliveries.error && deliveries.error.code !== "42P01") throw new Error(`Could not load communication deliveries: ${deliveries.error.message}`)
+    return {
+        ...message,
+        deliveries: (deliveries.data ?? []).flatMap((delivery) => delivery.provider === "meta_whatsapp" || delivery.provider === "twilio_sms" ? [{
+            provider: delivery.provider,
+            providerMessageId: delivery.provider_message_id,
+            status: delivery.status,
+            error: delivery.error,
+            sentAt: delivery.sent_at,
+            deliveredAt: delivery.delivered_at,
+            readAt: delivery.read_at,
+            failedAt: delivery.failed_at,
+        }] : []),
     }
 }
 
