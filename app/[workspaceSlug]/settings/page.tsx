@@ -83,21 +83,6 @@ function UnifiedSection({
     )
 }
 
-function SettingsPlaceholder({
-    title,
-    description,
-}: {
-    title: string
-    description: string
-}) {
-    return (
-        <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/45 p-4 sm:p-5">
-            <h3 className="text-base font-semibold text-neutral-200">{title}</h3>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-500">{description}</p>
-        </div>
-    )
-}
-
 type PageProps = {
     params: Promise<{ workspaceSlug: string }>
     searchParams: Promise<{ service?: string }>
@@ -221,11 +206,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Client Portal"
                             description="Control the domain and settings used for the post-onboarding client experience."
                         >
-                            <SettingsPlaceholder
-                                title="Client portal foundation"
-                                description="Completed onboarding sessions now create durable client portal access. Chat, fulfilment progress, files, and results controls will be added here as those portal areas are built."
-                            />
-                            <div id="client-portal-domain" className="mt-5 scroll-mt-5">
+                            <div id="client-portal-domain" className="scroll-mt-5">
                                 <WorkspaceOnboardingDomain
                                     surface="client_portal"
                                     domain={workspace.custom_client_portal_domain}
