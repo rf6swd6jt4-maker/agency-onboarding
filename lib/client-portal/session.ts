@@ -20,18 +20,18 @@ export async function loadClientPortalSessionByToken(token: string) {
         .select("id, name, slug, status, custom_client_portal_domain, custom_client_portal_domain_status")
         .eq("id", session.workspace_id)
         .eq("status", "active")
-    const [{ data: workspace }, { data: relationship }, configuration] = await Promise.all([
+    const [{ data: workspace }, { data: relationship, error: relationshipError }, configuration] = await Promise.all([
         workspaceSlug ? workspaceQuery.eq("slug", workspaceSlug).maybeSingle() : workspaceQuery.maybeSingle(),
         supabaseAdmin
             .from("relationships")
             .select("id, primary_person_name, business_name")
             .eq("workspace_id", session.workspace_id)
             .eq("id", session.relationship_id)
-            .is("archived_at", null)
+            .neq("status", "archived")
             .maybeSingle(),
         loadPublishedOnboardingConfiguration(session.workspace_id),
     ])
-    if (!workspace || !relationship) return null
+    if (!workspace || relationshipError || !relationship) return null
 
     await supabaseAdmin
         .from("client_portal_sessions")

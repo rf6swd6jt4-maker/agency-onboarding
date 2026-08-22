@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 
 const migration = readFileSync("supabase/migrations/20260822090000_client_portal_foundation.sql", "utf8")
+const testDeliveryFix = readFileSync("supabase/migrations/20260822110000_deliver_test_client_portal_links.sql", "utf8")
 const proxy = readFileSync("proxy.ts", "utf8")
 const portalPage = readFileSync("app/client-portal/session/[token]/page.tsx", "utf8")
 const portalSession = readFileSync("lib/client-portal/session.ts", "utf8")
@@ -20,7 +21,8 @@ test("client portal sessions are durable relationship credentials provisioned by
     assert.match(migration, /after update of status on public\.relationship_onboarding_sessions/u)
     assert.match(migration, /new\.status = 'completed'/u)
     assert.match(migration, /on conflict \(workspace_id, relationship_id\) do update/u)
-    assert.match(migration, /coalesce\(new\.is_test, false\) then return new/u)
+    assert.match(testDeliveryFix, /create or replace function public\.provision_client_portal_after_onboarding/u)
+    assert.doesNotMatch(testDeliveryFix, /new\.is_test/u)
 })
 
 test("completion queues one idempotent portal link through the existing omnichannel outbox", () => {
@@ -50,6 +52,8 @@ test("completed onboarding redirects to a branded portal with a safe invalid-lin
     assert.match(onboardingActions, /redirect\(outcome\.clientPortalUrl\)/u)
     assert.match(onboardingForm, /window\.location\.assign\(outcome\.clientPortalUrl\)/u)
     assert.match(portalSession, /loadPublishedOnboardingConfiguration/u)
+    assert.match(portalSession, /\.neq\("status", "archived"\)/u)
+    assert.doesNotMatch(portalSession, /\.is\("archived_at"/u)
     assert.match(portalPage, /<OnboardingThemeProvider theme=\{theme\}>/u)
     assert.match(portalPage, /var\(--onboarding-primary/u)
     assert.match(portalPage, /data-betelgeze-client-portal-session="invalid"/u)
