@@ -333,7 +333,7 @@ export async function saveWorkspaceOnboardingDomain(slug: string, formData: Form
 }
 
 export async function saveWorkspaceClientPortalDomain(slug: string, formData: FormData) {
-    const { workspace } = await requireWorkspace(slug, "owner")
+    const { workspace } = await requireWorkspace(slug, "admin")
     const submitted = String(formData.get("domain") ?? "")
     const domain = submitted ? normalizeClientPortalDomain(submitted) : null
     if (submitted && !domain) throw new Error("Enter a valid hostname, such as portal.example.com.")
@@ -391,7 +391,7 @@ export async function saveWorkspaceClientPortalDomain(slug: string, formData: Fo
 }
 
 export async function verifyWorkspaceClientPortalDomain(slug: string) {
-    const { workspace } = await requireWorkspace(slug, "owner")
+    const { workspace } = await requireWorkspace(slug, "admin")
     if (!workspace.custom_client_portal_domain) throw new Error("Add a domain before verifying it.")
     const verified = await verifyClientPortalDomain(workspace.custom_client_portal_domain)
     let connectionError = verified.error
@@ -416,7 +416,7 @@ export async function verifyWorkspaceClientPortalDomain(slug: string) {
 }
 
 export async function cancelWorkspaceClientPortalDomain(slug: string) {
-    const { workspace } = await requireWorkspace(slug, "owner")
+    const { workspace } = await requireWorkspace(slug, "admin")
     if (!workspace.custom_client_portal_domain) return
 
     await removeClientPortalDomain(workspace.custom_client_portal_domain)

@@ -13,6 +13,7 @@ const onboardingActions = readFileSync("app/onboarding/session/[token]/actions.t
 const onboardingForm = readFileSync("components/onboarding/OnboardingForm.tsx", "utf8")
 const outbox = readFileSync("lib/onboarding/outbox.ts", "utf8")
 const settings = readFileSync("app/[workspaceSlug]/settings/page.tsx", "utf8")
+const settingsActions = readFileSync("app/[workspaceSlug]/settings/actions.ts", "utf8")
 
 test("client portal sessions are durable relationship credentials provisioned by onboarding completion", () => {
     assert.match(migration, /create table if not exists public\.client_portal_sessions/u)
@@ -45,6 +46,17 @@ test("portal custom domains have independent settings, verification, and routing
     assert.match(portalDomain, /customDomainVerified/u)
     assert.match(settings, /surface="client_portal"/u)
     assert.match(settings, /id="client-portal-domain"/u)
+})
+
+test("client portal settings expose the onboarding-equivalent domain process to owners and admins", () => {
+    const portalSection = settings.indexOf('id="client-portal"')
+    const portalDomain = settings.indexOf('id="client-portal-domain"')
+    const connectionsSection = settings.indexOf('id="connections"')
+    assert.ok(portalSection >= 0 && portalDomain > portalSection && connectionsSection > portalDomain)
+    assert.match(settings, /surface="client_portal"[\s\S]*canManage=\{role === "owner" \|\| role === "admin"\}/u)
+    assert.match(settingsActions, /saveWorkspaceClientPortalDomain[\s\S]*requireWorkspace\(slug, "admin"\)/u)
+    assert.match(settingsActions, /verifyWorkspaceClientPortalDomain[\s\S]*requireWorkspace\(slug, "admin"\)/u)
+    assert.match(settingsActions, /cancelWorkspaceClientPortalDomain[\s\S]*requireWorkspace\(slug, "admin"\)/u)
 })
 
 test("completed onboarding redirects to a branded portal with a safe invalid-link probe", () => {

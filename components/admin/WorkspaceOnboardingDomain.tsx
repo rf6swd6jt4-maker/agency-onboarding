@@ -65,6 +65,6 @@ export function WorkspaceOnboardingDomain({ surface = "onboarding", domain, stat
 
         {verified && <div className="mt-4 rounded-lg border border-emerald-900/70 bg-emerald-950/30 px-3 py-3 text-sm text-emerald-200"><p className="font-medium">Custom domain connected</p><p className="mt-1">New links use <span className="font-medium">https://{domain}/[token]</span>.</p>{canManage && <form action={cancelAction} data-workspace-mutation="background" className="mt-3"><WorkspaceActionButton pendingLabel="Disconnecting…" confirmMessage={`Disconnect this custom ${label} domain?`} className="rounded-lg border border-emerald-800 px-3 py-2 text-sm text-emerald-100">Disconnect domain</WorkspaceActionButton></form>}</div>}
 
-        {!canManage && <p className="mt-5 text-sm text-neutral-500">{portal ? "Only the workspace owner" : "Only workspace owners and admins"} can change this domain.</p>}
+        {!canManage && <p className="mt-5 text-sm text-neutral-500">Only workspace owners and admins can change this domain.</p>}
     </section>
 }
