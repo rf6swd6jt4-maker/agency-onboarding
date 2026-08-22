@@ -26,7 +26,6 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { dismissReadChatNotification } from "@/lib/push/browser-notifications"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
-import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
 import { clientConversationUnreadCount } from "@/lib/communications/unread"
 
 function record(value: unknown) {
@@ -227,7 +226,7 @@ function reconcileConversations(current: ClientConversation[], incoming: ClientC
     })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title))
 }
 
-export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenTeam, onSelectedConversationChange, onUnreadCountChange, teamUnreadCount }: {
+export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenTeam, onSelectedConversationChange, onUnreadCountChange, teamUnreadCount, conversationListWidth, onConversationListWidthChange }: {
     active: boolean
     bootstrap: CommunicationsBootstrap
     onConnectionStateChange?: (state: CommunicationsConnectionState) => void
@@ -235,6 +234,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     onSelectedConversationChange?: (conversationId: string | null) => void
     onUnreadCountChange?: (count: number) => void
     teamUnreadCount?: number
+    conversationListWidth: number
+    onConversationListWidthChange: (width: number) => void
 }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
     const [conversations, setConversations] = useState(bootstrap.conversations)
@@ -351,20 +352,6 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
             : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title)))
     }, [])
 
-    const syncConversationUrl = useCallback((conversationId: string | null) => {
-        const url = new URL(window.location.href)
-        if (conversationId) url.searchParams.set("conversation", conversationId)
-        else url.searchParams.delete("conversation")
-        const frameId = url.searchParams.get(WORKSPACE_TAB_FRAME_PARAM)
-        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
-        if (frameId && window.parent !== window) {
-            const shellUrl = new URL(url)
-            shellUrl.searchParams.delete(WORKSPACE_TAB_FRAME_PARAM)
-            const message: WorkspaceTabFrameMessage = { source: WORKSPACE_TAB_MESSAGE_SOURCE, target: "host", tabId: frameId, type: "location-replace", url: `${shellUrl.pathname}${shellUrl.search}${shellUrl.hash}` }
-            window.parent.postMessage(message, window.location.origin)
-        }
-    }, [])
-
     const persistReadCursor = useCallback(async (cursor: CommunicationReadCursor) => {
         pendingReadRef.current = cursor
         setReadCursors((current) => mergeCursor(current, cursor))
@@ -415,8 +402,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         setInteractionError(null)
         setSwipePosition(null)
         setDraft(conversationId ? localStorage.getItem(`betelgeze:communications:draft:${bootstrap.workspaceId}:${conversationId}`) ?? "" : "")
-        syncConversationUrl(conversationId)
-    }, [bootstrap.workspaceId, bootstrap.workspaceSlug, flushPendingRead, syncConversationUrl])
+    }, [bootstrap.workspaceId, bootstrap.workspaceSlug, flushPendingRead])
 
     function beginReply(message: CommunicationMessage) {
         setReplyingTo(message)
@@ -898,7 +884,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     return <section aria-label="Client communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
         {!schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
 
-        <ResizableConversationColumns>
+        <ResizableConversationColumns listWidth={conversationListWidth} onListWidthChange={onConversationListWidthChange}>
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>
                 <div className="shrink-0 border-b border-neutral-800 p-3">
                     <div role="tablist" aria-label="Communication conversations" className="flex items-center gap-1">

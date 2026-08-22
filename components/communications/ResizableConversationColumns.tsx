@@ -1,20 +1,23 @@
 "use client"
 
-import { type CSSProperties, type PointerEvent, type ReactNode, useRef, useState } from "react"
+import { type CSSProperties, type PointerEvent, type ReactNode, useRef } from "react"
 
-const DEFAULT_LIST_WIDTH = 352
+export const DEFAULT_CONVERSATION_LIST_WIDTH = 352
 const MIN_LIST_WIDTH = 288
 const MAX_LIST_WIDTH = 448
 
-export function ResizableConversationColumns({ children }: { children: ReactNode }) {
-    const [listWidth, setListWidth] = useState(DEFAULT_LIST_WIDTH)
+export function ResizableConversationColumns({ children, listWidth, onListWidthChange }: {
+    children: ReactNode
+    listWidth: number
+    onListWidthChange: (width: number) => void
+}) {
     const containerRef = useRef<HTMLDivElement | null>(null)
 
     function resize(event: PointerEvent<HTMLButtonElement>) {
         const rect = containerRef.current?.getBoundingClientRect()
         if (!rect) return
         const containerMaximum = Math.max(MIN_LIST_WIDTH, Math.round(rect.width * 0.42))
-        setListWidth(Math.max(MIN_LIST_WIDTH, Math.min(MAX_LIST_WIDTH, containerMaximum, Math.round(event.clientX - rect.left))))
+        onListWidthChange(Math.max(MIN_LIST_WIDTH, Math.min(MAX_LIST_WIDTH, containerMaximum, Math.round(event.clientX - rect.left))))
     }
 
     return <div
@@ -37,7 +40,7 @@ export function ResizableConversationColumns({ children }: { children: ReactNode
                 if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
                 resize(event)
             }}
-            onDoubleClick={() => setListWidth(DEFAULT_LIST_WIDTH)}
+            onDoubleClick={() => onListWidthChange(DEFAULT_CONVERSATION_LIST_WIDTH)}
             className="absolute inset-y-0 z-30 hidden w-4 -translate-x-1/2 touch-none cursor-col-resize outline-none lg:block"
             style={{ left: "var(--conversation-list-width)" }}
         />

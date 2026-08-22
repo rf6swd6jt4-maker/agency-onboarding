@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { CommunicationsWorkspace } from "@/components/communications/CommunicationsWorkspace"
 import { TeamCommunicationsWorkspace } from "@/components/communications/TeamCommunicationsWorkspace"
 import { CommunicationsActivityTracker } from "@/components/communications/CommunicationsActivityTracker"
+import { DEFAULT_CONVERSATION_LIST_WIDTH } from "@/components/communications/ResizableConversationColumns"
 import type { CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import type { CommunicationsBootstrap } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap } from "@/lib/teams/types"
@@ -21,7 +22,15 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
     const [nativeConnectionState, setNativeConnectionState] = useState<CommunicationsConnectionState>("connecting")
     const [clientUnreadCount, setClientUnreadCount] = useState(0)
     const [nativeUnreadCount, setNativeUnreadCount] = useState(0)
+    const [conversationListWidth, setConversationListWidth] = useState(DEFAULT_CONVERSATION_LIST_WIDTH)
     const unreadCount = clientUnreadCount + nativeUnreadCount
+
+    useEffect(() => {
+        const stored = Number(localStorage.getItem(`betelgeze:communications:list-width:${clientBootstrap.workspaceId}`))
+        if (!Number.isFinite(stored) || stored < 288 || stored > 448) return
+        const timer = window.setTimeout(() => setConversationListWidth(stored), 0)
+        return () => window.clearTimeout(timer)
+    }, [clientBootstrap.workspaceId])
 
     useEffect(() => {
         const tabId = new URL(window.location.href).searchParams.get(WORKSPACE_TAB_FRAME_PARAM)
@@ -36,17 +45,39 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
         window.parent.postMessage(message, window.location.origin)
     }, [unreadCount])
 
+    useEffect(() => {
+        const url = new URL(window.location.href)
+        url.searchParams.set("mode", mode)
+        if (clientSelectedId) url.searchParams.set("conversation", clientSelectedId)
+        else url.searchParams.delete("conversation")
+        if (nativeSelectedId) {
+            url.searchParams.set("nativeConversation", nativeSelectedId)
+            url.searchParams.delete("dm")
+        } else url.searchParams.delete("nativeConversation")
+
+        const tabId = url.searchParams.get(WORKSPACE_TAB_FRAME_PARAM)
+        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
+        if (!tabId || window.parent === window) return
+        const shellUrl = new URL(url)
+        shellUrl.searchParams.delete(WORKSPACE_TAB_FRAME_PARAM)
+        const message: WorkspaceTabFrameMessage = {
+            source: WORKSPACE_TAB_MESSAGE_SOURCE,
+            target: "host",
+            tabId,
+            type: "location-replace",
+            url: `${shellUrl.pathname}${shellUrl.search}${shellUrl.hash}`,
+        }
+        window.parent.postMessage(message, window.location.origin)
+    }, [clientSelectedId, mode, nativeSelectedId])
+
     const setMode = useCallback((next: "clients" | "team") => {
         setModeState(next)
-        const url = new URL(window.location.href)
-        if (next === "team") url.searchParams.set("mode", "team")
-        else {
-            url.searchParams.delete("mode")
-            url.searchParams.delete("nativeConversation")
-            url.searchParams.delete("dm")
-        }
-        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
     }, [])
+
+    const setSharedConversationListWidth = useCallback((width: number) => {
+        setConversationListWidth(width)
+        localStorage.setItem(`betelgeze:communications:list-width:${clientBootstrap.workspaceId}`, String(width))
+    }, [clientBootstrap.workspaceId])
     return <div data-communications-panel className="fixed inset-0 isolate overflow-hidden overscroll-none bg-black [contain:paint]">
         <CommunicationsActivityTracker
             connectionState={mode === "clients" ? clientConnectionState : nativeConnectionState}
@@ -63,6 +94,8 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
                 onSelectedConversationChange={setClientSelectedId}
                 onUnreadCountChange={setClientUnreadCount}
                 teamUnreadCount={nativeUnreadCount}
+                conversationListWidth={conversationListWidth}
+                onConversationListWidthChange={setSharedConversationListWidth}
             />
         </div>
         <div className={mode === "team" ? "absolute inset-0" : "hidden"} aria-hidden={mode !== "team"}>
@@ -74,6 +107,8 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
                 onSelectedConversationChange={setNativeSelectedId}
                 onUnreadCountChange={setNativeUnreadCount}
                 clientUnreadCount={clientUnreadCount}
+                conversationListWidth={conversationListWidth}
+                onConversationListWidthChange={setSharedConversationListWidth}
             />
         </div>
     </div>

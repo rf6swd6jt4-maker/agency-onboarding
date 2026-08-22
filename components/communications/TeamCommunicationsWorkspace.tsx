@@ -185,7 +185,7 @@ function realtimeMessage(value: unknown): NativeMessage | null {
     return { id, clientRequestId: text(row.client_request_id), conversationId, senderUserId, senderWorkspaceRole: row.sender_workspace_role === "owner" || row.sender_workspace_role === "admin" || row.sender_workspace_role === "staff" ? row.sender_workspace_role : null, body: typeof row.body === "string" ? row.body : "", replyToMessageId: text(row.reply_to_message_id), attachment, createdAt, editedAt: text(row.edited_at) }
 }
 
-export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenClients, onSelectedConversationChange, onUnreadCountChange, clientUnreadCount }: {
+export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenClients, onSelectedConversationChange, onUnreadCountChange, clientUnreadCount, conversationListWidth, onConversationListWidthChange }: {
     active: boolean
     bootstrap: NativeCommunicationsBootstrap
     onConnectionStateChange?: (state: CommunicationsConnectionState) => void
@@ -193,6 +193,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     onSelectedConversationChange?: (conversationId: string | null) => void
     onUnreadCountChange?: (count: number) => void
     clientUnreadCount?: number
+    conversationListWidth: number
+    onConversationListWidthChange: (width: number) => void
 }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
     const [conversations, setConversations] = useState(bootstrap.conversations)
@@ -353,10 +355,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         followLatestRef.current = true; setAtLatest(true); setShowJumpToLatest(false)
         setSelectedId(id); setReplyingTo(null); setEditingMessage(null); setEditState("idle"); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
         setDraft(id ? localStorage.getItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${id}`) ?? "" : "")
-        const url = new URL(window.location.href)
-        if (id) url.searchParams.set("nativeConversation", id); else url.searchParams.delete("nativeConversation")
-        url.searchParams.delete("dm")
-        window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
     }
 
     useEffect(() => { if (selectedId && !editingMessage) localStorage.setItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selectedId}`, draft) }, [bootstrap.workspaceId, draft, editingMessage, selectedId])
@@ -674,7 +672,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     return <section aria-label="Team communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
         {!schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">Apply the Teams database migration to enable native messaging.</div> : null}
-        <ResizableConversationColumns>
+        <ResizableConversationColumns listWidth={conversationListWidth} onListWidthChange={onConversationListWidthChange}>
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>
                 <div className="shrink-0 border-b border-neutral-800 p-3">
                     <div className="flex items-center gap-1"><div role="tablist" className="flex items-center gap-1"><button type="button" role="tab" aria-selected="false" onClick={onOpenClients} className="inline-flex h-8 items-center gap-2 rounded-lg px-3 text-xs font-medium text-neutral-400 hover:bg-neutral-900 hover:text-white">Clients<UnreadMessageCount count={clientUnreadCount ?? 0} label="unread Client messages" /></button><button type="button" role="tab" aria-selected="true" className="inline-flex h-8 items-center rounded-lg bg-neutral-800 px-3 text-xs font-semibold text-white">Team</button></div><span className="ml-auto"><CommunicationsConnectionStatus state={connection.state} error={connection.error} /></span>{bootstrap.canManageTeams ? <button type="button" onClick={() => setEditingTeam(null)} aria-label="Create team" title="Create team" className="inline-flex h-8 w-8 items-center justify-center rounded-full text-xl text-neutral-400 hover:bg-neutral-900 hover:text-white">+</button> : null}</div>

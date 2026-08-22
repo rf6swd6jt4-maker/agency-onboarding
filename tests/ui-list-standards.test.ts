@@ -54,7 +54,7 @@ test("Communications uses its dedicated responsive conversation workspace instea
     assert.doesNotMatch(workspace, /href=\{href\}/)
     assert.doesNotMatch(workspace, /@\/lib\/relationships/, "the client workspace must not import the server-only relationships module")
     assert.match(teamWorkspace, /h-full min-h-0 w-full/)
-    assert.match(teamWorkspace, /<ResizableConversationColumns>/)
+    assert.match(teamWorkspace, /<ResizableConversationColumns listWidth=\{conversationListWidth\}/)
     assert.match(resizableColumns, /lg:grid-cols/)
     assert.match(teamWorkspace, /lg:hidden/)
     assert.match(teamWorkspace, /selectConversation\(conversation\.id\)/)

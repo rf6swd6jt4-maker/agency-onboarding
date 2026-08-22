@@ -22,7 +22,7 @@ export default async function CommunicationsPage({ params, searchParams }: PageP
     return (
         <main className="fixed inset-0 overflow-hidden bg-black text-white">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-            <CommunicationsPanel clientBootstrap={bootstrap} nativeBootstrap={nativeBootstrap} initialMode={query.mode === "team" || Boolean(query.dm) || Boolean(query.nativeConversation) ? "team" : "clients"} />
+            <CommunicationsPanel clientBootstrap={bootstrap} nativeBootstrap={nativeBootstrap} initialMode={query.mode === "team" || (query.mode !== "clients" && (Boolean(query.dm) || Boolean(query.nativeConversation))) ? "team" : "clients"} />
         </main>
     )
 }

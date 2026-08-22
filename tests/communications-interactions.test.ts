@@ -119,7 +119,7 @@ test("message interactions keep the approved mobile and profile parity", async (
     for (const source of [clients, team]) {
         assert.match(source, /touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain/)
         assert.match(source, /mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none/)
-        assert.match(source, /<ResizableConversationColumns>/)
+        assert.match(source, /<ResizableConversationColumns listWidth=\{conversationListWidth\} onListWidthChange=\{onConversationListWidthChange\}>/)
         assert.match(source, /onTouchCancel/)
         assert.match(source, /max-w-\[80%\]/)
         assert.match(source, /min-w-0 touch-pan-y cursor-pointer/)

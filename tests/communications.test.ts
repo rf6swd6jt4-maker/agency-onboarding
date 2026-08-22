@@ -32,8 +32,6 @@ test("Communications is an opaque local-first client chat workspace", async () =
     assert.match(bootstrap, /relationship\.status !== "archived"/)
     assert.doesNotMatch(bootstrap, /relationship\.status !== "archived" && relationship\.client_id/)
     assert.match(workspace, /useState\(bootstrap\.selectedConversationId\)/)
-    assert.match(workspace, /window\.history\.replaceState/)
-    assert.match(workspace, /type: "location-replace"/)
     assert.match(workspace, /overflow-y-auto overscroll-contain/)
     assert.match(workspace, /postgres_changes/)
     assert.doesNotMatch(workspace, /presenceState|channel\.track|Team presence/)
@@ -50,6 +48,29 @@ test("Communications is an opaque local-first client chat workspace", async () =
     assert.match(workspace, /status: "sending"/)
     assert.match(workspace, /send_uncertain/)
     assert.match(workspace, /message\.direction === "outbound" \? "justify-end" : "justify-start"/)
+})
+
+test("Communications preserves its section and both selected chats across shell refreshes", async () => {
+    const [page, panel, clients, team, columns] = await Promise.all([
+        readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
+        readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
+    ])
+
+    assert.match(panel, /url\.searchParams\.set\("mode", mode\)/)
+    assert.match(panel, /url\.searchParams\.set\("conversation", clientSelectedId\)/)
+    assert.match(panel, /url\.searchParams\.set\("nativeConversation", nativeSelectedId\)/)
+    assert.match(panel, /type: "location-replace"/)
+    assert.match(panel, /window\.parent\.postMessage\(message, window\.location\.origin\)/)
+    assert.match(page, /query\.mode !== "clients"/)
+    assert.match(clients, /onSelectedConversationChange\?\.\(selectedId\)/)
+    assert.match(team, /onSelectedConversationChange\?\.\(selectedId\)/)
+    assert.match(panel, /conversationListWidth=\{conversationListWidth\}/)
+    assert.match(panel, /betelgeze:communications:list-width:/)
+    assert.match(columns, /listWidth: number/)
+    assert.match(columns, /onListWidthChange: \(width: number\) => void/)
 })
 
 test("Communications avatar controls stay circular on mobile", async () => {
