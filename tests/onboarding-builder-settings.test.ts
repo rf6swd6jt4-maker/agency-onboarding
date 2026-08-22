@@ -20,6 +20,7 @@ const onboardingUi = readFileSync("components/settings/OnboardingSettings.tsx", 
 const builderWindowControls = readFileSync("components/onboarding-builder/OnboardingBuilderWindowControls.tsx", "utf8")
 const builderWindowProtocol = readFileSync("lib/onboarding-builder-window.ts", "utf8")
 const brandingUi = readFileSync("components/settings/AgencyBrandingEditor.tsx", "utf8")
+const colourStyleUi = readFileSync("components/settings/ColourStyleEditor.tsx", "utf8")
 const builderUi = readFileSync("components/onboarding-builder/OnboardingBuilderWorkspace.tsx", "utf8")
 const workspaceShell = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
 const workspaceBridge = readFileSync("components/workspace/WorkspaceTabBridge.tsx", "utf8")
@@ -182,8 +183,12 @@ test("Settings renders real Services, Onboarding, and Agency Branding authoring 
 test("Agency Branding keeps semantic colours in a compact role assignment popup", () => {
     assert.match(brandingUi, /Client colour roles/)
     assert.match(brandingUi, /<AnchoredPopup/)
-    assert.match(brandingUi, /Colour palette/)
-    assert.match(brandingUi, /Assigned colour/)
+    assert.match(brandingUi, /placement="below"/)
+    assert.match(brandingUi, /<ColourStyleEditor/)
+    assert.match(colourStyleUi, />Styles</)
+    assert.match(colourStyleUi, /New colour style/)
+    assert.match(colourStyleUi, /Save style/)
+    assert.match(colourStyleUi, /max-h-\[32rem\]/)
     assert.doesNotMatch(brandingUi, /Live colour preview/)
 })
 

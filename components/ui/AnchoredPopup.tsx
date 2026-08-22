@@ -35,6 +35,7 @@ export function AnchoredPopup({
     anchor,
     children,
     align = "start",
+    placement = "above",
     className = "",
     role,
     onDismiss,
@@ -43,6 +44,7 @@ export function AnchoredPopup({
     anchor: HTMLElement | null
     children: ReactNode
     align?: "start" | "end"
+    placement?: "above" | "below"
     className?: string
     role?: string
     onDismiss?: () => void
@@ -68,8 +70,9 @@ export function AnchoredPopup({
             popupHeight: popup.scrollHeight || popup.offsetHeight,
             viewport: { left: viewportLeft, top: viewportTop, width: viewportWidth, height: viewportHeight },
             align,
+            placement,
         }))
-    }, [align, anchor])
+    }, [align, anchor, placement])
 
     useLayoutEffect(() => {
         updatePosition()

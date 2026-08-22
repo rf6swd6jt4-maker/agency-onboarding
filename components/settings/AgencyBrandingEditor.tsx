@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent } 
 import { saveAgencyBranding } from "@/app/[workspaceSlug]/settings/branding-actions"
 import { publishVisualThemeDraft } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
 import { AnchoredPopup } from "@/components/ui"
+import { ColourStyleEditor } from "@/components/settings/ColourStyleEditor"
 import { ONBOARDING_THEME_SLOTS, type OnboardingBrandSwatch, type OnboardingThemeDefinition, type OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
 import { normalizeHexColour, ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
 import { runWorkspaceMutation } from "@/lib/workspace-mutations"
@@ -55,21 +56,26 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
         setTheme((current) => ({ ...current, swatches: current.swatches.map((swatch) => swatch.id === id ? { ...swatch, ...update } : swatch) }))
     }
 
-    function addSwatch() {
-        const id = crypto.randomUUID()
-        setTheme((current) => ({ ...current, swatches: [...current.swatches, { id, name: "New colour", hex: "#64748B", hidden: false }] }))
-    }
-
     function openAssignmentEditor(event: MouseEvent<HTMLButtonElement>, slot: OnboardingThemeSlot) {
         setAssignmentEditor({ slot, anchor: event.currentTarget })
     }
 
     function assignSwatch(slot: OnboardingThemeSlot, swatchId: string) {
-        setTheme((current) => ({ ...current, assignments: { ...current.assignments, [slot]: swatchId } }))
+        setTheme((current) => ({
+            ...current,
+            swatches: current.swatches.map((swatch) => swatch.id === swatchId ? { ...swatch, hidden: false } : swatch),
+            assignments: { ...current.assignments, [slot]: swatchId },
+        }))
     }
 
-    const visibleSwatches = theme.swatches.filter((swatch) => !swatch.hidden)
-    const hiddenSwatches = theme.swatches.filter((swatch) => swatch.hidden)
+    function createAndAssignSwatch(slot: OnboardingThemeSlot, name: string, hex: string) {
+        const id = crypto.randomUUID()
+        setTheme((current) => ({
+            ...current,
+            swatches: [...current.swatches, { id, name, hex, hidden: false }],
+            assignments: { ...current.assignments, [slot]: id },
+        }))
+    }
 
     const editedSlot = assignmentEditor?.slot ?? null
     const editedAssignment = editedSlot ? theme.swatches.find((swatch) => swatch.id === theme.assignments[editedSlot]) : null
@@ -109,33 +115,24 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
                         >
                             <span aria-hidden="true" className="h-7 w-7 shrink-0 rounded-md border border-white/10" style={{ backgroundColor: normalizeHexColour(assigned?.hex) ?? "#000000" }} />
                             <span className="min-w-0 flex-1"><span className="block truncate text-sm text-neutral-200">{ONBOARDING_THEME_SLOT_LABELS[slot]}</span><span className="mt-0.5 block truncate text-xs text-neutral-500">{assigned?.name ?? "Default colour"}</span></span>
-                            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0 text-neutral-600"><path d="m6 3 5 5-5 5" /></svg>
+                            <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className={`h-4 w-4 shrink-0 text-neutral-600 transition-transform ${assignmentEditor?.slot === slot ? "rotate-180" : ""}`}><path d="m3 6 5 5 5-5" /></svg>
                         </button>
                     })}
                 </div>
             </section>
             {warnings.length ? <section className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100"><h3 className="font-medium">Contrast warnings</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-yellow-100/80">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p className="mt-2 text-xs text-yellow-100/70">Warnings do not block saving.</p></section> : null}
             <div className="flex items-center justify-between gap-3"><div aria-live="polite" className="min-h-5 text-xs text-neutral-500">{saveState === "saving" ? "Saving style draft…" : saveState === "saved" ? published ? "Style published" : "Unpublished style draft saved" : saveState === "error" ? error : schemaReady ? "Unpublished style draft" : "Read-only compatibility view"}</div><button type="button" disabled={!schemaReady || publishPending || published} onClick={() => startPublish(async () => { const outcome = await publishVisualThemeDraft(workspaceSlug, latestRef.current); if (!outcome.ok) setError(outcome.error); else setPublished(true) })} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">{publishPending ? "Publishing…" : "Publish style"}</button></div>
-        {assignmentEditor && editedSlot ? <AnchoredPopup anchor={assignmentEditor.anchor} align="end" role="dialog" onDismiss={() => setAssignmentEditor(null)} className="w-[min(25rem,calc(100vw-1rem))] rounded-xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/60">
-            <div className="flex items-start justify-between gap-3 border-b border-neutral-800 px-3 py-3"><div><p className="text-sm font-medium text-white">{ONBOARDING_THEME_SLOT_LABELS[editedSlot]}</p><p className="mt-0.5 text-xs text-neutral-500">Choose from your client-facing palette.</p></div><button type="button" onClick={() => setAssignmentEditor(null)} className="shrink-0 px-1 text-xs text-neutral-500 hover:text-white">Close</button></div>
-            <div className="p-2">
-                <div className="flex items-center justify-between px-1 pb-2"><p className="text-xs font-medium text-neutral-400">Colour palette</p><button type="button" onClick={addSwatch} className="text-xs text-neutral-400 underline underline-offset-4 hover:text-white">Add colour</button></div>
-                <div className="divide-y divide-neutral-800 overflow-hidden rounded-lg border border-neutral-800 bg-black">
-                    {visibleSwatches.map((swatch) => {
-                        const selected = theme.assignments[editedSlot] === swatch.id
-                        return <div key={swatch.id} className="grid grid-cols-[2rem_minmax(0,1fr)_5.75rem_2rem_2rem] items-center gap-1.5 p-1.5">
-                            <input aria-label={`${swatch.name} colour`} type="color" value={normalizeHexColour(swatch.hex) ?? "#000000"} onChange={(event) => updateSwatch(swatch.id, { hex: event.target.value.toUpperCase() })} className="h-8 w-8 cursor-pointer rounded-md border border-neutral-700 bg-transparent p-0.5" />
-                            <input aria-label="Colour name" value={swatch.name} onChange={(event) => updateSwatch(swatch.id, { name: event.target.value })} maxLength={80} className="h-8 min-w-0 rounded-md border border-transparent bg-transparent px-2 text-xs text-neutral-200 hover:border-neutral-800 focus:border-neutral-700 focus:outline-none" />
-                            <input aria-label={`${swatch.name} hex`} value={swatch.hex} onChange={(event) => updateSwatch(swatch.id, { hex: event.target.value.toUpperCase() })} maxLength={7} className="h-8 min-w-0 rounded-md border border-transparent bg-transparent px-2 font-mono text-xs uppercase text-neutral-400 hover:border-neutral-800 focus:border-neutral-700 focus:outline-none" />
-                            <button type="button" aria-label={`Assign ${swatch.name} to ${ONBOARDING_THEME_SLOT_LABELS[editedSlot]}`} aria-pressed={selected} onClick={() => assignSwatch(editedSlot, swatch.id)} className={`flex h-8 w-8 items-center justify-center rounded-md text-sm ${selected ? "bg-white text-black" : "text-neutral-600 hover:bg-neutral-900 hover:text-white"}`}>{selected ? "✓" : ""}</button>
-                            <button type="button" aria-label={`Hide ${swatch.name}`} title="Hide colour" onClick={() => updateSwatch(swatch.id, { hidden: true })} className="flex h-8 w-8 items-center justify-center rounded-md text-xs text-neutral-600 hover:bg-neutral-900 hover:text-white">×</button>
-                        </div>
-                    })}
-                    {!visibleSwatches.length ? <p className="p-3 text-xs text-neutral-500">Restore a hidden colour or add a new one.</p> : null}
-                </div>
-                {hiddenSwatches.length ? <details className="mt-2 px-1"><summary className="cursor-pointer text-xs text-neutral-500">Hidden colours ({hiddenSwatches.length})</summary><div className="mt-2 space-y-1">{hiddenSwatches.map((swatch) => <div key={swatch.id} className="flex items-center gap-2 rounded-md px-1 py-1"><span className="h-5 w-5 rounded border border-neutral-700" style={{ backgroundColor: normalizeHexColour(swatch.hex) ?? "#000000" }} /><span className="min-w-0 flex-1 truncate text-xs text-neutral-400">{swatch.name} · {swatch.hex}</span><button type="button" onClick={() => updateSwatch(swatch.id, { hidden: false })} className="text-xs text-neutral-400 underline underline-offset-4 hover:text-white">Restore</button></div>)}</div></details> : null}
-            </div>
-            <div className="flex items-center gap-2 border-t border-neutral-800 px-3 py-2.5"><span className="h-5 w-5 shrink-0 rounded border border-white/10" style={{ backgroundColor: normalizeHexColour(editedAssignment?.hex) ?? "#000000" }} /><span className="text-xs text-neutral-500">Assigned colour</span><span className="min-w-0 flex-1 truncate text-right text-xs text-neutral-200">{editedAssignment?.name ?? "Default colour"}</span></div>
+        {assignmentEditor && editedSlot ? <AnchoredPopup anchor={assignmentEditor.anchor} align="end" placement="below" role="dialog" onDismiss={() => setAssignmentEditor(null)} className="w-[min(22rem,calc(100vw-1rem))] rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/60">
+            <ColourStyleEditor
+                key={editedSlot}
+                roleLabel={ONBOARDING_THEME_SLOT_LABELS[editedSlot]}
+                assignedSwatch={editedAssignment ?? null}
+                swatches={theme.swatches}
+                onUpdateSwatch={updateSwatch}
+                onAssignSwatch={(swatchId) => assignSwatch(editedSlot, swatchId)}
+                onCreateSwatch={(name, hex) => createAndAssignSwatch(editedSlot, name, hex)}
+                onClose={() => setAssignmentEditor(null)}
+            />
         </AnchoredPopup> : null}
     </div>
 }

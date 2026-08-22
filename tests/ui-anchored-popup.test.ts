@@ -33,6 +33,22 @@ test("anchored popups stay inside the top and side safety edges", () => {
     assert.equal(position.maxWidth, 374)
 })
 
+test("anchored popups can opt into controlled placement below their trigger", () => {
+    const position = anchoredPopupPosition({
+        trigger: { left: 180, right: 360, top: 120, bottom: 164 },
+        popupWidth: 352,
+        popupHeight: 512,
+        viewport: { left: 0, top: 0, width: 390, height: 844 },
+        align: "end",
+        placement: "below",
+    })
+
+    assert.equal(position.left, 8)
+    assert.equal(position.top, 170)
+    assert.equal(position.maxHeight, 666)
+    assert.equal(position.maxWidth, 374)
+})
+
 test("field and list menus share the parent-aware anchored popup primitive", async () => {
     const [popup, listMenu, mobileSurface, fields, standards] = await Promise.all([
         readFile("components/ui/AnchoredPopup.tsx", "utf8"),
