@@ -17,7 +17,15 @@ import {
     verifyWorkspaceIntegration,
 } from "@/lib/workspace-integrations"
 import { normalizeOnboardingDomain } from "@/lib/onboarding/custom-domain"
-import { attachOnboardingDomain, removeOnboardingDomain, verifyOnboardingDomain } from "@/lib/onboarding/vercel-domains"
+import { normalizeClientPortalDomain } from "@/lib/client-portal/domain"
+import {
+    attachClientPortalDomain,
+    attachOnboardingDomain,
+    removeClientPortalDomain,
+    removeOnboardingDomain,
+    verifyClientPortalDomain,
+    verifyOnboardingDomain,
+} from "@/lib/onboarding/vercel-domains"
 import { allowDirectUploadsFromDomain, removeDirectUploadsFromDomain } from "@/lib/onboarding/r2-cors"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { MAINTENANCE_ROUTE_KEYS, platformFailureFingerprint, reportPlatformFailure, type MaintenanceRouteKey } from "@/lib/admin/maintenance"
@@ -274,13 +282,11 @@ export async function saveWorkspaceOnboardingDomain(slug: string, formData: Form
     if (domain && domain === platformHost) throw new Error("Use a separate custom domain, not the Betelgeze application domain.")
 
     if (domain && domain !== workspace.custom_onboarding_domain) {
-        const { data: assignedWorkspace } = await supabaseAdmin
-            .from("workspaces")
-            .select("id")
-            .ilike("custom_onboarding_domain", domain)
-            .neq("id", workspace.id)
-            .maybeSingle()
-        if (assignedWorkspace) throw new Error("That onboarding domain is already assigned to another workspace.")
+        const [{ data: assignedOnboarding }, { data: assignedPortal }] = await Promise.all([
+            supabaseAdmin.from("workspaces").select("id").ilike("custom_onboarding_domain", domain).neq("id", workspace.id).limit(1).maybeSingle(),
+            supabaseAdmin.from("workspaces").select("id").ilike("custom_client_portal_domain", domain).limit(1).maybeSingle(),
+        ])
+        if (assignedOnboarding || assignedPortal) throw new Error("That domain is already assigned to an onboarding or client portal connection.")
     }
 
     if (!domain) {
@@ -323,6 +329,109 @@ export async function saveWorkspaceOnboardingDomain(slug: string, formData: Form
         await removeOnboardingDomain(workspace.custom_onboarding_domain)
         await removeDirectUploadsFromDomain(workspace.custom_onboarding_domain)
     }
+    refresh(slug)
+}
+
+export async function saveWorkspaceClientPortalDomain(slug: string, formData: FormData) {
+    const { workspace } = await requireWorkspace(slug, "owner")
+    const submitted = String(formData.get("domain") ?? "")
+    const domain = submitted ? normalizeClientPortalDomain(submitted) : null
+    if (submitted && !domain) throw new Error("Enter a valid hostname, such as portal.example.com.")
+
+    const platformHost = process.env.NEXT_PUBLIC_SITE_URL
+        ? new URL(process.env.NEXT_PUBLIC_SITE_URL).hostname.toLowerCase()
+        : null
+    if (domain && domain === platformHost) throw new Error("Use a separate custom domain, not the Betelgeze application domain.")
+
+    if (domain && domain !== workspace.custom_client_portal_domain) {
+        const [{ data: assignedOnboarding }, { data: assignedPortal }] = await Promise.all([
+            supabaseAdmin.from("workspaces").select("id").ilike("custom_onboarding_domain", domain).limit(1).maybeSingle(),
+            supabaseAdmin.from("workspaces").select("id").ilike("custom_client_portal_domain", domain).neq("id", workspace.id).limit(1).maybeSingle(),
+        ])
+        if (assignedOnboarding || assignedPortal) throw new Error("That domain is already assigned to an onboarding or client portal connection.")
+    }
+
+    if (!domain) {
+        if (workspace.custom_client_portal_domain) {
+            await removeClientPortalDomain(workspace.custom_client_portal_domain)
+            await removeDirectUploadsFromDomain(workspace.custom_client_portal_domain)
+        }
+        const { error } = await supabaseAdmin
+            .from("workspaces")
+            .update({ custom_client_portal_domain: null, custom_client_portal_domain_status: "none", custom_client_portal_domain_records: [], custom_client_portal_domain_verified_at: null, custom_client_portal_domain_error: null })
+            .eq("id", workspace.id)
+        if (error) throw new Error("Could not remove the client portal domain.")
+        refresh(slug)
+        return
+    }
+
+    if (domain === workspace.custom_client_portal_domain && workspace.custom_client_portal_domain_status === "verified") {
+        refresh(slug)
+        return
+    }
+
+    const provisioned = await attachClientPortalDomain(domain)
+    const { error } = await supabaseAdmin
+        .from("workspaces")
+        .update({
+            custom_client_portal_domain: domain,
+            custom_client_portal_domain_status: "pending_dns",
+            custom_client_portal_domain_records: provisioned.records,
+            custom_client_portal_domain_verified_at: null,
+            custom_client_portal_domain_error: null,
+        })
+        .eq("id", workspace.id)
+    if (error?.code === "23505") throw new Error("That domain is already assigned to an onboarding or client portal connection.")
+    if (error) throw new Error("Could not save the client portal domain.")
+    if (workspace.custom_client_portal_domain && workspace.custom_client_portal_domain !== domain) {
+        await removeClientPortalDomain(workspace.custom_client_portal_domain)
+        await removeDirectUploadsFromDomain(workspace.custom_client_portal_domain)
+    }
+    refresh(slug)
+}
+
+export async function verifyWorkspaceClientPortalDomain(slug: string) {
+    const { workspace } = await requireWorkspace(slug, "owner")
+    if (!workspace.custom_client_portal_domain) throw new Error("Add a domain before verifying it.")
+    const verified = await verifyClientPortalDomain(workspace.custom_client_portal_domain)
+    let connectionError = verified.error
+    if (verified.verified) {
+        try {
+            await allowDirectUploadsFromDomain(workspace.custom_client_portal_domain)
+        } catch (error) {
+            connectionError = error instanceof Error ? error.message : "Could not configure browser uploads for this domain."
+        }
+    }
+    const { error } = await supabaseAdmin
+        .from("workspaces")
+        .update({
+            custom_client_portal_domain_status: verified.verified && !connectionError ? "verified" : "pending_dns",
+            custom_client_portal_domain_records: verified.records,
+            custom_client_portal_domain_verified_at: verified.verified && !connectionError ? new Date().toISOString() : null,
+            custom_client_portal_domain_error: connectionError,
+        })
+        .eq("id", workspace.id)
+    if (error) throw new Error("Could not save the client portal domain verification result.")
+    refresh(slug)
+}
+
+export async function cancelWorkspaceClientPortalDomain(slug: string) {
+    const { workspace } = await requireWorkspace(slug, "owner")
+    if (!workspace.custom_client_portal_domain) return
+
+    await removeClientPortalDomain(workspace.custom_client_portal_domain)
+    await removeDirectUploadsFromDomain(workspace.custom_client_portal_domain)
+    const { error } = await supabaseAdmin
+        .from("workspaces")
+        .update({
+            custom_client_portal_domain: null,
+            custom_client_portal_domain_status: "none",
+            custom_client_portal_domain_records: [],
+            custom_client_portal_domain_verified_at: null,
+            custom_client_portal_domain_error: null,
+        })
+        .eq("id", workspace.id)
+    if (error) throw new Error("Could not cancel the client portal domain setup.")
     refresh(slug)
 }
 

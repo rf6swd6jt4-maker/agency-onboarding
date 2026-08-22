@@ -108,7 +108,7 @@ async function getCustomDomainWorkspace(domain: string) {
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     if (!baseUrl || !anonKey) return null
 
-    const response = await fetch(`${baseUrl}/rest/v1/rpc/resolve_workspace_onboarding_domain`, {
+    const requestOptions = {
         method: "POST",
         headers: {
             apikey: anonKey,
@@ -117,13 +117,24 @@ async function getCustomDomainWorkspace(domain: string) {
         },
         body: JSON.stringify({ requested_domain: domain }),
         cache: "no-store",
-    })
-    if (!response.ok) return null
+    } as const
+    const response = await fetch(`${baseUrl}/rest/v1/rpc/resolve_workspace_public_domain`, requestOptions)
+    if (response.ok) {
+        const result = await response.json() as Array<{ workspace_slug?: string; domain_status?: string; surface?: string }>
+        const workspace = result[0]
+        return workspace?.workspace_slug
+            ? { slug: workspace.workspace_slug, status: workspace.domain_status ?? "verified", surface: workspace.surface === "client_portal" ? "client_portal" as const : "onboarding" as const }
+            : null
+    }
 
-    const result = await response.json() as Array<{ workspace_slug?: string; domain_status?: string }>
+    // Rolling-migration fallback keeps existing onboarding domains available
+    // until the public-domain resolver migration reaches the database.
+    const legacyResponse = await fetch(`${baseUrl}/rest/v1/rpc/resolve_workspace_onboarding_domain`, requestOptions)
+    if (!legacyResponse.ok) return null
+    const result = await legacyResponse.json() as Array<{ workspace_slug?: string; domain_status?: string }>
     const workspace = result[0]
     return workspace?.workspace_slug
-        ? { slug: workspace.workspace_slug, status: workspace.domain_status ?? "verified" }
+        ? { slug: workspace.workspace_slug, status: workspace.domain_status ?? "verified", surface: "onboarding" as const }
         : null
 }
 
@@ -176,7 +187,7 @@ export async function proxy(request: NextRequest) {
         const publicDashboardPaths = [
             "/login", "/sign-up", "/forgot-password", "/update-password",
             "/mfa", "/logout", "/privacy", "/users", "/invites", "/auth", "/workspaces", "/install",
-            "/check-email", "/email-confirmed", "/session", "/onboarding",
+            "/check-email", "/email-confirmed", "/session", "/onboarding", "/client-portal",
         ]
         const isPublicDashboardPath = publicDashboardPaths.some(
             (publicPath) => path === publicPath || path.startsWith(`${publicPath}/`)
@@ -239,22 +250,26 @@ export async function proxy(request: NextRequest) {
         if (workspace) {
             const customToken = path.match(/^\/([a-f0-9]{64})$/i)
             const platformSessionToken = path.match(/^\/onboarding\/session\/([a-f0-9]{64})$/i)
-            const isDomainProbe = request.nextUrl.searchParams.has("__betelgeze_domain_probe")
+            const isDomainProbe = workspace.surface === "client_portal"
+                ? request.nextUrl.searchParams.has("__betelgeze_client_portal_domain_probe")
+                : request.nextUrl.searchParams.has("__betelgeze_domain_probe")
             if (!isDomainProbe && workspace.status !== "verified") {
                 return new NextResponse("Not Found", { status: 404 })
             }
             // Checkout sessions created before custom-domain return URLs were
             // canonicalized still point here. Preserve their query string and
             // move the browser to the public token route instead of 404ing.
-            if (platformSessionToken) {
+            if (workspace.surface === "onboarding" && platformSessionToken) {
                 return withSession(withRedirect(request, `/${platformSessionToken[1]}`))
             }
             if (!customToken) return new NextResponse("Not Found", { status: 404 })
             const headers = new Headers(request.headers)
             headers.set("x-betelgeze-workspace-slug", workspace.slug)
-            headers.set("x-betelgeze-custom-onboarding-domain", domain)
+            headers.set(workspace.surface === "client_portal" ? "x-betelgeze-custom-client-portal-domain" : "x-betelgeze-custom-onboarding-domain", domain)
             const url = request.nextUrl.clone()
-            url.pathname = `/onboarding/session/${customToken[1]}`
+            url.pathname = workspace.surface === "client_portal"
+                ? `/client-portal/session/${customToken[1]}`
+                : `/onboarding/session/${customToken[1]}`
             return NextResponse.rewrite(url, { request: { headers } })
         }
     }

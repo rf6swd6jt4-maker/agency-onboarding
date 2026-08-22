@@ -16,19 +16,28 @@ type VercelDomainConfig = {
     recommendedIPv4?: Array<{ rank?: number; value?: string[] }>
 }
 
-async function probeOnboardingSession(domain: string) {
+type PublicDomainSurface = "onboarding" | "client_portal"
+
+async function probePublicSession(domain: string, surface: PublicDomainSurface) {
     const token = "0".repeat(64)
     try {
-        const response = await fetch(`https://${domain}/${token}?__betelgeze_domain_probe=1`, {
+        const probeParameter = surface === "client_portal"
+            ? "__betelgeze_client_portal_domain_probe=1"
+            : "__betelgeze_domain_probe=1"
+        const response = await fetch(`https://${domain}/${token}?${probeParameter}`, {
             cache: "no-store",
             redirect: "manual",
             signal: AbortSignal.timeout(12_000),
         })
-        if (!response.ok) return "The domain did not reach an onboarding session. Check the DNS record and wait for it to propagate."
+        const surfaceLabel = surface === "client_portal" ? "client portal" : "onboarding session"
+        if (!response.ok) return `The domain did not reach the ${surfaceLabel}. Check the DNS record and wait for it to propagate.`
         const body = await response.text()
-        return body.includes('data-betelgeze-onboarding-session="invalid"')
+        const marker = surface === "client_portal"
+            ? 'data-betelgeze-client-portal-session="invalid"'
+            : 'data-betelgeze-onboarding-session="invalid"'
+        return body.includes(marker)
             ? null
-            : "The domain reached a different site instead of Betelgeze’s onboarding session. Check the DNS record."
+            : `The domain reached a different site instead of Betelgeze’s ${surfaceLabel}. Check the DNS record.`
     } catch {
         return "Betelgeze could not reach this domain over HTTPS. Check the DNS record and try again after propagation."
     }
@@ -81,7 +90,7 @@ async function getDomainConfig(domain: string) {
     return await response.json() as VercelDomainConfig
 }
 
-export async function attachOnboardingDomain(domain: string) {
+async function attachPublicDomain(domain: string) {
     const response = await fetch(projectUrl("/domains"), {
         method: "POST",
         headers: headers(),
@@ -94,7 +103,7 @@ export async function attachOnboardingDomain(domain: string) {
     return { verified: Boolean(projectDomain.verified), records: recordsFrom(projectDomain, config, domain) }
 }
 
-export async function verifyOnboardingDomain(domain: string) {
+async function verifyPublicDomain(domain: string, surface: PublicDomainSurface) {
     const response = await fetch(projectUrl(`/domains/${encodeURIComponent(domain)}/verify`, "v9"), {
         method: "POST",
         headers: headers(),
@@ -114,15 +123,27 @@ export async function verifyOnboardingDomain(domain: string) {
     if (!projectDomain.verified) {
         return { verified: false, records: recordsFrom(projectDomain, config, domain), error: "Vercel has not verified this domain yet. Check the DNS records and try again." }
     }
-    const probeError = await probeOnboardingSession(domain)
+    const probeError = await probePublicSession(domain, surface)
     return { verified: !probeError, records: recordsFrom(projectDomain, config, domain), error: probeError }
 }
 
-export async function removeOnboardingDomain(domain: string) {
+async function removePublicDomain(domain: string) {
     const response = await fetch(projectUrl(`/domains/${encodeURIComponent(domain)}`, "v9"), {
         method: "DELETE",
         headers: headers(),
         cache: "no-store",
     })
     if (!response.ok && response.status !== 404) throw new Error("Vercel could not remove this domain from Betelgeze.")
+}
+
+export const attachOnboardingDomain = attachPublicDomain
+export const removeOnboardingDomain = removePublicDomain
+export function verifyOnboardingDomain(domain: string) {
+    return verifyPublicDomain(domain, "onboarding")
+}
+
+export const attachClientPortalDomain = attachPublicDomain
+export const removeClientPortalDomain = removePublicDomain
+export function verifyClientPortalDomain(domain: string) {
+    return verifyPublicDomain(domain, "client_portal")
 }

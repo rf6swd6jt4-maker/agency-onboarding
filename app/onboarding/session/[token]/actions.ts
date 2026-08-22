@@ -18,6 +18,7 @@ import {
 } from "@/lib/onboarding/canonical"
 import { createSignedRelationshipOnboardingUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { redirect } from "next/navigation"
 
 async function getPublicSession(token: string) {
     const session = await getCanonicalSessionByToken(token)
@@ -41,7 +42,8 @@ function createFillerResponse(form: OnboardingFormDefinition): FormResponse {
 }
 
 export async function completeStep(token: string, stepKey: string) {
-    await completeCanonicalStep(token, stepKey)
+    const outcome = await completeCanonicalStep(token, stepKey)
+    if (outcome.clientPortalUrl) redirect(outcome.clientPortalUrl)
 }
 
 export async function satisfyBlockRequirement(token: string, sessionBlockId: string, kind: "button_opened" | "video_finished") {
@@ -97,8 +99,8 @@ export async function submitPreparedFormStep(
     response: FormResponse
 ) {
     try {
-        await submitCanonicalFormStep(token, stepKey, response)
-        return { ok: true as const }
+        const outcome = await submitCanonicalFormStep(token, stepKey, response)
+        return { ok: true as const, clientPortalUrl: outcome.clientPortalUrl }
     } catch (error) {
         return {
             ok: false as const,
@@ -144,13 +146,13 @@ export async function skipTestStep(
             const step = (await getPublicSession(token)).completableSteps.find((candidate) => candidate.key === stepKey)
             const form = step?.form ?? getOnboardingForm(formKey)
             if (form) {
-                await submitCanonicalFormStep(token, stepKey, createFillerResponse(form))
-                return { ok: true as const, nextPath: await getPublicOnboardingPath(token) }
+                const outcome = await submitCanonicalFormStep(token, stepKey, createFillerResponse(form))
+                return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token) }
             }
         }
 
-        await completeCanonicalStep(token, stepKey)
-        return { ok: true as const, nextPath: await getPublicOnboardingPath(token) }
+        const outcome = await completeCanonicalStep(token, stepKey)
+        return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token) }
     } catch (error) {
         return {
             ok: false as const,

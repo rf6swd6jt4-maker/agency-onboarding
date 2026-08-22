@@ -317,6 +317,10 @@ export function OnboardingForm({
             const outcome = await submitPreparedFormStep(token, stepKey, response)
             if (!outcome.ok) throw new Error(outcome.error)
             window.localStorage.removeItem(localDraftKey)
+            if (outcome.clientPortalUrl) {
+                window.location.assign(outcome.clientPortalUrl)
+                return
+            }
             setUploadLabel(null)
             setUploadProgress(0)
             setSaving(false)

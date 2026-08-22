@@ -6,6 +6,7 @@ import { FormResponse, OnboardingFormDefinition, StoredUpload } from "@/lib/onbo
 import type { OnboardingHelpSettings, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
 import { legacyPublishedOnboardingConfiguration, loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
+import { getClientPortalUrlForOnboardingSession } from "@/lib/client-portal/session"
 import { getOnboardingRuntimeMode } from "@/lib/onboarding/runtime-mode"
 import {
     composeOnboardingSession,
@@ -834,7 +835,7 @@ async function maybeCompleteOnboarding(session: CanonicalOnboardingSession, work
         .like("native_key", `${session.id}:%`)
 
     const allDone = Boolean(items?.length) && items!.every((item) => item.status === "done")
-    if (!allDone) return
+    if (!allDone) return null
 
     let completedWithRpc = false
     const completionIdempotencyKey = `onboarding.session.completed:${session.id}`
@@ -892,6 +893,10 @@ async function maybeCompleteOnboarding(session: CanonicalOnboardingSession, work
         })
     }
     revalidatePath(`/${workspaceSlug}/work`)
+    return getClientPortalUrlForOnboardingSession({
+        workspaceId: session.workspace_id,
+        relationshipId: session.relationship_id,
+    })
 }
 
 export async function completeCanonicalStep(
@@ -1068,8 +1073,9 @@ export async function completeCanonicalStep(
             }
         }
     }
-    await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
+    const clientPortalUrl = await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
     revalidateOnboarding(resolved.workspace.slug, resolved.session.relationship_id, token)
+    return { clientPortalUrl }
 }
 
 export async function submitCanonicalFormStep(token: string, stepKey: string, response: FormResponse) {
@@ -1085,7 +1091,7 @@ export async function submitCanonicalFormStep(token: string, stepKey: string, re
     validateFormResponse(form, response)
     const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)
     if (!workItem) throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding step")
-    await completeCanonicalStep(token, stepKey, { form, response })
+    return completeCanonicalStep(token, stepKey, { form, response })
 }
 
 function draftResponseForForm(form: OnboardingFormDefinition, response: FormResponse) {

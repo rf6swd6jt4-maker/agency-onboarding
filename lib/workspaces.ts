@@ -23,6 +23,10 @@ type Workspace = {
     custom_onboarding_domain_status: "none" | "pending_dns" | "verified"
     custom_onboarding_domain_records: Array<{ type: "A" | "CNAME" | "TXT"; name: string; value: string }>
     custom_onboarding_domain_error: string | null
+    custom_client_portal_domain: string | null
+    custom_client_portal_domain_status: "none" | "pending_dns" | "verified"
+    custom_client_portal_domain_records: Array<{ type: "A" | "CNAME" | "TXT"; name: string; value: string }>
+    custom_client_portal_domain_error: string | null
 }
 
 export function isValidWorkspaceSlug(value: string) {
@@ -43,19 +47,19 @@ export async function requireWorkspace(
 
     const workspaceResult = await supabaseAdmin
         .from("workspaces")
-        .select("id, name, slug, status, banner_path, logo_path, banner_height, banner_position, leadgen_banner_path, leadgen_banner_height, leadgen_banner_position, custom_onboarding_domain, custom_onboarding_domain_status, custom_onboarding_domain_records, custom_onboarding_domain_error")
+        .select("id, name, slug, status, banner_path, logo_path, banner_height, banner_position, leadgen_banner_path, leadgen_banner_height, leadgen_banner_position, custom_onboarding_domain, custom_onboarding_domain_status, custom_onboarding_domain_records, custom_onboarding_domain_error, custom_client_portal_domain, custom_client_portal_domain_status, custom_client_portal_domain_records, custom_client_portal_domain_error")
         .eq("slug", slug)
         .maybeSingle() as { data: Workspace | null; error: { message: string } | null }
 
     let workspace = workspaceResult.data
-    if (workspaceResult.error?.message.includes("custom_onboarding_domain") || workspaceResult.error?.message.includes("leadgen_banner")) {
+    if (workspaceResult.error?.message.includes("custom_onboarding_domain") || workspaceResult.error?.message.includes("custom_client_portal_domain") || workspaceResult.error?.message.includes("leadgen_banner")) {
         const { data: legacyWorkspace } = await supabaseAdmin
             .from("workspaces")
             .select("id, name, slug, status, banner_path, logo_path, banner_height, banner_position")
             .eq("slug", slug)
             .maybeSingle()
         workspace = legacyWorkspace
-            ? { ...legacyWorkspace, leadgen_banner_path: null, leadgen_banner_height: 192, leadgen_banner_position: 50, custom_onboarding_domain: null, custom_onboarding_domain_status: "none", custom_onboarding_domain_records: [], custom_onboarding_domain_error: null }
+            ? { ...legacyWorkspace, leadgen_banner_path: null, leadgen_banner_height: 192, leadgen_banner_position: 50, custom_onboarding_domain: null, custom_onboarding_domain_status: "none", custom_onboarding_domain_records: [], custom_onboarding_domain_error: null, custom_client_portal_domain: null, custom_client_portal_domain_status: "none", custom_client_portal_domain_records: [], custom_client_portal_domain_error: null }
             : null
     }
 

@@ -1,4 +1,5 @@
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
+import { getClientPortalUrl } from "@/lib/client-portal/domain"
 import { resolveCommunicationDestinations, sendCommunicationDeliveries } from "@/lib/client-messages/omnichannel"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { deleteOnboardingUploads } from "@/lib/onboarding/uploads"
@@ -10,13 +11,14 @@ import {
 
 export { sanitizeOnboardingOutboxError } from "@/lib/onboarding/outbox-safety"
 
-type DeliveryKind = "module_update" | "onboarding_link"
+type DeliveryKind = "module_update" | "onboarding_link" | "client_portal_link"
 
 type DeliveryOutboxRow = {
     id: string
     workspace_id: string
     relationship_id: string | null
     session_id: string | null
+    portal_session_id: string | null
     correlation_id: string
     kind: DeliveryKind
     destination: string
@@ -144,6 +146,32 @@ async function finishDelivery(
 }
 
 async function deliveryContext(row: DeliveryOutboxRow) {
+    const { data: workspace, error: workspaceError } = await supabaseAdmin
+        .from("workspaces")
+        .select("slug, custom_onboarding_domain, custom_onboarding_domain_status, custom_client_portal_domain, custom_client_portal_domain_status")
+        .eq("id", row.workspace_id)
+        .maybeSingle()
+    if (workspaceError || !workspace) throw new Error(workspaceError?.message ?? "Onboarding delivery workspace was not found")
+    if (row.kind === "client_portal_link") {
+        if (!row.portal_session_id) throw new Error("Client portal delivery has no portal session")
+        const { data: portalSession, error: portalError } = await supabaseAdmin
+            .from("client_portal_sessions")
+            .select("session_token, relationship_id, status, token_revoked_at")
+            .eq("workspace_id", row.workspace_id)
+            .eq("id", row.portal_session_id)
+            .maybeSingle()
+        if (portalError || !portalSession) throw new Error(portalError?.message ?? "Client portal delivery session was not found")
+        const relationshipId = portalSession.relationship_id ?? row.relationship_id
+        if (!relationshipId || portalSession.relationship_id !== relationshipId || portalSession.status !== "active" || portalSession.token_revoked_at) throw new Error("Client portal delivery session link is not available")
+        return {
+            relationshipId,
+            publicUrl: getClientPortalUrl({
+                sessionToken: portalSession.session_token,
+                customDomain: workspace.custom_client_portal_domain,
+                customDomainVerified: workspace.custom_client_portal_domain_status === "verified",
+            }),
+        }
+    }
     if (!row.session_id) throw new Error("Onboarding delivery has no session")
     const { data: session, error: sessionError } = await supabaseAdmin
         .from("relationship_onboarding_sessions")
@@ -152,13 +180,7 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         .eq("id", row.session_id)
         .maybeSingle()
     if (sessionError || !session) throw new Error(sessionError?.message ?? "Onboarding delivery session was not found")
-    if (!['active', 'completed'].includes(session.status) || session.token_revoked_at) throw new Error("Onboarding delivery session link is not available")
-    const { data: workspace, error: workspaceError } = await supabaseAdmin
-        .from("workspaces")
-        .select("slug, custom_onboarding_domain, custom_onboarding_domain_status")
-        .eq("id", row.workspace_id)
-        .maybeSingle()
-    if (workspaceError || !workspace) throw new Error(workspaceError?.message ?? "Onboarding delivery workspace was not found")
+    if (!["active", "completed"].includes(session.status) || session.token_revoked_at) throw new Error("Onboarding delivery session link is not available")
     const relationshipId = session.relationship_id ?? row.relationship_id
     if (!relationshipId) throw new Error("Onboarding delivery has no relationship")
     const onboardingUrl = getOnboardingUrl(
@@ -167,20 +189,30 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         workspace.custom_onboarding_domain,
         workspace.custom_onboarding_domain_status === "verified"
     )
-    return { relationshipId, onboardingUrl }
+    return { relationshipId, publicUrl: onboardingUrl }
 }
 
-function deliveryBody(row: DeliveryOutboxRow, onboardingUrl: string) {
+function deliveryBody(row: DeliveryOutboxRow, publicUrl: string) {
     const payload = payloadRecord(row.payload)
+    if (row.kind === "client_portal_link") {
+        const introduction = payloadText(payload, "message", 2_000) || "Your client portal is ready."
+        return [introduction, `Open your portal: ${publicUrl}`].join("\n\n").slice(0, 4_000)
+    }
     if (row.kind === "module_update") {
         const explanation = payloadText(payload, "explanation", 2_000)
             || "We updated this part of your onboarding so we can collect the right information. Please complete it again."
-        return [`We've updated part of your onboarding.`, explanation, `Open your onboarding: ${onboardingUrl}`].join("\n\n").slice(0, 4_000)
+        return [`We've updated part of your onboarding.`, explanation, `Open your onboarding: ${publicUrl}`].join("\n\n").slice(0, 4_000)
     }
     const introduction = payloadText(payload, "message", 2_000)
         || payloadText(payload, "body", 2_000)
         || "Your onboarding link is ready."
-    return [introduction, onboardingUrl].join("\n\n").slice(0, 4_000)
+    return [introduction, publicUrl].join("\n\n").slice(0, 4_000)
+}
+
+function deliveryAutomationLabel(kind: DeliveryKind) {
+    if (kind === "module_update") return "Onboarding update"
+    if (kind === "client_portal_link") return "Client portal link"
+    return "Onboarding link"
 }
 
 async function existingDeliveryMessage(row: DeliveryOutboxRow, sentOnly: boolean) {
@@ -211,7 +243,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
         }
 
         const context = await deliveryContext(row)
-        const body = deliveryBody(row, context.onboardingUrl)
+        const body = deliveryBody(row, context.publicUrl)
         const channels = await resolveCommunicationDestinations({ workspaceId: row.workspace_id, relationshipId: context.relationshipId })
         if (!channels.destinations.length) throw new Error("The relationship has no connected messaging destination")
         const primaryDestination = channels.destinations.find((destination) => destination.primary) ?? channels.destinations[0]
@@ -222,6 +254,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
             outbox_id: row.id,
             kind: row.kind,
             session_id: row.session_id,
+            portal_session_id: row.portal_session_id,
             client_sale_id: saleId,
         }
         const existingMessage = await existingDeliveryMessage(row, false)
@@ -239,7 +272,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
                 error: null,
                 sender_kind: "automation",
                 automation_kind: row.kind,
-                automation_label: row.kind === "module_update" ? "Onboarding update" : "Onboarding link",
+                automation_label: deliveryAutomationLabel(row.kind),
                 raw_payload: messageMetadata,
             }).eq("workspace_id", row.workspace_id).eq("id", messageLogId)
             if (error) throw error
@@ -256,7 +289,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
                 status: "sending",
                 sender_kind: "automation",
                 automation_kind: row.kind,
-                automation_label: row.kind === "module_update" ? "Onboarding update" : "Onboarding link",
+                automation_label: deliveryAutomationLabel(row.kind),
                 raw_payload: messageMetadata,
             }).select("id").single()
             if (error || !messageLog) throw error ?? new Error("Could not create onboarding delivery message log")

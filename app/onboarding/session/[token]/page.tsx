@@ -12,6 +12,8 @@ import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { OnboardingSessionNotice } from "@/components/onboarding/OnboardingSessionNotice"
 import { getFrozenOnboardingPaymentDefinition, getOnboardingPaymentContext, onboardingPaymentPending } from "@/lib/client-sales/onboarding-checkout"
 import { ONBOARDING_PAYMENT_BUTTON_ID, stepEstimate, stepHeader } from "@/lib/onboarding/block-definition"
+import { getClientPortalUrlForOnboardingSession } from "@/lib/client-portal/session"
+import { redirect } from "next/navigation"
 
 export const dynamic = "force-dynamic"
 
@@ -36,6 +38,13 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     }
 
     const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds } = resolved
+    if (session.status === "completed") {
+        const clientPortalUrl = await getClientPortalUrlForOnboardingSession({
+            workspaceId: session.workspace_id,
+            relationshipId: session.relationship_id,
+        })
+        if (clientPortalUrl) redirect(clientPortalUrl)
+    }
     const paymentContext = await getOnboardingPaymentContext(token)
     if (onboardingPaymentPending(paymentContext) && paymentContext) {
         const paymentDefinition = await getFrozenOnboardingPaymentDefinition(paymentContext)

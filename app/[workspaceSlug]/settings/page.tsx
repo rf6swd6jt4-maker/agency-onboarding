@@ -26,18 +26,21 @@ import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa, updateWorkspaceUserRole } from "../users/actions"
 import {
+    cancelWorkspaceClientPortalDomain,
     cancelWorkspaceOnboardingDomain,
     completeWhatsAppEmbeddedSignup,
     discardPendingWorkspaceConnection,
     disconnectWorkspaceConnection,
     removeWorkspaceInvitation,
     rollbackWorkspaceConnection,
+    saveWorkspaceClientPortalDomain,
     saveWorkspaceConnection,
     saveWorkspaceOnboardingDomain,
     updateWorkspaceCoverLayout,
     updateWorkspaceName,
     uploadWorkspaceBanner,
     uploadWorkspaceLogo,
+    verifyWorkspaceClientPortalDomain,
     verifyWorkspaceConnection,
     verifyWorkspaceOnboardingDomain,
     stageManualWorkspaceConnection,
@@ -50,9 +53,9 @@ const settingsSections = [
     { id: "workspace", label: "Workspace", detail: "Name and workspace details" },
     { id: "services", label: "Services", detail: "Catalogue and default pricing" },
     { id: "onboarding", label: "Onboarding", detail: "Domain and session builder" },
-    { id: "client-portal", label: "Client Portal", detail: "Future portal settings" },
+    { id: "client-portal", label: "Client Portal", detail: "Access and experience" },
     { id: "agency-branding", label: "Agency Branding", detail: "Onboarding and portal colours" },
-    { id: "connections", label: "Connections", detail: "Stripe, WhatsApp, and Twilio" },
+    { id: "connections", label: "Connections", detail: "Providers and portal domain" },
     { id: "users", label: "Users", detail: "Access and invitations" },
     { id: "teams", label: "Teams", detail: "People and responsibility routing" },
     { id: "leadgen", label: "Lead Gen", detail: "Automation, targeting, and sources" },
@@ -219,15 +222,15 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             description="This section will hold the settings for the post-onboarding client experience."
                         >
                             <SettingsPlaceholder
-                                title="Client portal settings"
-                                description="The client portal is not available yet. Its domain, access, communication, fulfilment progress, and results settings will be added here when the portal is built."
+                                title="Client portal foundation"
+                                description="Completed onboarding sessions now create durable client portal access. Chat, fulfilment progress, files, and results controls will be added here as those portal areas are built."
                             />
                         </UnifiedSection>
 
                         <UnifiedSection
                             id="agency-branding"
                             title="Agency Branding"
-                            description="Manage the shared colours used across onboarding sessions and the future client portal."
+                            description="Manage the shared colours used across onboarding sessions and the client portal."
                         >
                             <AgencyBrandingEditor workspaceSlug={workspace.slug} initialTheme={onboardingSettings.theme} schemaReady={onboardingSettings.schemaReady} />
                         </UnifiedSection>
@@ -235,7 +238,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                         <UnifiedSection
                             id="connections"
                             title="Connections"
-                            description="Manage active provider credentials and verify that the real external path works."
+                            description="Manage active provider credentials and the client-facing domain used for portal links."
                         >
                             <WorkspaceConnections
                                 workspaceSlug={workspace.slug}
@@ -253,6 +256,19 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                 metaEmbeddedSignupConfigId={process.env.NEXT_PUBLIC_META_EMBEDDED_SIGNUP_CONFIG_ID ?? null}
                                 showHeader={false}
                             />
+                            <div id="client-portal-domain" className="mt-5 scroll-mt-5">
+                                <WorkspaceOnboardingDomain
+                                    surface="client_portal"
+                                    domain={workspace.custom_client_portal_domain}
+                                    status={workspace.custom_client_portal_domain_status}
+                                    records={workspace.custom_client_portal_domain_records}
+                                    error={workspace.custom_client_portal_domain_error}
+                                    saveAction={saveWorkspaceClientPortalDomain.bind(null, workspace.slug)}
+                                    verifyAction={verifyWorkspaceClientPortalDomain.bind(null, workspace.slug)}
+                                    cancelAction={cancelWorkspaceClientPortalDomain.bind(null, workspace.slug)}
+                                    canManage={isOwner}
+                                />
+                            </div>
                         </UnifiedSection>
 
                         <UnifiedSection
