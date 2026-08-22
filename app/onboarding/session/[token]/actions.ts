@@ -134,7 +134,9 @@ export async function skipTestStep(
             if (form) {
                 const draft = await getCanonicalStepDraft(token, stepKey)
                 const response = createTestFormResponse(form, draft?.response)
-                const outcome = await submitCanonicalFormStep(token, stepKey, response)
+                const outcome = await submitCanonicalFormStep(token, stepKey, response, {
+                    allowMissingRequiredFilesForTest: true,
+                })
                 return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token) }
             }
         }

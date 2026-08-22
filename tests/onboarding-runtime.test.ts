@@ -265,7 +265,9 @@ test("client writes are limited to the first incomplete onboarding step", () => 
 test("test clients autofill the frozen current form and advance without legacy field assumptions", () => {
     assert.match(publicActions, /const step = resolved\.completableSteps\.find/u)
     assert.match(publicActions, /createTestFormResponse\(form, draft\?\.response\)/u)
-    assert.match(publicActions, /submitCanonicalFormStep\(token, stepKey, response\)/u)
+    assert.match(publicActions, /submitCanonicalFormStep\(token, stepKey, response, \{[\s\S]{0,120}allowMissingRequiredFilesForTest: true/u)
+    assert.match(canonical, /allowMissingRequiredFiles: Boolean\(options\.allowMissingRequiredFilesForTest && resolved\.session\.is_test\)/u)
+    assert.match(canonical, /field\.required && uploads\.length === 0 && !options\.allowMissingRequiredFiles/u)
     assert.doesNotMatch(publicActions, /Test response for/u)
     assert.doesNotMatch(publicActions, /if \(formKey\)/u)
     assert.match(publicPage, /skipTestStep\(token, currentStep\.key\)/u)

@@ -245,7 +245,11 @@ function extractUploadsFromResponse(response: FormResponse) {
     return uploads
 }
 
-function validateFormResponse(form: OnboardingFormDefinition, response: FormResponse) {
+function validateFormResponse(
+    form: OnboardingFormDefinition,
+    response: FormResponse,
+    options: { allowMissingRequiredFiles?: boolean } = {}
+) {
     const allowedFields = new Set(form.fields.map((field) => field.name))
     if (Object.keys(response).some((key) => !allowedFields.has(key))) {
         throw new Error("This form changed while you were completing it. Reload and try again.")
@@ -254,7 +258,7 @@ function validateFormResponse(form: OnboardingFormDefinition, response: FormResp
         const value = response[field.name]
         if (field.type === "file") {
             const uploads = Array.isArray(value) ? value : []
-            if (field.required && uploads.length === 0) throw new Error(`${field.label} is required.`)
+            if (field.required && uploads.length === 0 && !options.allowMissingRequiredFiles) throw new Error(`${field.label} is required.`)
             if (!field.multiple && uploads.length > 1) throw new Error(`${field.label} accepts one file.`)
             if (uploads.some((upload) => !upload || typeof upload !== "object" || typeof upload.path !== "string" || typeof upload.name !== "string")) {
                 throw new Error(`${field.label} contains an invalid upload.`)
@@ -1078,7 +1082,12 @@ export async function completeCanonicalStep(
     return { clientPortalUrl }
 }
 
-export async function submitCanonicalFormStep(token: string, stepKey: string, response: FormResponse) {
+export async function submitCanonicalFormStep(
+    token: string,
+    stepKey: string,
+    response: FormResponse,
+    options: { allowMissingRequiredFilesForTest?: boolean } = {}
+) {
     const resolved = await getCanonicalSessionByToken(token)
     if (!resolved) throw new Error("Invalid onboarding session")
     if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
@@ -1088,7 +1097,9 @@ export async function submitCanonicalFormStep(token: string, stepKey: string, re
     const form = step.form
         ?? (step.formKey ? (await import("@/lib/onboarding/forms")).getOnboardingForm(step.formKey) : null)
     if (!form) throw new Error("Unknown onboarding form")
-    validateFormResponse(form, response)
+    validateFormResponse(form, response, {
+        allowMissingRequiredFiles: Boolean(options.allowMissingRequiredFilesForTest && resolved.session.is_test),
+    })
     const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)
     if (!workItem) throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding step")
     return completeCanonicalStep(token, stepKey, { form, response })
