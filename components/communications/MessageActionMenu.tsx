@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
-import { CopyIcon, DeleteIcon, EditIcon, PinIcon, ReactIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { CopyIcon, DeleteIcon, EditIcon, PinIcon, ReactIcon, ReplyIcon, SaveIcon } from "@/components/communications/MessageInteractionIcons"
 
 const DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢"]
 const ACTION_BUTTON_CLASS = "inline-flex h-10 w-10 min-h-10 min-w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-800 hover:text-white lg:h-8 lg:w-8 lg:min-h-8 lg:min-w-8"
@@ -31,13 +31,30 @@ export async function copyMessageText(value: string) {
     if (!copied) throw new Error("Copy is unavailable on this device.")
 }
 
-function ActionButton({ label, onClick, children, danger = false, pressed }: { label: string; onClick: () => void; children: ReactNode; danger?: boolean; pressed?: boolean }) {
-    return <button data-icon-button type="button" onClick={onClick} aria-label={label} aria-pressed={pressed} className={`${ACTION_BUTTON_CLASS} ${danger ? "text-red-500 hover:bg-red-500/10 hover:text-red-400" : ""}`}>{children}</button>
+export async function downloadMessageAttachment(url: string, fileName: string) {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error("Could not download this attachment.")
+    const objectUrl = URL.createObjectURL(await response.blob())
+    const anchor = document.createElement("a")
+    anchor.href = objectUrl
+    anchor.download = fileName.split(/[\\/]/).pop() || "attachment"
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000)
 }
 
-export function PrimaryMessageActions({ onDelete, onEdit, onReply, onCopy, onPin, onReact, pinned }: {
+function ActionButton({ label, onClick, children, danger = false, disabled = false, pressed }: { label: string; onClick: () => void; children: ReactNode; danger?: boolean; disabled?: boolean; pressed?: boolean }) {
+    return <button data-icon-button type="button" onClick={onClick} disabled={disabled} aria-label={label} aria-pressed={pressed} className={`${ACTION_BUTTON_CLASS} disabled:cursor-default disabled:hover:bg-transparent ${danger ? "text-red-500 hover:bg-red-500/10 hover:text-red-400" : ""}`}>{children}</button>
+}
+
+export function PrimaryMessageActions({ onDelete, onEdit, onSave, saveLabel = "Save attachment", saveDisabled = false, saveActive = false, onReply, onCopy, onPin, onReact, pinned }: {
     onDelete: (() => void) | null
     onEdit: (() => void) | null
+    onSave: (() => void) | null
+    saveLabel?: string
+    saveDisabled?: boolean
+    saveActive?: boolean
     onReply: (() => void) | null
     onCopy: () => void
     onPin: (() => void) | null
@@ -47,6 +64,7 @@ export function PrimaryMessageActions({ onDelete, onEdit, onReply, onCopy, onPin
     return <div className="flex items-center rounded-full border border-neutral-800 bg-neutral-950 p-1 shadow-xl">
         {onDelete ? <ActionButton label="Delete message" onClick={onDelete} danger><DeleteIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
         {onEdit ? <ActionButton label="Edit message" onClick={onEdit}><EditIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
+        {onSave ? <ActionButton label={saveLabel} onClick={onSave} disabled={saveDisabled} pressed={saveActive}><SaveIcon className={`h-5 w-5 lg:h-4 lg:w-4 ${saveActive ? "text-emerald-400" : ""}`} /></ActionButton> : null}
         {onReply ? <ActionButton label="Reply" onClick={onReply}><ReplyIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
         <ActionButton label="Copy message" onClick={onCopy}><CopyIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton>
         {onPin ? <ActionButton label={pinned ? "Unpin message" : "Pin message"} onClick={onPin} pressed={pinned}><PinIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}

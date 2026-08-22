@@ -107,6 +107,8 @@ test("native messaging supports realtime messages, replies, reactions, reads, fi
     assert.match(workspace, /!conversationId \|\| conversation\.id === conversationId/)
     assert.match(workspace, /result\?\.deleted !== true \|\| result\.conversationId !== selected\.id \|\| result\.messageId !== message\.id/)
     assert.match(workspace, /Shared across client and team chats\./)
+    assert.match(workspace, /downloadMessageAttachment/)
+    assert.match(workspace, /!isSticker && !own/)
     assert.match(messages, /inspectStoredCommunicationSticker/)
     assert.match(messages, /communication_stickers/)
     assert.match(workspace, /PinnedMessageBar/)

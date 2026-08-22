@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 
 import { Avatar } from "@/components/account/Avatar"
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
-import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
+import { copyMessageText, downloadMessageAttachment, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
 import { MessageComposer } from "@/components/communications/MessageComposer"
@@ -184,7 +184,7 @@ function MessageAttachment({ attachment, onOpenImage, light, whiteOnColor = fals
     return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-3 rounded-xl border border-current/10 bg-black/5 px-3 py-2.5 hover:bg-black/10"><span className="text-xl">↗</span><span className="min-w-0"><span className="block truncate text-xs font-semibold">{attachment.fileName}</span><span className="mt-0.5 block text-[10px] opacity-60">{formatFileSize(attachment.size)}</span></span></a>
 }
 
-function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onReact, onRecentEmoji, onReply, onCopy, onPin, onShowReactions, pinned, side, stickerSaved, stickerSaving, onSaveSticker }: {
+function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onReact, onRecentEmoji, onReply, onCopy, onPin, onShowReactions, pinned, side, onSave, saveLabel, saveDisabled, saveActive }: {
     view: MessageActionView
     canInteract: boolean
     currentEmoji: string | null
@@ -197,22 +197,14 @@ function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onRea
     onShowReactions: () => void
     pinned: boolean
     side: "left" | "right"
-    stickerSaved: boolean
-    stickerSaving: boolean
-    onSaveSticker: (() => void) | null
+    onSave: (() => void) | null
+    saveLabel?: string
+    saveDisabled?: boolean
+    saveActive?: boolean
 }) {
-    return <div className={`flex flex-col gap-1 ${side === "right" ? "items-end" : "items-start"}`}>
-        {onSaveSticker || stickerSaved ? <button
-            type="button"
-            onClick={onSaveSticker ?? undefined}
-            disabled={stickerSaved || stickerSaving}
-            aria-label={stickerSaved ? "Sticker saved" : "Save sticker"}
-            className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs font-medium text-neutral-300 shadow-xl hover:bg-neutral-900 hover:text-white disabled:text-emerald-400"
-        >{stickerSaved ? "✓ Saved" : stickerSaving ? "Saving…" : "Save sticker"}</button> : null}
-        {view === "actions"
-            ? <PrimaryMessageActions onDelete={null} onEdit={null} onReply={onReply} onCopy={onCopy} onPin={onPin} onReact={canInteract ? onShowReactions : null} pinned={pinned} />
-            : canInteract ? <MessageReactionActions currentEmoji={currentEmoji} recentEmoji={recentEmoji} onReact={onReact} onRecentEmoji={onRecentEmoji} side={side} /> : null}
-    </div>
+    return view === "actions"
+        ? <PrimaryMessageActions onDelete={null} onEdit={null} onSave={onSave} saveLabel={saveLabel} saveDisabled={saveDisabled} saveActive={saveActive} onReply={onReply} onCopy={onCopy} onPin={onPin} onReact={canInteract ? onShowReactions : null} pinned={pinned} />
+        : canInteract ? <MessageReactionActions currentEmoji={currentEmoji} recentEmoji={recentEmoji} onReact={onReact} onRecentEmoji={onRecentEmoji} side={side} /> : null
 }
 
 function mergeCursor(current: CommunicationReadCursor[], incoming: CommunicationReadCursor) {
@@ -261,6 +253,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
     const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
     const [savingStickerMessageId, setSavingStickerMessageId] = useState<string | null>(null)
+    const [downloadingMessageId, setDownloadingMessageId] = useState<string | null>(null)
     const [interactionError, setInteractionError] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
@@ -553,6 +546,25 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
             setInteractionError(error instanceof Error ? error.message : "Could not save this sticker.")
         } finally {
             setSavingStickerMessageId(null)
+        }
+    }
+
+    async function saveOrDownloadAttachment(message: CommunicationMessage) {
+        if (!message.attachment) return
+        setActionMessageId(null)
+        if (message.attachment.kind === "sticker") {
+            await saveSticker(message)
+            return
+        }
+        if (downloadingMessageId) return
+        setDownloadingMessageId(message.id)
+        setInteractionError(null)
+        try {
+            await downloadMessageAttachment(message.attachment.url, message.attachment.fileName)
+        } catch (error) {
+            setInteractionError(error instanceof Error ? error.message : "Could not download this attachment.")
+        } finally {
+            setDownloadingMessageId(null)
         }
     }
 
@@ -936,6 +948,9 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                             const isSticker = message.attachment?.kind === "sticker"
                             const isWhatsAppClientMessage = message.direction === "inbound" && usesWhatsApp(message)
                             const stickerSaved = Boolean(isSticker && stickers.some((sticker) => sticker.storagePath === message.attachment?.storagePath))
+                            const canSaveAttachment = Boolean(message.attachment && (isSticker || message.senderUserId !== bootstrap.currentUser.id))
+                            const saveAttachmentLabel = isSticker ? stickerSaved ? "Sticker saved" : savingStickerMessageId === message.id ? "Saving sticker" : "Save sticker" : `Download ${message.attachment?.fileName ?? "attachment"}`
+                            const saveAttachmentDisabled = stickerSaved || savingStickerMessageId === message.id || downloadingMessageId === message.id
                             const canPin = message.clientRequestId !== message.id
                             const showActions = actionMessageId === message.id
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
@@ -944,7 +959,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                 <div data-message-interaction={message.id} className={`relative flex items-center gap-2 ${message.direction === "outbound" ? "justify-end" : "justify-start"} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
                                     <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
-                                    {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
                                     <article
                                         role="button"
                                         tabIndex={0}
@@ -1014,7 +1029,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {["send_failed", "partial_sent"].includes(message.status) && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry failed channel{message.status === "partial_sent" ? "" : "s"}</button> : null}
                                     </article>
-                                    {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" stickerSaved={stickerSaved} stickerSaving={savingStickerMessageId === message.id} onSaveSticker={isSticker && !stickerSaved ? () => void saveSticker(message) : null} /></div> : null}
+                                    {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
                                 </div>
                                 {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                             </Fragment>

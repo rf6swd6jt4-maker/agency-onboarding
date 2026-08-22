@@ -4,7 +4,7 @@ import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Avatar } from "@/components/account/Avatar"
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
-import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
+import { copyMessageText, downloadMessageAttachment, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { CancelIcon, CheckIcon, DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
 import { MessageComposer } from "@/components/communications/MessageComposer"
@@ -215,6 +215,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const [actionMessageId, setActionMessageId] = useState<string | null>(null)
     const [actionView, setActionView] = useState<MessageActionView>("actions")
     const [recentReaction, setRecentReaction] = useState<string | null>(null)
+    const [downloadingMessageId, setDownloadingMessageId] = useState<string | null>(null)
     const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const [editingTeam, setEditingTeam] = useState<WorkspaceTeam | null | undefined>(undefined)
@@ -593,6 +594,20 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         }
     }
 
+    async function downloadAttachment(message: NativeMessage) {
+        if (!message.attachment || message.attachment.kind === "sticker" || downloadingMessageId) return
+        setActionMessageId(null)
+        setDownloadingMessageId(message.id)
+        setError(null)
+        try {
+            await downloadMessageAttachment(message.attachment.url, message.attachment.fileName)
+        } catch (downloadError) {
+            setError(downloadError instanceof Error ? downloadError.message : "Could not download this attachment.")
+        } finally {
+            setDownloadingMessageId(null)
+        }
+    }
+
     async function togglePinnedMessage(message: NativeMessage) {
         if (!selected?.canWrite) return
         const conversationId = selected.id
@@ -702,13 +717,15 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         const canPin = selected.canWrite && message.clientRequestId !== message.id
                         const canEdit = selected.canWrite && nativeMessageCanEdit(message, bootstrap.currentUser.id)
                         const isSticker = message.attachment?.kind === "sticker"
+                        const canSaveAttachment = Boolean(message.attachment && !isSticker && !own)
+                        const saveAttachmentLabel = `Download ${message.attachment?.fileName ?? "attachment"}`
                         return <Fragment key={message.id}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                             <div data-message-interaction={message.id} className={`relative flex items-end transition-[filter,opacity] duration-150 ${own ? "justify-end" : "justify-start"} ${editingMessage ? editingMessage.id === message.id ? "pointer-events-none" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                 <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-3 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/45 via-red-950/20 to-transparent" : "bg-gradient-to-r from-white/20 via-white/5 to-transparent"}`} />
                                 <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                 {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
-                                {actionMessageId === message.id ? <div key={`${message.id}:${actionView}`} data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}>{actionView === "actions" ? <PrimaryMessageActions onDelete={canDelete && selected.canWrite ? () => void deleteMessage(message) : null} onEdit={canEdit ? () => startEditingMessage(message) : null} onReply={selected.canWrite ? () => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onReact={selected.canWrite ? () => setActionView("reactions") : null} pinned={selected.pinnedMessageId === message.id} /> : selected.canWrite ? <MessageReactionActions currentEmoji={ownReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}</div> : null}
+                                {actionMessageId === message.id ? <div key={`${message.id}:${actionView}`} data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}>{actionView === "actions" ? <PrimaryMessageActions onDelete={canDelete && selected.canWrite ? () => void deleteMessage(message) : null} onEdit={canEdit ? () => startEditingMessage(message) : null} onSave={canSaveAttachment ? () => void downloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={downloadingMessageId === message.id} onReply={selected.canWrite ? () => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onReact={selected.canWrite ? () => setActionView("reactions") : null} pinned={selected.pinnedMessageId === message.id} /> : selected.canWrite ? <MessageReactionActions currentEmoji={ownReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}</div> : null}
                                 {!own && selected.kind === "team" ? sender?.former
                                     ? <span title={`${sender.name} · former member`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 overflow-hidden rounded-full opacity-70"><Avatar src={sender.avatarSrc} name={sender.name} className="h-full w-full object-center" /></span>
                                     : <button data-icon-button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full object-center" /></button> : null}
