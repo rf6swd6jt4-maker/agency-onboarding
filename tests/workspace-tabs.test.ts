@@ -12,6 +12,7 @@ import {
     workspaceTabFrameMatchesUrl,
     workspaceTabFrameUrl,
     workspaceTabHistoryStep,
+    workspaceTabIsCommunications,
     workspaceRouteCanShowRelationshipContext,
     workspaceRouteIsRecordDetail,
 } from "../lib/workspace-tabs.ts"
@@ -96,6 +97,12 @@ test("workspace shell only supports relationship context on detail routes", () =
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/work/client-1", "scaylup", origin), true)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/onboarding", "scaylup", origin), false)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/relationships", "scaylup", origin), false)
+})
+
+test("identifies the Communications workspace tab without matching other workspaces or routes", () => {
+    assert.equal(workspaceTabIsCommunications("/scaylup/communications?mode=team", "scaylup", origin), true)
+    assert.equal(workspaceTabIsCommunications("/another/communications", "scaylup", origin), false)
+    assert.equal(workspaceTabIsCommunications("/scaylup/communications/archive", "scaylup", origin), false)
 })
 
 test("record details open as switchable workspace tabs while hubs and actions stay in place", () => {

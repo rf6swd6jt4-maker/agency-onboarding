@@ -1,6 +1,25 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import { clientConversationUnreadCount, nativeConversationUnreadCount } from "../lib/communications/unread.ts"
+
+test("combined unread helpers follow read message IDs and exclude sent messages", () => {
+    const clientConversation = { messages: [
+        { id: "c1", direction: "inbound" as const, createdAt: "2026-08-22T10:00:00.000Z" },
+        { id: "c2", direction: "outbound" as const, createdAt: "2026-08-22T10:01:00.000Z" },
+        { id: "c3", direction: "inbound" as const, createdAt: "2026-08-22T10:02:00.000Z" },
+    ] }
+    const nativeConversation = { messages: [
+        { id: "n1", senderUserId: "other", createdAt: "2026-08-22T10:00:00.000Z" },
+        { id: "n2", senderUserId: "current", createdAt: "2026-08-22T10:01:00.000Z" },
+        { id: "n3", senderUserId: "other", createdAt: "2026-08-22T10:02:00.000Z" },
+    ] }
+
+    assert.equal(clientConversationUnreadCount(clientConversation, { lastReadMessageId: "c1", lastReadAt: clientConversation.messages[0].createdAt }, false), 1)
+    assert.equal(nativeConversationUnreadCount(nativeConversation, { lastReadMessageId: "n1", lastReadAt: nativeConversation.messages[0].createdAt }, "current", false), 1)
+    assert.equal(clientConversationUnreadCount(clientConversation, undefined, true), 0)
+    assert.equal(nativeConversationUnreadCount(nativeConversation, undefined, "current", true), 0)
+})
 
 test("Communications is an opaque local-first client chat workspace", async () => {
     const [page, workspace, bootstrap] = await Promise.all([
@@ -60,13 +79,33 @@ test("client and native unread chat indicators use the neutral white accent", as
     }
 })
 
+test("the workspace Communications tab receives the combined client and team unread count", async () => {
+    const [panel, clients, team, shell, tabs] = await Promise.all([
+        readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("lib/workspace-tabs.ts", "utf8"),
+    ])
+
+    assert.match(clients, /onUnreadCountChange\?\.\(unreadCount\)/)
+    assert.match(team, /onUnreadCountChange\?\.\(unreadCount\)/)
+    assert.match(panel, /const unreadCount = clientUnreadCount \+ nativeUnreadCount/)
+    assert.match(panel, /type: "communications-unread"/)
+    assert.match(tabs, /"communications-unread"/)
+    assert.match(shell, /communicationsUnreadCount/)
+    assert.match(shell, /workspaceTabIsCommunications/)
+    assert.match(shell, /unread Communications messages/)
+})
+
 test("client and team chats reconcile missed Realtime events without a reload", async () => {
-    const [hook, panel, clients, team, syncRoute] = await Promise.all([
+    const [hook, panel, clients, team, syncRoute, unread] = await Promise.all([
         readFile("components/communications/useReliableCommunicationsRealtime.ts", "utf8"),
         readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/communications/sync/route.ts", "utf8"),
+        readFile("lib/communications/unread.ts", "utf8"),
     ])
 
     assert.match(hook, /status === "SUBSCRIBED"/)
@@ -80,6 +119,7 @@ test("client and team chats reconcile missed Realtime events without a reload", 
     assert.match(clients, /topic: `communications-client:\$\{bootstrap\.workspaceSlug\}`/)
     assert.match(team, /privateChannel: true/)
     assert.match(team, /topic: `communications:\$\{bootstrap\.workspaceSlug\}`/)
+    assert.match(unread, /message\.createdAt > ownCursor\.lastReadAt/)
     assert.match(hook, /window\.addEventListener\("online", recoverWhenAvailable\)/)
     assert.match(hook, /window\.addEventListener\("focus", recoverWhenAvailable\)/)
     assert.match(hook, /document\.addEventListener\("visibilitychange", recoverWhenAvailable\)/)
@@ -93,9 +133,8 @@ test("client and team chats reconcile missed Realtime events without a reload", 
     for (const workspace of [clients, team]) {
         assert.match(workspace, /persistReadCursor/)
         assert.match(workspace, /lastReadAt > incoming\.lastReadAt/)
-        assert.match(workspace, /message\.createdAt > ownCursor\.lastReadAt/)
         assert.match(workspace, /const visiblyReading = conversation\.id === selectedId && active && workspaceTabActive && documentVisible && atLatest/)
-        assert.match(workspace, /const unread = visiblyReading \? 0 :/)
+        assert.match(workspace, /ConversationUnreadCount\(conversation, ownCursor/)
         assert.match(workspace, /<CommunicationsConnectionStatus/)
     }
 })

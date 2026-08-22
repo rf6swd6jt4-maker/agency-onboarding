@@ -25,6 +25,7 @@ import { dismissReadChatNotification } from "@/lib/push/browser-notifications"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
+import { clientConversationUnreadCount } from "@/lib/communications/unread"
 
 function record(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -232,12 +233,13 @@ function reconcileConversations(current: ClientConversation[], incoming: ClientC
     })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title))
 }
 
-export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenTeam, onSelectedConversationChange }: {
+export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenTeam, onSelectedConversationChange, onUnreadCountChange }: {
     active: boolean
     bootstrap: CommunicationsBootstrap
     onConnectionStateChange?: (state: CommunicationsConnectionState) => void
     onOpenTeam?: () => void
     onSelectedConversationChange?: (conversationId: string | null) => void
+    onUnreadCountChange?: (count: number) => void
 }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
     const [conversations, setConversations] = useState(bootstrap.conversations)
@@ -795,6 +797,14 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
 
     useEffect(() => onConnectionStateChange?.(connection.state), [connection.state, onConnectionStateChange])
 
+    const unreadCount = useMemo(() => conversations.reduce((total, conversation) => {
+        const ownCursor = readCursors.find((cursor) => cursor.relationshipId === conversation.id && cursor.userId === bootstrap.currentUser.id)
+        const visiblyReading = conversation.id === selectedId && active && workspaceTabActive && documentVisible && atLatest
+        return total + clientConversationUnreadCount(conversation, ownCursor, visiblyReading)
+    }, 0), [active, atLatest, bootstrap.currentUser.id, conversations, documentVisible, readCursors, selectedId, workspaceTabActive])
+
+    useEffect(() => onUnreadCountChange?.(unreadCount), [onUnreadCountChange, unreadCount])
+
     useEffect(() => {
         if (!active || !workspaceTabActive || !documentVisible || !atLatest || !selectedId || !selected?.messages.length || !schemaReady) return
         const latest = selected.messages.at(-1)!
@@ -886,9 +896,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{visibleConversations.length ? visibleConversations.map((conversation) => {
                     const latest = conversation.messages.at(-1)
                     const ownCursor = readCursors.find((cursor) => cursor.relationshipId === conversation.id && cursor.userId === bootstrap.currentUser.id)
-                    const cursorIndex = ownCursor?.lastReadMessageId ? conversation.messages.findIndex((message) => message.id === ownCursor.lastReadMessageId) : -1
                     const visiblyReading = conversation.id === selectedId && active && workspaceTabActive && documentVisible && atLatest
-                    const unread = visiblyReading ? 0 : conversation.messages.filter((message, index) => message.direction === "inbound" && (cursorIndex >= 0 ? index > cursorIndex : !ownCursor || message.createdAt > ownCursor.lastReadAt)).length
+                    const unread = clientConversationUnreadCount(conversation, ownCursor, visiblyReading)
                     return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} aria-current={selectedId === conversation.id ? "page" : undefined} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left transition ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}>
                         <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-800 text-sm font-semibold text-neutral-200">{initials(conversation.title)}</span>
                         <span className="min-w-0"><span className="flex min-w-0 items-start justify-between gap-3"><span className="min-w-0 flex-1 truncate text-sm font-semibold">{conversation.title}</span><span className="flex shrink-0 items-center gap-2">{conversation.isTest ? <SquarePill tone="yellow" className="!min-h-5 !px-2 !py-0.5 !text-[10px] !leading-3">Test</SquarePill> : null}{latest ? <time dateTime={latest.createdAt} className={`text-[11px] ${unread ? "text-white" : "text-neutral-600"}`}>{formatRelativeTime(latest.createdAt)}</time> : null}</span></span><span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-neutral-500">{latest?.direction === "outbound" ? <DeliveryTicks message={latest} /> : null}<span className="truncate">{latest?.body || "No messages yet"}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span>

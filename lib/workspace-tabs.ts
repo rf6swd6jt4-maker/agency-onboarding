@@ -17,16 +17,22 @@ export type WorkspaceTabFrameMessage = {
     source: typeof WORKSPACE_TAB_MESSAGE_SOURCE
     target: "host"
     tabId: string
-    type: "location" | "location-replace" | "mutation" | "action-start" | "action-end" | "mutation-start" | "mutation-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab"
+    type: "location" | "location-replace" | "mutation" | "action-start" | "action-end" | "mutation-start" | "mutation-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab" | "communications-unread"
     url?: string
     relationshipId?: string | null
     contextSupported?: boolean
     context?: WorkspaceTabRelationshipContext | null
     contextObstructed?: boolean
     pollId?: string
+    unreadCount?: number
     mutationId?: string
     mutationFailed?: boolean
     mutationError?: string
+}
+
+export function workspaceTabIsCommunications(value: string, workspaceSlug: string, origin: string) {
+    const parsed = new URL(value, origin)
+    return parsed.origin === new URL(origin).origin && parsed.pathname === `/${workspaceSlug}/communications`
 }
 
 export type WorkspaceTabContextMetric = {

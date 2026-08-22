@@ -20,6 +20,7 @@ import { dismissReadChatNotification } from "@/lib/push/browser-notifications"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import type { CommunicationAttachment, CommunicationSticker } from "@/lib/communications/types"
+import { nativeConversationUnreadCount } from "@/lib/communications/unread"
 import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, NativeReadCursor, WorkspaceTeam } from "@/lib/teams/types"
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
@@ -181,12 +182,13 @@ function realtimeMessage(value: unknown): NativeMessage | null {
     return { id, clientRequestId: text(row.client_request_id), conversationId, senderUserId, senderWorkspaceRole: row.sender_workspace_role === "owner" || row.sender_workspace_role === "admin" || row.sender_workspace_role === "staff" ? row.sender_workspace_role : null, body: typeof row.body === "string" ? row.body : "", replyToMessageId: text(row.reply_to_message_id), attachment, createdAt }
 }
 
-export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenClients, onSelectedConversationChange }: {
+export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenClients, onSelectedConversationChange, onUnreadCountChange }: {
     active: boolean
     bootstrap: NativeCommunicationsBootstrap
     onConnectionStateChange?: (state: CommunicationsConnectionState) => void
     onOpenClients: () => void
     onSelectedConversationChange?: (conversationId: string | null) => void
+    onUnreadCountChange?: (count: number) => void
 }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
     const [conversations, setConversations] = useState(bootstrap.conversations)
@@ -440,6 +442,14 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     useEffect(() => onConnectionStateChange?.(connection.state), [connection.state, onConnectionStateChange])
 
+    const unreadCount = useMemo(() => conversations.reduce((total, conversation) => {
+        const ownCursor = readCursors.find((cursor) => cursor.conversationId === conversation.id && cursor.userId === bootstrap.currentUser.id)
+        const visiblyReading = conversation.id === selectedId && active && workspaceTabActive && documentVisible && atLatest
+        return total + nativeConversationUnreadCount(conversation, ownCursor, bootstrap.currentUser.id, visiblyReading)
+    }, 0), [active, atLatest, bootstrap.currentUser.id, conversations, documentVisible, readCursors, selectedId, workspaceTabActive])
+
+    useEffect(() => onUnreadCountChange?.(unreadCount), [onUnreadCountChange, unreadCount])
+
     useEffect(() => {
         if (!active || !workspaceTabActive || !documentVisible || !atLatest || !selectedId || !selected?.messages.length || !schemaReady) return
         const latest = selected.messages.at(-1)!
@@ -605,9 +615,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                     const latest = conversation.messages.at(-1)
                     const showTypingPreview = conversation.id !== selectedId && Object.keys(typingByConversation[conversation.id] ?? {}).length > 0
                     const ownCursor = readCursors.find((cursor) => cursor.conversationId === conversation.id && cursor.userId === bootstrap.currentUser.id)
-                    const cursorIndex = ownCursor?.lastReadMessageId ? conversation.messages.findIndex((message) => message.id === ownCursor.lastReadMessageId) : -1
                     const visiblyReading = conversation.id === selectedId && active && workspaceTabActive && documentVisible && atLatest
-                    const unread = visiblyReading ? 0 : conversation.messages.filter((message, index) => message.senderUserId !== bootstrap.currentUser.id && (cursorIndex >= 0 ? index > cursorIndex : !ownCursor || message.createdAt > ownCursor.lastReadAt)).length
+                    const unread = nativeConversationUnreadCount(conversation, ownCursor, bootstrap.currentUser.id, visiblyReading)
                     const latestRead = Boolean(latest && readCursors.some((cursor) => cursor.conversationId === conversation.id && cursor.userId !== latest.senderUserId && cursor.lastReadAt >= latest.createdAt))
                     return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}><TeamAvatar conversation={conversation} currentUserId={bootstrap.currentUser.id} /><span className="min-w-0"><span className="flex items-start justify-between gap-3"><span className="truncate text-sm font-semibold">{conversation.title}</span>{latest ? <time className={unread ? "text-[11px] text-white" : "text-[11px] text-neutral-600"}>{formatRelativeTime(latest.createdAt)}</time> : null}</span><span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-neutral-500">{!showTypingPreview && latest?.senderUserId === bootstrap.currentUser.id ? <NativeDeliveryTicks message={latest} read={latestRead} /> : null}<span className={`truncate ${showTypingPreview ? "font-medium text-neutral-300" : ""}`}>{showTypingPreview ? "typing…" : latest ? `${latest.senderUserId === bootstrap.currentUser.id ? "You: " : ""}${messagePreview(latest)}` : conversation.subtitle}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span></button>
                 }) : <div className="p-6 text-center"><p className="text-sm text-neutral-300">{showArchived ? "No archived teams" : "No team conversations yet"}</p><p className="mt-2 text-xs text-neutral-600">{showArchived ? "Archived team history will appear here." : "Open a profile to start a DM or create a team."}</p></div>}</div>

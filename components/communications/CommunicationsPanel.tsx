@@ -1,12 +1,13 @@
 "use client"
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { CommunicationsWorkspace } from "@/components/communications/CommunicationsWorkspace"
 import { TeamCommunicationsWorkspace } from "@/components/communications/TeamCommunicationsWorkspace"
 import { CommunicationsActivityTracker } from "@/components/communications/CommunicationsActivityTracker"
 import type { CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import type { CommunicationsBootstrap } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap } from "@/lib/teams/types"
+import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
 
 export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialMode }: {
     clientBootstrap: CommunicationsBootstrap
@@ -18,6 +19,22 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
     const [nativeSelectedId, setNativeSelectedId] = useState(nativeBootstrap.requestedConversationId)
     const [clientConnectionState, setClientConnectionState] = useState<CommunicationsConnectionState>("connecting")
     const [nativeConnectionState, setNativeConnectionState] = useState<CommunicationsConnectionState>("connecting")
+    const [clientUnreadCount, setClientUnreadCount] = useState(0)
+    const [nativeUnreadCount, setNativeUnreadCount] = useState(0)
+    const unreadCount = clientUnreadCount + nativeUnreadCount
+
+    useEffect(() => {
+        const tabId = new URL(window.location.href).searchParams.get(WORKSPACE_TAB_FRAME_PARAM)
+        if (!tabId || window.parent === window) return
+        const message: WorkspaceTabFrameMessage = {
+            source: WORKSPACE_TAB_MESSAGE_SOURCE,
+            target: "host",
+            tabId,
+            type: "communications-unread",
+            unreadCount,
+        }
+        window.parent.postMessage(message, window.location.origin)
+    }, [unreadCount])
 
     const setMode = useCallback((next: "clients" | "team") => {
         setModeState(next)
@@ -44,6 +61,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
                 onConnectionStateChange={setClientConnectionState}
                 onOpenTeam={() => setMode("team")}
                 onSelectedConversationChange={setClientSelectedId}
+                onUnreadCountChange={setClientUnreadCount}
             />
         </div>
         <div className={mode === "team" ? "absolute inset-0" : "hidden"} aria-hidden={mode !== "team"}>
@@ -53,6 +71,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
                 onConnectionStateChange={setNativeConnectionState}
                 onOpenClients={() => setMode("clients")}
                 onSelectedConversationChange={setNativeSelectedId}
+                onUnreadCountChange={setNativeUnreadCount}
             />
         </div>
     </div>

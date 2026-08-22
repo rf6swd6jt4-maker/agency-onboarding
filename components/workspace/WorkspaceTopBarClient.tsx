@@ -42,6 +42,7 @@ import {
     workspaceTabFrameMatchesUrl,
     workspaceTabHistoryStep,
     workspaceTabFrameUrl,
+    workspaceTabIsCommunications,
     workspaceRouteCanShowRelationshipContext,
     workspaceRouteIsRecordDetail,
     type WorkspaceTabFrameMessage,
@@ -385,6 +386,12 @@ function workspaceTabDisplayTitle(tab: Pick<WorkspaceTab, "title" | "customTitle
     return tab.customTitle || tab.title
 }
 
+function CommunicationsUnreadCount({ count }: { count: number }) {
+    // This is unread navigation state for one destination, not an operational
+    // status or grouped statistic that the shared StatusStat primitive represents.
+    return <span aria-label={`${count} unread Communications messages`} className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold tabular-nums text-black">{count}</span>
+}
+
 function deferNavigationStateUpdate(update: () => void) {
     queueMicrotask(update)
 }
@@ -495,6 +502,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [uploadLabel, setUploadLabel] = useState<string | null>(null)
     const [creationNotice, setCreationNotice] = useState<CreationNotice | null>(null)
     const [profileUserId, setProfileUserId] = useState<string | null>(null)
+    const [communicationsUnreadCount, setCommunicationsUnreadCount] = useState(0)
     const [isCreating, startCreateTransition] = useTransition()
     const defaultWorkspaceUrl = `/${workspace.slug}`
     const tabsStorageKey = `betelgeze:workspace-tabs:${workspace.slug}`
@@ -1015,6 +1023,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
             if (message.type === "poll-started" && message.pollId) {
                 showCreationNotice({ label: "Poll started", href: `/${workspace.slug}/leadgen/poll/${message.pollId}` })
+            }
+
+            if (message.type === "communications-unread" && Number.isFinite(message.unreadCount)) {
+                setCommunicationsUnreadCount(Math.max(0, Math.floor(message.unreadCount ?? 0)))
             }
 
             if (message.type === "navigation-start") {
@@ -2220,6 +2232,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         const active = tab.id === activeTabId || (!tabsHydrated && tab.id === "initial")
                         const dragging = tab.id === draggingTabId
                         const displayTitle = workspaceTabDisplayTitle(tab)
+                        const communicationsTab = workspaceTabIsCommunications(tab.url, workspace.slug, "http://localhost")
                         return (
                             <div key={tab.id} className={`group flex h-9 min-w-32 max-w-56 shrink-0 items-center rounded-t-lg border px-2 text-sm transition-[opacity,background-color,border-color] duration-150 ${dragging ? "opacity-0" : ""} ${active ? "border-neutral-700 border-b-neutral-950 bg-neutral-950 text-white" : "border-transparent bg-neutral-900/55 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200"}`}>
                                 {editingTabId === tab.id ? (
@@ -2258,7 +2271,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                                     }}
                                     className={`min-w-0 flex-1 touch-pan-y truncate text-left ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
                                 >
-                                    <span className="flex min-w-0 items-center gap-1.5"><span className="truncate">{displayTitle}</span>{navigationStateByTab[tab.id]?.status === "loading" ? <span aria-label="Loading" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-neutral-400" /> : navigationStateByTab[tab.id]?.status === "error" ? <span aria-label="Navigation failed" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" /> : null}</span>
+                                    <span className="flex min-w-0 items-center gap-1.5"><span className="truncate">{displayTitle}</span>{communicationsTab && communicationsUnreadCount > 0 ? <CommunicationsUnreadCount count={communicationsUnreadCount} /> : null}{navigationStateByTab[tab.id]?.status === "loading" ? <span aria-label="Loading" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-neutral-400" /> : navigationStateByTab[tab.id]?.status === "error" ? <span aria-label="Navigation failed" className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-400" /> : null}</span>
                                 </button>}
                                 {visibleTabs.length > 1 && (
                                     <button data-icon-button type="button" onClick={() => closeTab(tab.id)} aria-label={`Close ${displayTitle} tab`} className="ml-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-500 opacity-80 transition hover:bg-neutral-800 hover:text-white group-hover:opacity-100">
