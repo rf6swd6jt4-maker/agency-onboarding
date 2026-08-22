@@ -84,6 +84,8 @@ test("native messaging supports realtime messages, replies, reactions, reads, fi
     ])
     for (const table of ["workspace_native_messages", "workspace_native_reactions", "workspace_native_read_cursors", "workspace_team_members"]) assert.match(workspace, new RegExp(`table: "${table}"`))
     assert.match(workspace, /replyingTo/)
+    assert.match(workspace, /reply\.senderUserId === bootstrap\.currentUser\.id \? "You" : peopleById\.get\(reply\.senderUserId\)\?\.name \?\? "Team member"/)
+    assert.doesNotMatch(workspace, /selected\.kind === "team" \? <p className="truncate text-\[10px\] font-semibold opacity-70">\{reply\.senderUserId/)
     assert.match(actions, /Use device emoji picker/)
     assert.doesNotMatch(actions, /EMOJI_CATALOGUE/)
     assert.match(workspace, /clientRequestId/)
