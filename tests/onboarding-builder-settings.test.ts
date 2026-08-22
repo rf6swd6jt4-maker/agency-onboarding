@@ -179,6 +179,14 @@ test("Settings renders real Services, Onboarding, and Agency Branding authoring 
     assert.match(settingsPage, /id="onboarding-domain"/)
 })
 
+test("Agency Branding keeps semantic colours in a compact role assignment popup", () => {
+    assert.match(brandingUi, /Client colour roles/)
+    assert.match(brandingUi, /<AnchoredPopup/)
+    assert.match(brandingUi, /Colour palette/)
+    assert.match(brandingUi, /Assigned colour/)
+    assert.doesNotMatch(brandingUi, /Live colour preview/)
+})
+
 test("Builder keeps private server access and renders the visual workspace", () => {
     assert.match(builderPage, /requireWorkspace\(workspaceSlug, "admin"\)/)
     assert.match(builderPage, /loadOnboardingBuilderData/)
