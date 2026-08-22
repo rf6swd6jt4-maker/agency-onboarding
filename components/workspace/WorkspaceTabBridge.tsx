@@ -181,7 +181,8 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             }
         }
 
-        function reportPossibleMutation() {
+        function reportPossibleMutation(event?: Event) {
+            if (event?.target instanceof HTMLFormElement && event.target.dataset.workspaceMutationScope === "local") return
             const message: WorkspaceTabFrameMessage = {
                 source: WORKSPACE_TAB_MESSAGE_SOURCE,
                 target: "host",

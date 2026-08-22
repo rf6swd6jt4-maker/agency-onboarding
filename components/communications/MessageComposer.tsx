@@ -29,6 +29,7 @@ export function MessageComposer({
 }) {
     return <>
         <form
+            data-workspace-mutation-scope="local"
             onSubmit={(event) => {
                 event.preventDefault()
                 if (!sendDisabled) onSend()

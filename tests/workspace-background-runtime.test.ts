@@ -56,6 +56,17 @@ test("workspace navigation keeps frame content mounted and reports progress inli
     assert.match(shell, /hidden=\{!active\}/)
 })
 
+test("chat sends stay local and refreshed tabs remain covered until their frame load completes", () => {
+    const shell = source("components/workspace/WorkspaceTopBarClient.tsx")
+    const bridge = source("components/workspace/WorkspaceTabBridge.tsx")
+    const composer = source("components/communications/MessageComposer.tsx")
+
+    assert.match(composer, /data-workspace-mutation-scope="local"/)
+    assert.match(bridge, /event\.target\.dataset\.workspaceMutationScope === "local"\) return/)
+    assert.match(shell, /if \(refresh\) setRouteLoadingTabId\(tab\.id\)/)
+    assert.match(shell, /setRouteLoadingTabId\(\(current\) => current === tabId \? null : current\)/)
+})
+
 test("workspace frames acknowledge readiness with the current activation state", () => {
     const shell = source("components/workspace/WorkspaceTopBarClient.tsx")
     const bridge = source("components/workspace/WorkspaceTabBridge.tsx")

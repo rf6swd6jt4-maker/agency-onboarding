@@ -863,6 +863,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             setTabs(nextTabs)
             setActiveTabId(existingTab.id)
             saveTabsState(nextTabs, existingTab.id)
+            if (refresh) setRouteLoadingTabId(existingTab.id)
             window.requestAnimationFrame(() => {
                 postToTab(previousTabId, { type: "activate", active: false, refresh: false })
                 postToTab(existingTab.id, { type: "activate", active: true, refresh })
@@ -1373,6 +1374,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (!tab) return
         beginTabNavigation(tabId, tab.url)
         pendingNavigationRef.current.set(tabId, tab.url)
+        setRouteLoadingTabId(tabId)
         postToTab(tabId, { type: "activate", active: true, refresh: true })
     }
 
@@ -1564,6 +1566,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         loadedTabIdsRef.current.add(tabId)
         readyTabIdsRef.current.delete(tabId)
         setLoadedTabIds(new Set(loadedTabIdsRef.current))
+        setRouteLoadingTabId((current) => current === tabId ? null : current)
         const pendingUrl = pendingNavigationRef.current.get(tabId)
         const desiredUrl = pendingUrl ?? expectedUrl
         const repaired = ensureTabFrameLocation(tabId, desiredUrl)
@@ -1584,6 +1587,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         setTabs(nextTabs)
         setActiveTabId(tab.id)
         saveTabsState(nextTabs, tab.id)
+        if (refresh) setRouteLoadingTabId(tab.id)
         window.requestAnimationFrame(() => {
             postToTab(previousTabId, { type: "activate", active: false, refresh: false })
             postToTab(tab.id, { type: "activate", active: true, refresh })
@@ -1850,6 +1854,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         saveTabsState(nextTabs, nextActiveTab.id)
         if (tabId === activeTabId) {
             const refresh = nextActiveTab.seenRevision < mutationRevisionRef.current
+            if (refresh) setRouteLoadingTabId(nextActiveTab.id)
             window.requestAnimationFrame(() => postToTab(nextActiveTab.id, { type: "activate", active: true, refresh }))
         }
     }
