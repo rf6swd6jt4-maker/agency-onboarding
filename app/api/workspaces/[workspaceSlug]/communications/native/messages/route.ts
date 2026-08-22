@@ -6,6 +6,7 @@ import { after } from "next/server"
 import { notifyNativeChatMessage } from "@/lib/push/chat-notifications"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { communicationFileKeyForCurrentUser } from "@/lib/communications/encryption"
+import { NATIVE_MESSAGE_EDIT_WINDOW_MS } from "@/lib/teams/message-editing"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -99,6 +100,50 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
         attachment: storedAttachment ? { kind: storedAttachment.kind, fileName: storedAttachment.fileName } : null,
     }))
     return Response.json({ message })
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
+    const { workspaceSlug } = await context.params
+    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const input = await request.json().catch(() => null) as Record<string, unknown> | null
+    const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
+    const messageId = typeof input?.messageId === "string" ? input.messageId : ""
+    const body = typeof input?.body === "string" ? input.body.trim() : ""
+    if (!UUID_PATTERN.test(conversationId) || !UUID_PATTERN.test(messageId) || !body || body.length > 8000) return Response.json({ error: "A valid edited message is required." }, { status: 400 })
+    if (!await assertNativeConversationAccess(conversationId, user.id, "write")) return Response.json({ error: "Conversation is unavailable or read-only." }, { status: 403 })
+
+    const targetResult = await supabaseAdmin
+        .from("workspace_native_messages")
+        .select("id, sender_user_id, created_at")
+        .eq("workspace_id", workspace.id)
+        .eq("conversation_id", conversationId)
+        .eq("id", messageId)
+        .maybeSingle()
+    if (targetResult.error) return Response.json({ error: targetResult.error.message }, { status: 503 })
+    if (!targetResult.data) return Response.json({ error: "Message not found." }, { status: 404 })
+    if (targetResult.data.sender_user_id !== user.id) return Response.json({ error: "You can only edit your own messages." }, { status: 403 })
+
+    const editCutoff = new Date(Date.now() - NATIVE_MESSAGE_EDIT_WINDOW_MS).toISOString()
+    const editedAt = new Date().toISOString()
+    const updateResult = await supabaseAdmin
+        .from("workspace_native_messages")
+        .update({ body, edited_at: editedAt })
+        .eq("workspace_id", workspace.id)
+        .eq("conversation_id", conversationId)
+        .eq("id", messageId)
+        .eq("sender_user_id", user.id)
+        .gte("created_at", editCutoff)
+        .select("id")
+        .maybeSingle()
+    if (updateResult.error) return Response.json({ error: updateResult.error.message }, { status: 503 })
+    if (!updateResult.data) return Response.json({ error: "Messages can only be edited for 15 minutes after sending." }, { status: 409 })
+
+    try {
+        const message = await loadNativeMessageForCurrentUser({ workspaceId: workspace.id, messageId })
+        return message ? Response.json({ message }) : Response.json({ error: "The edited message could not be reloaded." }, { status: 503 })
+    } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "The edited message could not be reloaded." }, { status: 503 })
+    }
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {

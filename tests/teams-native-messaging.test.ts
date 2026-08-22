@@ -114,6 +114,30 @@ test("native messaging supports realtime messages, replies, reactions, reads, fi
     assert.match(pinMigration, /workspace_native_conversations_pinned_message_fkey/)
 })
 
+test("native team messages can only be edited by their sender during the 15 minute window", async () => {
+    const [workspace, messages, actions, composer, editing] = await Promise.all([
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/native/messages/route.ts", "utf8"),
+        readFile("components/communications/MessageActionMenu.tsx", "utf8"),
+        readFile("components/communications/MessageComposer.tsx", "utf8"),
+        readFile("lib/teams/message-editing.ts", "utf8"),
+    ])
+    assert.match(editing, /15 \* 60 \* 1000/)
+    assert.match(editing, /message\.senderUserId === currentUserId/)
+    assert.match(messages, /export async function PATCH/)
+    assert.match(messages, /targetResult\.data\.sender_user_id !== user\.id/)
+    assert.match(messages, /\.eq\("sender_user_id", user\.id\)/)
+    assert.match(messages, /\.gte\("created_at", editCutoff\)/)
+    assert.match(messages, /edited_at: editedAt/)
+    assert.match(actions, /label="Edit message"/)
+    assert.match(workspace, /startEditingMessage/)
+    assert.match(workspace, /submitLabel=\{editingMessage \? "Save edit"/)
+    assert.match(workspace, /aria-label="Cancel editing"/)
+    assert.match(workspace, /blur-\[1px\]/)
+    assert.match(workspace, /message\.editedAt \? <span>Edited<\/span>/)
+    assert.match(composer, /aria-label=\{submitLabel\}/)
+})
+
 test("native typing is conversation scoped, animated, previewed, and self expiring", async () => {
     const [workspace, realtime, styles] = await Promise.all([
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),

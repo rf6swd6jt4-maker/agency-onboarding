@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Avatar } from "@/components/account/Avatar"
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
 import { copyMessageText, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
-import { DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { CancelIcon, CheckIcon, DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
 import { MessageComposer } from "@/components/communications/MessageComposer"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
@@ -22,6 +22,7 @@ import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import type { CommunicationAttachment, CommunicationSticker } from "@/lib/communications/types"
 import { nativeConversationUnreadCount } from "@/lib/communications/unread"
+import { nativeMessageCanEdit } from "@/lib/teams/message-editing"
 import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, NativeReadCursor, WorkspaceTeam } from "@/lib/teams/types"
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
@@ -180,7 +181,7 @@ function realtimeMessage(value: unknown): NativeMessage | null {
     if (row.body_encryption_version !== null && row.body_encryption_version !== undefined) return null
     if (!id || !conversationId || !senderUserId || !createdAt) return null
     const attachment = row.attachment && typeof row.attachment === "object" && !Array.isArray(row.attachment) ? row.attachment as CommunicationAttachment : null
-    return { id, clientRequestId: text(row.client_request_id), conversationId, senderUserId, senderWorkspaceRole: row.sender_workspace_role === "owner" || row.sender_workspace_role === "admin" || row.sender_workspace_role === "staff" ? row.sender_workspace_role : null, body: typeof row.body === "string" ? row.body : "", replyToMessageId: text(row.reply_to_message_id), attachment, createdAt }
+    return { id, clientRequestId: text(row.client_request_id), conversationId, senderUserId, senderWorkspaceRole: row.sender_workspace_role === "owner" || row.sender_workspace_role === "admin" || row.sender_workspace_role === "staff" ? row.sender_workspace_role : null, body: typeof row.body === "string" ? row.body : "", replyToMessageId: text(row.reply_to_message_id), attachment, createdAt, editedAt: text(row.edited_at) }
 }
 
 export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenClients, onSelectedConversationChange, onUnreadCountChange, clientUnreadCount }: {
@@ -202,6 +203,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const [search, setSearch] = useState("")
     const [showArchived, setShowArchived] = useState(false)
     const [draft, setDraft] = useState("")
+    const [editingMessage, setEditingMessage] = useState<NativeMessage | null>(null)
+    const [editState, setEditState] = useState<"idle" | "saving">("idle")
     const [replyingTo, setReplyingTo] = useState<NativeMessage | null>(null)
     const [attachment, setAttachment] = useState<CommunicationAttachment | null>(null)
     const [attachmentState, setAttachmentState] = useState<"idle" | "uploading">("idle")
@@ -235,6 +238,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const sentTypingConversationRef = useRef<string | null>(null)
     const lastTypingBroadcastAtRef = useRef(0)
     const pendingReadRef = useRef<NativeReadCursor | null>(null)
+    const editingDraftSnapshotRef = useRef("")
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
@@ -344,7 +348,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     function selectConversation(id: string | null) {
         void flushPendingRead().catch(() => undefined)
         followLatestRef.current = true; setAtLatest(true); setShowJumpToLatest(false)
-        setSelectedId(id); setReplyingTo(null); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
+        setSelectedId(id); setReplyingTo(null); setEditingMessage(null); setEditState("idle"); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
         setDraft(id ? localStorage.getItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${id}`) ?? "" : "")
         const url = new URL(window.location.href)
         if (id) url.searchParams.set("nativeConversation", id); else url.searchParams.delete("nativeConversation")
@@ -352,7 +356,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
     }
 
-    useEffect(() => { if (selectedId) localStorage.setItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selectedId}`, draft) }, [bootstrap.workspaceId, draft, selectedId])
+    useEffect(() => { if (selectedId && !editingMessage) localStorage.setItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selectedId}`, draft) }, [bootstrap.workspaceId, draft, editingMessage, selectedId])
     useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selected?.messages.length, selectedId])
     useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selectedId, typingByConversation])
 
@@ -377,6 +381,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                             } : conversation))
                             setReactions((current) => current.filter((reaction) => reaction.messageId !== messageId))
                             setReplyingTo((current) => current?.id === messageId ? null : current)
+                            setEditingMessage((current) => current?.id === messageId ? null : current)
                             setActionMessageId((current) => current === messageId ? null : current)
                         }
                         return
@@ -416,6 +421,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     function handleDraftChange(value: string) {
         setDraft(value)
+        if (editingMessage) {
+            stopNativeTyping(sentTypingConversationRef.current)
+            return
+        }
         if (!selected?.canWrite || !value.trim() || !active || !workspaceTabActive || !documentVisible || connection.state !== "live") {
             stopNativeTyping(sentTypingConversationRef.current)
             return
@@ -496,7 +505,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         if (!selected?.canWrite) return
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
         const stickerAttachment: CommunicationAttachment = { kind: "sticker", fileName: sticker.fileName, mimeType: "image/webp", size: sticker.size, storagePath: sticker.storagePath, url: sticker.url }
-        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString() }
+        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString(), editedAt: null }
         updateConversationMessages(selected.id, [optimistic], true); setReplyingTo(null); setStickerTrayOpen(false); setError(null)
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body: "", replyToMessageId: replyTarget?.id, attachment: stickerAttachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
@@ -509,12 +518,54 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         const body = draft.trim(); if (!body && !attachment) return
         stopNativeTyping(selected.id)
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
-        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString() }
+        const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString(), editedAt: null }
         updateConversationMessages(selected.id, [optimistic], true); setDraft(""); setReplyingTo(null); setAttachment(null); setError(null); localStorage.removeItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selected.id}`)
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body, replyToMessageId: replyTarget?.id, attachment: optimistic.attachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
         if (result?.message) updateConversationMessages(selected.id, [result.message])
         else { setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((message) => message.clientRequestId !== clientRequestId) } : conversation)); setError(result?.error ?? "Could not send message.") }
+    }
+
+    function startEditingMessage(message: NativeMessage) {
+        if (!selected?.canWrite || !nativeMessageCanEdit(message, bootstrap.currentUser.id)) return
+        editingDraftSnapshotRef.current = draft
+        stopNativeTyping(selected.id)
+        setEditingMessage(message)
+        setEditState("idle")
+        setDraft(message.body)
+        setReplyingTo(null)
+        setAttachment(null)
+        setStickerTrayOpen(false)
+        setActionMessageId(null)
+        setError(null)
+        window.requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }))
+    }
+
+    function cancelEditingMessage() {
+        setEditingMessage(null)
+        setEditState("idle")
+        setDraft(editingDraftSnapshotRef.current)
+        setError(null)
+        window.requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }))
+    }
+
+    async function saveEditedMessage() {
+        if (!selected?.canWrite || !editingMessage || editState === "saving") return
+        const body = draft.trim()
+        if (!body || body === editingMessage.body.trim()) return
+        setEditState("saving")
+        setError(null)
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, messageId: editingMessage.id, body }) }).catch(() => null)
+        const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
+        if (!response?.ok || !result?.message) {
+            setEditState("idle")
+            setError(result?.error ?? "Could not edit message.")
+            return
+        }
+        updateConversationMessages(selected.id, [result.message])
+        setEditingMessage(null)
+        setEditState("idle")
+        setDraft(editingDraftSnapshotRef.current)
     }
 
     async function sendReaction(message: NativeMessage, emoji: string) {
@@ -649,14 +700,15 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                             : bootstrap.currentUserRole === "admin" && message.senderWorkspaceRole === "staff"
                         const canDelete = message.clientRequestId !== message.id && (own || canModerate)
                         const canPin = selected.canWrite && message.clientRequestId !== message.id
+                        const canEdit = selected.canWrite && nativeMessageCanEdit(message, bootstrap.currentUser.id)
                         const isSticker = message.attachment?.kind === "sticker"
                         return <Fragment key={message.id}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
-                            <div data-message-interaction={message.id} className={`relative flex items-end ${own ? "justify-end" : "justify-start"} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
+                            <div data-message-interaction={message.id} className={`relative flex items-end transition-[filter,opacity] duration-150 ${own ? "justify-end" : "justify-start"} ${editingMessage ? editingMessage.id === message.id ? "pointer-events-none" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                 <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-3 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/45 via-red-950/20 to-transparent" : "bg-gradient-to-r from-white/20 via-white/5 to-transparent"}`} />
                                 <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                 {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
-                                {actionMessageId === message.id ? <div key={`${message.id}:${actionView}`} data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}>{actionView === "actions" ? <PrimaryMessageActions onDelete={canDelete && selected.canWrite ? () => void deleteMessage(message) : null} onReply={selected.canWrite ? () => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onReact={selected.canWrite ? () => setActionView("reactions") : null} pinned={selected.pinnedMessageId === message.id} /> : selected.canWrite ? <MessageReactionActions currentEmoji={ownReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}</div> : null}
+                                {actionMessageId === message.id ? <div key={`${message.id}:${actionView}`} data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}>{actionView === "actions" ? <PrimaryMessageActions onDelete={canDelete && selected.canWrite ? () => void deleteMessage(message) : null} onEdit={canEdit ? () => startEditingMessage(message) : null} onReply={selected.canWrite ? () => { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } : null} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onReact={selected.canWrite ? () => setActionView("reactions") : null} pinned={selected.pinnedMessageId === message.id} /> : selected.canWrite ? <MessageReactionActions currentEmoji={ownReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}</div> : null}
                                 {!own && selected.kind === "team" ? sender?.former
                                     ? <span title={`${sender.name} · former member`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 overflow-hidden rounded-full opacity-70"><Avatar src={sender.avatarSrc} name={sender.name} className="h-full w-full object-center" /></span>
                                     : <button data-icon-button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full object-center" /></button> : null}
@@ -675,7 +727,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                     onTouchEnd={(event) => { const start = swipeStartRef.current; const touch = event.changedTouches[0]; swipeStartRef.current = null; if (start && touch) { const deltaX = touch.clientX - start.x; const vertical = Math.abs(touch.clientY - start.y); if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = vertical } if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = vertical } } const replyGesture = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42); const deleteGesture = Boolean(start && !start.cancelled && canDelete && start.minDeltaX < -52 && start.verticalAtMin < 42); setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220); if (replyGesture) { swipedMessageRef.current = message.id; setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } else if (deleteGesture) { swipedMessageRef.current = message.id; void deleteMessage(message) } }}
                                     onTouchCancel={() => { swipeStartRef.current = null; setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220) }}
                                     style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
-                                    className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${own ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 touch-pan-y cursor-pointer outline-none`}
+                                    className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${own ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} ${editingMessage?.id === message.id ? "ring-2 ring-white ring-offset-2 ring-offset-black" : ""} min-w-0 touch-pan-y cursor-pointer outline-none`}
                                 >
                                     {selected.kind === "team" ? sender?.former
                                         ? <span className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500`}>{sender.name} · former member</span>
@@ -686,7 +738,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                     {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                     <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : own ? "text-neutral-500" : "text-neutral-600"}`}>
                                         <span className="flex min-w-0 items-center -space-x-1">{selected.kind === "team" ? readers.map((person) => <button data-icon-button type="button" key={person.id} onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(person.id) }} title={`Read by ${person.name}`} aria-label={`Open ${person.name} profile`} className="relative inline-flex h-4 w-4 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full border border-black p-0 leading-none"><Avatar src={person.avatarSrc} name={person.name} className="h-full w-full object-center" /></button>) : null}</span>
-                                        <span className="flex shrink-0 items-center gap-1.5"><time>{messageTime(message.createdAt)}</time>{own ? <NativeDeliveryTicks message={message} read={readers.length > 0} /> : null}</span>
+                                        <span className="flex shrink-0 items-center gap-1.5">{message.editedAt ? <span>Edited</span> : null}<time>{messageTime(message.createdAt)}</time>{own ? <NativeDeliveryTicks message={message} read={readers.length > 0} /> : null}</span>
                                     </div>
                                 </article>
                             </div>
@@ -695,6 +747,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                     }) : selectedTypingPeople.length ? null : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}
                     {selectedTypingPeople.length ? <NativeTypingDots label={selectedTypingLabel} /> : null}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
                     <footer className="relative z-10 shrink-0 touch-none border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
+                        {editingMessage ? <div className="mx-auto mb-2 max-w-3xl border-l-2 border-white px-3 py-1 text-xs"><span className="block font-semibold text-neutral-200">Editing message</span><span className="block truncate text-neutral-500">{editingMessage.body}</span></div> : null}
                         {replyingTo ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border-l-2 border-neutral-500 bg-neutral-900 px-3 py-2 text-xs"><span className="min-w-0 flex-1"><span className="block truncate font-semibold text-neutral-300">{selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"}</span><span className="block truncate text-neutral-500">{messagePreview(replyingTo)}</span></span><button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => { setReplyingTo(null); composerRef.current?.focus({ preventScroll: true }) }} aria-label="Cancel reply" className="h-8 w-8 text-neutral-500">×</button></div> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
                         {stickerTrayOpen ? <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-neutral-800 bg-black p-3 shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold text-neutral-200">Stickers</p><p className="mt-0.5 text-[10px] text-neutral-600">Shared across client and team chats.</p></div><button type="button" onClick={() => setStickerTrayOpen(false)} aria-label="Close sticker tray" className="h-8 w-8 text-neutral-500 hover:text-white">×</button></div><div className="mt-3 grid max-h-52 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-7">{stickers.map((sticker) => <button key={sticker.id} type="button" onClick={() => void sendSticker(sticker)} disabled={!selected.canWrite} title={sticker.fileName} className="flex aspect-square items-center justify-center rounded-xl bg-neutral-950 p-1.5 hover:bg-neutral-900 disabled:opacity-40"><Image unoptimized src={sticker.url} alt={sticker.fileName} width={512} height={512} className="h-full w-full object-contain" /></button>)}<button type="button" onClick={() => stickerInputRef.current?.click()} disabled={stickerUploadState === "uploading"} className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-white disabled:opacity-40"><span className="text-2xl">+</span><span className="mt-1 text-[9px]">{stickerUploadState === "uploading" ? "Converting…" : "Add sticker"}</span></button></div></div> : null}
@@ -706,11 +759,13 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                             draft={draft}
                             placeholder={selected.canWrite ? `Message ${selected.title}` : "Archived conversation"}
                             disabled={!selected.canWrite}
-                            sendDisabled={!selected.canWrite || (!draft.trim() && !attachment) || attachmentState === "uploading"}
+                            sendDisabled={!selected.canWrite || (editingMessage ? !draft.trim() || draft.trim() === editingMessage.body.trim() || editState === "saving" : (!draft.trim() && !attachment) || attachmentState === "uploading")}
                             onDraftChange={handleDraftChange}
                             onBlur={() => stopNativeTyping(selected.id)}
-                            onSend={() => void sendMessage()}
-                            leadingActions={<>
+                            onSend={() => editingMessage ? void saveEditedMessage() : void sendMessage()}
+                            submitLabel={editingMessage ? "Save edit" : "Send message"}
+                            submitIcon={editingMessage ? <CheckIcon className="h-5 w-5" /> : undefined}
+                            leadingActions={editingMessage ? <button data-icon-button type="button" onPointerDown={(event) => event.preventDefault()} onClick={cancelEditingMessage} aria-label="Cancel editing" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white lg:h-9 lg:w-9"><CancelIcon className="h-5 w-5" /></button> : <>
                                 <button data-icon-button type="button" onClick={() => attachmentInputRef.current?.click()} disabled={!selected.canWrite || attachmentState === "uploading"} aria-label="Attach image or file" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><AttachmentIcon /></button>
                                 <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setError(null) }} disabled={!selected.canWrite} aria-label="Open sticker tray" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><StickerIcon /></button>
                             </>}

@@ -28,6 +28,7 @@ export type NativeMessage = {
     replyToMessageId: string | null
     attachment: CommunicationAttachment | null
     createdAt: string
+    editedAt: string | null
 }
 
 export type NativeReaction = {

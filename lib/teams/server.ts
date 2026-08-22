@@ -34,7 +34,20 @@ export function nativeMessageFromRow(value: unknown): NativeMessage | null {
         replyToMessageId: text(row.reply_to_message_id),
         attachment: communicationAttachmentFromValue(row.attachment),
         createdAt,
+        editedAt: text(row.edited_at),
     }
+}
+
+async function loadNativeEditTimes(workspaceId: string, conversationId?: string) {
+    let query = supabaseAdmin
+        .from("workspace_native_messages")
+        .select("id, edited_at")
+        .eq("workspace_id", workspaceId)
+        .not("edited_at", "is", null)
+    if (conversationId) query = query.eq("conversation_id", conversationId)
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+    return new Map((data ?? []).map((row) => [row.id, row.edited_at as string]))
 }
 
 export async function assertNativeConversationAccess(conversationId: string, userId: string, mode: "read" | "write") {
@@ -145,9 +158,11 @@ export async function loadNativeCommunications(input: {
     const teamById = new Map(teams.map((team) => [team.id, team]))
     const participants = new Map<string, string[]>()
     for (const participant of participantResult.data ?? []) participants.set(participant.conversation_id, [...(participants.get(participant.conversation_id) ?? []), participant.user_id])
+    const editedAtByMessageId = await loadNativeEditTimes(input.workspaceId)
     const messages = new Map<string, NativeMessage[]>()
     for (const row of [...(messageResult.data ?? [])].reverse()) {
-        const message = nativeMessageFromRow(row)
+        const source = record(row)
+        const message = nativeMessageFromRow({ ...source, edited_at: editedAtByMessageId.get(text(source.id) ?? "") ?? null })
         if (message) messages.set(message.conversationId, [...(messages.get(message.conversationId) ?? []), message])
     }
     const conversations = (conversationResult.data ?? []).flatMap<NativeConversation>((conversation) => {
@@ -185,7 +200,11 @@ export async function loadNativeMessagesForCurrentUser(input: {
         p_limit: input.limit ?? 1000,
     })
     if (error) throw new Error(error.message)
-    return [...(data ?? [])].reverse().flatMap((row: unknown) => nativeMessageFromRow(row) ?? [])
+    const editedAtByMessageId = await loadNativeEditTimes(input.workspaceId, input.conversationId)
+    return [...(data ?? [])].reverse().flatMap((row: unknown) => {
+        const source = record(row)
+        return nativeMessageFromRow({ ...source, edited_at: editedAtByMessageId.get(text(source.id) ?? "") ?? null }) ?? []
+    })
 }
 
 export async function loadNativeMessageForCurrentUser(input: {
@@ -198,7 +217,12 @@ export async function loadNativeMessageForCurrentUser(input: {
         p_message_id: input.messageId,
     })
     if (error) throw new Error(error.message)
-    return (data ?? []).flatMap((row: unknown) => nativeMessageFromRow(row) ?? [])[0] ?? null
+    const source = record((data ?? [])[0])
+    const id = text(source.id)
+    if (!id) return null
+    const editResult = await supabaseAdmin.from("workspace_native_messages").select("edited_at").eq("workspace_id", input.workspaceId).eq("id", id).maybeSingle()
+    if (editResult.error) throw new Error(editResult.error.message)
+    return nativeMessageFromRow({ ...source, edited_at: editResult.data?.edited_at ?? null })
 }
 
 export function nativeAttachmentFromInput(value: unknown): CommunicationAttachment | null {

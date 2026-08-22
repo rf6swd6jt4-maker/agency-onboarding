@@ -210,7 +210,7 @@ function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onRea
             className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-xs font-medium text-neutral-300 shadow-xl hover:bg-neutral-900 hover:text-white disabled:text-emerald-400"
         >{stickerSaved ? "✓ Saved" : stickerSaving ? "Saving…" : "Save sticker"}</button> : null}
         {view === "actions"
-            ? <PrimaryMessageActions onDelete={null} onReply={onReply} onCopy={onCopy} onPin={onPin} onReact={canInteract ? onShowReactions : null} pinned={pinned} />
+            ? <PrimaryMessageActions onDelete={null} onEdit={null} onReply={onReply} onCopy={onCopy} onPin={onPin} onReact={canInteract ? onShowReactions : null} pinned={pinned} />
             : canInteract ? <MessageReactionActions currentEmoji={currentEmoji} recentEmoji={recentEmoji} onReact={onReact} onRecentEmoji={onRecentEmoji} side={side} /> : null}
     </div>
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
-import { CopyIcon, DeleteIcon, PinIcon, ReactIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
+import { CopyIcon, DeleteIcon, EditIcon, PinIcon, ReactIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 
 const DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢"]
 const ACTION_BUTTON_CLASS = "inline-flex h-10 w-10 min-h-10 min-w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-800 hover:text-white lg:h-8 lg:w-8 lg:min-h-8 lg:min-w-8"
@@ -35,8 +35,9 @@ function ActionButton({ label, onClick, children, danger = false, pressed }: { l
     return <button data-icon-button type="button" onClick={onClick} aria-label={label} aria-pressed={pressed} className={`${ACTION_BUTTON_CLASS} ${danger ? "text-red-500 hover:bg-red-500/10 hover:text-red-400" : ""}`}>{children}</button>
 }
 
-export function PrimaryMessageActions({ onDelete, onReply, onCopy, onPin, onReact, pinned }: {
+export function PrimaryMessageActions({ onDelete, onEdit, onReply, onCopy, onPin, onReact, pinned }: {
     onDelete: (() => void) | null
+    onEdit: (() => void) | null
     onReply: (() => void) | null
     onCopy: () => void
     onPin: (() => void) | null
@@ -45,6 +46,7 @@ export function PrimaryMessageActions({ onDelete, onReply, onCopy, onPin, onReac
 }) {
     return <div className="flex items-center rounded-full border border-neutral-800 bg-neutral-950 p-1 shadow-xl">
         {onDelete ? <ActionButton label="Delete message" onClick={onDelete} danger><DeleteIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
+        {onEdit ? <ActionButton label="Edit message" onClick={onEdit}><EditIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
         {onReply ? <ActionButton label="Reply" onClick={onReply}><ReplyIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
         <ActionButton label="Copy message" onClick={onCopy}><CopyIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton>
         {onPin ? <ActionButton label={pinned ? "Unpin message" : "Pin message"} onClick={onPin} pressed={pinned}><PinIcon className="h-5 w-5 lg:h-4 lg:w-4" /></ActionButton> : null}
