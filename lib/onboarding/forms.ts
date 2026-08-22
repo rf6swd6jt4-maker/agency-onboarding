@@ -74,6 +74,33 @@ export type FormResponseValue = string | StoredUpload[]
 
 export type FormResponse = Record<string, FormResponseValue>
 
+const TEST_FORM_VALUES: Record<Exclude<FormFieldType, "file">, string> = {
+    text: "Example business information",
+    textarea: "This is example information for testing this onboarding step.",
+    email: "test.client@example.com",
+    tel: "+353 85 123 4567",
+    url: "https://example.com",
+}
+
+export function createTestFormResponse(
+    form: OnboardingFormDefinition,
+    existingResponse: FormResponse = {}
+): FormResponse {
+    const response: FormResponse = {}
+
+    for (const field of form.fields) {
+        if (field.type === "file") {
+            const existingUploads = existingResponse[field.name]
+            response[field.name] = Array.isArray(existingUploads) ? existingUploads : []
+            continue
+        }
+
+        response[field.name] = TEST_FORM_VALUES[field.type]
+    }
+
+    return response
+}
+
 export const ONBOARDING_FORMS: Record<string, OnboardingFormDefinition> = {
     "web-access": {
         key: "web-access",

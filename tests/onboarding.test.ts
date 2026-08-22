@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto"
 import test from "node:test"
 import { getCompletedStepCount, getProgressPercentage } from "../lib/onboarding/progress.ts"
 import {
+    createTestFormResponse,
     getFileAcceptValue,
     getOnboardingForm,
     ONBOARDING_FORMS,
@@ -66,6 +67,37 @@ test("calculates rounded progress percentage", () => {
 
 test("empty step lists are treated as complete", () => {
     assert.equal(getProgressPercentage([], []), 100)
+})
+
+test("creates type-aware answers for test onboarding forms", () => {
+    const existingUpload = {
+        name: "example.pdf",
+        path: "workspace/onboarding/example.pdf",
+        size: 128,
+        type: "application/pdf",
+        kind: "document" as const,
+        provider: "r2" as const,
+    }
+    const response = createTestFormResponse({
+        key: "custom-step",
+        title: "Custom step",
+        intro: "",
+        fields: [
+            { name: "website", label: "Website", type: "url", required: true },
+            { name: "email", label: "Email", type: "email", required: true },
+            { name: "phone", label: "Phone", type: "tel", required: true },
+            { name: "summary", label: "Summary", type: "text", required: true },
+            { name: "details", label: "Details", type: "textarea", required: true },
+            { name: "proof", label: "Proof", type: "file" },
+        ],
+    }, { proof: [existingUpload] })
+
+    assert.equal(response.website, "https://example.com")
+    assert.match(String(response.email), /^[^\s@]+@[^\s@]+\.[^\s@]+$/u)
+    assert.match(String(response.phone), /^\+353/u)
+    assert.equal(response.summary, "Example business information")
+    assert.match(String(response.details), /example information/u)
+    assert.deepEqual(response.proof, [existingUpload])
 })
 
 test("maps fulfilment services to required onboarding modules", () => {

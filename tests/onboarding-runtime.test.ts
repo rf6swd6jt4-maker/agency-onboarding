@@ -262,6 +262,15 @@ test("client writes are limited to the first incomplete onboarding step", () => 
     assert.match(canonical, /publicOnboardingMutationMessage/u)
 })
 
+test("test clients autofill the frozen current form and advance without legacy field assumptions", () => {
+    assert.match(publicActions, /const step = resolved\.completableSteps\.find/u)
+    assert.match(publicActions, /createTestFormResponse\(form, draft\?\.response\)/u)
+    assert.match(publicActions, /submitCanonicalFormStep\(token, stepKey, response\)/u)
+    assert.doesNotMatch(publicActions, /Test response for/u)
+    assert.doesNotMatch(publicActions, /if \(formKey\)/u)
+    assert.match(publicPage, /skipTestStep\(token, currentStep\.key\)/u)
+})
+
 test("paid consent queues one idempotent onboarding-link delivery after consent persistence", () => {
     const handler = saleAutomation.slice(saleAutomation.indexOf("export async function handleSaleConsentConfirmation"))
     const enqueueIndex = handler.indexOf("enqueueOnboardingLinkDelivery({")

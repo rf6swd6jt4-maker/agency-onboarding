@@ -1,14 +1,15 @@
 "use server"
 
 import {
+    createTestFormResponse,
     getOnboardingForm,
-    OnboardingFormDefinition,
     FormResponse,
     validateOnboardingUploadFile,
 } from "@/lib/onboarding/forms"
 import {
     completeCanonicalStep,
     getCanonicalSessionByToken,
+    getCanonicalStepDraft,
     getPublicOnboardingPath,
     markCanonicalSessionNoticeSeen,
     ONBOARDING_SESSION_UPDATED_MESSAGE,
@@ -24,21 +25,6 @@ async function getPublicSession(token: string) {
     const session = await getCanonicalSessionByToken(token)
     if (!session) throw new Error("Invalid onboarding session")
     return session
-}
-
-function createFillerResponse(form: OnboardingFormDefinition): FormResponse {
-    const response: FormResponse = {}
-
-    for (const field of form.fields) {
-        if (field.type === "file") {
-            response[field.name] = []
-            continue
-        }
-
-        response[field.name] = `Test response for ${field.label}.`
-    }
-
-    return response
 }
 
 export async function completeStep(token: string, stepKey: string) {
@@ -135,18 +121,20 @@ export async function markSessionNoticeSeen(token: string, noticeId: string) {
 
 export async function skipTestStep(
     token: string,
-    stepKey: string,
-    formKey?: string
+    stepKey: string
 ) {
     try {
-        const { session } = await getPublicSession(token)
+        const resolved = await getPublicSession(token)
+        const { session } = resolved
         if (!session.is_test) throw new Error("Invalid test onboarding session")
 
-        if (formKey) {
-            const step = (await getPublicSession(token)).completableSteps.find((candidate) => candidate.key === stepKey)
-            const form = step?.form ?? getOnboardingForm(formKey)
+        const step = resolved.completableSteps.find((candidate) => candidate.key === stepKey)
+        if (step?.kind === "form") {
+            const form = step.form ?? getOnboardingForm(step.formKey)
             if (form) {
-                const outcome = await submitCanonicalFormStep(token, stepKey, createFillerResponse(form))
+                const draft = await getCanonicalStepDraft(token, stepKey)
+                const response = createTestFormResponse(form, draft?.response)
+                const outcome = await submitCanonicalFormStep(token, stepKey, response)
                 return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token) }
             }
         }
