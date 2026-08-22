@@ -237,7 +237,7 @@ test("logical replies remain linked while WhatsApp receives native reply context
     assert.match(omnichannel, /communication_message_deliveries/)
     assert.match(omnichannel, /replyToMessageId: input\.replyToMessageId/)
     assert.match(meta, /context: replyToMessageId \? \{ message_id: replyToMessageId \} : undefined/)
-    assert.match(workspace, /Replying to \{senderName\(replyingTo\)\}/)
+    assert.match(workspace, /label=\{`Replying to \$\{senderName\(replyingTo\)\}`\}/)
     assert.match(workspace, /start\.maxDeltaX > 52/)
     assert.match(workspace, /start\.verticalAtMax < 42/)
     assert.match(workspace, /message\.replyToMessageId/)

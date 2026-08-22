@@ -96,10 +96,11 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerScroll, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
+    const [clients, team, composer, composerPreview, composerScroll, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
+        readFile("components/communications/ComposerMessagePreview.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("lib/communications/bootstrap.ts", "utf8"),
@@ -167,9 +168,9 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.doesNotMatch(composer, /navigator\.userAgent|iPhone|iPad|Android/)
     assert.match(clients, /shrink-0 touch-none border-t/)
     assert.match(team, /shrink-0 touch-none border-t/)
-    for (const source of [clients, team]) {
-        assert.match(source, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\} onClick=\{\(\) => \{ setReplyingTo\(null\); composerRef\.current\?\.focus\(\{ preventScroll: true \}\) \}\} aria-label="Cancel reply"/)
-    }
+    assert.match(composerPreview, /onPointerDown=\{\(event\) => event\.preventDefault\(\)\}/)
+    assert.match(composerPreview, /onClick=\{onCancel\} aria-label="Cancel reply"/)
+    for (const source of [clients, team]) assert.match(source, /onCancel=\{\(\) => \{ setReplyingTo\(null\); composerRef\.current\?\.focus\(\{ preventScroll: true \}\) \}\}/)
     assert.match(resizableColumns, /MIN_LIST_WIDTH = 288/)
     assert.match(resizableColumns, /MAX_LIST_WIDTH = 448/)
     assert.match(resizableColumns, /rect\.width \* 0\.42/)
@@ -210,6 +211,8 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(bootstrap, /isTest: relationship\.source_metadata\.is_test === true/)
     assert.match(types, /isTest: boolean/)
     assert.match(icons, /function DoubleDeliveryCheckIcon/)
+    assert.match(icons, /function SingleDeliveryCheckIcon/)
+    assert.equal((icons.match(/m1 5 2\.4 2\.4L8\.7 1\.6/g) ?? []).length, 2)
     assert.match(icons, /function CopyIcon/)
     assert.match(icons, /function PinIcon/)
     assert.match(icons, /function ReactIcon/)
@@ -229,6 +232,12 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.doesNotMatch(team, /actionTop/)
     assert.match(clients, /VoiceNotePlayer/)
     assert.match(team, /VoiceNotePlayer/)
+    for (const source of [clients, team]) {
+        assert.match(source, /scale-\[1\.03\]/)
+        assert.match(source, /opacity-30 blur-\[1px\]/)
+        assert.match(source, /<ComposerMessagePreview/)
+    }
+    assert.doesNotMatch(team, /ring-2 ring-white ring-offset-2 ring-offset-black/)
     assert.match(team, /isSticker \? "mb-1 w-fit rounded-full bg-neutral-950\/80 px-2 py-0\.5" : "mb-0\.5"/)
     assert.match(team, /readers\.map\(\(person\) => <button data-icon-button/)
     assert.match(team, /h-4 w-4 shrink-0 aspect-square/)

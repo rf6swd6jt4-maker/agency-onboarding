@@ -37,3 +37,7 @@ export function ReactIcon({ className = "h-4 w-4" }: { className?: string }) {
 export function DoubleDeliveryCheckIcon({ className = "h-3 w-4" }: { className?: string }) {
     return <svg viewBox="0 0 14 10" aria-hidden="true" className={`${className} shrink-0 fill-none stroke-current`} strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round"><path d="m1 5 2.4 2.4L8.7 1.6" /><path d="m4.5 5 2.4 2.4 5.3-5.8" /></svg>
 }
+
+export function SingleDeliveryCheckIcon({ className = "h-3 w-4" }: { className?: string }) {
+    return <svg viewBox="0 0 10 10" aria-hidden="true" className={`${className} shrink-0 fill-none stroke-current`} strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round"><path d="m1 5 2.4 2.4L8.7 1.6" /></svg>
+}
