@@ -1,16 +1,21 @@
 import type { Metadata } from "next"
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
 import { loadClientPortalSessionByToken } from "@/lib/client-portal/session"
+import { clientFaviconIcons } from "@/lib/client-branding/favicon"
 
 export const dynamic = "force-dynamic"
 
-export const metadata: Metadata = {
-    title: "Client portal",
-    robots: { index: false, follow: false },
-}
-
 type PageProps = {
     params: Promise<{ token: string }>
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+    const { token } = await params
+    return {
+        title: "Client portal",
+        robots: { index: false, follow: false },
+        icons: await clientFaviconIcons("client-portal", token),
+    }
 }
 
 function firstName(name: string) {

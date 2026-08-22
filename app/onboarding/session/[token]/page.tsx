@@ -14,12 +14,23 @@ import { getFrozenOnboardingPaymentDefinition, getOnboardingPaymentContext, onbo
 import { ONBOARDING_PAYMENT_BUTTON_ID, stepEstimate, stepHeader } from "@/lib/onboarding/block-definition"
 import { getClientPortalUrlForOnboardingSession } from "@/lib/client-portal/session"
 import { redirect } from "next/navigation"
+import type { Metadata } from "next"
+import { clientFaviconIcons } from "@/lib/client-branding/favicon"
 
 export const dynamic = "force-dynamic"
 
 type PageProps = {
     params: Promise<{ token: string }>
     searchParams: Promise<{ step?: string; payment?: string; reason?: string }>
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+    const { token } = await params
+    return {
+        title: "Onboarding",
+        robots: { index: false, follow: false },
+        icons: await clientFaviconIcons("onboarding", token),
+    }
 }
 
 export default async function CanonicalSessionPage({ params, searchParams }: PageProps) {

@@ -245,7 +245,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Agency Branding"
                             description="Manage the shared colours used across onboarding sessions and the client portal."
                         >
-                            <AgencyBrandingEditor workspaceSlug={workspace.slug} initialTheme={onboardingSettings.theme} schemaReady={onboardingSettings.schemaReady} />
+                            <AgencyBrandingEditor workspaceSlug={workspace.slug} initialTheme={onboardingSettings.theme} schemaReady={onboardingSettings.schemaReady} faviconSrc={logoSrc} uploadFavicon={uploadWorkspaceLogo.bind(null, workspace.slug)} />
                         </UnifiedSection>
 
                         <UnifiedSection

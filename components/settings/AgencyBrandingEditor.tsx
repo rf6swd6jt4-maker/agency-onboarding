@@ -7,12 +7,13 @@ import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingTheme
 import { ONBOARDING_THEME_SLOTS, type OnboardingBrandSwatch, type OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { normalizeHexColour, ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
 import { runWorkspaceMutation } from "@/lib/workspace-mutations"
+import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
 
 function themeKey(theme: OnboardingThemeDefinition) {
     return JSON.stringify({ swatches: theme.swatches, assignments: theme.assignments })
 }
 
-export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady }: { workspaceSlug: string; initialTheme: OnboardingThemeDefinition; schemaReady: boolean }) {
+export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady, faviconSrc, uploadFavicon }: { workspaceSlug: string; initialTheme: OnboardingThemeDefinition; schemaReady: boolean; faviconSrc: string | null; uploadFavicon: (formData: FormData) => Promise<void> }) {
     const [theme, setTheme] = useState(initialTheme)
     const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const [error, setError] = useState<string | null>(null)
@@ -64,6 +65,22 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady 
     return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,25rem)]">
         <div className="space-y-5">
             {!schemaReady ? <p className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">Theme controls are read-only until the onboarding configuration schema is deployed.</p> : null}
+            <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-4">
+                        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-neutral-700 bg-black p-2">
+                            {/* Signed workspace-logo URLs are already resized by the token-scoped favicon endpoint. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={faviconSrc ?? "/icon.svg"} alt="Client browser favicon preview" className="h-full w-full object-contain" />
+                        </div>
+                        <div><h3 className="font-semibold">Client-facing favicon</h3><p className="mt-1 max-w-xl text-sm leading-6 text-neutral-500">Your workspace logo appears in browser tabs for onboarding and the client portal. Uploading here also updates the workspace logo.</p></div>
+                    </div>
+                    <form action={uploadFavicon} data-workspace-mutation="background" className="flex shrink-0 items-center gap-2">
+                        <input name="logo" required type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Client-facing favicon image" className="min-w-0 max-w-56 text-xs text-neutral-400 file:mr-2 file:rounded-lg file:border-0 file:bg-neutral-800 file:px-3 file:py-2 file:text-sm file:text-white" />
+                        <WorkspaceActionButton pendingLabel="Uploading…" className="h-10 shrink-0 rounded-lg bg-white px-3 text-sm font-medium text-black">{faviconSrc ? "Replace" : "Upload"}</WorkspaceActionButton>
+                    </form>
+                </div>
+            </section>
             <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-4"><div><h3 className="font-semibold">Colour palette</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Name reusable colours, then assign them to the six client-facing roles.</p></div><button type="button" disabled={!schemaReady} onClick={addSwatch} className="shrink-0 rounded-lg border border-neutral-700 px-3 py-2 text-sm text-neutral-200 disabled:opacity-30">Add colour</button></div>
                 <div className="mt-4 divide-y divide-neutral-800 overflow-hidden rounded-xl border border-neutral-800 bg-black">
