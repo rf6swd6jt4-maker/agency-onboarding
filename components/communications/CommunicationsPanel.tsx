@@ -62,6 +62,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
                 onOpenTeam={() => setMode("team")}
                 onSelectedConversationChange={setClientSelectedId}
                 onUnreadCountChange={setClientUnreadCount}
+                teamUnreadCount={nativeUnreadCount}
             />
         </div>
         <div className={mode === "team" ? "absolute inset-0" : "hidden"} aria-hidden={mode !== "team"}>
@@ -72,6 +73,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
                 onOpenClients={() => setMode("clients")}
                 onSelectedConversationChange={setNativeSelectedId}
                 onUnreadCountChange={setNativeUnreadCount}
+                clientUnreadCount={clientUnreadCount}
             />
         </div>
     </div>

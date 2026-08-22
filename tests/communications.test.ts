@@ -79,23 +79,31 @@ test("client and native unread chat indicators use the neutral white accent", as
     }
 })
 
-test("the workspace Communications tab receives the combined client and team unread count", async () => {
-    const [panel, clients, team, shell, tabs] = await Promise.all([
+test("unread counts move from the workspace tab to the opposite Communications section", async () => {
+    const [panel, clients, team, shell, tabs, count] = await Promise.all([
         readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("lib/workspace-tabs.ts", "utf8"),
+        readFile("components/communications/UnreadMessageCount.tsx", "utf8"),
     ])
 
     assert.match(clients, /onUnreadCountChange\?\.\(unreadCount\)/)
     assert.match(team, /onUnreadCountChange\?\.\(unreadCount\)/)
     assert.match(panel, /const unreadCount = clientUnreadCount \+ nativeUnreadCount/)
+    assert.match(panel, /teamUnreadCount=\{nativeUnreadCount\}/)
+    assert.match(panel, /clientUnreadCount=\{clientUnreadCount\}/)
     assert.match(panel, /type: "communications-unread"/)
     assert.match(tabs, /"communications-unread"/)
     assert.match(shell, /communicationsUnreadCount/)
     assert.match(shell, /workspaceTabIsCommunications/)
-    assert.match(shell, /unread Communications messages/)
+    assert.match(shell, /communicationsTab && !active/)
+    assert.match(clients, /Team<UnreadMessageCount count=\{teamUnreadCount \?\? 0\}/)
+    assert.match(team, /Clients<UnreadMessageCount count=\{clientUnreadCount \?\? 0\}/)
+    assert.doesNotMatch(clients, />Clients<span[^>]*>\{visibleConversations\.length\}/)
+    assert.doesNotMatch(team, />Team<span[^>]*>\{visible\.length\}/)
+    assert.match(count, /if \(count <= 0\) return null/)
 })
 
 test("client and team chats reconcile missed Realtime events without a reload", async () => {
