@@ -180,15 +180,17 @@ test("Settings renders real Services, Onboarding, and Agency Branding authoring 
     assert.match(settingsPage, /id="onboarding-domain"/)
 })
 
-test("Agency Branding keeps semantic colours in a compact role assignment popup", () => {
+test("Agency Branding edits semantic colours in a compact centred modal", () => {
     assert.match(brandingUi, /Client colour roles/)
-    assert.match(brandingUi, /<AnchoredPopup/)
-    assert.match(brandingUi, /placement="below"/)
+    assert.match(brandingUi, /createPortal/)
+    assert.match(brandingUi, /backdrop-blur-sm/)
+    assert.match(brandingUi, /max-h-\[min\(92dvh,38rem\)\]/)
     assert.match(brandingUi, /<ColourStyleEditor/)
     assert.match(colourStyleUi, />Styles</)
     assert.match(colourStyleUi, /New colour style/)
     assert.match(colourStyleUi, /Save style/)
-    assert.match(colourStyleUi, /max-h-\[32rem\]/)
+    assert.match(colourStyleUi, /linear-gradient\(90deg, #FF0000/)
+    assert.match(colourStyleUi, /relative flex shrink-0 items-center/)
     assert.doesNotMatch(brandingUi, /Live colour preview/)
 })
 

@@ -1,5 +1,4 @@
 export type PopupRect = {
-    bottom?: number
     left: number
     right: number
     top: number
@@ -18,7 +17,6 @@ export function anchoredPopupPosition({
     popupHeight,
     viewport,
     align,
-    placement = "above",
     edge = 8,
     gap = 6,
 }: {
@@ -27,22 +25,16 @@ export function anchoredPopupPosition({
     popupHeight: number
     viewport: PopupViewport
     align: "start" | "end"
-    placement?: "above" | "below"
     edge?: number
     gap?: number
 }) {
     const maxWidth = Math.max(0, viewport.width - edge * 2)
     const width = Math.min(popupWidth, maxWidth)
     const availableAbove = Math.max(0, trigger.top - gap - viewport.top - edge)
-    const triggerBottom = trigger.bottom ?? trigger.top
-    const availableBelow = Math.max(0, viewport.top + viewport.height - triggerBottom - gap - edge)
-    const availableHeight = placement === "below" ? availableBelow : availableAbove
-    const height = Math.min(popupHeight, availableHeight)
+    const height = Math.min(popupHeight, availableAbove)
     const desiredLeft = align === "end" ? trigger.right - width : trigger.left
     const left = Math.max(viewport.left + edge, Math.min(desiredLeft, viewport.left + viewport.width - width - edge))
-    const top = placement === "below"
-        ? triggerBottom + gap
-        : Math.max(viewport.top + edge, trigger.top - gap - height)
+    const top = Math.max(viewport.top + edge, trigger.top - gap - height)
 
-    return { left, top, maxHeight: availableHeight, maxWidth }
+    return { left, top, maxHeight: availableAbove, maxWidth }
 }

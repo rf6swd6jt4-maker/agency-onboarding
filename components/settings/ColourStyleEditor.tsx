@@ -88,7 +88,8 @@ function ColourPicker({ value, onChange, label }: { value: string; onChange: (he
             onPointerMove={(event) => { if (hueDragging.current) changeHue(event) }}
             onPointerUp={(event) => { hueDragging.current = false; event.currentTarget.releasePointerCapture(event.pointerId) }}
             onPointerCancel={() => { hueDragging.current = false }}
-            className="relative mt-3 h-3 touch-none rounded-full bg-[linear-gradient(to_right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)]"
+            className="relative mt-3 h-3 touch-none rounded-full"
+            style={{ background: "linear-gradient(90deg, #FF0000 0%, #FFFF00 16.67%, #00FF00 33.33%, #00FFFF 50%, #0000FF 66.67%, #FF00FF 83.33%, #FF0000 100%)" }}
         >
             <span aria-hidden="true" className="pointer-events-none absolute left-0 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-[0_0_0_1px_rgba(0,0,0,.7)]" style={{ left: `${hue / 360 * 100}%`, backgroundColor: `hsl(${hue} 100% 50%)` }} />
         </div>
@@ -119,6 +120,7 @@ function ColourPicker({ value, onChange, label }: { value: string; onChange: (he
 }
 
 export function ColourStyleEditor({
+    titleId,
     roleLabel,
     assignedSwatch,
     swatches,
@@ -127,6 +129,7 @@ export function ColourStyleEditor({
     onCreateSwatch,
     onClose,
 }: {
+    titleId: string
     roleLabel: string
     assignedSwatch: OnboardingBrandSwatch | null
     swatches: OnboardingBrandSwatch[]
@@ -152,11 +155,11 @@ export function ColourStyleEditor({
         setCreating(false)
     }
 
-    if (creating) return <div className="flex max-h-[32rem] min-h-0 flex-col overflow-hidden">
-        <div className="grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center border-b border-neutral-800 px-3 py-3">
+    if (creating) return <div className="flex max-h-[min(92dvh,38rem)] min-h-0 flex-col overflow-hidden">
+        <div className="relative flex shrink-0 items-center border-b border-neutral-800 px-3 py-3">
             <button type="button" aria-label="Back to styles" onClick={() => setCreating(false)} className="flex h-8 w-8 items-center justify-center text-neutral-500 hover:text-white"><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4"><path d="m10 3-5 5 5 5" /></svg></button>
-            <p className="truncate text-center text-sm font-medium text-white">New colour style</p>
-            <button type="button" aria-label="Close colour editor" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-lg text-neutral-500 hover:text-white">×</button>
+            <p id={titleId} className="pointer-events-none absolute inset-x-12 truncate text-center text-sm font-medium text-white">New colour style</p>
+            <button type="button" aria-label="Close colour editor" onClick={onClose} className="ml-auto flex h-8 w-8 items-center justify-center text-lg text-neutral-500 hover:text-white">×</button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <label className="block"><span className="sr-only">Style name</span><input autoFocus value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={80} placeholder="Name" className="h-10 w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-neutral-500" /></label>
@@ -165,8 +168,8 @@ export function ColourStyleEditor({
         <div className="border-t border-neutral-800 p-3"><button type="button" disabled={!newName.trim()} onClick={saveNewStyle} className="h-10 w-full rounded-lg bg-white text-sm font-medium text-black disabled:opacity-30">Save style</button></div>
     </div>
 
-    return <div className="flex max-h-[32rem] min-h-0 flex-col overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b border-neutral-800 px-3 py-3"><p className="truncate text-sm font-medium text-white">{roleLabel}</p><button type="button" aria-label="Close colour editor" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center text-lg text-neutral-500 hover:text-white">×</button></div>
+    return <div className="flex max-h-[min(92dvh,38rem)] min-h-0 flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-800 px-3 py-3"><p id={titleId} className="truncate text-sm font-medium text-white">{roleLabel}</p><button type="button" aria-label="Close colour editor" onClick={onClose} className="flex h-8 w-8 shrink-0 items-center justify-center text-lg text-neutral-500 hover:text-white">×</button></div>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <ColourPicker key={assignedSwatch?.id ?? "unassigned"} value={assignedSwatch?.hex ?? "#000000"} onChange={(hex) => { if (assignedSwatch) onUpdateSwatch(assignedSwatch.id, { hex }) }} label={roleLabel} />
             <div className="mt-4 border-t border-neutral-800 pt-3">

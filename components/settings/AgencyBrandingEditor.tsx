@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { createPortal } from "react-dom"
 import { saveAgencyBranding } from "@/app/[workspaceSlug]/settings/branding-actions"
 import { publishVisualThemeDraft } from "@/app/[workspaceSlug]/onboarding-builder/visual-actions"
-import { AnchoredPopup } from "@/components/ui"
 import { ColourStyleEditor } from "@/components/settings/ColourStyleEditor"
 import { ONBOARDING_THEME_SLOTS, type OnboardingBrandSwatch, type OnboardingThemeDefinition, type OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
 import { normalizeHexColour, ONBOARDING_THEME_SLOT_LABELS, onboardingThemeWarnings } from "@/lib/onboarding/theme"
@@ -20,7 +20,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
     const [error, setError] = useState<string | null>(null)
     const [publishPending, startPublish] = useTransition()
     const [published, setPublished] = useState(false)
-    const [assignmentEditor, setAssignmentEditor] = useState<{ slot: OnboardingThemeSlot; anchor: HTMLElement } | null>(null)
+    const [assignmentEditor, setAssignmentEditor] = useState<{ slot: OnboardingThemeSlot } | null>(null)
     const latestRef = useRef(theme)
     const lastSavedRef = useRef(themeKey(initialTheme))
     const timerRef = useRef<number | null>(null)
@@ -28,6 +28,16 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
     const warnings = useMemo(() => onboardingThemeWarnings(theme), [theme])
 
     useEffect(() => { latestRef.current = theme }, [theme])
+
+    useEffect(() => {
+        if (!assignmentEditor) return
+        const hostDocument = window.parent !== window ? window.parent.document : document
+        const dismiss = (event: globalThis.KeyboardEvent) => {
+            if (event.key === "Escape") setAssignmentEditor(null)
+        }
+        hostDocument.addEventListener("keydown", dismiss)
+        return () => hostDocument.removeEventListener("keydown", dismiss)
+    }, [assignmentEditor])
 
     useEffect(() => {
         if (!schemaReady || themeKey(theme) === lastSavedRef.current) return
@@ -56,8 +66,8 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
         setTheme((current) => ({ ...current, swatches: current.swatches.map((swatch) => swatch.id === id ? { ...swatch, ...update } : swatch) }))
     }
 
-    function openAssignmentEditor(event: MouseEvent<HTMLButtonElement>, slot: OnboardingThemeSlot) {
-        setAssignmentEditor({ slot, anchor: event.currentTarget })
+    function openAssignmentEditor(slot: OnboardingThemeSlot) {
+        setAssignmentEditor({ slot })
     }
 
     function assignSwatch(slot: OnboardingThemeSlot, swatchId: string) {
@@ -79,6 +89,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
 
     const editedSlot = assignmentEditor?.slot ?? null
     const editedAssignment = editedSlot ? theme.swatches.find((swatch) => swatch.id === theme.assignments[editedSlot]) : null
+    const modalTarget = typeof window !== "undefined" ? (window.parent !== window ? window.parent.document.body : document.body) : null
 
     return <div className="space-y-5">
             {!schemaReady ? <p className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">Theme controls are read-only until the onboarding configuration schema is deployed.</p> : null}
@@ -110,7 +121,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
                             aria-haspopup="dialog"
                             aria-expanded={assignmentEditor?.slot === slot}
                             disabled={!schemaReady}
-                            onClick={(event) => openAssignmentEditor(event, slot)}
+                            onClick={() => openAssignmentEditor(slot)}
                             className={`flex min-w-0 items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-neutral-900 disabled:cursor-default disabled:opacity-50 ${index > 0 ? "border-t border-neutral-800" : ""} ${index === 1 ? "sm:border-t-0" : ""} ${index % 2 === 1 ? "sm:border-l sm:border-neutral-800" : ""}`}
                         >
                             <span aria-hidden="true" className="h-7 w-7 shrink-0 rounded-md border border-white/10" style={{ backgroundColor: normalizeHexColour(assigned?.hex) ?? "#000000" }} />
@@ -122,17 +133,20 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
             </section>
             {warnings.length ? <section className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100"><h3 className="font-medium">Contrast warnings</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-yellow-100/80">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p className="mt-2 text-xs text-yellow-100/70">Warnings do not block saving.</p></section> : null}
             <div className="flex items-center justify-between gap-3"><div aria-live="polite" className="min-h-5 text-xs text-neutral-500">{saveState === "saving" ? "Saving style draft…" : saveState === "saved" ? published ? "Style published" : "Unpublished style draft saved" : saveState === "error" ? error : schemaReady ? "Unpublished style draft" : "Read-only compatibility view"}</div><button type="button" disabled={!schemaReady || publishPending || published} onClick={() => startPublish(async () => { const outcome = await publishVisualThemeDraft(workspaceSlug, latestRef.current); if (!outcome.ok) setError(outcome.error); else setPublished(true) })} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">{publishPending ? "Publishing…" : "Publish style"}</button></div>
-        {assignmentEditor && editedSlot ? <AnchoredPopup anchor={assignmentEditor.anchor} align="end" placement="below" role="dialog" onDismiss={() => setAssignmentEditor(null)} className="w-[min(22rem,calc(100vw-1rem))] rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/60">
-            <ColourStyleEditor
-                key={editedSlot}
-                roleLabel={ONBOARDING_THEME_SLOT_LABELS[editedSlot]}
-                assignedSwatch={editedAssignment ?? null}
-                swatches={theme.swatches}
-                onUpdateSwatch={updateSwatch}
-                onAssignSwatch={(swatchId) => assignSwatch(editedSlot, swatchId)}
-                onCreateSwatch={(name, hex) => createAndAssignSwatch(editedSlot, name, hex)}
-                onClose={() => setAssignmentEditor(null)}
-            />
-        </AnchoredPopup> : null}
+        {assignmentEditor && editedSlot && modalTarget ? createPortal(<div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setAssignmentEditor(null) }}>
+            <section role="dialog" aria-modal="true" aria-labelledby="colour-style-editor-title" className="max-h-[min(92dvh,38rem)] w-full max-w-sm overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 text-white shadow-2xl shadow-black/70">
+                <ColourStyleEditor
+                    key={editedSlot}
+                    titleId="colour-style-editor-title"
+                    roleLabel={ONBOARDING_THEME_SLOT_LABELS[editedSlot]}
+                    assignedSwatch={editedAssignment ?? null}
+                    swatches={theme.swatches}
+                    onUpdateSwatch={updateSwatch}
+                    onAssignSwatch={(swatchId) => assignSwatch(editedSlot, swatchId)}
+                    onCreateSwatch={(name, hex) => createAndAssignSwatch(editedSlot, name, hex)}
+                    onClose={() => setAssignmentEditor(null)}
+                />
+            </section>
+        </div>, modalTarget) : null}
     </div>
 }
