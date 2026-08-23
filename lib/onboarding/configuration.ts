@@ -725,6 +725,7 @@ export async function loadOnboardingSettingsPageData(workspaceId: string): Promi
     }))
     const whatsappHint = record(raw.whatsapp?.config_hint)
     const whatsappVerified = whatsappIntegrationVerified(raw.whatsapp)
+    const publishedTheme = mapTheme(raw.themes[0], raw.swatches)
     return {
         schemaReady: raw.schemaReady,
         services,
@@ -735,8 +736,9 @@ export async function loadOnboardingSettingsPageData(workspaceId: string): Promi
         theme: newestTheme(
             mapThemeDraftDefinition(themeDraftResult.data?.definition),
             collaborativeTheme(builderDocumentResult.data?.snapshot_base64, builderUpdatesResult.data ?? []),
-            mapTheme(raw.themes[0], raw.swatches),
+            publishedTheme,
         ) ?? defaultTheme(),
+        publishedTheme,
         help: mapHelp(raw.configurations, whatsappVerified, text(whatsappHint.phone_number, whatsappHint.display_phone_number) ?? null),
         assignees,
     }

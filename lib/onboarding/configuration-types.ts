@@ -172,6 +172,7 @@ export type OnboardingSettingsPageData = {
     welcome: OnboardingBookendDefinition
     completion: OnboardingBookendDefinition
     theme: OnboardingThemeDefinition
+    publishedTheme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
     assignees: OnboardingAssigneeOption[]
 }

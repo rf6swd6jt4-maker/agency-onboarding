@@ -208,6 +208,19 @@ test("Agency Branding edits semantic colours in a compact centred modal", () => 
     assert.doesNotMatch(brandingUi, /Live colour preview/)
 })
 
+test("Agency Branding previews the real client shell and reviews semantic colour changes before publishing", () => {
+    assert.match(settingsPage, /publishedTheme=\{onboardingSettings\.publishedTheme\}/)
+    assert.match(brandingUi, /import \{ EditIcon \} from "@\/components\/communications\/MessageInteractionIcons"/)
+    assert.match(brandingUi, /<EditIcon className="h-4 w-4 shrink-0 text-neutral-600"/)
+    assert.match(brandingUi, /data-agency-branding-preview/)
+    assert.match(brandingUi, /<BuilderPreview bookend=\{previewBookend\} theme=\{theme\}/)
+    assert.match(brandingUi, />Exit preview</)
+    assert.match(brandingUi, /Review colour changes/)
+    assert.match(brandingUi, /Publish \{colourChanges\.length\}/)
+    assert.match(brandingUi, /publishLatestTheme/)
+    assert.doesNotMatch(brandingUi, />Publish style</)
+})
+
 test("Builder keeps private server access and renders the visual workspace", () => {
     assert.match(builderPage, /requireWorkspace\(workspaceSlug, "admin"\)/)
     assert.match(builderPage, /loadOnboardingBuilderData/)
