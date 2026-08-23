@@ -96,12 +96,13 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerPreview, composerScroll, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
+    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
         readFile("components/communications/ComposerMessagePreview.tsx", "utf8"),
         readFile("components/communications/composer-scroll.ts", "utf8"),
+        readFile("components/communications/composer-keyboard-slide.ts", "utf8"),
         readFile("app/[workspaceSlug]/communications/page.tsx", "utf8"),
         readFile("lib/communications/bootstrap.ts", "utf8"),
         readFile("components/communications/CommunicationsPanel.tsx", "utf8"),
@@ -251,6 +252,16 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(composerScroll, /maximumLines = window\.matchMedia\("\(min-width: 1024px\)"\)\.matches \? 7 : 4/)
     assert.match(composerScroll, /textarea\.style\.height = `\$\{Math\.min\(maximumHeight/)
     assert.match(composerScroll, /textarea\.scrollTop = Math\.max\(0, textarea\.scrollHeight - textarea\.clientHeight\)/)
+    for (const source of [clients, team]) {
+        assert.match(source, /useComposerKeyboardSlide\(composerFooterRef\)/)
+        assert.match(source, /<footer ref=\{composerFooterRef\}/)
+    }
+    assert.match(keyboardSlide, /hostWindow\.visualViewport\?\.addEventListener\("resize", scheduleKeyboardSlide\)/)
+    assert.match(keyboardSlide, /footer\.contains\(document\.activeElement\)/)
+    assert.match(keyboardSlide, /prefers-reduced-motion: reduce/)
+    assert.match(keyboardSlide, /translate3d\(0, \$\{shift\}px, 0\)/)
+    assert.match(keyboardSlide, /KEYBOARD_SLIDE_DURATION_MS = 220/)
+    assert.doesNotMatch(keyboardSlide, /navigator\.userAgent|iPhone|iPad|Android/)
     assert.match(composer, /<button data-icon-button type="submit"/)
     assert.match(team, /Shared across client and team chats\./)
     assert.match(team, /attachment\.kind === "sticker"/)

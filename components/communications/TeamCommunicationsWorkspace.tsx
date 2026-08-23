@@ -15,6 +15,7 @@ import { ResizableConversationColumns } from "@/components/communications/Resiza
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
+import { useComposerKeyboardSlide } from "@/components/communications/composer-keyboard-slide"
 import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabActive"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -232,6 +233,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const messageAnimationTimersRef = useRef<number[]>([])
     const knownMessageKeysRef = useRef(new Set(bootstrap.conversations.flatMap((conversation) => conversation.messages.map(messageAnimationKey))))
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
+    const composerFooterRef = useRef<HTMLElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
     const stickerInputRef = useRef<HTMLInputElement | null>(null)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; minDeltaX: number; verticalAtMax: number; verticalAtMin: number } | null>(null)
@@ -246,6 +248,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
+    useComposerKeyboardSlide(composerFooterRef)
     const focusedMessageId = editingMessage?.id ?? replyingTo?.id ?? null
     const peopleById = useMemo(() => new Map([...bootstrap.people, ...bootstrap.formerPeople].map((person) => [person.id, person])), [bootstrap.formerPeople, bootstrap.people])
 
@@ -763,7 +766,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         </Fragment>
                     }) : selectedTypingPeople.length ? null : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}
                     {selectedTypingPeople.length ? <NativeTypingDots label={selectedTypingLabel} /> : null}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
-                    <footer className="relative z-10 shrink-0 touch-none border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
+                    <footer ref={composerFooterRef} className="relative z-10 shrink-0 touch-none border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
                         {editingMessage ? <ComposerMessagePreview label="Editing message" preview={editingMessage.body} /> : null}
                         {replyingTo ? <ComposerMessagePreview label={selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"} preview={messagePreview(replyingTo)} onCancel={() => { setReplyingTo(null); composerRef.current?.focus({ preventScroll: true }) }} /> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
