@@ -212,15 +212,15 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
         }, { config_id: metaEmbeddedSignupConfigId, response_type: "code", override_default_response_type: true, extras: { setup: {}, sessionInfoVersion: "3" } })
     }
 
-    return <section className={showHeader ? "mt-8" : ""}>
+    return <section className={`${showHeader ? "mt-8 " : ""}min-w-0 max-w-full`}>
         {showHeader ? <><h2 className="text-lg font-semibold">Connections</h2><p className="mt-1 text-sm text-neutral-400">Connect each agency&apos;s own provider accounts without exposing credentials.</p></> : null}
-        <div className={`${showHeader ? "mt-4 " : ""}grid gap-4 md:grid-cols-2 xl:grid-cols-3`}>{connections.map((item) => {
+        <div className={`${showHeader ? "mt-4 " : ""}grid min-w-0 max-w-full gap-4 md:grid-cols-2 xl:grid-cols-3`}>{connections.map((item) => {
             const state = statusFor(item)
             const detail = connectionDetail(item)
-            return <article key={item.provider} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
-                <div className="flex items-start justify-between gap-4"><div><h3 className="font-medium text-white">{titles[item.provider]}</h3><p className="mt-1 text-sm leading-5 text-neutral-500">{descriptions[item.provider]}</p></div><Status label={state.label} tone={state.tone} className="shrink-0" /></div>
-                {detail ? <p className="mt-4 truncate text-sm text-neutral-300">{detail}</p> : null}
-                {item.last_error ? <p className="mt-3 text-sm leading-5 text-red-300">{item.last_error}</p> : null}
+            return <article key={item.provider} className="min-w-0 max-w-full rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
+                <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4"><div className="min-w-0"><h3 className="font-medium text-white">{titles[item.provider]}</h3><p className="mt-1 text-sm leading-5 text-neutral-500">{descriptions[item.provider]}</p></div><Status label={state.label} tone={state.tone} wrap className="max-w-full sm:shrink-0" /></div>
+                {detail ? <p className="mt-4 break-all text-sm text-neutral-300">{detail}</p> : null}
+                {item.last_error ? <p className="mt-3 break-words text-sm leading-5 text-red-300">{item.last_error}</p> : null}
                 <button type="button" disabled={!canManage} onClick={() => { setSelected(item.provider); setAdvanced(false); setError(null) }} className="mt-5 h-10 w-full rounded-lg border border-neutral-700 px-3 text-sm font-medium text-neutral-100 transition hover:border-neutral-500 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40">{item.enabled ? "Manage connection" : "Connect"}</button>
             </article>
         })}</div>

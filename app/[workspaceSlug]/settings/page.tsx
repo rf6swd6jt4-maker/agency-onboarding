@@ -73,7 +73,7 @@ function UnifiedSection({
     children: ReactNode
 }) {
     return (
-        <section id={id} className="scroll-mt-5">
+        <section id={id} className="min-w-0 max-w-full scroll-mt-5">
             <div className="mb-4">
                 <h2 className="text-xl font-semibold tracking-tight text-white">{title}</h2>
                 <p className="mt-1 text-sm leading-6 text-neutral-400">{description}</p>
@@ -129,9 +129,9 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
     ) as Parameters<typeof WorkspaceConnections>[0]["connections"]
 
     return (
-        <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
+        <main className="min-h-screen max-w-full overflow-x-clip bg-neutral-950 px-4 pb-8 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-            <div className="mx-auto max-w-7xl pt-5">
+            <div className="mx-auto min-w-0 max-w-7xl pt-5">
                 <WorkspaceIdentityEditor
                     workspace={{
                         name: workspace.name,
@@ -151,10 +151,10 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                     showNameEditor={false}
                 />
 
-                <div className="mt-8 grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
+                <div className="mt-8 grid min-w-0 max-w-full gap-8 lg:grid-cols-[16rem_minmax(0,1fr)]">
                     <SettingsSectionNav sections={settingsSections} />
 
-                    <div id="workspace-settings-scroll" className="min-w-0 space-y-10 pb-8 lg:pr-2">
+                    <div id="workspace-settings-scroll" className="min-w-0 max-w-full space-y-10 pb-8 lg:pr-2">
                         <UnifiedSection
                             id="workspace"
                             title="Workspace"

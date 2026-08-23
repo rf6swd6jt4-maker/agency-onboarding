@@ -19,9 +19,9 @@ export function WorkspaceInvitationForm({
     }, [state])
 
     return (
-        <form ref={formRef} action={formAction} data-global-loading="false" data-workspace-mutation="background" className="grid gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:grid-cols-[1fr_auto_auto] sm:p-5">
-            <input name="email" type="email" required placeholder="person@business.com" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2" />
-            <select name="role" defaultValue="staff" className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
+        <form ref={formRef} action={formAction} data-global-loading="false" data-workspace-mutation="background" className="grid min-w-0 max-w-full gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:p-5">
+            <input name="email" type="email" required placeholder="person@business.com" className="min-w-0 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2" />
+            <select name="role" defaultValue="staff" className="min-w-0 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2">
                 <option value="staff">Staff</option>
                 {canInviteAdmins ? <option value="admin">Admin</option> : null}
             </select>

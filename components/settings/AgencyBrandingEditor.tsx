@@ -91,20 +91,20 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
     const editedAssignment = editedSlot ? theme.swatches.find((swatch) => swatch.id === theme.assignments[editedSlot]) : null
     const modalTarget = typeof window !== "undefined" ? (window.parent !== window ? window.parent.document.body : document.body) : null
 
-    return <div className="space-y-5">
+    return <div className="min-w-0 max-w-full space-y-5">
             {!schemaReady ? <p className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">Theme controls are read-only until the onboarding configuration schema is deployed.</p> : null}
             <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-4">
+                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
                         <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-neutral-700 bg-black p-2">
                             {/* Signed workspace-logo URLs are already resized by the token-scoped favicon endpoint. */}
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={faviconSrc ?? "/icon.svg"} alt="Client browser favicon preview" className="h-full w-full object-contain" />
                         </div>
-                        <div><h3 className="font-semibold">Client-facing favicon</h3><p className="mt-1 max-w-xl text-sm leading-6 text-neutral-500">Your workspace logo appears in browser tabs for onboarding and the client portal. Uploading here also updates the workspace logo.</p></div>
+                        <div className="min-w-0"><h3 className="font-semibold">Client-facing favicon</h3><p className="mt-1 max-w-xl text-sm leading-6 text-neutral-500">Your workspace logo appears in browser tabs for onboarding and the client portal. Uploading here also updates the workspace logo.</p></div>
                     </div>
-                    <form action={uploadFavicon} data-workspace-mutation="background" className="flex shrink-0 items-center gap-2">
-                        <input name="logo" required type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Client-facing favicon image" className="min-w-0 max-w-56 text-xs text-neutral-400 file:mr-2 file:rounded-lg file:border-0 file:bg-neutral-800 file:px-3 file:py-2 file:text-sm file:text-white" />
+                    <form action={uploadFavicon} data-workspace-mutation="background" className="flex min-w-0 max-w-full flex-col items-stretch gap-2 sm:shrink-0 sm:flex-row sm:items-center">
+                        <input name="logo" required type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Client-facing favicon image" className="min-w-0 max-w-full text-xs text-neutral-400 file:mr-2 file:max-w-full file:rounded-lg file:border-0 file:bg-neutral-800 file:px-3 file:py-2 file:text-sm file:text-white sm:max-w-56" />
                         <WorkspaceActionButton pendingLabel="Uploading…" className="h-10 shrink-0 rounded-lg bg-white px-3 text-sm font-medium text-black">{faviconSrc ? "Replace" : "Upload"}</WorkspaceActionButton>
                     </form>
                 </div>
@@ -132,7 +132,7 @@ export function AgencyBrandingEditor({ workspaceSlug, initialTheme, schemaReady,
                 </div>
             </section>
             {warnings.length ? <section className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100"><h3 className="font-medium">Contrast warnings</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5 text-yellow-100/80">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul><p className="mt-2 text-xs text-yellow-100/70">Warnings do not block saving.</p></section> : null}
-            <div className="flex items-center justify-between gap-3"><div aria-live="polite" className="min-h-5 text-xs text-neutral-500">{saveState === "saving" ? "Saving style draft…" : saveState === "saved" ? published ? "Style published" : "Unpublished style draft saved" : saveState === "error" ? error : schemaReady ? "Unpublished style draft" : "Read-only compatibility view"}</div><button type="button" disabled={!schemaReady || publishPending || published} onClick={() => startPublish(async () => { const outcome = await publishVisualThemeDraft(workspaceSlug, latestRef.current); if (!outcome.ok) setError(outcome.error); else setPublished(true) })} className="h-10 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">{publishPending ? "Publishing…" : "Publish style"}</button></div>
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div aria-live="polite" className="min-h-5 min-w-0 text-xs text-neutral-500">{saveState === "saving" ? "Saving style draft…" : saveState === "saved" ? published ? "Style published" : "Unpublished style draft saved" : saveState === "error" ? error : schemaReady ? "Unpublished style draft" : "Read-only compatibility view"}</div><button type="button" disabled={!schemaReady || publishPending || published} onClick={() => startPublish(async () => { const outcome = await publishVisualThemeDraft(workspaceSlug, latestRef.current); if (!outcome.ok) setError(outcome.error); else setPublished(true) })} className="h-10 shrink-0 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-30">{publishPending ? "Publishing…" : "Publish style"}</button></div>
         {assignmentEditor && editedSlot && modalTarget ? createPortal(<div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setAssignmentEditor(null) }}>
             <section role="dialog" aria-modal="true" aria-labelledby="colour-style-editor-title" className="max-h-[min(92dvh,38rem)] w-full max-w-sm overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 text-white shadow-2xl shadow-black/70">
                 <ColourStyleEditor

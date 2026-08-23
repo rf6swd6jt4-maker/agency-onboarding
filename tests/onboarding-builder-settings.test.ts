@@ -28,6 +28,9 @@ const sharedRenderer = readFileSync("components/onboarding/OnboardingSessionRend
 const configurationLoader = readFileSync("lib/onboarding/configuration.ts", "utf8")
 const configurationActions = readFileSync("lib/onboarding/configuration-actions.ts", "utf8")
 const onboardingUploads = readFileSync("lib/onboarding/uploads.ts", "utf8")
+const connectionsUi = readFileSync("components/admin/WorkspaceConnections.tsx", "utf8")
+const domainUi = readFileSync("components/admin/WorkspaceOnboardingDomain.tsx", "utf8")
+const invitationUi = readFileSync("components/admin/WorkspaceInvitationForm.tsx", "utf8")
 
 test("new modules begin with one form step and one optional short-text field", () => {
     const definition = defaultOnboardingModuleDefinition()
@@ -178,6 +181,17 @@ test("Settings renders real Services, Onboarding, and Agency Branding authoring 
     assert.match(settingsPage, /<OnboardingSettings/)
     assert.match(settingsPage, /<AgencyBrandingEditor/)
     assert.match(settingsPage, /id="onboarding-domain"/)
+})
+
+test("Settings keeps every category inside the mobile content track", () => {
+    assert.match(settingsPage, /overflow-x-clip/)
+    assert.match(settingsPage, /id="workspace-settings-scroll" className="min-w-0 max-w-full/)
+    assert.match(brandingUi, /min-w-0 max-w-full space-y-5/)
+    assert.match(connectionsUi, /grid min-w-0 max-w-full gap-4/)
+    assert.match(connectionsUi, /break-all text-sm text-neutral-300/)
+    assert.match(invitationUi, /sm:grid-cols-\[minmax\(0,1fr\)_auto_auto\]/)
+    assert.doesNotMatch(domainUi, /overflow-x-auto/)
+    assert.match(domainUi, /sm:grid-cols-\[3rem_minmax\(0,1fr\)_minmax\(0,1fr\)\]/)
 })
 
 test("Agency Branding edits semantic colours in a compact centred modal", () => {
