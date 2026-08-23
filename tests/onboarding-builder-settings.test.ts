@@ -218,6 +218,10 @@ test("Agency Branding previews the real client shell and reviews semantic colour
     assert.match(brandingUi, /Review colour changes/)
     assert.match(brandingUi, /Publish \{colourChanges\.length\}/)
     assert.match(brandingUi, /publishLatestTheme/)
+    assert.match(brandingUi, /gridTemplateColumns: "minmax\(0, 1fr\) 2rem minmax\(0, 1fr\)"/)
+    assert.match(brandingUi, /pointer-events-none absolute inset-x-0 top-0/)
+    assert.doesNotMatch(brandingUi, />Published<\/span>/)
+    assert.doesNotMatch(brandingUi, />Draft<\/span>/)
     assert.doesNotMatch(brandingUi, />Publish style</)
 })
 
