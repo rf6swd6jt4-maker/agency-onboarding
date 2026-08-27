@@ -64,7 +64,7 @@ function intervalCountMaximum(interval: OnboardingServiceDefinition["defaultBill
     return interval === "year" ? 3 : interval === "month" ? 36 : 156
 }
 
-function ServiceTemplatesModal({ onClose }: { onClose: () => void }) {
+function ServiceTemplatesModal({ onClose, onCreateCustom }: { onClose: () => void; onCreateCustom: () => void }) {
     const modalRef = useRef<HTMLElement>(null)
     const closeRef = useRef<HTMLButtonElement>(null)
 
@@ -97,7 +97,7 @@ function ServiceTemplatesModal({ onClose }: { onClose: () => void }) {
     }, [onClose])
 
     return <div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 text-white backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <section ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="service-templates-title" aria-describedby="service-templates-description" className="flex max-h-[min(92dvh,46rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+        <section ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="service-templates-title" aria-describedby="service-templates-description" className="flex max-h-[min(92dvh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70 sm:h-[min(90dvh,52rem)]">
             <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-6 sm:py-5">
                 <div className="min-w-0 flex-1">
                     <h2 id="service-templates-title" className="text-xl font-semibold tracking-tight sm:text-2xl">Service Templates</h2>
@@ -107,7 +107,16 @@ function ServiceTemplatesModal({ onClose }: { onClose: () => void }) {
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Available service templates">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5" aria-label="Available service templates">
+                    <button type="button" onClick={onCreateCustom} className="group min-w-0 overflow-hidden rounded-xl border border-dashed border-neutral-700 bg-black text-left transition hover:border-neutral-500 hover:bg-neutral-900/60">
+                        <span className="flex aspect-[16/10] items-center justify-center border-b border-dashed border-neutral-800 text-neutral-500 transition group-hover:text-white">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-9 w-9 fill-none stroke-current" strokeWidth="1.5" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                        </span>
+                        <span className="block p-4">
+                            <span className="block font-semibold text-white">Add your own</span>
+                            <span className="mt-1.5 block text-sm leading-5 text-neutral-500">Create a custom service from scratch.</span>
+                        </span>
+                    </button>
                     {SERVICE_TEMPLATES.map((template) => <article key={template.id} className="min-w-0 overflow-hidden rounded-xl border border-neutral-800 bg-black">
                         <div className="relative aspect-[16/10] overflow-hidden border-b border-neutral-800 bg-[#080834]">
                             <Image src={template.thumbnail.src} alt={template.thumbnail.alt} fill sizes="(max-width: 639px) calc(100vw - 3.5rem), (max-width: 1023px) 40vw, 17rem" className="object-contain" />
@@ -334,7 +343,7 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
                 {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first service to make it available in the POS.</p></div> : null}
             </div>
         </section>
-        {templatesOpen && portalTarget ? createPortal(<ServiceTemplatesModal onClose={() => setTemplatesOpen(false)} />, portalTarget) : null}
+        {templatesOpen && portalTarget ? createPortal(<ServiceTemplatesModal onClose={() => setTemplatesOpen(false)} onCreateCustom={() => { setTemplatesOpen(false); setSelectedId("new") }} />, portalTarget) : null}
         {selected && portalTarget ? createPortal(<ServiceEditor key={selected.id || "new"} workspaceSlug={workspaceSlug} service={selected} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} />, portalTarget) : null}
     </>
 }

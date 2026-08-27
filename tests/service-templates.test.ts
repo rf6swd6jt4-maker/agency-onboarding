@@ -16,11 +16,14 @@ test("the service template catalogue starts with the Meta Ads template", () => {
     assert.equal(existsSync(`public${metaAds.thumbnail.src}`), true)
 })
 
-test("New service opens templates while the legacy creation editor stays dormant", () => {
+test("New service opens templates and the first card reaches the preserved custom editor", () => {
     assert.match(servicesUi, />Service Templates</)
+    assert.match(servicesUi, />Add your own</)
+    assert.match(servicesUi, />Create a custom service from scratch\.</)
     assert.match(servicesUi, /SERVICE_TEMPLATES\.map/)
     assert.match(servicesUi, /onClick=\{\(\) => setTemplatesOpen\(true\)\}/)
     assert.doesNotMatch(servicesUi, /onClick=\{\(\) => setSelectedId\("new"\)\}/)
+    assert.match(servicesUi, /onCreateCustom=\{\(\) => \{ setTemplatesOpen\(false\); setSelectedId\("new"\) \}\}/)
     assert.match(servicesUi, /initialServiceId && initialServiceId !== "new"/)
     assert.match(servicesUi, /selectedId === "new" \? blankService\(\)/)
     assert.match(servicesUi, /"Create service"/)
