@@ -1,0 +1,27 @@
+import assert from "node:assert/strict"
+import { existsSync, readFileSync } from "node:fs"
+import test from "node:test"
+import { SERVICE_TEMPLATES } from "../lib/onboarding/service-templates.ts"
+
+const servicesUi = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
+
+test("the service template catalogue starts with the Meta Ads template", () => {
+    assert.equal(SERVICE_TEMPLATES.length, 1)
+    const [metaAds] = SERVICE_TEMPLATES
+    assert.equal(metaAds.id, "meta-ads")
+    assert.equal(metaAds.name, "Meta Ads")
+    assert.ok(metaAds.description.length > 0)
+    assert.equal(metaAds.serviceDefaults.thumbnailSrc, metaAds.thumbnail.src)
+    assert.equal(metaAds.setup.kind, "none")
+    assert.equal(existsSync(`public${metaAds.thumbnail.src}`), true)
+})
+
+test("New service opens templates while the legacy creation editor stays dormant", () => {
+    assert.match(servicesUi, />Service Templates</)
+    assert.match(servicesUi, /SERVICE_TEMPLATES\.map/)
+    assert.match(servicesUi, /onClick=\{\(\) => setTemplatesOpen\(true\)\}/)
+    assert.doesNotMatch(servicesUi, /onClick=\{\(\) => setSelectedId\("new"\)\}/)
+    assert.match(servicesUi, /initialServiceId && initialServiceId !== "new"/)
+    assert.match(servicesUi, /selectedId === "new" \? blankService\(\)/)
+    assert.match(servicesUi, /"Create service"/)
+})

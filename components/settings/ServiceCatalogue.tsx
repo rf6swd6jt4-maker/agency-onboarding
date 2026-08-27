@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { saveOnboardingService, setOnboardingServiceState } from "@/app/[workspaceSlug]/settings/service-actions"
 import { Assignee, SquarePill, Status, type StatusTone } from "@/components/ui"
 import type { OnboardingAssigneeOption, OnboardingModuleSummary, OnboardingServiceDefinition, OnboardingServiceState, OnboardingServiceType } from "@/lib/onboarding/configuration-types"
+import { SERVICE_TEMPLATES } from "@/lib/onboarding/service-templates"
 
 const inputClass = "mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white outline-none focus:border-neutral-500"
 const textareaClass = "mt-1.5 w-full resize-none rounded-lg border border-neutral-700 bg-black px-3 py-2 text-sm leading-5 text-white outline-none focus:border-neutral-500"
@@ -61,6 +62,65 @@ function intervalLabel(service: OnboardingServiceDefinition) {
 
 function intervalCountMaximum(interval: OnboardingServiceDefinition["defaultBillingInterval"]) {
     return interval === "year" ? 3 : interval === "month" ? 36 : 156
+}
+
+function ServiceTemplatesModal({ onClose }: { onClose: () => void }) {
+    const modalRef = useRef<HTMLElement>(null)
+    const closeRef = useRef<HTMLButtonElement>(null)
+
+    useEffect(() => {
+        const hostDocument = modalRef.current?.ownerDocument ?? document
+        const origin = hostDocument.activeElement instanceof HTMLElement ? hostDocument.activeElement : null
+        const previousOverflow = hostDocument.body.style.overflow
+        const handleKey = (event: KeyboardEvent) => {
+            if (event.key === "Escape") {
+                event.preventDefault()
+                onClose()
+                return
+            }
+            if (event.key !== "Tab" || !modalRef.current) return
+            const focusable = [...modalRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+            if (!focusable.length) return
+            const first = focusable[0]
+            const last = focusable.at(-1)!
+            if (event.shiftKey && hostDocument.activeElement === first) { event.preventDefault(); last.focus() }
+            else if (!event.shiftKey && hostDocument.activeElement === last) { event.preventDefault(); first.focus() }
+        }
+        hostDocument.body.style.overflow = "hidden"
+        hostDocument.addEventListener("keydown", handleKey)
+        closeRef.current?.focus()
+        return () => {
+            hostDocument.body.style.overflow = previousOverflow
+            hostDocument.removeEventListener("keydown", handleKey)
+            origin?.focus()
+        }
+    }, [onClose])
+
+    return <div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 text-white backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+        <section ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="service-templates-title" aria-describedby="service-templates-description" className="flex max-h-[min(92dvh,46rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+            <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-6 sm:py-5">
+                <div className="min-w-0 flex-1">
+                    <h2 id="service-templates-title" className="text-xl font-semibold tracking-tight sm:text-2xl">Service Templates</h2>
+                    <p id="service-templates-description" className="mt-1.5 text-sm leading-6 text-neutral-500">Start with a ready-made service for your agency catalogue.</p>
+                </div>
+                <button ref={closeRef} type="button" onClick={onClose} aria-label="Close service templates" className="inline-flex h-9 w-9 shrink-0 items-center justify-center text-xl text-neutral-500 transition hover:text-white">×</button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Available service templates">
+                    {SERVICE_TEMPLATES.map((template) => <article key={template.id} className="min-w-0 overflow-hidden rounded-xl border border-neutral-800 bg-black">
+                        <div className="relative aspect-[16/10] overflow-hidden border-b border-neutral-800 bg-[#080834]">
+                            <Image src={template.thumbnail.src} alt={template.thumbnail.alt} fill sizes="(max-width: 639px) calc(100vw - 3.5rem), (max-width: 1023px) 40vw, 17rem" className="object-contain" />
+                        </div>
+                        <div className="p-4">
+                            <h3 className="font-semibold text-white">{template.name}</h3>
+                            <p className="mt-1.5 text-sm leading-5 text-neutral-500">{template.description}</p>
+                        </div>
+                    </article>)}
+                </div>
+            </div>
+        </section>
+    </div>
 }
 
 function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose }: {
@@ -247,14 +307,15 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
     schemaReady: boolean
     initialServiceId?: string | null
 }) {
-    const [selectedId, setSelectedId] = useState<string | null>(initialServiceId ?? null)
+    const [selectedId, setSelectedId] = useState<string | null>(initialServiceId && initialServiceId !== "new" ? initialServiceId : null)
+    const [templatesOpen, setTemplatesOpen] = useState(false)
     const selected = selectedId === "new" ? blankService() : services.find((service) => service.id === selectedId) ?? null
     const assigneeById = useMemo(() => new Map(assignees.map((assignee) => [assignee.id, assignee])), [assignees])
     const portalTarget = typeof window !== "undefined" ? (window.parent !== window ? window.parent.document.body : document.body) : null
 
     return <>
         <section className="min-w-0 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-            <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-4 py-4 sm:px-5"><div><h3 className="font-semibold">Services</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Reusable service and pricing defaults for the POS and Stripe Checkout.</p></div><button type="button" onClick={() => setSelectedId("new")} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black">New service</button></div>
+            <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-4 py-4 sm:px-5"><div><h3 className="font-semibold">Services</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Reusable service and pricing defaults for the POS and Stripe Checkout.</p></div><button type="button" onClick={() => setTemplatesOpen(true)} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black">New service</button></div>
             {!schemaReady ? <p className="border-b border-yellow-500/20 bg-yellow-500/[0.06] px-4 py-3 text-xs text-yellow-200 sm:px-5">Showing compatible hard-coded definitions while the editable catalogue schema is applied.</p> : null}
             <div className="divide-y divide-neutral-800">
                 {services.map((service) => {
@@ -273,6 +334,7 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
                 {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first service to make it available in the POS.</p></div> : null}
             </div>
         </section>
+        {templatesOpen && portalTarget ? createPortal(<ServiceTemplatesModal onClose={() => setTemplatesOpen(false)} />, portalTarget) : null}
         {selected && portalTarget ? createPortal(<ServiceEditor key={selected.id || "new"} workspaceSlug={workspaceSlug} service={selected} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} />, portalTarget) : null}
     </>
 }
