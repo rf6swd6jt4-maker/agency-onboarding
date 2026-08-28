@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react"
 
+import { ClientPortalChat } from "@/components/client-portal/ClientPortalChat"
+
 type PortalPanel = "chat" | "resources"
 
 function firstName(name: string) {
@@ -38,7 +40,7 @@ function ArrowIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
 }
 
-function PlaceholderPanel({ panel, workspaceName, onBack }: { panel: PortalPanel; workspaceName: string; onBack: () => void }) {
+function PortalSidePanel({ panel, token, workspaceName, onBack }: { panel: PortalPanel; token: string; workspaceName: string; onBack: () => void }) {
     const chat = panel === "chat"
     const panelRef = useRef<HTMLElement>(null)
     const backRef = useRef<HTMLButtonElement>(null)
@@ -73,17 +75,8 @@ function PlaceholderPanel({ panel, workspaceName, onBack }: { panel: PortalPanel
                 </div>
             </header>
 
-            <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
-                {chat ? <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-black/15 bg-[var(--onboarding-page,#F8F7F3)] p-8 text-center">
-                        <div className="max-w-xs">
-                            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--onboarding-primary,#1E3A5F)]/10 text-[var(--onboarding-primary,#1E3A5F)]"><ChatIcon className="h-6 w-6" /></span>
-                            <h3 className="mt-4 font-semibold">Your conversation will appear here</h3>
-                            <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">In the next update, you will be able to see every message and speak directly with the team.</p>
-                        </div>
-                    </div>
-                    <div className="mt-3 h-12 rounded-xl border border-black/10 bg-black/[0.03]" aria-hidden="true" />
-                </div> : <div className="flex min-h-0 flex-1 flex-col">
+            <div className={`flex min-h-0 flex-1 flex-col ${chat ? "" : "p-4 sm:p-6"}`}>
+                {chat ? <ClientPortalChat token={token} workspaceName={workspaceName} /> : <div className="flex min-h-0 flex-1 flex-col">
                     <div className="rounded-2xl border border-black/10 p-5">
                         <h3 className="font-semibold">Send something to the team</h3>
                         <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">Documents, images and other resources will be securely attached to your account.</p>
@@ -101,7 +94,7 @@ function PlaceholderPanel({ panel, workspaceName, onBack }: { panel: PortalPanel
     </>
 }
 
-export function ClientPortalShell({ workspaceName, primaryPersonName }: { workspaceName: string; primaryPersonName: string }) {
+export function ClientPortalShell({ token, workspaceName, primaryPersonName }: { token: string; workspaceName: string; primaryPersonName: string }) {
     const [panel, setPanel] = useState<PortalPanel | null>(null)
     const [greeting, setGreeting] = useState("Welcome")
 
@@ -184,6 +177,6 @@ export function ClientPortalShell({ workspaceName, primaryPersonName }: { worksp
             </section>
         </main>
 
-        {panel ? <PlaceholderPanel panel={panel} workspaceName={workspaceName} onBack={() => setPanel(null)} /> : null}
+        {panel ? <PortalSidePanel panel={panel} token={token} workspaceName={workspaceName} onBack={() => setPanel(null)} /> : null}
     </div>
 }

@@ -31,6 +31,6 @@ export default async function ClientPortalSessionPage({ params }: PageProps) {
 
     const { workspace, relationship, theme } = resolved
     return <OnboardingThemeProvider theme={theme}>
-        <ClientPortalShell workspaceName={workspace.name} primaryPersonName={relationship.primary_person_name} />
+        <ClientPortalShell token={token} workspaceName={workspace.name} primaryPersonName={relationship.primary_person_name} />
     </OnboardingThemeProvider>
 }

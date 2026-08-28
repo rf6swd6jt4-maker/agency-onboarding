@@ -1,3 +1,5 @@
+import "server-only"
+
 import { supabaseAdmin } from "@/lib/supabase/admin"
 
 export type ClientPortalMessageAttachment = {
@@ -17,6 +19,14 @@ export type ClientPortalMessage = {
     replyToMessageId: string | null
     attachment: ClientPortalMessageAttachment | null
     createdAt: string
+}
+
+export type ClientPortalAttachmentAccess = {
+    storagePath: string
+    fileName: string
+    mimeType: string
+    customerKey: string | null
+    isEncrypted: boolean
 }
 
 function record(value: unknown) {
@@ -82,4 +92,33 @@ export async function loadClientPortalMessages({
     })
     if (error) throw new Error(`Could not load client portal messages: ${error.message}`)
     return ((data ?? []) as unknown[]).flatMap((row) => messageFromValue(row) ?? []).reverse()
+}
+
+export async function loadClientPortalAttachmentAccess({
+    workspaceId,
+    relationshipId,
+    messageId,
+}: {
+    workspaceId: string
+    relationshipId: string
+    messageId: string
+}): Promise<ClientPortalAttachmentAccess | null> {
+    const { data, error } = await supabaseAdmin.rpc("client_portal_message_attachment_access", {
+        p_workspace_id: workspaceId,
+        p_relationship_id: relationshipId,
+        p_message_id: messageId,
+    })
+    if (error) throw new Error(`Could not load client portal attachment access: ${error.message}`)
+    const source = record(Array.isArray(data) ? data[0] : data)
+    const storagePath = text(source.storage_path)
+    const fileName = text(source.file_name)
+    const mimeType = text(source.mime_type)
+    if (!storagePath || !fileName || !mimeType) return null
+    return {
+        storagePath,
+        fileName,
+        mimeType,
+        customerKey: text(source.customer_key),
+        isEncrypted: source.is_encrypted === true,
+    }
 }
