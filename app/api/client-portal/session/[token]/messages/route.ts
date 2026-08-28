@@ -23,6 +23,7 @@ function publicMessage(input: {
     id: string
     body: string
     createdAt: string
+    replyToMessageId: string | null
 }) {
     return {
         id: input.id,
@@ -30,7 +31,9 @@ function publicMessage(input: {
         direction: "inbound" as const,
         senderKind: "client" as const,
         automationLabel: null,
-        replyToMessageId: null,
+        replyToMessageId: input.replyToMessageId,
+        source: "portal" as const,
+        reactions: [],
         attachment: null,
         createdAt: input.createdAt,
     }
@@ -75,16 +78,17 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     const resolved = await resolveClientPortalAccessByToken(token)
     if (!resolved) return noStore({ error: "Portal not found." }, { status: 404 })
 
-    const input = await request.json().catch(() => null) as { body?: unknown; clientRequestId?: unknown } | null
+    const input = await request.json().catch(() => null) as { body?: unknown; clientRequestId?: unknown; replyToMessageId?: unknown } | null
     const body = typeof input?.body === "string" ? input.body.trim() : ""
     const clientRequestId = typeof input?.clientRequestId === "string" ? input.clientRequestId : ""
-    if (!body || body.length > MESSAGE_LIMIT || !UUID_PATTERN.test(clientRequestId)) {
+    const replyToMessageId = typeof input?.replyToMessageId === "string" && input.replyToMessageId ? input.replyToMessageId : null
+    if (!body || body.length > MESSAGE_LIMIT || !UUID_PATTERN.test(clientRequestId) || (replyToMessageId !== null && !UUID_PATTERN.test(replyToMessageId))) {
         return noStore({ error: `Write a message of up to ${MESSAGE_LIMIT.toLocaleString()} characters.` }, { status: 400 })
     }
 
     const existing = await supabaseAdmin
         .from("client_messages")
-        .select("id, created_at")
+        .select("id, created_at, reply_to_message_id")
         .eq("workspace_id", resolved.workspace.id)
         .eq("relationship_id", resolved.relationship.id)
         .eq("client_request_id", clientRequestId)
@@ -92,9 +96,21 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     if (existing.error) return noStore({ error: "Could not confirm this message." }, { status: 503 })
     if (existing.data) {
         return noStore({
-            message: publicMessage({ id: existing.data.id, body, createdAt: existing.data.created_at }),
+            message: publicMessage({ id: existing.data.id, body, createdAt: existing.data.created_at, replyToMessageId: existing.data.reply_to_message_id }),
             reused: true,
         })
+    }
+
+    if (replyToMessageId) {
+        const replyTarget = await supabaseAdmin
+            .from("client_messages")
+            .select("id")
+            .eq("workspace_id", resolved.workspace.id)
+            .eq("relationship_id", resolved.relationship.id)
+            .eq("id", replyToMessageId)
+            .maybeSingle()
+        if (replyTarget.error) return noStore({ error: "Could not confirm the replied message." }, { status: 503 })
+        if (!replyTarget.data) return noStore({ error: "The message you replied to is no longer available." }, { status: 409 })
     }
 
     const since = new Date(Date.now() - 60_000).toISOString()
@@ -120,6 +136,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
         status: "received",
         sender_kind: "client",
         client_request_id: clientRequestId,
+        reply_to_message_id: replyToMessageId,
         raw_payload: {
             source: "client_portal",
             portal_session_id: resolved.session.id,
@@ -130,7 +147,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
         return noStore({ error: "Could not send this message right now." }, { status: 503 })
     }
 
-    const message = publicMessage({ id: created.data.id, body, createdAt: created.data.created_at })
+    const message = publicMessage({ id: created.data.id, body, createdAt: created.data.created_at, replyToMessageId })
     after(async () => {
         await Promise.allSettled([
             notifyClientChatMessage({
@@ -157,4 +174,67 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
         ])
     })
     return noStore({ message }, { status: 201 })
+}
+
+export async function DELETE(request: NextRequest, context: { params: Promise<{ token: string }> }) {
+    const { token } = await context.params
+    const resolved = await resolveClientPortalAccessByToken(token)
+    if (!resolved) return noStore({ error: "Portal not found." }, { status: 404 })
+
+    const messageId = request.nextUrl.searchParams.get("messageId") ?? ""
+    if (!UUID_PATTERN.test(messageId)) return noStore({ error: "Message not found." }, { status: 404 })
+
+    const target = await supabaseAdmin
+        .from("client_messages")
+        .select("id, direction, provider")
+        .eq("workspace_id", resolved.workspace.id)
+        .eq("relationship_id", resolved.relationship.id)
+        .eq("id", messageId)
+        .maybeSingle()
+    if (target.error) return noStore({ error: "Could not delete this message right now." }, { status: 503 })
+    if (!target.data) return noStore({ error: "Message not found." }, { status: 404 })
+    if (target.data.direction !== "inbound" || target.data.provider !== "client_portal") {
+        return noStore({ error: "Messages sent outside this portal cannot be deleted here." }, { status: 409 })
+    }
+
+    const deleted = await supabaseAdmin.rpc("delete_client_portal_message", {
+        p_workspace_id: resolved.workspace.id,
+        p_relationship_id: resolved.relationship.id,
+        p_message_id: messageId,
+    })
+    let wasDeleted = deleted.data === true
+    if (deleted.error?.code === "PGRST202") {
+        const legacyDelete = await supabaseAdmin
+            .from("client_messages")
+            .delete()
+            .eq("workspace_id", resolved.workspace.id)
+            .eq("relationship_id", resolved.relationship.id)
+            .eq("id", messageId)
+            .eq("direction", "inbound")
+            .eq("provider", "client_portal")
+            .select("id")
+            .maybeSingle()
+        if (legacyDelete.error) return noStore({ error: "Could not delete this message right now." }, { status: 503 })
+        wasDeleted = legacyDelete.data?.id === messageId
+    } else if (deleted.error) {
+        return noStore({ error: "Could not delete this message right now." }, { status: 503 })
+    }
+    if (!wasDeleted) return noStore({ error: "The message is no longer available." }, { status: 409 })
+
+    after(async () => {
+        if (!resolved.relationship.client_id) return
+        await recordClientAdminActivity({
+            clientId: resolved.relationship.client_id,
+            category: "communications",
+            eventKey: "client_portal.message.deleted",
+            summary: "Client portal message deleted",
+            entityType: "client_message",
+            entityId: messageId,
+            actorKind: "client",
+            direction: "inbound",
+            idempotencyKey: `client-portal-message-deleted:${messageId}`,
+            metadata: { source: "client_portal" },
+        })
+    })
+    return noStore({ deleted: true, messageId })
 }

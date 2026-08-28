@@ -37,25 +37,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
     }
     const { data: message, error: messageError } = await supabaseAdmin
         .from("client_messages")
-        .select("id, direction, from_address, to_address, provider_message_id, whatsapp_message_id, created_at")
+        .select("id, direction, provider, from_address, to_address, provider_message_id, whatsapp_message_id, created_at")
         .eq("workspace_id", workspace.id)
         .eq("relationship_id", relationshipId)
         .eq("id", messageId)
         .maybeSingle()
     if (messageError) return Response.json({ error: messageError.message }, { status: 503 })
     if (!message) return Response.json({ error: "Message not found." }, { status: 404 })
-    if (Date.now() - new Date(message.created_at).getTime() > 30 * 24 * 60 * 60 * 1_000) {
-        return Response.json({ error: "WhatsApp reactions are available for messages up to 30 days old." }, { status: 409 })
-    }
-    const targetProviderId = message.whatsapp_message_id ?? message.provider_message_id
-    const to = message.direction === "inbound" ? message.from_address : message.to_address
-    if (!targetProviderId || !to) return Response.json({ error: "This message cannot be reacted to in WhatsApp yet." }, { status: 409 })
-
-    let response: unknown
-    try {
-        response = await sendMetaWhatsAppReaction({ workspaceId: workspace.id, to, messageId: targetProviderId, emoji })
-    } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Could not send this reaction." }, { status: 502 })
+    const portalNative = message.provider === "client_portal"
+    let response: unknown = null
+    if (!portalNative) {
+        if (message.provider !== "meta_whatsapp") {
+            return Response.json({ error: "This message source does not support reactions." }, { status: 409 })
+        }
+        if (Date.now() - new Date(message.created_at).getTime() > 30 * 24 * 60 * 60 * 1_000) {
+            return Response.json({ error: "WhatsApp reactions are available for messages up to 30 days old." }, { status: 409 })
+        }
+        const targetProviderId = message.whatsapp_message_id ?? message.provider_message_id
+        const to = message.direction === "inbound" ? message.from_address : message.to_address
+        if (!targetProviderId || !to) return Response.json({ error: "This message cannot be reacted to in WhatsApp yet." }, { status: 409 })
+        try {
+            response = await sendMetaWhatsAppReaction({ workspaceId: workspace.id, to, messageId: targetProviderId, emoji })
+        } catch (error) {
+            return Response.json({ error: error instanceof Error ? error.message : "Could not send this reaction." }, { status: 502 })
+        }
     }
 
     if (!emoji) {

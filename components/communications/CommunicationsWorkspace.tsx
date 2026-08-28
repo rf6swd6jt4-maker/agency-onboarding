@@ -223,7 +223,12 @@ function reconcileConversations(current: ClientConversation[], incoming: ClientC
     const currentById = new Map(current.map((conversation) => [conversation.id, conversation]))
     return incoming.map((conversation) => ({
         ...conversation,
-        messages: mergeMessages(currentById.get(conversation.id)?.messages ?? [], conversation.messages),
+        // The server snapshot is authoritative during recovery. Preserve only
+        // optimistic sends which have not received their durable row yet.
+        messages: mergeMessages(
+            (currentById.get(conversation.id)?.messages ?? []).filter((message) => message.clientRequestId === message.id),
+            conversation.messages,
+        ),
     })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title))
 }
 
@@ -659,6 +664,18 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
 
     const registerRealtime = useCallback((channel: ReturnType<typeof supabase.channel>) => channel
                 .on("postgres_changes", { event: "*", schema: "public", table: "client_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
+                    if (payload.eventType === "DELETE") {
+                        const deleted = record(payload.old)
+                        const relationshipId = stringValue(deleted.relationship_id)
+                        const messageId = stringValue(deleted.id)
+                        if (relationshipId && messageId) {
+                            setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== messageId) } : conversation))
+                            setReactions((current) => current.filter((reaction) => reaction.messageId !== messageId))
+                            setReplyingTo((current) => current?.id === messageId ? null : current)
+                            setActionMessageId((current) => current === messageId ? null : current)
+                        }
+                        return
+                    }
                     const message = realtimeMessage(payload.new)
                     if (message) updateConversationMessages(message.relationshipId, [message], true)
                     else {
@@ -933,7 +950,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                     : null
                             const messageReactions = reactions.filter((reaction) => reaction.messageId === message.id)
                             const teamReaction = messageReactions.find((reaction) => reaction.direction === "outbound") ?? null
-                            const canInteract = Boolean(message.providerMessageId) && new Date(message.createdAt).getTime() >= reactionCutoff
+                            const canInteract = message.provider === "client_portal" || (usesWhatsApp(message) && Boolean(message.providerMessageId) && new Date(message.createdAt).getTime() >= reactionCutoff)
                             const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                             const isSticker = message.attachment?.kind === "sticker"
                             const isWhatsAppClientMessage = message.direction === "inbound" && usesWhatsApp(message)

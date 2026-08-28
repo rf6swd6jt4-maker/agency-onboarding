@@ -3,6 +3,8 @@
 import Image from "next/image"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
+import { MessageReactionActions, PrimaryMessageActions, copyMessageText, downloadMessageAttachment, type MessageActionView } from "@/components/communications/MessageActionMenu"
+import { DeleteIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 
 type PortalAttachment = {
@@ -19,11 +21,20 @@ type PortalMessage = {
     senderKind: "client" | "staff" | "automation"
     automationLabel: string | null
     replyToMessageId: string | null
+    source: "agency" | "external" | "portal" | "sms" | "whatsapp"
+    reactions: PortalReaction[]
     attachment: PortalAttachment | null
     createdAt: string
     localRequestId?: string
     sendState?: "sending" | "failed"
     sendError?: string | null
+}
+
+type PortalReaction = {
+    id: string
+    direction: "inbound" | "outbound"
+    emoji: string
+    updatedAt: string
 }
 
 type MessagesResponse = {
@@ -55,6 +66,16 @@ function attachmentFromValue(value: unknown): PortalAttachment | null {
     }
 }
 
+function reactionFromValue(value: unknown): PortalReaction | null {
+    const source = record(value)
+    const id = text(source.id)
+    const direction = source.direction === "inbound" || source.direction === "outbound" ? source.direction : null
+    const emoji = text(source.emoji)
+    const updatedAt = text(source.updatedAt)
+    if (!id || !direction || !emoji || !updatedAt || !Number.isFinite(Date.parse(updatedAt))) return null
+    return { id, direction, emoji, updatedAt }
+}
+
 function messageFromValue(value: unknown): PortalMessage | null {
     const source = record(value)
     const id = text(source.id)
@@ -62,7 +83,8 @@ function messageFromValue(value: unknown): PortalMessage | null {
     const createdAt = text(source.createdAt)
     const direction = source.direction === "inbound" || source.direction === "outbound" ? source.direction : null
     const senderKind = source.senderKind === "client" || source.senderKind === "staff" || source.senderKind === "automation" ? source.senderKind : null
-    if (!id || body === null || !createdAt || !direction || !senderKind || !Number.isFinite(Date.parse(createdAt))) return null
+    const messageSource = source.source === "agency" || source.source === "external" || source.source === "portal" || source.source === "sms" || source.source === "whatsapp" ? source.source : null
+    if (!id || body === null || !createdAt || !direction || !senderKind || !messageSource || !Number.isFinite(Date.parse(createdAt))) return null
     return {
         id,
         body,
@@ -70,6 +92,8 @@ function messageFromValue(value: unknown): PortalMessage | null {
         senderKind,
         automationLabel: text(source.automationLabel),
         replyToMessageId: text(source.replyToMessageId),
+        source: messageSource,
+        reactions: Array.isArray(source.reactions) ? source.reactions.flatMap((candidate) => reactionFromValue(candidate) ?? []) : [],
         attachment: attachmentFromValue(source.attachment),
         createdAt,
     }
@@ -93,6 +117,14 @@ function mergeMessages(current: PortalMessage[], incoming: PortalMessage[]) {
         return false
     })
     return sortMessages([...retained, ...incoming])
+}
+
+function mergeLatestSnapshot(current: PortalMessage[], incoming: PortalMessage[]) {
+    const local = current.filter((message) => message.id.startsWith("local:"))
+    if (!incoming.length) return local
+    const firstIncomingAt = Date.parse(incoming[0].createdAt)
+    const older = current.filter((message) => !message.id.startsWith("local:") && Date.parse(message.createdAt) < firstIncomingAt)
+    return mergeMessages([...older, ...local], incoming)
 }
 
 function dayKey(value: string) {
@@ -152,17 +184,17 @@ function MessageAttachment({ attachment, url, own, onOpenImage }: {
     onOpenImage: (media: MessageMediaPreview) => void
 }) {
     if (attachment.kind === "image" || attachment.kind === "sticker") {
-        return <button type="button" onClick={() => onOpenImage({ url, alt: attachment.fileName })} className={`mb-2 block overflow-hidden rounded-xl ${attachment.kind === "sticker" ? "bg-transparent" : own ? "bg-black/10" : "bg-black/5"}`} aria-label={`Open ${attachment.fileName}`}>
+        return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url, alt: attachment.fileName }) }} className={`mb-2 block overflow-hidden rounded-xl ${attachment.kind === "sticker" ? "bg-transparent" : own ? "bg-black/10" : "bg-black/5"}`} aria-label={`Open ${attachment.fileName}`}>
             <Image unoptimized src={url} alt={attachment.fileName} width={720} height={560} className={`${attachment.kind === "sticker" ? "max-h-44 object-contain" : "max-h-72 object-cover"} h-auto w-full`} />
         </button>
     }
     if (attachment.kind === "video") {
-        return <video controls playsInline preload="metadata" className="mb-2 max-h-72 w-full rounded-xl bg-black" aria-label={attachment.fileName}><source src={url} type={attachment.mimeType} /></video>
+        return <video controls playsInline preload="metadata" onClick={(event) => event.stopPropagation()} className="mb-2 max-h-72 w-full rounded-xl bg-black" aria-label={attachment.fileName}><source src={url} type={attachment.mimeType} /></video>
     }
     if (attachment.kind === "audio") {
-        return <div className={`mb-2 rounded-xl p-2 ${own ? "bg-black/10" : "bg-black/5"}`}><audio controls preload="metadata" src={url} className="block h-10 w-full max-w-64" aria-label={attachment.fileName} /></div>
+        return <div onClick={(event) => event.stopPropagation()} className={`mb-2 rounded-xl p-2 ${own ? "bg-black/10" : "bg-black/5"}`}><audio controls preload="metadata" src={url} className="block h-10 w-full max-w-64" aria-label={attachment.fileName} /></div>
     }
-    return <a href={url} target="_blank" rel="noreferrer" className={`mb-2 flex items-center gap-3 rounded-xl border px-3 py-3 ${own ? "border-white/20 bg-white/10 text-white" : "border-black/10 bg-black/[0.03] text-[var(--onboarding-text,#0F172A)]"}`}>
+    return <a href={url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()} className={`mb-2 flex items-center gap-3 rounded-xl border px-3 py-3 ${own ? "border-white/20 bg-white/10 text-white" : "border-black/10 bg-black/[0.03] text-[var(--onboarding-text,#0F172A)]"}`}>
         <span className="shrink-0"><FileIcon /></span>
         <span className="min-w-0"><span className="block truncate text-sm font-semibold">{attachment.fileName}</span><span className={`mt-0.5 block text-xs ${own ? "text-white/70" : "text-[var(--onboarding-muted,#475569)]"}`}>{formatFileSize(attachment.size)}</span></span>
     </a>
@@ -170,18 +202,28 @@ function MessageAttachment({ attachment, url, own, onOpenImage }: {
 
 export function ClientPortalChat({ token, workspaceName }: { token: string; workspaceName: string }) {
     const apiPath = useMemo(() => `/api/client-portal/session/${encodeURIComponent(token)}/messages`, [token])
+    const reactionsApiPath = useMemo(() => `/api/client-portal/session/${encodeURIComponent(token)}/reactions`, [token])
     const [messages, setMessages] = useState<PortalMessage[]>([])
     const [nextBefore, setNextBefore] = useState<string | null>(null)
     const [initialState, setInitialState] = useState<"loading" | "ready" | "error">("loading")
     const [loadingOlder, setLoadingOlder] = useState(false)
     const [draft, setDraft] = useState("")
     const [sendError, setSendError] = useState<string | null>(null)
+    const [interactionError, setInteractionError] = useState<string | null>(null)
+    const [replyingTo, setReplyingTo] = useState<PortalMessage | null>(null)
+    const [actionMessageId, setActionMessageId] = useState<string | null>(null)
+    const [actionView, setActionView] = useState<MessageActionView>("actions")
+    const [recentReaction, setRecentReaction] = useState<string | null>(() => typeof window === "undefined" ? null : localStorage.getItem("betelgeze:client-portal:recent-reaction"))
+    const [swipePosition, setSwipePosition] = useState<{ id: string; offset: number; active: boolean } | null>(null)
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const scrollRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const refreshingRef = useRef(false)
     const followingLatestRef = useRef(true)
     const scrollToLatestRef = useRef(true)
+    const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; minDeltaX: number; verticalAtMax: number; verticalAtMin: number } | null>(null)
+    const swipedMessageRef = useRef<string | null>(null)
+    const dismissedActionMessageRef = useRef<string | null>(null)
 
     const refreshLatest = useCallback(async (initial = false) => {
         if (refreshingRef.current) return
@@ -192,7 +234,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
             if (!response.ok) throw new Error(typeof result?.error === "string" ? result.error : "Messages are unavailable.")
             const incoming = Array.isArray(result?.messages) ? result.messages.flatMap((value) => messageFromValue(value) ?? []) : []
             if (initial || followingLatestRef.current) scrollToLatestRef.current = true
-            setMessages((current) => mergeMessages(current, incoming))
+            setMessages((current) => initial ? mergeMessages(current, incoming) : mergeLatestSnapshot(current, incoming))
             if (initial) setNextBefore(typeof result?.nextBefore === "string" ? result.nextBefore : null)
             setInitialState("ready")
         } catch {
@@ -237,6 +279,18 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
         textarea.style.height = `${Math.min(120, Math.max(44, textarea.scrollHeight))}px`
     }, [draft])
 
+    useEffect(() => {
+        if (!actionMessageId) return
+        const dismiss = (event: PointerEvent) => {
+            const target = event.target instanceof Element ? event.target : null
+            if (target?.closest("[data-message-action-popup]")) return
+            if (target?.closest(`[data-message-interaction="${actionMessageId}"]`)) dismissedActionMessageRef.current = actionMessageId
+            setActionMessageId(null)
+        }
+        document.addEventListener("pointerdown", dismiss, true)
+        return () => document.removeEventListener("pointerdown", dismiss, true)
+    }, [actionMessageId])
+
     async function loadOlder() {
         const pane = scrollRef.current
         if (!nextBefore || loadingOlder || !pane) return
@@ -270,7 +324,9 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                 direction: "inbound",
                 senderKind: "client",
                 automationLabel: null,
-                replyToMessageId: null,
+                replyToMessageId: replyingTo?.id ?? null,
+                source: "portal",
+                reactions: [],
                 attachment: null,
                 createdAt: new Date().toISOString(),
                 localRequestId: clientRequestId,
@@ -281,12 +337,15 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
         followingLatestRef.current = true
         setMessages((current) => sortMessages(retry ? current.map((message) => message.id === retry.id ? optimistic : message) : [...current, optimistic]))
         setSendError(null)
-        if (!retry) setDraft("")
+        if (!retry) {
+            setDraft("")
+            setReplyingTo(null)
+        }
 
         const response = await fetch(apiPath, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ body, clientRequestId }),
+            body: JSON.stringify({ body, clientRequestId, replyToMessageId: optimistic.replyToMessageId }),
         }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as MessagesResponse | null : null
         const stored = messageFromValue(result?.message)
@@ -297,6 +356,90 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
         }
         const error = typeof result?.error === "string" ? result.error : "The message was not confirmed. Check your connection and try again."
         setMessages((current) => current.map((message) => message.id === localId ? { ...message, sendState: "failed", sendError: error } : message))
+    }
+
+    function beginReply(message: PortalMessage) {
+        if (message.id.startsWith("local:")) return
+        setReplyingTo(message)
+        setActionMessageId(null)
+        window.requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+
+    function rememberRecentReaction(emoji: string) {
+        setRecentReaction(emoji)
+        localStorage.setItem("betelgeze:client-portal:recent-reaction", emoji)
+    }
+
+    async function copyMessage(message: PortalMessage) {
+        setActionMessageId(null)
+        setInteractionError(null)
+        const body = message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? message.body : messagePreview(message)
+        try {
+            await copyMessageText(body)
+        } catch (error) {
+            setInteractionError(error instanceof Error ? error.message : "Could not copy this message.")
+        }
+    }
+
+    async function downloadAttachment(message: PortalMessage) {
+        if (!message.attachment) return
+        setActionMessageId(null)
+        setInteractionError(null)
+        try {
+            await downloadMessageAttachment(`${apiPath}/${encodeURIComponent(message.id)}/attachment`, message.attachment.fileName)
+        } catch (error) {
+            setInteractionError(error instanceof Error ? error.message : "Could not download this attachment.")
+        }
+    }
+
+    async function deleteMessage(message: PortalMessage) {
+        if (message.direction !== "inbound" || message.source !== "portal" || message.id.startsWith("local:")) return
+        if (!window.confirm("Delete this message? It will disappear for you and the agency, and this cannot be undone.")) return
+        const previous = messages
+        setActionMessageId(null)
+        setReplyingTo((current) => current?.id === message.id ? null : current)
+        setInteractionError(null)
+        setMessages((current) => current.filter((candidate) => candidate.id !== message.id).map((candidate) => candidate.replyToMessageId === message.id ? { ...candidate, replyToMessageId: null } : candidate))
+        const params = new URLSearchParams({ messageId: message.id })
+        const response = await fetch(`${apiPath}?${params}`, { method: "DELETE" }).catch(() => null)
+        const result = response ? await response.json().catch(() => null) as { deleted?: boolean; messageId?: string; error?: string } | null : null
+        if (!response?.ok || result?.deleted !== true || result.messageId !== message.id) {
+            setMessages((current) => mergeMessages(current, previous))
+            setInteractionError(result?.error ?? "Could not delete this message.")
+        }
+    }
+
+    async function sendReaction(message: PortalMessage, emoji: string) {
+        if (message.direction !== "outbound" || message.id.startsWith("local:")) return
+        const previous = message.reactions
+        const optimistic = emoji ? {
+            id: previous.find((reaction) => reaction.direction === "inbound")?.id ?? `local-reaction:${message.id}`,
+            direction: "inbound" as const,
+            emoji,
+            updatedAt: new Date().toISOString(),
+        } : null
+        setActionMessageId(null)
+        setInteractionError(null)
+        setMessages((current) => current.map((candidate) => candidate.id === message.id ? {
+            ...candidate,
+            reactions: [...candidate.reactions.filter((reaction) => reaction.direction !== "inbound"), ...(optimistic ? [optimistic] : [])],
+        } : candidate))
+        const response = await fetch(reactionsApiPath, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ messageId: message.id, emoji }),
+        }).catch(() => null)
+        const result = response ? await response.json().catch(() => null) as { reaction?: unknown; error?: string } | null : null
+        const stored = reactionFromValue(result?.reaction)
+        if (!response?.ok || (emoji && !stored)) {
+            setMessages((current) => current.map((candidate) => candidate.id === message.id ? { ...candidate, reactions: previous } : candidate))
+            setInteractionError(result?.error ?? "Could not update this reaction.")
+            return
+        }
+        setMessages((current) => current.map((candidate) => candidate.id === message.id ? {
+            ...candidate,
+            reactions: [...candidate.reactions.filter((reaction) => reaction.direction !== "inbound"), ...(stored ? [stored] : [])],
+        } : candidate))
     }
 
     const messageById = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages])
@@ -323,11 +466,96 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                     const repliedMessage = message.replyToMessageId ? messageById.get(message.replyToMessageId) : null
                     const showDay = !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt)
                     const attachmentUrl = `${apiPath}/${encodeURIComponent(message.id)}/attachment`
+                    const persistent = !message.id.startsWith("local:")
+                    const canDelete = persistent && own && message.source === "portal"
+                    const canReact = persistent && !own
+                    const canReply = persistent
+                    const clientReaction = message.reactions.find((reaction) => reaction.direction === "inbound") ?? null
+                    const isWhatsApp = own && message.source === "whatsapp"
+                    const showActions = actionMessageId === message.id
+                    const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
+                    const senderLabel = own
+                        ? message.source === "whatsapp" ? "You · WhatsApp" : message.source === "sms" ? "You · SMS" : "You"
+                        : message.senderKind === "automation" ? message.automationLabel ?? "Automated update" : workspaceName
                     return <Fragment key={message.id}>
                         {showDay ? <div className="my-5 flex items-center gap-3" aria-label={dayLabel(message.createdAt)}><span className="h-px flex-1 bg-black/10" /><span className="text-[11px] font-semibold text-[var(--onboarding-muted,#475569)]">{dayLabel(message.createdAt)}</span><span className="h-px flex-1 bg-black/10" /></div> : null}
-                        <div className={`mb-3 flex ${own ? "justify-end" : "justify-start"}`}>
-                            <article className={`min-w-0 max-w-[86%] rounded-2xl px-3.5 py-2.5 shadow-sm sm:max-w-[78%] ${own ? "rounded-br-md bg-[var(--onboarding-primary,#1E3A5F)] text-white" : "rounded-bl-md border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] text-[var(--onboarding-text,#0F172A)]"}`}>
-                                <p className={`mb-1 text-[10px] font-semibold ${own ? "text-white/70" : "text-[var(--onboarding-muted,#475569)]"}`}>{own ? "You" : message.senderKind === "automation" ? message.automationLabel ?? "Automated update" : workspaceName}</p>
+                        <div data-message-interaction={message.id} className={`relative mb-3 flex items-center transition-[filter,opacity,transform] duration-150 ${own ? "justify-end origin-right" : "justify-start origin-left"} ${replyingTo ? replyingTo.id === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-35 blur-[1px]" : ""}`}>
+                            <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-4 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/35 via-red-100/40 to-transparent" : "bg-gradient-to-r from-black/10 via-black/[0.03] to-transparent"}`} />
+                            <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-900 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
+                            {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
+                            {showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className={`betelgeze-reaction-popup-enter absolute bottom-full z-20 mb-1 ${own ? "right-0" : "left-0"}`}>
+                                {actionView === "actions" ? <PrimaryMessageActions
+                                    onDelete={canDelete ? () => void deleteMessage(message) : null}
+                                    onEdit={null}
+                                    onSave={persistent && message.attachment ? () => void downloadAttachment(message) : null}
+                                    saveLabel={message.attachment ? `Download ${message.attachment.fileName}` : undefined}
+                                    onReply={canReply ? () => beginReply(message) : null}
+                                    onCopy={() => void copyMessage(message)}
+                                    onPin={null}
+                                    onReact={canReact ? () => setActionView("reactions") : null}
+                                    pinned={false}
+                                /> : canReact ? <MessageReactionActions currentEmoji={clientReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}
+                            </div> : null}
+                            <article
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Message from ${senderLabel}. Activate for message actions.`}
+                                onClick={() => {
+                                    if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
+                                    if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
+                                    setActionView("actions")
+                                    setActionMessageId((current) => current === message.id ? null : message.id)
+                                }}
+                                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionView("actions"); setActionMessageId((current) => current === message.id ? null : message.id) } }}
+                                onTouchStart={(event) => {
+                                    const target = event.target instanceof Element ? event.target : null
+                                    if (target?.closest("button,a,audio,video")) return
+                                    const touch = event.touches[0]
+                                    swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false, maxDeltaX: 0, minDeltaX: 0, verticalAtMax: 0, verticalAtMin: 0 } : null
+                                    if (touch) setSwipePosition({ id: message.id, offset: 0, active: true })
+                                }}
+                                onTouchMove={(event) => {
+                                    const start = swipeStartRef.current
+                                    const touch = event.touches[0]
+                                    if (!start || start.id !== message.id || !touch || start.cancelled) return
+                                    const deltaX = touch.clientX - start.x
+                                    const deltaY = touch.clientY - start.y
+                                    if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = Math.abs(deltaY) }
+                                    if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = Math.abs(deltaY) }
+                                    if (Math.abs(deltaY) > Math.abs(deltaX) * 1.5 && Math.abs(deltaY) > 12) {
+                                        start.cancelled = true
+                                        setSwipePosition({ id: message.id, offset: 0, active: false })
+                                        return
+                                    }
+                                    const constrained = canDelete ? Math.max(-82, Math.min(82, deltaX * 0.78)) : Math.max(0, Math.min(82, deltaX * 0.78))
+                                    if (Math.abs(constrained) > 2) { event.preventDefault(); setSwipePosition({ id: message.id, offset: constrained, active: true }) }
+                                }}
+                                onTouchEnd={(event) => {
+                                    const start = swipeStartRef.current
+                                    const touch = event.changedTouches[0]
+                                    swipeStartRef.current = null
+                                    if (start && touch) {
+                                        const deltaX = touch.clientX - start.x
+                                        const vertical = Math.abs(touch.clientY - start.y)
+                                        if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = vertical }
+                                        if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = vertical }
+                                    }
+                                    const replyGesture = Boolean(start && !start.cancelled && canReply && start.maxDeltaX > 52 && start.verticalAtMax < 42)
+                                    const deleteGesture = Boolean(start && !start.cancelled && canDelete && start.minDeltaX < -52 && start.verticalAtMin < 42)
+                                    setSwipePosition({ id: message.id, offset: 0, active: false })
+                                    window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
+                                    if (replyGesture) { swipedMessageRef.current = message.id; beginReply(message) }
+                                    else if (deleteGesture) { swipedMessageRef.current = message.id; void deleteMessage(message) }
+                                }}
+                                onTouchCancel={() => {
+                                    swipeStartRef.current = null
+                                    setSwipePosition({ id: message.id, offset: 0, active: false })
+                                    window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
+                                }}
+                                style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
+                                className={`min-w-0 max-w-[86%] touch-pan-y cursor-pointer rounded-2xl px-3.5 py-2.5 shadow-sm outline-none ring-offset-2 ring-offset-[var(--onboarding-page,#F8F7F3)] focus-visible:ring-2 focus-visible:ring-[var(--onboarding-primary,#1E3A5F)] sm:max-w-[78%] ${isWhatsApp ? "rounded-br-md bg-[#154D37] text-white" : own ? "rounded-br-md bg-[var(--onboarding-primary,#1E3A5F)] text-white" : "rounded-bl-md border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] text-[var(--onboarding-text,#0F172A)]"}`}
+                            >
+                                <p className={`mb-1 text-[10px] font-semibold ${own ? "text-white/70" : "text-[var(--onboarding-muted,#475569)]"}`}>{senderLabel}</p>
                                 {message.replyToMessageId ? <div className={`mb-2 rounded-lg border-l-2 px-2.5 py-2 ${own ? "border-white/50 bg-black/10" : "border-[var(--onboarding-primary,#1E3A5F)]/40 bg-black/[0.03]"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? (repliedMessage.direction === "inbound" ? "You" : workspaceName) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-70">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
                                 {message.attachment ? <MessageAttachment attachment={message.attachment} url={attachmentUrl} own={own} onOpenImage={setPreviewMedia} /> : null}
                                 {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageText body={message.body} own={own} /> : null}
@@ -335,6 +563,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                 {message.sendState === "failed" ? <div className="mt-2 border-t border-white/15 pt-2"><p className="text-xs text-white/85">{message.sendError}</p><button type="button" onClick={() => void sendMessage(message)} className="mt-1 text-xs font-semibold underline underline-offset-2">Try again</button></div> : null}
                             </article>
                         </div>
+                        {message.reactions.length ? <div className={`mb-2 flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{message.reactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? "You reacted" : `${workspaceName} reacted`} className="rounded-full border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                     </Fragment>
                 })}
             </div>
@@ -342,6 +571,11 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
 
         <footer className="shrink-0 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
             <div className="mx-auto max-w-2xl">
+                {replyingTo ? <div className="mb-2 flex items-center gap-3 border-l-2 border-[var(--onboarding-primary,#1E3A5F)] px-3 py-1 text-xs">
+                    <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-[var(--onboarding-text,#0F172A)]">Replying to {replyingTo.direction === "inbound" ? "yourself" : workspaceName}</span><span className="block truncate text-[var(--onboarding-muted,#475569)]">{messagePreview(replyingTo)}</span></span>
+                    <button type="button" onPointerDown={(event) => event.preventDefault()} onClick={() => { setReplyingTo(null); textareaRef.current?.focus({ preventScroll: true }) }} aria-label="Cancel reply" className="inline-flex h-8 w-8 shrink-0 items-center justify-center text-[var(--onboarding-muted,#475569)] hover:text-[var(--onboarding-text,#0F172A)]">×</button>
+                </div> : null}
+                {interactionError ? <div role="alert" className="mb-2 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700"><span>{interactionError}</span><button type="button" onClick={() => setInteractionError(null)} aria-label="Dismiss interaction error">×</button></div> : null}
                 {sendError ? <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{sendError}</p> : null}
                 <form onSubmit={(event) => { event.preventDefault(); void sendMessage() }} className="flex items-end gap-2 rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-1.5 focus-within:border-[var(--onboarding-primary,#1E3A5F)]/50">
                     <textarea
