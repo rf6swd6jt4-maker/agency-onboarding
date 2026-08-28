@@ -3,7 +3,7 @@ import { getClientPortalUrl } from "@/lib/client-portal/domain"
 import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 
-export async function loadClientPortalSessionByToken(token: string) {
+export async function resolveClientPortalAccessByToken(token: string) {
     if (!/^[a-f0-9]{64}$/i.test(token)) return null
 
     const requestHeaders = await headers()
@@ -20,7 +20,7 @@ export async function loadClientPortalSessionByToken(token: string) {
         .select("id, name, slug, status, custom_client_portal_domain, custom_client_portal_domain_status")
         .eq("id", session.workspace_id)
         .eq("status", "active")
-    const [{ data: workspace }, { data: relationship, error: relationshipError }, configuration] = await Promise.all([
+    const [{ data: workspace }, { data: relationship, error: relationshipError }] = await Promise.all([
         workspaceSlug ? workspaceQuery.eq("slug", workspaceSlug).maybeSingle() : workspaceQuery.maybeSingle(),
         supabaseAdmin
             .from("relationships")
@@ -29,17 +29,24 @@ export async function loadClientPortalSessionByToken(token: string) {
             .eq("id", session.relationship_id)
             .neq("status", "archived")
             .maybeSingle(),
-        loadPublishedOnboardingConfiguration(session.workspace_id),
     ])
     if (!workspace || relationshipError || !relationship) return null
+
+    return { session, workspace, relationship }
+}
+
+export async function loadClientPortalSessionByToken(token: string) {
+    const resolved = await resolveClientPortalAccessByToken(token)
+    if (!resolved) return null
+    const configuration = await loadPublishedOnboardingConfiguration(resolved.session.workspace_id)
 
     await supabaseAdmin
         .from("client_portal_sessions")
         .update({ last_accessed_at: new Date().toISOString() })
-        .eq("workspace_id", session.workspace_id)
-        .eq("id", session.id)
+        .eq("workspace_id", resolved.session.workspace_id)
+        .eq("id", resolved.session.id)
 
-    return { session, workspace, relationship, theme: configuration.theme }
+    return { ...resolved, theme: configuration.theme }
 }
 
 export async function getClientPortalUrlForOnboardingSession(input: {
