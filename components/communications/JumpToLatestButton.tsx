@@ -10,19 +10,32 @@ export function messagePaneCanShowNewMessage(pane: HTMLDivElement | null, follow
     return bounds.bottom > 0 && bounds.top < window.innerHeight
 }
 
-export function observeMessagePaneResize(pane: HTMLDivElement | null, isFollowingLatest: () => boolean, preserveVisibleBottom = false) {
+export function observeMessagePaneResize(
+    pane: HTMLDivElement | null,
+    isFollowingLatest: () => boolean,
+    preserveVisibleBottom = false,
+    composer: HTMLTextAreaElement | null = null,
+) {
     if (!pane || typeof ResizeObserver === "undefined") return () => undefined
     let previousHeight = pane.clientHeight
+    let previousComposerHeight = composer?.getBoundingClientRect().height ?? 0
     const observer = new ResizeObserver(() => {
         const nextHeight = pane.clientHeight
-        if (nextHeight === previousHeight) return
+        const nextComposerHeight = composer?.getBoundingClientRect().height ?? previousComposerHeight
+        const composerHeightDelta = nextComposerHeight - previousComposerHeight
+        const paneHeightDelta = previousHeight - nextHeight
+        if (paneHeightDelta === 0 && Math.abs(composerHeightDelta) < 0.01) return
         const followingLatest = isFollowingLatest()
-        const heightDelta = previousHeight - nextHeight
         previousHeight = nextHeight
-        if (followingLatest) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
-        else if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + heightDelta, left: 0 })
+        previousComposerHeight = nextComposerHeight
+        // Composer growth is the user-visible movement to mirror. Measure it
+        // directly instead of deriving it from the pane's rounded clientHeight.
+        if (Math.abs(composerHeightDelta) >= 0.01) pane.scrollTo({ top: pane.scrollTop + composerHeightDelta, left: 0 })
+        else if (followingLatest) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
+        else if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + paneHeightDelta, left: 0 })
     })
     observer.observe(pane)
+    if (composer) observer.observe(composer)
     return () => {
         observer.disconnect()
     }
