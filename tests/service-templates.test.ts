@@ -28,3 +28,17 @@ test("New service opens templates and the first card reaches the preserved custo
     assert.match(servicesUi, /selectedId === "new" \? blankService\(\)/)
     assert.match(servicesUi, /"Create service"/)
 })
+
+test("Services uses the shared responsive list anatomy", () => {
+    assert.match(servicesUi, /<List ariaLabel="Services"/)
+    assert.match(servicesUi, /<ListItem key=\{service\.id\}>/)
+    assert.match(servicesUi, /<MobileListActionSurface/)
+    assert.match(servicesUi, /<ListPrimaryRow>/)
+    assert.match(servicesUi, /<ListTitle href=\{href\}/)
+    assert.match(servicesUi, /<ListSecondaryRow>/)
+    assert.match(servicesUi, /<ListTrailing>/)
+    assert.match(servicesUi, /<ListActionMenu/)
+    assert.doesNotMatch(servicesUi, />Service<\/span>/)
+    assert.match(servicesUi, /sm:flex-row sm:items-end sm:justify-between/)
+    assert.match(servicesUi, /w-full shrink-0[\s\S]*sm:w-auto/)
+})

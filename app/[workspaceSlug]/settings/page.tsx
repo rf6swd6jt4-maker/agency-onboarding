@@ -168,11 +168,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             </WorkspaceAutosaveForm>
                         </UnifiedSection>
 
-                        <UnifiedSection
-                            id="services"
-                            title="Services"
-                            description="Manage the services your agency offers and the default prices used when preparing client work."
-                        >
+                        <section id="services" className="min-w-0 max-w-full scroll-mt-5">
                             <ServiceCatalogue
                                 workspaceSlug={workspace.slug}
                                 services={onboardingSettings.services}
@@ -181,7 +177,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                 schemaReady={onboardingSettings.schemaReady}
                                 initialServiceId={query.service}
                             />
-                        </UnifiedSection>
+                        </section>
 
                         <UnifiedSection
                             id="onboarding"

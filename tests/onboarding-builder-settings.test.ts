@@ -299,8 +299,9 @@ test("private search includes dynamic services and modules without weakening the
     assert.doesNotMatch(searchRoute, /event\.source_href \?\? `\/\$\{workspace\.slug\}\/admin\/activity`/)
 })
 
-test("Settings and Builder authoring controls are not forced into canonical List", () => {
-    for (const source of [servicesUi, onboardingUi, brandingUi, builderUi]) assert.doesNotMatch(source, /components\/list\/List/)
+test("Services uses the canonical List while non-list authoring controls keep their own surfaces", () => {
+    assert.match(servicesUi, /components\/list\/List/)
+    for (const source of [onboardingUi, brandingUi, builderUi]) assert.doesNotMatch(source, /components\/list\/List/)
     assert.match(servicesUi, /SquarePill tone="yellow">Test/)
     assert.match(onboardingUi, /OnboardingBuilderLauncher/)
     assert.match(builderWindowControls, /Open Onboarding Builder/)

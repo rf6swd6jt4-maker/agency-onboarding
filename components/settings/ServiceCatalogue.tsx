@@ -5,9 +5,13 @@ import { createPortal } from "react-dom"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { saveOnboardingService, setOnboardingServiceState } from "@/app/[workspaceSlug]/settings/service-actions"
+import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
+import { ListActionMenu } from "@/components/list/ListActionMenu"
+import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { Assignee, SquarePill, Status, type StatusTone } from "@/components/ui"
 import type { OnboardingAssigneeOption, OnboardingModuleSummary, OnboardingServiceDefinition, OnboardingServiceState, OnboardingServiceType } from "@/lib/onboarding/configuration-types"
 import { SERVICE_TEMPLATES } from "@/lib/onboarding/service-templates"
+import { shortId } from "@/lib/ui/relative-time"
 
 const inputClass = "mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white outline-none focus:border-neutral-500"
 const textareaClass = "mt-1.5 w-full resize-none rounded-lg border border-neutral-700 bg-black px-3 py-2 text-sm leading-5 text-white outline-none focus:border-neutral-500"
@@ -323,26 +327,50 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
     const portalTarget = typeof window !== "undefined" ? (window.parent !== window ? window.parent.document.body : document.body) : null
 
     return <>
-        <section className="min-w-0 overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-            <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-4 py-4 sm:px-5"><div><h3 className="font-semibold">Services</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Reusable service and pricing defaults for the POS and Stripe Checkout.</p></div><button type="button" onClick={() => setTemplatesOpen(true)} className="shrink-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-black">New service</button></div>
-            {!schemaReady ? <p className="border-b border-yellow-500/20 bg-yellow-500/[0.06] px-4 py-3 text-xs text-yellow-200 sm:px-5">Showing compatible hard-coded definitions while the editable catalogue schema is applied.</p> : null}
-            <div className="divide-y divide-neutral-800">
-                {services.map((service) => {
-                    const status = serviceStatus(service.state)
-                    const assignee = service.defaultAssigneeId ? assigneeById.get(service.defaultAssigneeId) : null
-                    return <button key={service.id} type="button" onClick={() => setSelectedId(service.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-neutral-900 sm:px-5">
-                        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900 text-[9px] uppercase tracking-wide text-neutral-600">{service.thumbnailUrl ? <Image src={service.thumbnailUrl} alt="" width={44} height={44} unoptimized className="h-full w-full object-cover" /> : "Service"}</span>
-                        <span className="min-w-0 flex-1">
-                            <span className="flex min-w-0 items-center gap-2"><span className="truncate font-medium text-white">{service.name}</span>{service.serviceType === "retainer" ? <SquarePill tone="sky">Retainer</SquarePill> : null}{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span>
-                            <span className="mt-1 block truncate text-xs text-neutral-600">{service.description || (service.serviceType === "retainer" ? service.recurringName : "No description")}</span>
-                            <span className="mt-1.5 flex min-w-0 items-center gap-2 text-xs text-neutral-500"><span className="shrink-0 tabular-nums">{priceLabel(service.defaultUpfrontPriceCents, service.currency)}{service.serviceType === "retainer" ? " upfront" : " one-time"}</span>{service.serviceType === "retainer" ? <span className="shrink-0 tabular-nums">· {priceLabel(service.defaultRecurringPriceCents, service.currency)} {intervalLabel(service)}</span> : null}{assignee ? <Assignee userId={assignee.id} name={assignee.name} avatarSrc={assignee.avatarSrc} compact compactSize="md" className="ml-auto" /> : <span className="ml-auto shrink-0">Unassigned</span>}</span>
-                        </span>
-                        <Status label={status.label} tone={status.tone} className="shrink-0" />
-                    </button>
-                })}
-                {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first service to make it available in the POS.</p></div> : null}
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+                <h2 className="text-xl font-semibold tracking-tight text-white">Services</h2>
+                <p className="mt-1 text-sm leading-6 text-neutral-400">Manage the services your agency offers and the default prices used when preparing client work.</p>
             </div>
-        </section>
+            <button type="button" onClick={() => setTemplatesOpen(true)} className="inline-flex h-10 w-full shrink-0 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black transition hover:bg-neutral-200 sm:w-auto">New service</button>
+        </div>
+
+        {!schemaReady ? <p className="mt-5 rounded-lg border border-yellow-500/20 bg-yellow-500/[0.06] px-4 py-3 text-xs text-yellow-200">Showing compatible hard-coded definitions while the editable catalogue schema is applied.</p> : null}
+
+        <List ariaLabel="Services" className={!schemaReady ? "mt-3" : ""}>
+            {services.map((service) => {
+                const status = serviceStatus(service.state)
+                const assignee = service.defaultAssigneeId ? assigneeById.get(service.defaultAssigneeId) : null
+                const href = `?service=${encodeURIComponent(service.id)}#services`
+                const actions = [{ label: "Edit service", href }]
+                const description = service.description || (service.serviceType === "retainer" ? service.recurringName : "No description")
+                return <ListItem key={service.id}>
+                    <MobileListActionSurface actions={actions} label={`Open actions for ${service.name}`}>
+                        <ListPrimaryRow>
+                            <ListTitle href={href} className="flex-1">{service.name}</ListTitle>
+                            {service.serviceType === "retainer" ? <SquarePill tone="sky">Retainer</SquarePill> : null}
+                            {service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}
+                            <Status label={status.label} tone={status.tone} className="ml-auto shrink-0" />
+                        </ListPrimaryRow>
+                        <ListSecondaryRow>
+                            <span className="min-w-0 flex-1 truncate tabular-nums text-neutral-300">
+                                {priceLabel(service.defaultUpfrontPriceCents, service.currency)}{service.serviceType === "retainer" ? " upfront" : " one-time"}
+                            </span>
+                            {service.serviceType === "retainer" ? <span className="hidden shrink-0 tabular-nums text-neutral-500 sm:inline">{priceLabel(service.defaultRecurringPriceCents, service.currency)} {intervalLabel(service)}</span> : null}
+                            <span className="hidden min-w-0 flex-1 truncate text-neutral-500 xl:inline">{description}</span>
+                            {assignee
+                                ? <span className="hidden shrink-0 md:inline-flex"><Assignee userId={assignee.id} name={assignee.name} avatarSrc={assignee.avatarSrc} /></span>
+                                : <span className="hidden shrink-0 text-neutral-500 md:inline">Unassigned</span>}
+                            <ListTrailing>
+                                <span className="font-mono text-neutral-500">{shortId(service.id)}</span>
+                                <ListActionMenu actions={actions} label={`Open actions for ${service.name}`} className="hidden sm:block" />
+                            </ListTrailing>
+                        </ListSecondaryRow>
+                    </MobileListActionSurface>
+                </ListItem>
+            })}
+            {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first service to make it available in the POS.</p></div> : null}
+        </List>
         {templatesOpen && portalTarget ? createPortal(<ServiceTemplatesModal onClose={() => setTemplatesOpen(false)} onCreateCustom={() => { setTemplatesOpen(false); setSelectedId("new") }} />, portalTarget) : null}
         {selected && portalTarget ? createPortal(<ServiceEditor key={selected.id || "new"} workspaceSlug={workspaceSlug} service={selected} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} />, portalTarget) : null}
     </>
