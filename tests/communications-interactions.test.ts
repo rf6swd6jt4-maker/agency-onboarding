@@ -313,8 +313,11 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.doesNotMatch(team, /window\.addEventListener\("resize", resizeComposer\)/)
     assert.match(clients, /keepComposerCurrentLineCentered\(composerRef\.current\)/)
     assert.match(team, /keepComposerCurrentLineCentered\(composerRef\.current\)/)
+    assert.match(composer, /transition-\[height\] duration-\[160ms\] ease-\[cubic-bezier\(0\.32,0\.72,0,1\)\] motion-reduce:transition-none/)
     assert.match(composerScroll, /maximumLines = window\.matchMedia\("\(min-width: 1024px\)"\)\.matches \? 7 : 4/)
-    assert.match(composerScroll, /textarea\.style\.height = `\$\{Math\.min\(maximumHeight/)
+    assert.match(composerScroll, /const currentHeight = textarea\.getBoundingClientRect\(\)\.height \|\| minimumHeight/)
+    assert.match(composerScroll, /const nextHeight = Math\.min\(maximumHeight/)
+    assert.match(composerScroll, /textarea\.style\.transition = "none"[\s\S]*textarea\.style\.height = `\$\{currentHeight\}px`[\s\S]*textarea\.style\.transition = inlineTransition[\s\S]*textarea\.style\.height = `\$\{nextHeight\}px`/)
     assert.match(composerScroll, /textarea\.scrollTop = Math\.max\(0, textarea\.scrollHeight - textarea\.clientHeight\)/)
     for (const source of [clients, team]) {
         assert.doesNotMatch(source, /messageContentRef|composerFooterRef|useComposerKeyboardSlide/)
