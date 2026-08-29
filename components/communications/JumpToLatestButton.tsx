@@ -35,7 +35,6 @@ export function observeMessagePaneResize(
         else if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + paneHeightDelta, left: 0 })
     })
     observer.observe(pane)
-    if (composer) observer.observe(composer)
     return () => {
         observer.disconnect()
     }

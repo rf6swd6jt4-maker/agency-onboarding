@@ -62,16 +62,26 @@ export function useClientPortalComposerViewport(composerRef: RefObject<HTMLTextA
             }
 
             const keyboardShift = restingViewportBottom - viewportBottom
-            if (keyboardShift <= 1) return
+            if (keyboardShift <= 1) {
+                keyboardViewportBottom = null
+                syntheticTargetCommitted = false
+                viewportMode = "pending"
+                setMotion(false)
+                writeViewportBottom(restingViewportBottom)
+                return
+            }
             if (viewportMode === "pending") {
                 viewportMode = mobile.matches && keyboardShift >= PORTAL_KEYBOARD_MINIMUM_SHIFT_PX ? "synthetic" : "continuous"
                 setMotion(viewportMode === "synthetic")
             }
+            // Browser chrome and caret tracking can briefly report a taller visual
+            // viewport after the keyboard settles. Keep the smallest open-keyboard
+            // edge so that noise cannot push the chat back down while typing.
+            keyboardViewportBottom = Math.min(keyboardViewportBottom ?? viewportBottom, viewportBottom)
             if (viewportMode === "synthetic") {
-                keyboardViewportBottom = Math.min(keyboardViewportBottom ?? viewportBottom, viewportBottom)
                 scheduleSyntheticViewport()
             } else {
-                writeViewportBottom(viewportBottom)
+                writeViewportBottom(keyboardViewportBottom)
             }
         }
         const handleComposerFocus = () => {

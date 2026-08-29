@@ -611,7 +611,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                 if (draft.trim()) void sendMessage()
                             }
                         }}
-                        className="h-11 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent px-2.5 py-2.5 text-base leading-6 outline-none transition-[height] duration-[160ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none placeholder:text-[var(--onboarding-muted,#475569)]/70 lg:text-sm lg:leading-5"
+                        className="h-11 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent px-2.5 py-2.5 text-base leading-6 outline-none transition-[height] duration-[180ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transition-none placeholder:text-[var(--onboarding-muted,#475569)]/70 lg:text-sm lg:leading-5"
                     />
                     <button type="submit" disabled={!draft.trim()} aria-label="Send message" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--onboarding-primary,#1E3A5F)] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-35"><SendIcon /></button>
                 </form>
