@@ -66,7 +66,7 @@ function PortalSidePanel({ panel, token, workspaceName, onBack }: { panel: Porta
 
     return <>
         <button type="button" aria-label="Close panel" onClick={onBack} className="fixed inset-0 z-40 hidden bg-black/25 backdrop-blur-[1px] md:block" />
-        <aside ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="client-portal-panel-title" className="fixed inset-0 z-50 flex min-h-0 flex-col bg-[var(--onboarding-surface,#FFFFFF)] text-[var(--onboarding-text,#0F172A)] shadow-2xl md:inset-y-0 md:left-auto md:w-[30rem] md:border-l md:border-black/10">
+        <aside ref={panelRef} data-client-portal-panel role="dialog" aria-modal="true" aria-labelledby="client-portal-panel-title" className="fixed inset-x-0 top-0 z-50 flex h-[var(--client-portal-viewport-bottom,100dvh)] min-h-0 flex-col bg-[var(--onboarding-surface,#FFFFFF)] text-[var(--onboarding-text,#0F172A)] shadow-2xl [backface-visibility:hidden] md:left-auto md:w-[30rem] md:border-l md:border-black/10">
             <header className="flex h-16 shrink-0 items-center gap-3 border-b border-black/10 px-4 sm:px-5">
                 <button ref={backRef} type="button" onClick={onBack} className="inline-flex h-11 items-center gap-1 rounded-lg px-2 text-sm font-semibold text-[var(--onboarding-primary,#1E3A5F)] transition hover:bg-black/5" aria-label={`Back from ${chat ? "chat" : "resources"}`}><BackIcon /><span>Back</span></button>
                 <div className="min-w-0 border-l border-black/10 pl-4">
