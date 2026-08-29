@@ -15,7 +15,6 @@ import { ResizableConversationColumns } from "@/components/communications/Resiza
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
-import { useComposerKeyboardSlide } from "@/components/communications/composer-keyboard-slide"
 import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabActive"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -229,12 +228,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set())
     const [typingByConversation, setTypingByConversation] = useState<NativeTypingByConversation>({})
     const messagePaneRef = useRef<HTMLDivElement | null>(null)
-    const messageContentRef = useRef<HTMLDivElement | null>(null)
     const followLatestRef = useRef(true)
     const messageAnimationTimersRef = useRef<number[]>([])
     const knownMessageKeysRef = useRef(new Set(bootstrap.conversations.flatMap((conversation) => conversation.messages.map(messageAnimationKey))))
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
-    const composerFooterRef = useRef<HTMLElement | null>(null)
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
     const stickerInputRef = useRef<HTMLInputElement | null>(null)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; minDeltaX: number; verticalAtMax: number; verticalAtMin: number } | null>(null)
@@ -249,7 +246,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
-    useComposerKeyboardSlide(composerFooterRef, messagePaneRef, messageContentRef)
     const focusedMessageId = editingMessage?.id ?? replyingTo?.id ?? null
     const peopleById = useMemo(() => new Map([...bootstrap.people, ...bootstrap.formerPeople].map((person) => [person.id, person])), [bootstrap.formerPeople, bootstrap.people])
 
@@ -258,7 +254,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     useEffect(() => { const update = () => setDocumentVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", update); return () => document.removeEventListener("visibilitychange", update) }, [])
     useEffect(() => { const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0); return () => window.clearTimeout(timer) }, [bootstrap.workspaceId])
     useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
-    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current), [selectedId])
+    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true), [selectedId])
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
     useEffect(() => {
         const interval = window.setInterval(() => {
@@ -705,7 +701,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
-                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onClick={() => composerRef.current?.blur()} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; const following = !messagePaneIsAwayFromBottom(event.currentTarget, 24); followLatestRef.current = following; setAtLatest(following); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div ref={messageContentRef} className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onClick={() => composerRef.current?.blur()} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; const following = !messagePaneIsAwayFromBottom(event.currentTarget, 24); followLatestRef.current = following; setAtLatest(following); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null
@@ -767,7 +763,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         </Fragment>
                     }) : selectedTypingPeople.length ? null : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}
                     {selectedTypingPeople.length ? <NativeTypingDots label={selectedTypingLabel} /> : null}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}</div>
-                    <footer ref={composerFooterRef} className="relative z-10 shrink-0 touch-manipulation border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
+                    <footer className="relative z-10 shrink-0 touch-manipulation border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
                         {editingMessage ? <ComposerMessagePreview label="Editing message" preview={editingMessage.body} /> : null}
                         {replyingTo ? <ComposerMessagePreview label={selected.kind === "team" ? `Replying to ${replyingTo.senderUserId === bootstrap.currentUser.id ? "yourself" : peopleById.get(replyingTo.senderUserId)?.name ?? "team member"}` : "Replying to message"} preview={messagePreview(replyingTo)} onCancel={() => { setReplyingTo(null); composerRef.current?.focus({ preventScroll: true }) }} /> : null}
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}

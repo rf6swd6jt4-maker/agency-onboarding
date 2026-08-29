@@ -10,22 +10,19 @@ export function messagePaneCanShowNewMessage(pane: HTMLDivElement | null, follow
     return bounds.bottom > 0 && bounds.top < window.innerHeight
 }
 
-export function observeMessagePaneResize(pane: HTMLDivElement | null, isFollowingLatest: () => boolean) {
+export function observeMessagePaneResize(pane: HTMLDivElement | null, isFollowingLatest: () => boolean, preserveVisibleBottom = false) {
     if (!pane || typeof ResizeObserver === "undefined") return () => undefined
     let previousHeight = pane.clientHeight
-    let frame = 0
     const observer = new ResizeObserver(() => {
         const nextHeight = pane.clientHeight
         if (nextHeight === previousHeight) return
+        const heightDelta = previousHeight - nextHeight
         previousHeight = nextHeight
-        window.cancelAnimationFrame(frame)
-        frame = window.requestAnimationFrame(() => {
-            if (isFollowingLatest()) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
-        })
+        if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + heightDelta, left: 0 })
+        else if (isFollowingLatest()) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
     })
     observer.observe(pane)
     return () => {
-        window.cancelAnimationFrame(frame)
         observer.disconnect()
     }
 }
@@ -35,7 +32,6 @@ const BUTTON_CLASS = "absolute bottom-3 z-20 box-border shrink-0 aspect-square p
 function JumpButton({ className, onClick }: { className: string; onClick: () => void }) {
     return <button
         data-icon-button
-        data-jump-to-latest
         type="button"
         aria-label="Jump to latest message"
         title="Jump to latest message"
