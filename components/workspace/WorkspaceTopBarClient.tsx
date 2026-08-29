@@ -1120,7 +1120,10 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const root = document.documentElement
         const holdWorkspaceViewport = () => {
             const visualViewport = window.visualViewport
-            root.style.setProperty("--workspace-visual-viewport-height", `${Math.round(visualViewport?.height ?? window.innerHeight)}px`)
+            // iOS can pan the visual viewport before the keyboard resizes it. Track its
+            // lower edge so that preliminary pan is not mistaken for keyboard height.
+            const viewportBottom = (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight)
+            root.style.setProperty("--workspace-visual-viewport-bottom", `${Math.round(viewportBottom)}px`)
         }
         const previousStates = hiddenSiblings.map((element) => ({ element, hidden: element.hidden, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
@@ -1128,6 +1131,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         root.dataset.workspaceViewportLocked = "true"
         window.addEventListener("resize", holdWorkspaceViewport)
         window.visualViewport?.addEventListener("resize", holdWorkspaceViewport)
+        window.visualViewport?.addEventListener("scroll", holdWorkspaceViewport)
         holdWorkspaceViewport()
         window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
         hiddenSiblings.forEach((element) => {
@@ -1139,10 +1143,11 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         return () => {
             window.removeEventListener("resize", holdWorkspaceViewport)
             window.visualViewport?.removeEventListener("resize", holdWorkspaceViewport)
+            window.visualViewport?.removeEventListener("scroll", holdWorkspaceViewport)
             document.body.style.overflow = previousOverflow
             delete document.body.dataset.workspaceTabsHosted
             delete root.dataset.workspaceViewportLocked
-            root.style.removeProperty("--workspace-visual-viewport-height")
+            root.style.removeProperty("--workspace-visual-viewport-bottom")
             window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
             previousStates.forEach(({ element, hidden, inert, ariaHidden }) => {
                 element.hidden = hidden

@@ -44,6 +44,11 @@ export function MessageComposer({
                     rows={1}
                     value={draft}
                     enterKeyHint="send"
+                    onPointerDown={(event) => {
+                        // Prevent iOS from panning the iframe before its keyboard animation,
+                        // while leaving the native pointer/click activation intact.
+                        if (document.activeElement !== event.currentTarget) event.currentTarget.focus({ preventScroll: true })
+                    }}
                     onClick={(event) => {
                         if (document.activeElement !== event.currentTarget) event.currentTarget.focus({ preventScroll: true })
                     }}

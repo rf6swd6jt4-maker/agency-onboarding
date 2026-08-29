@@ -52,7 +52,7 @@ html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
 html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   top: 6.25rem;
   bottom: auto;
-  height: max(0px, calc(var(--workspace-visual-viewport-height, 100dvh) - 6.25rem));
+  height: max(0px, calc(var(--workspace-visual-viewport-bottom, 100dvh) - 6.25rem));
 }
 
 @media (min-width: 768px) {

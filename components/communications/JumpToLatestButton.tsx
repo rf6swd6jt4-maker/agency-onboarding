@@ -16,10 +16,11 @@ export function observeMessagePaneResize(pane: HTMLDivElement | null, isFollowin
     const observer = new ResizeObserver(() => {
         const nextHeight = pane.clientHeight
         if (nextHeight === previousHeight) return
+        const followingLatest = isFollowingLatest()
         const heightDelta = previousHeight - nextHeight
         previousHeight = nextHeight
-        if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + heightDelta, left: 0 })
-        else if (isFollowingLatest()) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
+        if (followingLatest) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
+        else if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + heightDelta, left: 0 })
     })
     observer.observe(pane)
     return () => {
