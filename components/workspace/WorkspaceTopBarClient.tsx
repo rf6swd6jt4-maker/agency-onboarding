@@ -53,7 +53,10 @@ import {
 } from "@/lib/workspace-tabs"
 
 const sidebarStorageKey = "betelgeze:workspace-sidebar-open"
-const WORKSPACE_KEYBOARD_MOTION_MS = 280
+const WORKSPACE_KEYBOARD_MOTION_MS = 300
+// Mobile Safari continues resizing its browser chrome after the keyboard itself
+// has finished. Keep the known resting edge until that secondary resize settles.
+const WORKSPACE_KEYBOARD_SETTLE_MS = WORKSPACE_KEYBOARD_MOTION_MS + 340
 const WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX = 64
 type WorkspacePresenceChannel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>
 
@@ -1128,25 +1131,35 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         let restingViewportBottom = readViewportBottom()
         let keyboardViewportBottom: number | null = null
         let composerFocused = false
-        let viewportMode: "idle" | "pending" | "continuous" | "synthetic" | "closing" = "idle"
+        let viewportMode: "idle" | "pending" | "continuous" | "synthetic" | "closing" | "suspended" = "idle"
+        let syntheticTargetCommitted = false
         let animationFrame = 0
         let closeTimer = 0
         const writeViewportBottom = (viewportBottom: number) => {
             root.style.setProperty("--workspace-visual-viewport-bottom", `${viewportBottom}px`)
         }
+        const keepWorkspaceDocumentAtOrigin = () => {
+            if (root.scrollTop !== 0) root.scrollTop = 0
+            if (document.body.scrollTop !== 0) document.body.scrollTop = 0
+        }
         const scheduleSyntheticViewport = () => {
-            if (animationFrame) return
+            if (animationFrame || syntheticTargetCommitted) return
             animationFrame = window.requestAnimationFrame(() => {
                 animationFrame = 0
-                if (keyboardViewportBottom !== null) writeViewportBottom(keyboardViewportBottom)
+                if (viewportMode !== "synthetic" || keyboardViewportBottom === null || syntheticTargetCommitted) return
+                syntheticTargetCommitted = true
+                writeViewportBottom(keyboardViewportBottom)
             })
         }
         const holdWorkspaceViewport = () => {
+            if (document.visibilityState === "hidden") return
+            keepWorkspaceDocumentAtOrigin()
             const viewportBottom = readViewportBottom()
-            if (viewportMode === "closing") return
+            if (viewportMode === "closing" || viewportMode === "suspended") return
             if (!composerFocused) {
                 restingViewportBottom = viewportBottom
                 keyboardViewportBottom = null
+                syntheticTargetCommitted = false
                 viewportMode = "idle"
                 delete root.dataset.workspaceKeyboardMotion
                 writeViewportBottom(viewportBottom)
@@ -1171,18 +1184,25 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const handleComposerFocus = (event: Event) => {
             const focused = (event as CustomEvent<WorkspaceComposerFocusEventDetail>).detail?.focused
             if (typeof focused !== "boolean") return
+            if (document.visibilityState === "hidden") {
+                if (!focused) composerFocused = false
+                return
+            }
             if (focused) {
                 if (closeTimer) window.clearTimeout(closeTimer)
                 closeTimer = 0
+                keepWorkspaceDocumentAtOrigin()
                 composerFocused = true
                 if (viewportMode === "closing" && keyboardViewportBottom !== null) {
                     viewportMode = "synthetic"
+                    syntheticTargetCommitted = true
                     root.dataset.workspaceKeyboardMotion = "true"
                     writeViewportBottom(keyboardViewportBottom)
                     return
                 }
                 restingViewportBottom = readViewportBottom()
                 keyboardViewportBottom = null
+                syntheticTargetCommitted = false
                 viewportMode = "pending"
                 delete root.dataset.workspaceKeyboardMotion
                 writeViewportBottom(restingViewportBottom)
@@ -1207,9 +1227,39 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 closeTimer = 0
                 viewportMode = "idle"
                 keyboardViewportBottom = null
+                syntheticTargetCommitted = false
                 delete root.dataset.workspaceKeyboardMotion
                 holdWorkspaceViewport()
-            }, WORKSPACE_KEYBOARD_MOTION_MS + 40)
+            }, WORKSPACE_KEYBOARD_SETTLE_MS)
+        }
+        const suspendWorkspaceViewport = () => {
+            const activeElement = document.activeElement
+            if (activeElement instanceof HTMLElement) activeElement.blur()
+            composerFocused = false
+            if (animationFrame) window.cancelAnimationFrame(animationFrame)
+            animationFrame = 0
+            if (closeTimer) window.clearTimeout(closeTimer)
+            closeTimer = 0
+            viewportMode = "suspended"
+            keyboardViewportBottom = null
+            syntheticTargetCommitted = false
+            delete root.dataset.workspaceKeyboardMotion
+            keepWorkspaceDocumentAtOrigin()
+            writeViewportBottom(restingViewportBottom)
+        }
+        const resumeWorkspaceViewport = () => {
+            if (document.visibilityState !== "visible" || viewportMode !== "suspended") return
+            keepWorkspaceDocumentAtOrigin()
+            writeViewportBottom(restingViewportBottom)
+            closeTimer = window.setTimeout(() => {
+                closeTimer = 0
+                viewportMode = "idle"
+                holdWorkspaceViewport()
+            }, WORKSPACE_KEYBOARD_SETTLE_MS)
+        }
+        const handleWorkspaceVisibility = () => {
+            if (document.visibilityState === "hidden") suspendWorkspaceViewport()
+            else resumeWorkspaceViewport()
         }
         const previousStates = hiddenSiblings.map((element) => ({ element, hidden: element.hidden, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
@@ -1219,6 +1269,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         window.visualViewport?.addEventListener("resize", holdWorkspaceViewport)
         window.visualViewport?.addEventListener("scroll", holdWorkspaceViewport)
         window.addEventListener(WORKSPACE_COMPOSER_FOCUS_EVENT, handleComposerFocus)
+        document.addEventListener("visibilitychange", handleWorkspaceVisibility)
+        window.addEventListener("pagehide", suspendWorkspaceViewport)
+        window.addEventListener("pageshow", resumeWorkspaceViewport)
         holdWorkspaceViewport()
         window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
         hiddenSiblings.forEach((element) => {
@@ -1232,6 +1285,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             window.visualViewport?.removeEventListener("resize", holdWorkspaceViewport)
             window.visualViewport?.removeEventListener("scroll", holdWorkspaceViewport)
             window.removeEventListener(WORKSPACE_COMPOSER_FOCUS_EVENT, handleComposerFocus)
+            document.removeEventListener("visibilitychange", handleWorkspaceVisibility)
+            window.removeEventListener("pagehide", suspendWorkspaceViewport)
+            window.removeEventListener("pageshow", resumeWorkspaceViewport)
             if (animationFrame) window.cancelAnimationFrame(animationFrame)
             if (closeTimer) window.clearTimeout(closeTimer)
             document.body.style.overflow = previousOverflow

@@ -49,14 +49,27 @@ html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   background: #000;
 }
 
+html[data-workspace-viewport-locked="true"] [data-workspace-topbar],
+html[data-workspace-viewport-locked="true"] [data-workspace-tabbar],
+html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+html[data-workspace-viewport-locked="true"] [data-workspace-topbar],
+html[data-workspace-viewport-locked="true"] [data-workspace-tabbar] {
+  will-change: transform;
+}
+
 html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   top: 6.25rem;
   bottom: auto;
   height: max(0px, calc(var(--workspace-visual-viewport-bottom, 100dvh) - 6.25rem));
+  will-change: height, transform;
 }
 
 html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true"] [data-workspace-tab-panels] {
-  transition: height 280ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: height 300ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {

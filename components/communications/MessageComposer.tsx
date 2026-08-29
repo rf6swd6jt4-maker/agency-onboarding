@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode, RefObject } from "react"
+import { useEffect, type ReactNode, type RefObject } from "react"
 import { reportWorkspaceComposerFocus } from "@/lib/workspace-composer-viewport"
 
 export function MessageComposer({
@@ -28,6 +28,20 @@ export function MessageComposer({
     onBlur?: () => void
     onSend: () => void
 }) {
+    useEffect(() => {
+        const blurComposer = () => textareaRef.current?.blur()
+        const blurComposerWhenHidden = () => {
+            if (document.visibilityState === "hidden") blurComposer()
+        }
+
+        document.addEventListener("visibilitychange", blurComposerWhenHidden)
+        window.addEventListener("pagehide", blurComposer)
+        return () => {
+            document.removeEventListener("visibilitychange", blurComposerWhenHidden)
+            window.removeEventListener("pagehide", blurComposer)
+        }
+    }, [textareaRef])
+
     return <>
         <form
             data-workspace-mutation-scope="local"

@@ -703,7 +703,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
-                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} {...messagePaneInteractions} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null

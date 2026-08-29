@@ -939,7 +939,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
 
                     <div className="relative min-h-0 flex-1">
-                    <div ref={messagePaneRef} {...messagePaneInteractions} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
+                    <div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
                         <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
