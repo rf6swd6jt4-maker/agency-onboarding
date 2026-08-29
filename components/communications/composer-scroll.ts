@@ -8,14 +8,30 @@ export function keepComposerCurrentLineCentered(textarea: HTMLTextAreaElement | 
     const maximumHeight = Math.ceil(lineHeight * maximumLines + verticalPadding)
 
     const currentHeight = textarea.getBoundingClientRect().height || minimumHeight
+    // Measure outside layout so a routine keystroke cannot briefly collapse the
+    // live composer and let the browser clamp the message pane's scroll position.
+    const measurement = textarea.cloneNode(false) as HTMLTextAreaElement
+    measurement.value = textarea.value
+    measurement.setAttribute("aria-hidden", "true")
+    measurement.tabIndex = -1
+    measurement.style.position = "fixed"
+    measurement.style.inset = "0 auto auto -10000px"
+    measurement.style.width = `${textarea.getBoundingClientRect().width}px`
+    measurement.style.height = "0"
+    measurement.style.minHeight = "0"
+    measurement.style.maxHeight = "none"
+    measurement.style.overflow = "hidden"
+    measurement.style.visibility = "hidden"
+    measurement.style.pointerEvents = "none"
+    measurement.style.transition = "none"
+    const measurementHost = textarea.parentElement ?? document.body
+    measurementHost.appendChild(measurement)
+    const contentHeight = measurement.scrollHeight
+    measurement.remove()
+
+    const nextHeight = Math.min(maximumHeight, Math.max(minimumHeight, contentHeight))
     const inlineTransition = textarea.style.transition
     textarea.style.transition = "none"
-    textarea.style.height = `${minimumHeight}px`
-    const contentHeight = textarea.scrollHeight
-    const nextHeight = Math.min(maximumHeight, Math.max(minimumHeight, contentHeight))
-    // Measure at the minimum height, restore the currently rendered frame, then
-    // let CSS interpolate to the new line count. ResizeObserver keeps the message
-    // pane anchored to the same visible content throughout that interpolation.
     textarea.style.height = `${currentHeight}px`
     void textarea.offsetHeight
     textarea.style.transition = inlineTransition

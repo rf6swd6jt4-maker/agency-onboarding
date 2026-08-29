@@ -316,7 +316,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         keepComposerCurrentLineCentered(composerRef.current)
     }, [draft])
 
-    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true, composerRef.current), [selectedId])
+    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true), [selectedId])
 
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
 
