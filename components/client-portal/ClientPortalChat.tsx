@@ -6,6 +6,9 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { MessageReactionActions, PrimaryMessageActions, copyMessageText, downloadMessageAttachment, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DeleteIcon, ReplyIcon } from "@/components/communications/MessageInteractionIcons"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
+import { observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
+import { useComposerKeyboardSlide } from "@/components/communications/composer-keyboard-slide"
+import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
 
 type PortalAttachment = {
     kind: "image" | "video" | "audio" | "document" | "sticker"
@@ -223,12 +226,14 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
     const [previewMedia, setPreviewMedia] = useState<MessageMediaPreview | null>(null)
     const scrollRef = useRef<HTMLDivElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const composerFooterRef = useRef<HTMLElement>(null)
     const refreshingRef = useRef(false)
     const followingLatestRef = useRef(true)
     const scrollToLatestRef = useRef(true)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; minDeltaX: number; verticalAtMax: number; verticalAtMin: number } | null>(null)
     const swipedMessageRef = useRef<string | null>(null)
     const dismissedActionMessageRef = useRef<string | null>(null)
+    useComposerKeyboardSlide(composerFooterRef)
 
     const refreshLatest = useCallback(async (initial = false) => {
         if (refreshingRef.current) return
@@ -278,11 +283,10 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
     }, [messages])
 
     useEffect(() => {
-        const textarea = textareaRef.current
-        if (!textarea) return
-        textarea.style.height = "0px"
-        textarea.style.height = `${Math.min(120, Math.max(44, textarea.scrollHeight))}px`
+        keepComposerCurrentLineCentered(textareaRef.current)
     }, [draft])
+
+    useEffect(() => observeMessagePaneResize(scrollRef.current, () => followingLatestRef.current), [])
 
     useEffect(() => {
         if (!actionMessageId) return
@@ -367,7 +371,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
         if (message.id.startsWith("local:")) return
         setReplyingTo(message)
         setActionMessageId(null)
-        window.requestAnimationFrame(() => textareaRef.current?.focus())
+        window.requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }))
     }
 
     function rememberRecentReaction(emoji: string) {
@@ -456,7 +460,8 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                 const pane = event.currentTarget
                 followingLatestRef.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 96
             }}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-5"
+            onClick={() => textareaRef.current?.blur()}
+            className="min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain px-4 py-5 sm:px-5"
             aria-live="polite"
             aria-busy={initialState === "loading"}
         >
@@ -576,7 +581,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
             </div>
         </div>
 
-        <footer className="shrink-0 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4">
+        <footer ref={composerFooterRef} className="relative z-10 shrink-0 touch-none border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
             <div className="mx-auto max-w-2xl">
                 {replyingTo ? <div className="mb-2 flex items-center gap-3 border-l-2 border-[var(--onboarding-primary,#1E3A5F)] px-3 py-1 text-xs">
                     <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-[var(--onboarding-text,#0F172A)]">Replying to {replyingTo.direction === "inbound" ? "yourself" : workspaceName}</span><span className="block truncate text-[var(--onboarding-muted,#475569)]">{messagePreview(replyingTo)}</span></span>
@@ -584,7 +589,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                 </div> : null}
                 {interactionError ? <div role="alert" className="mb-2 flex items-center justify-between gap-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700"><span>{interactionError}</span><button type="button" onClick={() => setInteractionError(null)} aria-label="Dismiss interaction error">×</button></div> : null}
                 {sendError ? <p role="alert" className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{sendError}</p> : null}
-                <form onSubmit={(event) => { event.preventDefault(); void sendMessage() }} className="flex items-end gap-2 rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-1.5 focus-within:border-[var(--onboarding-primary,#1E3A5F)]/50">
+                <form onSubmit={(event) => { event.preventDefault(); void sendMessage() }} className="flex touch-none items-center gap-2 rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-1.5 focus-within:border-[var(--onboarding-primary,#1E3A5F)]/50">
                     <textarea
                         ref={textareaRef}
                         rows={1}
@@ -593,6 +598,13 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                         enterKeyHint="send"
                         placeholder={`Message ${workspaceName}`}
                         aria-label={`Message ${workspaceName}`}
+                        onPointerDown={(event) => {
+                            if (event.pointerType !== "touch" || document.activeElement === event.currentTarget) return
+                            event.preventDefault()
+                            event.currentTarget.focus({ preventScroll: true })
+                            const draftEnd = event.currentTarget.value.length
+                            event.currentTarget.setSelectionRange(draftEnd, draftEnd)
+                        }}
                         onChange={(event) => setDraft(event.target.value)}
                         onKeyDown={(event) => {
                             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -600,11 +612,11 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                 if (draft.trim()) void sendMessage()
                             }
                         }}
-                        className="min-h-11 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-base leading-6 outline-none placeholder:text-[var(--onboarding-muted,#475569)]/70 sm:text-sm"
+                        className="h-11 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent px-2.5 py-2.5 text-base leading-6 outline-none placeholder:text-[var(--onboarding-muted,#475569)]/70 lg:text-sm lg:leading-5"
                     />
                     <button type="submit" disabled={!draft.trim()} aria-label="Send message" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--onboarding-primary,#1E3A5F)] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-35"><SendIcon /></button>
                 </form>
-                <p className="mt-1.5 hidden text-center text-[10px] text-[var(--onboarding-muted,#475569)] sm:block">Enter to send · Shift+Enter for a new line</p>
+                <p className="mt-1.5 hidden text-center text-[10px] text-[var(--onboarding-muted,#475569)] lg:block">Enter to send · Shift+Enter for a new line</p>
             </div>
         </footer>
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
