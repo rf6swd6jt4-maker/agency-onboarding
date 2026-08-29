@@ -7,7 +7,7 @@ import { CommunicationsConnectionStatus } from "@/components/communications/Comm
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
 import { copyMessageText, downloadMessageAttachment, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { CancelIcon, CheckIcon, DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon, SingleDeliveryCheckIcon } from "@/components/communications/MessageInteractionIcons"
-import { JumpToLatestButton, messagePaneCanShowNewMessage, messagePaneIsAwayFromBottom, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
+import { JumpToLatestButton, messagePaneCanShowNewMessage, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
 import { MessageComposer } from "@/components/communications/MessageComposer"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
@@ -15,6 +15,7 @@ import { ResizableConversationColumns } from "@/components/communications/Resiza
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
+import { useMessagePaneInteractions } from "@/components/communications/useMessagePaneInteractions"
 import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabActive"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -246,6 +247,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
+    const messagePaneInteractions = useMessagePaneInteractions(composerRef, followLatestRef, setAtLatest, setShowJumpToLatest)
     const focusedMessageId = editingMessage?.id ?? replyingTo?.id ?? null
     const peopleById = useMemo(() => new Map([...bootstrap.people, ...bootstrap.formerPeople].map((person) => [person.id, person])), [bootstrap.formerPeople, bootstrap.people])
 
@@ -701,7 +703,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
-                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} onClick={() => composerRef.current?.blur()} onScroll={(event) => { if (event.currentTarget.scrollLeft !== 0) event.currentTarget.scrollLeft = 0; const following = !messagePaneIsAwayFromBottom(event.currentTarget, 24); followLatestRef.current = following; setAtLatest(following); setShowJumpToLatest(messagePaneIsAwayFromBottom(event.currentTarget)) }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
+                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} {...messagePaneInteractions} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null

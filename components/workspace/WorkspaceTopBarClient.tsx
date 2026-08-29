@@ -21,6 +21,7 @@ import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type Onb
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspaces"
 import { WORKSPACE_MEMBER_PROFILE_EVENT, WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE } from "@/lib/workspace-member-profile"
+import { WORKSPACE_COMPOSER_FOCUS_EVENT, type WorkspaceComposerFocusEventDetail } from "@/lib/workspace-composer-viewport"
 import { visibleWorkspacePresence, workspacePresenceRoster, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceRosterMember, type WorkspacePresenceState } from "@/lib/workspace-presence"
 import {
     runWorkspaceMutation,
@@ -52,6 +53,8 @@ import {
 } from "@/lib/workspace-tabs"
 
 const sidebarStorageKey = "betelgeze:workspace-sidebar-open"
+const WORKSPACE_KEYBOARD_MOTION_MS = 280
+const WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX = 64
 type WorkspacePresenceChannel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>
 
 type WorkspaceTab = {
@@ -1118,12 +1121,95 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const hiddenSiblings = Array.from(host.children).filter((element): element is HTMLElement => element instanceof HTMLElement && element !== shellRoot)
         const previousOverflow = document.body.style.overflow
         const root = document.documentElement
-        const holdWorkspaceViewport = () => {
+        const readViewportBottom = () => {
             const visualViewport = window.visualViewport
-            // iOS can pan the visual viewport before the keyboard resizes it. Track its
-            // lower edge so that preliminary pan is not mistaken for keyboard height.
-            const viewportBottom = (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight)
-            root.style.setProperty("--workspace-visual-viewport-bottom", `${Math.round(viewportBottom)}px`)
+            return Math.round((visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight))
+        }
+        let restingViewportBottom = readViewportBottom()
+        let keyboardViewportBottom: number | null = null
+        let composerFocused = false
+        let viewportMode: "idle" | "pending" | "continuous" | "synthetic" | "closing" = "idle"
+        let animationFrame = 0
+        let closeTimer = 0
+        const writeViewportBottom = (viewportBottom: number) => {
+            root.style.setProperty("--workspace-visual-viewport-bottom", `${viewportBottom}px`)
+        }
+        const scheduleSyntheticViewport = () => {
+            if (animationFrame) return
+            animationFrame = window.requestAnimationFrame(() => {
+                animationFrame = 0
+                if (keyboardViewportBottom !== null) writeViewportBottom(keyboardViewportBottom)
+            })
+        }
+        const holdWorkspaceViewport = () => {
+            const viewportBottom = readViewportBottom()
+            if (viewportMode === "closing") return
+            if (!composerFocused) {
+                restingViewportBottom = viewportBottom
+                keyboardViewportBottom = null
+                viewportMode = "idle"
+                delete root.dataset.workspaceKeyboardMotion
+                writeViewportBottom(viewportBottom)
+                return
+            }
+
+            const keyboardShift = restingViewportBottom - viewportBottom
+            if (keyboardShift <= 1) return
+            if (viewportMode === "pending") {
+                // Preserve progressive viewport updates, but smooth browsers that expose
+                // the keyboard movement as one large jump before the keyboard catches up.
+                viewportMode = keyboardShift >= WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX ? "synthetic" : "continuous"
+                if (viewportMode === "synthetic") root.dataset.workspaceKeyboardMotion = "true"
+            }
+            if (viewportMode === "synthetic") {
+                keyboardViewportBottom = Math.min(keyboardViewportBottom ?? viewportBottom, viewportBottom)
+                scheduleSyntheticViewport()
+            } else {
+                writeViewportBottom(viewportBottom)
+            }
+        }
+        const handleComposerFocus = (event: Event) => {
+            const focused = (event as CustomEvent<WorkspaceComposerFocusEventDetail>).detail?.focused
+            if (typeof focused !== "boolean") return
+            if (focused) {
+                if (closeTimer) window.clearTimeout(closeTimer)
+                closeTimer = 0
+                composerFocused = true
+                if (viewportMode === "closing" && keyboardViewportBottom !== null) {
+                    viewportMode = "synthetic"
+                    root.dataset.workspaceKeyboardMotion = "true"
+                    writeViewportBottom(keyboardViewportBottom)
+                    return
+                }
+                restingViewportBottom = readViewportBottom()
+                keyboardViewportBottom = null
+                viewportMode = "pending"
+                delete root.dataset.workspaceKeyboardMotion
+                writeViewportBottom(restingViewportBottom)
+                return
+            }
+
+            composerFocused = false
+            if (viewportMode !== "synthetic" || keyboardViewportBottom === null) {
+                viewportMode = "idle"
+                delete root.dataset.workspaceKeyboardMotion
+                holdWorkspaceViewport()
+                return
+            }
+            if (animationFrame) window.cancelAnimationFrame(animationFrame)
+            animationFrame = 0
+            viewportMode = "closing"
+            root.dataset.workspaceKeyboardMotion = "true"
+            // Start the return from the same captured resting edge rather than waiting
+            // for a late or incomplete visualViewport event from iOS.
+            writeViewportBottom(restingViewportBottom)
+            closeTimer = window.setTimeout(() => {
+                closeTimer = 0
+                viewportMode = "idle"
+                keyboardViewportBottom = null
+                delete root.dataset.workspaceKeyboardMotion
+                holdWorkspaceViewport()
+            }, WORKSPACE_KEYBOARD_MOTION_MS + 40)
         }
         const previousStates = hiddenSiblings.map((element) => ({ element, hidden: element.hidden, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
@@ -1132,6 +1218,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         window.addEventListener("resize", holdWorkspaceViewport)
         window.visualViewport?.addEventListener("resize", holdWorkspaceViewport)
         window.visualViewport?.addEventListener("scroll", holdWorkspaceViewport)
+        window.addEventListener(WORKSPACE_COMPOSER_FOCUS_EVENT, handleComposerFocus)
         holdWorkspaceViewport()
         window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
         hiddenSiblings.forEach((element) => {
@@ -1144,9 +1231,13 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             window.removeEventListener("resize", holdWorkspaceViewport)
             window.visualViewport?.removeEventListener("resize", holdWorkspaceViewport)
             window.visualViewport?.removeEventListener("scroll", holdWorkspaceViewport)
+            window.removeEventListener(WORKSPACE_COMPOSER_FOCUS_EVENT, handleComposerFocus)
+            if (animationFrame) window.cancelAnimationFrame(animationFrame)
+            if (closeTimer) window.clearTimeout(closeTimer)
             document.body.style.overflow = previousOverflow
             delete document.body.dataset.workspaceTabsHosted
             delete root.dataset.workspaceViewportLocked
+            delete root.dataset.workspaceKeyboardMotion
             root.style.removeProperty("--workspace-visual-viewport-bottom")
             window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
             previousStates.forEach(({ element, hidden, inert, ariaHidden }) => {

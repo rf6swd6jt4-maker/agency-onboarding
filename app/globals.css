@@ -55,6 +55,16 @@ html[data-workspace-viewport-locked="true"] [data-workspace-tab-panels] {
   height: max(0px, calc(var(--workspace-visual-viewport-bottom, 100dvh) - 6.25rem));
 }
 
+html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true"] [data-workspace-tab-panels] {
+  transition: height 280ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true"] [data-workspace-tab-panels] {
+    transition: none;
+  }
+}
+
 @media (min-width: 768px) {
   body[data-workspace-sidebar-open="true"] [data-workspace-tabbar] {
     left: var(--workspace-sidebar-width);

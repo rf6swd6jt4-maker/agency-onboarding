@@ -122,7 +122,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout] = await Promise.all([
+    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout, paneInteractions, composerViewport] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
@@ -141,6 +141,8 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("components/communications/MessageActionMenu.tsx", "utf8"),
         readFile("components/communications/PinnedMessageBar.tsx", "utf8"),
         readFile("app/layout.tsx", "utf8"),
+        readFile("components/communications/useMessagePaneInteractions.ts", "utf8"),
+        readFile("lib/workspace-composer-viewport.ts", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
@@ -151,9 +153,9 @@ test("message interactions keep the approved mobile and profile parity", async (
         assert.match(source, /max-w-\[80%\]/)
         assert.match(source, /min-w-0 touch-pan-y cursor-pointer/)
         assert.doesNotMatch(source, /min-w-0 max-w-full touch-pan-y cursor-pointer/)
-        assert.match(source, /scrollLeft !== 0\) event\.currentTarget\.scrollLeft = 0/)
+        assert.match(source, /useMessagePaneInteractions\(composerRef, followLatestRef, setAtLatest, setShowJumpToLatest\)/)
+        assert.match(source, /\{\.\.\.messagePaneInteractions\}/)
         assert.match(source, /scrollTo\(\{ top: messagePaneRef\.current\.scrollHeight, left: 0 \}\)/)
-        assert.match(source, /messagePaneIsAwayFromBottom\(event\.currentTarget\)/)
         assert.match(source, /behavior: "smooth"/)
         assert.match(source, /messagePaneCanShowNewMessage\(messagePaneRef\.current, followLatestRef\.current\)/)
         assert.match(source, /betelgeze-message-enter-right/)
@@ -167,16 +169,23 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(shell, /element\.hidden = true/)
     assert.match(shell, /element\.hidden = hidden/)
     assert.match(shell, /--workspace-visual-viewport-bottom/)
-    assert.match(shell, /const viewportBottom = \(visualViewport\?\.offsetTop \?\? 0\) \+ \(visualViewport\?\.height \?\? window\.innerHeight\)/)
+    assert.match(shell, /return Math\.round\(\(visualViewport\?\.offsetTop \?\? 0\) \+ \(visualViewport\?\.height \?\? window\.innerHeight\)\)/)
     assert.match(shell, /visualViewport\?\.addEventListener\("scroll", holdWorkspaceViewport\)/)
+    assert.match(shell, /WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX = 64/)
+    assert.match(shell, /viewportMode: "idle" \| "pending" \| "continuous" \| "synthetic" \| "closing"/)
+    assert.match(shell, /keyboardViewportBottom = Math\.min\(keyboardViewportBottom \?\? viewportBottom, viewportBottom\)/)
+    assert.match(shell, /WORKSPACE_KEYBOARD_MOTION_MS \+ 40/)
+    assert.match(shell, /addEventListener\(WORKSPACE_COMPOSER_FOCUS_EVENT, handleComposerFocus\)/)
+    assert.match(shell, /dataset\.workspaceKeyboardMotion = "true"/)
     assert.doesNotMatch(shell, /--workspace-visual-viewport-top/)
-    assert.match(shell, /const holdWorkspaceViewport = \(\) => \{\s+const visualViewport = window\.visualViewport/)
+    assert.match(shell, /const holdWorkspaceViewport = \(\) => \{\s+const viewportBottom = readViewportBottom\(\)/)
     assert.doesNotMatch(shell, /window\.scrollTo\(0, 0\)/)
     assert.match(globals, /html\[data-workspace-viewport-locked="true"\]/)
     assert.match(globals, /position: fixed;/)
     assert.doesNotMatch(globals, /--workspace-visual-viewport-top|\[data-workspace-topbar\][\s\S]*translate3d/)
     assert.match(globals, /\[data-workspace-tab-panels\] \{\s+top: 6\.25rem;/)
     assert.match(globals, /height: max\(0px, calc\(var\(--workspace-visual-viewport-bottom, 100dvh\) - 6\.25rem\)\)/)
+    assert.match(globals, /data-workspace-keyboard-motion="true"[\s\S]*transition: height 280ms cubic-bezier\(0\.25, 0\.1, 0\.25, 1\)/)
     assert.doesNotMatch(globals, /communications-keyboard-inset|communications-viewport-locked/)
     assert.match(clients, /window\.parent\.document/)
     assert.match(team, /window\.parent\.document/)
@@ -184,8 +193,8 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(team, /start\.minDeltaX < -52/)
     assert.match(team, /start\.verticalAtMin < 42/)
     assert.match(team, /start\.maxDeltaX > 52/)
-    assert.match(clients, /onClick=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
-    assert.match(team, /onClick=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
+    assert.doesNotMatch(clients, /onClick=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
+    assert.doesNotMatch(team, /onClick=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
     assert.doesNotMatch(clients, /onPointerDown=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
     assert.doesNotMatch(team, /onPointerDown=\{\(\) => composerRef\.current\?\.blur\(\)\}/)
     assert.match(composer, /max-w-3xl touch-manipulation items-center/)
@@ -193,6 +202,16 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(composer, /onClick=\{\(event\) => \{/)
     assert.match(composer, /document\.activeElement !== event\.currentTarget/)
     assert.doesNotMatch(composer, /onPointerDown=\{[\s\S]{0,400}event\.preventDefault\(\)|setSelectionRange/)
+    assert.match(composer, /reportWorkspaceComposerFocus\(true\)/)
+    assert.match(composer, /reportWorkspaceComposerFocus\(false\)/)
+    assert.match(composerViewport, /WORKSPACE_COMPOSER_FOCUS_EVENT/)
+    assert.match(composerViewport, /window\.parent === window/)
+    assert.match(paneInteractions, /POINTER_SCROLL_THRESHOLD_PX = 6/)
+    assert.match(paneInteractions, /if \(!gesture \|\| gesture\.pointerId !== event\.pointerId\) return/)
+    assert.match(paneInteractions, /if \(gesture\.moved\) markUserScroll\(\)\s+else composerRef\.current\?\.blur\(\)/)
+    assert.match(paneInteractions, /const userScrolling = Boolean\(pointerGestureRef\.current\?\.moved\) \|\| performance\.now\(\) < userScrollUntilRef\.current/)
+    assert.match(paneInteractions, /if \(userScrolling\) \{\s+markUserScroll\(\)\s+followLatestRef\.current = following/)
+    assert.match(paneInteractions, /const anchoredToLatest = !userScrolling && followLatestRef\.current/)
     assert.match(rootLayout, /interactiveWidget: "resizes-visual"/)
     assert.doesNotMatch(composer, /navigator\.userAgent|iPhone|iPad|Android/)
     assert.match(clients, /shrink-0 touch-manipulation border-t/)

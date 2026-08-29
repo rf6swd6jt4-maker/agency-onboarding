@@ -1,6 +1,7 @@
 "use client"
 
 import type { ReactNode, RefObject } from "react"
+import { reportWorkspaceComposerFocus } from "@/lib/workspace-composer-viewport"
 
 export function MessageComposer({
     textareaRef,
@@ -53,7 +54,13 @@ export function MessageComposer({
                         if (document.activeElement !== event.currentTarget) event.currentTarget.focus({ preventScroll: true })
                     }}
                     onChange={(event) => onDraftChange(event.target.value)}
-                    onBlur={onBlur}
+                    onFocus={() => {
+                        reportWorkspaceComposerFocus(true)
+                    }}
+                    onBlur={() => {
+                        reportWorkspaceComposerFocus(false)
+                        onBlur?.()
+                    }}
                     onKeyDown={(event) => {
                         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                             event.preventDefault()
