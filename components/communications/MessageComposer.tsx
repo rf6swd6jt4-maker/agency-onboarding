@@ -34,7 +34,7 @@ export function MessageComposer({
                 event.preventDefault()
                 if (!sendDisabled) onSend()
             }}
-            className="mx-auto flex max-w-3xl touch-none items-center gap-1.5 rounded-2xl border border-neutral-800 bg-black px-1.5 py-1.5 focus-within:border-neutral-600"
+            className="mx-auto flex max-w-3xl touch-manipulation items-center gap-1.5 rounded-2xl border border-neutral-800 bg-black px-1.5 py-1.5 focus-within:border-neutral-600"
         >
             <div className="flex shrink-0 items-center -space-x-1">{leadingActions}</div>
             <div className="relative min-w-0 flex-1">
@@ -44,12 +44,8 @@ export function MessageComposer({
                     rows={1}
                     value={draft}
                     enterKeyHint="send"
-                    onPointerDown={(event) => {
-                        if (event.pointerType !== "touch" || document.activeElement === event.currentTarget) return
-                        event.preventDefault()
-                        event.currentTarget.focus({ preventScroll: true })
-                        const draftEnd = event.currentTarget.value.length
-                        event.currentTarget.setSelectionRange(draftEnd, draftEnd)
+                    onClick={(event) => {
+                        if (document.activeElement !== event.currentTarget) event.currentTarget.focus({ preventScroll: true })
                     }}
                     onChange={(event) => onDraftChange(event.target.value)}
                     onBlur={onBlur}

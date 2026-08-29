@@ -35,6 +35,7 @@ const BUTTON_CLASS = "absolute bottom-3 z-20 box-border shrink-0 aspect-square p
 function JumpButton({ className, onClick }: { className: string; onClick: () => void }) {
     return <button
         data-icon-button
+        data-jump-to-latest
         type="button"
         aria-label="Jump to latest message"
         title="Jump to latest message"
