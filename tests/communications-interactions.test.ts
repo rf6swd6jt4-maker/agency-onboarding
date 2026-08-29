@@ -122,7 +122,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, globals, actions, pinnedBar, rootLayout, paneInteractions, composerViewport] = await Promise.all([
+    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, messagePaneScroll, globals, actions, pinnedBar, rootLayout, paneInteractions, composerViewport] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
@@ -137,6 +137,7 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
         readFile("components/communications/ResizableConversationColumns.tsx", "utf8"),
         readFile("components/communications/JumpToLatestButton.tsx", "utf8"),
+        readFile("components/communications/message-pane-scroll.ts", "utf8"),
         readFile("app/globals.css", "utf8"),
         readFile("components/communications/MessageActionMenu.tsx", "utf8"),
         readFile("components/communications/PinnedMessageBar.tsx", "utf8"),
@@ -148,7 +149,8 @@ test("message interactions keep the approved mobile and profile parity", async (
     for (const source of [clients, team]) {
         assert.match(source, /touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain/)
         assert.match(source, /style=\{\{ overflowAnchor: "none" \}\}/)
-        assert.match(source, /mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none/)
+        assert.match(source, /mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none/)
+        assert.match(source, /aria-hidden="true" className="mt-auto"/)
         assert.match(source, /<ResizableConversationColumns listWidth=\{conversationListWidth\} onListWidthChange=\{onConversationListWidthChange\}>/)
         assert.match(source, /onTouchCancel/)
         assert.match(source, /max-w-\[80%\]/)
@@ -249,15 +251,14 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(jumpToLatest, /block h-5 w-5 shrink-0/)
     assert.match(jumpToLatest, /document\.visibilityState !== "visible"/)
     assert.match(jumpToLatest, /new ResizeObserver/)
-    assert.match(jumpToLatest, /const composerHeightDelta = nextComposerHeight - previousComposerHeight/)
-    assert.match(jumpToLatest, /const paneHeightDelta = previousHeight - nextHeight/)
-    assert.match(jumpToLatest, /const followingLatest = isFollowingLatest\(\)/)
-    assert.match(jumpToLatest, /if \(Math\.abs\(composerHeightDelta\) >= 0\.01\) pane\.scrollTo\(\{ top: pane\.scrollTop \+ composerHeightDelta, left: 0 \}\)/)
-    assert.match(jumpToLatest, /else if \(followingLatest\) pane\.scrollTo\(\{ top: pane\.scrollHeight, left: 0 \}\)/)
-    assert.match(jumpToLatest, /else if \(preserveVisibleBottom\) pane\.scrollTo\(\{ top: pane\.scrollTop \+ paneHeightDelta, left: 0 \}\)/)
-    assert.doesNotMatch(jumpToLatest, /observer\.observe\(composer\)/)
-    assert.match(clients, /observeMessagePaneResize\(messagePaneRef\.current, \(\) => followLatestRef\.current, true, composerRef\.current\)/)
-    assert.match(team, /observeMessagePaneResize\(messagePaneRef\.current, \(\) => followLatestRef\.current, true, composerRef\.current\)/)
+    assert.match(jumpToLatest, /anchoredMessagePaneScrollTop/)
+    assert.match(jumpToLatest, /pane\.addEventListener\("scroll", rememberScrollPosition/)
+    assert.match(jumpToLatest, /pane\.scrollTo\(\{ top: nextScrollTop, left: 0 \}\)/)
+    assert.doesNotMatch(jumpToLatest, /composerHeightDelta|paneHeightDelta|observer\.observe\(composer\)/)
+    assert.match(messagePaneScroll, /if \(followingLatest\) return maximumScrollTop/)
+    assert.match(messagePaneScroll, /previousScrollTop \+ previousClientHeight - nextClientHeight/)
+    assert.match(clients, /observeMessagePaneResize\(messagePaneRef\.current, \(\) => followLatestRef\.current, true\)/)
+    assert.match(team, /observeMessagePaneResize\(messagePaneRef\.current, \(\) => followLatestRef\.current, true\)/)
     assert.match(globals, /@keyframes betelgeze-message-grow-in/)
     assert.match(globals, /280ms cubic-bezier/)
     assert.match(globals, /@keyframes betelgeze-reaction-popup-in/)
@@ -324,7 +325,7 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(composerScroll, /textarea\.scrollTop = Math\.max\(0, textarea\.scrollHeight - textarea\.clientHeight\)/)
     for (const source of [clients, team]) {
         assert.doesNotMatch(source, /messageContentRef|composerFooterRef|useComposerKeyboardSlide/)
-        assert.match(source, /<div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col/)
+        assert.match(source, /<div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col/)
         assert.match(source, /<footer className="relative z-10 shrink-0 touch-manipulation/)
     }
     assert.match(keyboardSlide, /hostWindow\.visualViewport\?\.addEventListener\("resize", scheduleKeyboardSlide\)/)

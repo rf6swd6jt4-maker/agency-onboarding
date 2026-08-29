@@ -316,7 +316,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         keepComposerCurrentLineCentered(composerRef.current)
     }, [draft])
 
-    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true, composerRef.current), [selectedId])
+    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true), [selectedId])
 
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
 
@@ -940,7 +940,9 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
 
                     <div className="relative min-h-0 flex-1">
                     <div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
-                        <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">{selected.messages.length ? selected.messages.map((message, index) => {
+                        <div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">
+                            {selected.messages.length ? <div aria-hidden="true" className="mt-auto" /> : null}
+                            {selected.messages.length ? selected.messages.map((message, index) => {
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
                             const repliedMessage = message.replyToMessageId

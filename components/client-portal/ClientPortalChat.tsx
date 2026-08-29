@@ -285,7 +285,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
         keepComposerCurrentLineCentered(textareaRef.current)
     }, [draft])
 
-    useEffect(() => observeMessagePaneResize(scrollRef.current, () => followingLatestRef.current, true, textareaRef.current), [])
+    useEffect(() => observeMessagePaneResize(scrollRef.current, () => followingLatestRef.current, true), [])
 
     useEffect(() => {
         if (!actionMessageId) return
@@ -465,7 +465,8 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
             aria-live="polite"
             aria-busy={initialState === "loading"}
         >
-            <div className="mx-auto max-w-2xl">
+            <div className="mx-auto flex min-h-full max-w-2xl flex-col">
+                {messages.length ? <div aria-hidden="true" className="mt-auto" /> : null}
                 {initialState === "loading" ? <div className="flex min-h-64 items-center justify-center text-sm text-[var(--onboarding-muted,#475569)]">Loading your conversation…</div> : null}
                 {initialState === "error" ? <div className="flex min-h-64 items-center justify-center text-center"><div><p className="font-semibold">Your conversation could not be loaded</p><p className="mt-1 text-sm text-[var(--onboarding-muted,#475569)]">Check your connection and try again.</p><button type="button" onClick={() => void refreshLatest(true)} className="mt-4 h-11 rounded-lg bg-[var(--onboarding-primary,#1E3A5F)] px-4 text-sm font-semibold text-white">Try again</button></div></div> : null}
                 {initialState === "ready" && nextBefore ? <div className="mb-5 text-center"><button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="h-10 rounded-lg px-4 text-sm font-semibold text-[var(--onboarding-primary,#1E3A5F)] hover:bg-black/5 disabled:opacity-50">{loadingOlder ? "Loading…" : "Load earlier messages"}</button></div> : null}

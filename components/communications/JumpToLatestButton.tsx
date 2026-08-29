@@ -1,5 +1,7 @@
 "use client"
 
+import { anchoredMessagePaneScrollTop } from "@/components/communications/message-pane-scroll"
+
 export function messagePaneIsAwayFromBottom(pane: HTMLDivElement, threshold = 96) {
     return pane.scrollHeight - pane.scrollTop - pane.clientHeight > threshold
 }
@@ -14,29 +16,34 @@ export function observeMessagePaneResize(
     pane: HTMLDivElement | null,
     isFollowingLatest: () => boolean,
     preserveVisibleBottom = false,
-    composer: HTMLTextAreaElement | null = null,
 ) {
     if (!pane || typeof ResizeObserver === "undefined") return () => undefined
     let previousHeight = pane.clientHeight
-    let previousComposerHeight = composer?.getBoundingClientRect().height ?? 0
+    let previousScrollTop = pane.scrollTop
+    const rememberScrollPosition = () => {
+        previousHeight = pane.clientHeight
+        previousScrollTop = pane.scrollTop
+    }
     const observer = new ResizeObserver(() => {
         const nextHeight = pane.clientHeight
-        const nextComposerHeight = composer?.getBoundingClientRect().height ?? previousComposerHeight
-        const composerHeightDelta = nextComposerHeight - previousComposerHeight
-        const paneHeightDelta = previousHeight - nextHeight
-        if (paneHeightDelta === 0 && Math.abs(composerHeightDelta) < 0.01) return
-        const followingLatest = isFollowingLatest()
+        if (nextHeight === previousHeight) return
+        const nextScrollTop = anchoredMessagePaneScrollTop({
+            scrollHeight: pane.scrollHeight,
+            previousClientHeight: previousHeight,
+            nextClientHeight: nextHeight,
+            previousScrollTop,
+            followingLatest: isFollowingLatest(),
+            preserveVisibleBottom,
+        })
         previousHeight = nextHeight
-        previousComposerHeight = nextComposerHeight
-        // Composer growth is the user-visible movement to mirror. Measure it
-        // directly instead of deriving it from the pane's rounded clientHeight.
-        if (Math.abs(composerHeightDelta) >= 0.01) pane.scrollTo({ top: pane.scrollTop + composerHeightDelta, left: 0 })
-        else if (followingLatest) pane.scrollTo({ top: pane.scrollHeight, left: 0 })
-        else if (preserveVisibleBottom) pane.scrollTo({ top: pane.scrollTop + paneHeightDelta, left: 0 })
+        pane.scrollTo({ top: nextScrollTop, left: 0 })
+        previousScrollTop = pane.scrollTop
     })
+    pane.addEventListener("scroll", rememberScrollPosition, { passive: true })
     observer.observe(pane)
     return () => {
         observer.disconnect()
+        pane.removeEventListener("scroll", rememberScrollPosition)
     }
 }
 
