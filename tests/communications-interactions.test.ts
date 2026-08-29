@@ -4,7 +4,33 @@ import test from "node:test"
 import sharp from "sharp"
 
 import { communicationAttachmentFromRawPayload } from "../lib/communications/attachments.ts"
+import { clientMessageSupportsReaction } from "../lib/communications/interactions.ts"
 import { convertCommunicationStickerImage } from "../lib/communications/stickers.ts"
+
+test("client portal messages always support agency reactions", () => {
+    assert.equal(clientMessageSupportsReaction({
+        provider: "client_portal",
+        providerMessageId: null,
+        deliveries: [],
+        createdAt: "2020-01-01T00:00:00.000Z",
+    }, Date.now()), true)
+})
+
+test("provider reactions remain restricted to eligible WhatsApp messages", () => {
+    const cutoff = new Date("2026-01-01T00:00:00.000Z").getTime()
+    assert.equal(clientMessageSupportsReaction({
+        provider: "meta_whatsapp",
+        providerMessageId: "wamid.example",
+        deliveries: [],
+        createdAt: "2026-01-02T00:00:00.000Z",
+    }, cutoff), true)
+    assert.equal(clientMessageSupportsReaction({
+        provider: "twilio_sms",
+        providerMessageId: "SMexample",
+        deliveries: [],
+        createdAt: "2026-01-02T00:00:00.000Z",
+    }, cutoff), false)
+})
 
 test("PNG sticker sources become transparent 512px WebP files under Meta's limit", async () => {
     const source = await sharp({ create: { width: 240, height: 120, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })

@@ -183,9 +183,14 @@ function MessageAttachment({ attachment, url, own, onOpenImage }: {
     own: boolean
     onOpenImage: (media: MessageMediaPreview) => void
 }) {
-    if (attachment.kind === "image" || attachment.kind === "sticker") {
-        return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url, alt: attachment.fileName }) }} className={`mb-2 block overflow-hidden rounded-xl ${attachment.kind === "sticker" ? "bg-transparent" : own ? "bg-black/10" : "bg-black/5"}`} aria-label={`Open ${attachment.fileName}`}>
-            <Image unoptimized src={url} alt={attachment.fileName} width={720} height={560} className={`${attachment.kind === "sticker" ? "max-h-44 object-contain" : "max-h-72 object-cover"} h-auto w-full`} />
+    if (attachment.kind === "sticker") {
+        return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url, alt: attachment.fileName }) }} className="block w-fit max-w-52 bg-transparent" aria-label={`Open ${attachment.fileName}`}>
+            <Image unoptimized src={url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-52 object-contain drop-shadow-lg" />
+        </button>
+    }
+    if (attachment.kind === "image") {
+        return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url, alt: attachment.fileName }) }} className={`mb-2 block overflow-hidden rounded-xl ${own ? "bg-black/10" : "bg-black/5"}`} aria-label={`Open ${attachment.fileName}`}>
+            <Image unoptimized src={url} alt={attachment.fileName} width={720} height={560} className="h-auto max-h-72 w-full object-cover" />
         </button>
     }
     if (attachment.kind === "video") {
@@ -472,6 +477,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                     const canReply = persistent
                     const clientReaction = message.reactions.find((reaction) => reaction.direction === "inbound") ?? null
                     const isWhatsApp = own && message.source === "whatsapp"
+                    const isSticker = message.attachment?.kind === "sticker"
                     const showActions = actionMessageId === message.id
                     const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                     const senderLabel = own
@@ -553,17 +559,18 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                     window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
                                 }}
                                 style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
-                                className={`min-w-0 max-w-[86%] touch-pan-y cursor-pointer rounded-2xl px-3.5 py-2.5 shadow-sm outline-none ring-offset-2 ring-offset-[var(--onboarding-page,#F8F7F3)] focus-visible:ring-2 focus-visible:ring-[var(--onboarding-primary,#1E3A5F)] sm:max-w-[78%] ${isWhatsApp ? "rounded-br-md bg-[#154D37] text-white" : own ? "rounded-br-md bg-[var(--onboarding-primary,#1E3A5F)] text-white" : "rounded-bl-md border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] text-[var(--onboarding-text,#0F172A)]"}`}
+                                className={`min-w-0 touch-pan-y cursor-pointer outline-none ring-offset-2 ring-offset-[var(--onboarding-page,#F8F7F3)] focus-visible:ring-2 focus-visible:ring-[var(--onboarding-primary,#1E3A5F)] ${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[86%] rounded-2xl px-3.5 py-2.5 shadow-sm sm:max-w-[78%] ${isWhatsApp ? "rounded-br-md bg-[#154D37] text-white" : own ? "rounded-br-md bg-[var(--onboarding-primary,#1E3A5F)] text-white" : "rounded-bl-md border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] text-[var(--onboarding-text,#0F172A)]"}`}`}
                             >
-                                <p className={`mb-1 text-[10px] font-semibold ${own ? "text-white/70" : "text-[var(--onboarding-muted,#475569)]"}`}>{senderLabel}</p>
+                                <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-black/70 px-2 py-0.5 text-white/75" : `mb-1 ${own ? "text-white/70" : "text-[var(--onboarding-muted,#475569)]"}`} text-[10px] font-semibold`}>{senderLabel}</p>
                                 {message.replyToMessageId ? <div className={`mb-2 rounded-lg border-l-2 px-2.5 py-2 ${own ? "border-white/50 bg-black/10" : "border-[var(--onboarding-primary,#1E3A5F)]/40 bg-black/[0.03]"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? (repliedMessage.direction === "inbound" ? "You" : workspaceName) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-70">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></div> : null}
                                 {message.attachment ? <MessageAttachment attachment={message.attachment} url={attachmentUrl} own={own} onOpenImage={setPreviewMedia} /> : null}
                                 {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageText body={message.body} own={own} /> : null}
-                                <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${own ? "text-white/65" : "text-[var(--onboarding-muted,#475569)]"}`}><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.sendState === "sending" ? <span>Sending…</span> : null}</div>
+                                {isSticker && message.reactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{message.reactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? "You reacted" : `${workspaceName} reacted`} className="rounded-full border border-black/15 bg-[var(--onboarding-surface,#FFFFFF)] px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
+                                <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${isSticker ? "ml-auto w-fit rounded-full bg-black/70 px-2 py-0.5 text-white/75" : own ? "text-white/65" : "text-[var(--onboarding-muted,#475569)]"}`}><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.sendState === "sending" ? <span>Sending…</span> : null}</div>
                                 {message.sendState === "failed" ? <div className="mt-2 border-t border-white/15 pt-2"><p className="text-xs text-white/85">{message.sendError}</p><button type="button" onClick={() => void sendMessage(message)} className="mt-1 text-xs font-semibold underline underline-offset-2">Try again</button></div> : null}
                             </article>
                         </div>
-                        {message.reactions.length ? <div className={`mb-2 flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{message.reactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? "You reacted" : `${workspaceName} reacted`} className="rounded-full border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
+                        {!isSticker && message.reactions.length ? <div className={`mb-2 flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{message.reactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? "You reacted" : `${workspaceName} reacted`} className="rounded-full border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                     </Fragment>
                 })}
             </div>

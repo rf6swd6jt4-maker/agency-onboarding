@@ -28,6 +28,7 @@ import { dismissReadChatNotification } from "@/lib/push/browser-notifications"
 import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import { clientConversationUnreadCount } from "@/lib/communications/unread"
+import { clientMessageSupportsReaction } from "@/lib/communications/interactions"
 
 function record(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -950,7 +951,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                     : null
                             const messageReactions = reactions.filter((reaction) => reaction.messageId === message.id)
                             const teamReaction = messageReactions.find((reaction) => reaction.direction === "outbound") ?? null
-                            const canInteract = message.provider === "client_portal" || (usesWhatsApp(message) && Boolean(message.providerMessageId) && new Date(message.createdAt).getTime() >= reactionCutoff)
+                            const canInteract = clientMessageSupportsReaction(message, reactionCutoff)
                             const swipeOffset = swipePosition?.id === message.id ? swipePosition.offset : 0
                             const isSticker = message.attachment?.kind === "sticker"
                             const isWhatsAppClientMessage = message.direction === "inbound" && usesWhatsApp(message)
