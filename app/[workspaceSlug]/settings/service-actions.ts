@@ -3,6 +3,7 @@
 import type { ConfigurationActionResult, OnboardingServiceDefinition, OnboardingServiceState } from "@/lib/onboarding/configuration-types"
 import { configurationRpc, configurationSchemaUnavailable, revalidateOnboardingConfiguration, unexpectedConfigurationError } from "@/lib/onboarding/configuration-actions"
 import { normalizeServiceDefinition } from "@/lib/onboarding/configuration-validation"
+import { SERVICE_TEMPLATES } from "@/lib/onboarding/service-templates"
 import { requireWorkspace } from "@/lib/workspaces"
 
 type SavedService = { service_id: string; revision_id: string; revision_number: number; state: OnboardingServiceState }
@@ -16,14 +17,27 @@ export async function saveOnboardingService(slug: string, serviceId: string | nu
         if (normalized.definition.thumbnailPath && !normalized.definition.thumbnailPath.startsWith(`${workspace.id}/service-thumbnails/`)) {
             return { ok: false, error: "The service thumbnail does not belong to this workspace." }
         }
-        const outcome = await configurationRpc<SavedService>("save_onboarding_service_revision", {
+        const template = !serviceId && normalized.definition.templateId
+            ? SERVICE_TEMPLATES.find((candidate) => candidate.id === normalized.definition.templateId)
+            : null
+        const operation = template?.setup.kind === "connection"
+            ? "install_onboarding_service_template"
+            : "save_onboarding_service_revision"
+        const definition = {
+            ...normalized.definition,
+            templateId: template?.id ?? normalized.definition.templateId,
+            requiredConnectionKeys: template?.setup.kind === "connection" ? [template.setup.connectionKey] : normalized.definition.requiredConnectionKeys,
+            defaultPriceCents: normalized.definition.defaultUpfrontPriceCents,
+        }
+        const outcome = await configurationRpc<SavedService>(operation, {
             p_workspace_id: workspace.id,
             p_actor_user_id: user.id,
             p_service_id: serviceId || null,
-            p_definition: {
-                ...normalized.definition,
-                defaultPriceCents: normalized.definition.defaultUpfrontPriceCents,
-            },
+            p_definition: definition,
+            ...(template?.setup.kind === "connection" ? {
+                p_template_id: template.id,
+                p_connection_provider: template.setup.connectionKey,
+            } : {}),
         })
         if (outcome.ok) revalidateOnboardingConfiguration(slug)
         return outcome

@@ -17,6 +17,8 @@ export type ServiceTemplateDefinition = {
         description: string
         thumbnailSrc: string
         serviceType: OnboardingServiceType
+        recurringName: string
+        recurringDescription: string
         defaultBillingInterval: OnboardingBillingInterval
         defaultBillingIntervalCount: number
     }
@@ -38,8 +40,10 @@ export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
         description: "Plan, launch, and manage paid campaigns across Facebook and Instagram.",
         thumbnailSrc: metaAdsThumbnail,
         serviceType: "retainer",
+        recurringName: "Meta Ads management",
+        recurringDescription: "Ongoing planning, launch, and management of paid campaigns across Facebook and Instagram.",
         defaultBillingInterval: "month",
         defaultBillingIntervalCount: 1,
     },
-    setup: { kind: "none" },
+    setup: { kind: "connection", connectionKey: "meta_ads" },
 }]

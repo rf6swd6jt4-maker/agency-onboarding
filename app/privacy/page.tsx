@@ -30,6 +30,14 @@ const SECTIONS = [
         ],
     },
     {
+        title: "Connected Meta Business Portfolios",
+        body: [
+            "A workspace owner may connect an agency-owned Meta Business Portfolio to Betelgeze. During connection, Meta may provide the Facebook user's name and identifier, the Business Portfolios they can access, portfolio identifiers and names, business verification status, granted permissions, and a time-limited access token. Betelgeze encrypts the token and does not return it to the browser.",
+            "Betelgeze uses this connection only to verify portfolio access and, when enabled in the portal, read advertising account and campaign reporting data for agency services. The initial connection requests read-only advertising access and does not give Betelgeze permission to create or change ads.",
+            "A workspace owner can disconnect Meta Ads in Workspace Settings. To request deletion of stored Meta connection data, email support@betelgeze.com from the workspace owner's account and identify the workspace. We will delete the stored token and connection metadata unless retention is required for security, legal, or audit purposes.",
+        ],
+    },
+    {
         title: "SMS and MMS Communications",
         body: [
             "Betelgeze enables agencies to send and receive SMS and MMS through Twilio using an agency-owned phone number. Messages may include a consent confirmation, a secure onboarding link, service or project updates, requested information, and direct replies within an active client conversation. The agency identified in the message is the sender, and Betelgeze provides the communication technology used to route and retain the conversation.",
@@ -89,7 +97,7 @@ export default function PrivacyPage() {
                 </h1>
 
                 <p className="mt-3 text-sm text-slate-500">
-                    Effective date: 17 August 2026
+                    Effective date: 30 August 2026
                 </p>
 
                 <p className="mt-6 leading-7 text-slate-700">
@@ -101,7 +109,7 @@ export default function PrivacyPage() {
 
                 <div className="mt-8 space-y-8">
                     {SECTIONS.map((section) => (
-                        <section key={section.title}>
+                        <section key={section.title} id={section.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}>
                             <h2 className="text-xl font-semibold text-slate-950">
                                 {section.title}
                             </h2>
@@ -120,16 +128,15 @@ export default function PrivacyPage() {
                     ))}
                 </div>
 
-                <section className="mt-8 border-t border-slate-200 pt-8">
+                <section id="contact" className="mt-8 border-t border-slate-200 pt-8">
                     <h2 className="text-xl font-semibold text-slate-950">
                         Contact
                     </h2>
 
                     <p className="mt-3 leading-7 text-slate-700">
-                        For privacy questions or requests, contact Betelgeze using
-                        the contact details provided to you as a client, or
-                        message our team through your active project
-                        communication channel.
+                        For privacy questions, access requests, or deletion requests,
+                        email <a href="mailto:support@betelgeze.com" className="font-medium text-[#1E3A5F] underline underline-offset-2">support@betelgeze.com</a> or
+                        message our team through your active project communication channel.
                     </p>
                     <p className="mt-3 leading-7 text-slate-700">
                         SMS and MMS participation is also governed by the <Link href="/terms" className="font-medium text-[#1E3A5F] underline underline-offset-2">Betelgeze Terms and Conditions</Link>.

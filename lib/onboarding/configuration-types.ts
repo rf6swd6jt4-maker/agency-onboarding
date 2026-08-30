@@ -95,6 +95,8 @@ export type OnboardingServiceDefinition = {
     defaultAssigneeId: string | null
     displayPriority: number
     modules: OnboardingServiceModuleAssignment[]
+    templateId?: string | null
+    requiredConnectionKeys?: string[]
     archiveBlockers: string[]
     lastEditedAt: string | null
 }

@@ -12,6 +12,7 @@ import {
     IntegrationProvider,
     restorePreviousWorkspaceIntegration,
     saveWorkspaceIntegration,
+    selectMetaAdsWorkspaceIntegrationBusiness,
     stageWorkspaceIntegrationCandidate,
     verifyAndActivateWorkspaceIntegrationCandidate,
     verifyWorkspaceIntegration,
@@ -145,7 +146,9 @@ export async function saveWorkspaceConnection(slug: string, provider: Integratio
         stripe: ["secret_key", "webhook_secret"],
         meta_whatsapp: ["access_token", "phone_number_id", "webhook_verify_token"],
         twilio_sms: ["account_sid", "auth_token", "phone_number"],
+        meta_ads: [],
     }
+    if (provider === "meta_ads") throw new Error("Meta Ads must be connected through the Betelgeze Meta App.")
     if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in all required connection details before saving.")
     await saveWorkspaceIntegration(workspace.id, provider, config, user.id)
     refresh(slug)
@@ -181,10 +184,21 @@ export async function stageManualWorkspaceConnection(slug: string, provider: Int
             stripe: ["secret_key", "webhook_secret"],
             meta_whatsapp: ["access_token", "phone_number_id", "waba_id", "consent_template_name"],
             twilio_sms: ["account_sid", "auth_token", "phone_number"],
+            meta_ads: [],
         }
+        if (provider === "meta_ads") throw new Error("Meta Ads must be connected through the Betelgeze Meta App.")
         if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in every required connection detail before continuing.")
         await stageWorkspaceIntegrationCandidate({ workspaceId: workspace.id, provider, config, authMethod: "manual", userId: user.id })
         await verifyAndActivateWorkspaceIntegrationCandidate(workspace.id, provider)
+        refresh(slug)
+    })
+}
+
+export async function selectMetaAdsBusinessPortfolio(slug: string, businessId: string): Promise<WorkspaceConnectionActionResult> {
+    return connectionAction(async () => {
+        const { workspace, user } = await requireWorkspace(slug, "owner")
+        if (!businessId.trim()) throw new Error("Choose a Business Portfolio before continuing.")
+        await selectMetaAdsWorkspaceIntegrationBusiness(workspace.id, businessId.trim(), user.id)
         refresh(slug)
     })
 }

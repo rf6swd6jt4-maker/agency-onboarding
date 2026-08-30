@@ -10,7 +10,7 @@ import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { Assignee, SquarePill, Status, type StatusTone } from "@/components/ui"
 import type { OnboardingAssigneeOption, OnboardingModuleSummary, OnboardingServiceDefinition, OnboardingServiceState, OnboardingServiceType } from "@/lib/onboarding/configuration-types"
-import { SERVICE_TEMPLATES } from "@/lib/onboarding/service-templates"
+import { SERVICE_TEMPLATES, type ServiceTemplateDefinition } from "@/lib/onboarding/service-templates"
 import { shortId } from "@/lib/ui/relative-time"
 
 const inputClass = "mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white outline-none focus:border-neutral-500"
@@ -22,20 +22,20 @@ function serviceStatus(state: OnboardingServiceState): { label: string; tone: St
     return { label: "Archived", tone: "grey" }
 }
 
-function blankService(): OnboardingServiceDefinition {
+function blankService(template?: ServiceTemplateDefinition): OnboardingServiceDefinition {
     return {
         id: "",
         revisionId: null,
         code: "Generated after save",
-        name: "",
-        description: "",
-        serviceType: "one_time",
-        recurringName: "",
-        recurringDescription: "",
-        defaultBillingInterval: "month",
-        defaultBillingIntervalCount: 1,
+        name: template?.serviceDefaults.name ?? "",
+        description: template?.serviceDefaults.description ?? "",
+        serviceType: template?.serviceDefaults.serviceType ?? "one_time",
+        recurringName: template?.serviceDefaults.recurringName ?? "",
+        recurringDescription: template?.serviceDefaults.recurringDescription ?? "",
+        defaultBillingInterval: template?.serviceDefaults.defaultBillingInterval ?? "month",
+        defaultBillingIntervalCount: template?.serviceDefaults.defaultBillingIntervalCount ?? 1,
         thumbnailPath: null,
-        thumbnailUrl: null,
+        thumbnailUrl: template?.serviceDefaults.thumbnailSrc ?? null,
         state: "active",
         version: 0,
         isTest: false,
@@ -45,6 +45,8 @@ function blankService(): OnboardingServiceDefinition {
         defaultAssigneeId: null,
         displayPriority: 100,
         modules: [],
+        templateId: template?.id ?? null,
+        requiredConnectionKeys: template?.setup.kind === "connection" ? [template.setup.connectionKey] : [],
         archiveBlockers: [],
         lastEditedAt: null,
     }
@@ -68,7 +70,7 @@ function intervalCountMaximum(interval: OnboardingServiceDefinition["defaultBill
     return interval === "year" ? 3 : interval === "month" ? 36 : 156
 }
 
-function ServiceTemplatesModal({ onClose, onCreateCustom }: { onClose: () => void; onCreateCustom: () => void }) {
+function ServiceTemplatesModal({ onClose, onCreateCustom, onSelectTemplate }: { onClose: () => void; onCreateCustom: () => void; onSelectTemplate: (template: ServiceTemplateDefinition) => void }) {
     const modalRef = useRef<HTMLElement>(null)
     const closeRef = useRef<HTMLButtonElement>(null)
 
@@ -121,15 +123,15 @@ function ServiceTemplatesModal({ onClose, onCreateCustom }: { onClose: () => voi
                             <span className="mt-1.5 block text-sm leading-5 text-neutral-500">Create a custom service from scratch.</span>
                         </span>
                     </button>
-                    {SERVICE_TEMPLATES.map((template) => <article key={template.id} className="min-w-0 overflow-hidden rounded-xl border border-neutral-800 bg-black">
-                        <div className="relative aspect-[16/10] overflow-hidden border-b border-neutral-800 bg-[#080834]">
+                    {SERVICE_TEMPLATES.map((template) => <button type="button" key={template.id} onClick={() => onSelectTemplate(template)} className="group min-w-0 overflow-hidden rounded-xl border border-neutral-800 bg-black text-left transition hover:border-neutral-600 hover:bg-neutral-900/60">
+                        <span className="relative block aspect-[16/10] overflow-hidden border-b border-neutral-800 bg-[#080834]">
                             <Image src={template.thumbnail.src} alt={template.thumbnail.alt} fill sizes="(max-width: 639px) calc(100vw - 3.5rem), (max-width: 1023px) 40vw, 17rem" className="object-contain" />
-                        </div>
-                        <div className="p-4">
-                            <h3 className="font-semibold text-white">{template.name}</h3>
+                        </span>
+                        <span className="block p-4">
+                            <span className="block font-semibold text-white">{template.name}</span>
                             <p className="mt-1.5 text-sm leading-5 text-neutral-500">{template.description}</p>
-                        </div>
-                    </article>)}
+                        </span>
+                    </button>)}
                 </div>
             </div>
         </section>
@@ -322,7 +324,10 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
 }) {
     const [selectedId, setSelectedId] = useState<string | null>(initialServiceId && initialServiceId !== "new" ? initialServiceId : null)
     const [templatesOpen, setTemplatesOpen] = useState(false)
-    const selected = selectedId === "new" ? blankService() : services.find((service) => service.id === selectedId) ?? null
+    const selectedTemplate = selectedId?.startsWith("template:")
+        ? SERVICE_TEMPLATES.find((template) => template.id === selectedId.slice("template:".length))
+        : null
+    const selected = selectedId === "new" ? blankService() : selectedTemplate ? blankService(selectedTemplate) : services.find((service) => service.id === selectedId) ?? null
     const assigneeById = useMemo(() => new Map(assignees.map((assignee) => [assignee.id, assignee])), [assignees])
     const portalTarget = typeof window !== "undefined" ? (window.parent !== window ? window.parent.document.body : document.body) : null
 
@@ -371,7 +376,7 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
             })}
             {!services.length ? <div className="p-6"><p className="font-medium">No services yet.</p><p className="mt-2 text-sm text-neutral-500">Create the first service to make it available in the POS.</p></div> : null}
         </List>
-        {templatesOpen && portalTarget ? createPortal(<ServiceTemplatesModal onClose={() => setTemplatesOpen(false)} onCreateCustom={() => { setTemplatesOpen(false); setSelectedId("new") }} />, portalTarget) : null}
-        {selected && portalTarget ? createPortal(<ServiceEditor key={selected.id || "new"} workspaceSlug={workspaceSlug} service={selected} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} />, portalTarget) : null}
+        {templatesOpen && portalTarget ? createPortal(<ServiceTemplatesModal onClose={() => setTemplatesOpen(false)} onCreateCustom={() => { setTemplatesOpen(false); setSelectedId("new") }} onSelectTemplate={(template) => { setTemplatesOpen(false); setSelectedId(`template:${template.id}`) }} />, portalTarget) : null}
+        {selected && portalTarget ? createPortal(<ServiceEditor key={selectedId ?? "new"} workspaceSlug={workspaceSlug} service={selected} assignees={assignees} schemaReady={schemaReady} onClose={() => setSelectedId(null)} />, portalTarget) : null}
     </>
 }

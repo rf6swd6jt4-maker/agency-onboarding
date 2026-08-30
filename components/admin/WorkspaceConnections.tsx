@@ -11,6 +11,7 @@ import type { WorkspaceConnectionActionResult } from "@/app/[workspaceSlug]/sett
 type Action = (provider: IntegrationProvider) => Promise<WorkspaceConnectionActionResult>
 type ManualAction = (provider: IntegrationProvider, formData: FormData) => Promise<WorkspaceConnectionActionResult>
 type WhatsAppAction = (input: { code: string; wabaId: string; phoneNumberId: string; consentTemplateName: string; consentTemplateLanguage: string }) => Promise<WorkspaceConnectionActionResult>
+type MetaAdsBusinessAction = (businessId: string) => Promise<WorkspaceConnectionActionResult>
 type Props = {
     workspaceSlug: string
     connections: WorkspaceConnection[]
@@ -18,6 +19,7 @@ type Props = {
     verifyAction: Action
     manualAction: ManualAction
     completeWhatsAppAction: WhatsAppAction
+    selectMetaAdsBusinessAction: MetaAdsBusinessAction
     verifyPendingAction: Action
     discardPendingAction: Action
     rollbackAction: Action
@@ -38,11 +40,12 @@ declare global {
     }
 }
 
-const titles: Record<IntegrationProvider, string> = { stripe: "Stripe", meta_whatsapp: "WhatsApp", twilio_sms: "Twilio" }
+const titles: Record<IntegrationProvider, string> = { stripe: "Stripe", meta_whatsapp: "WhatsApp", twilio_sms: "Twilio", meta_ads: "Meta Ads" }
 const descriptions: Record<IntegrationProvider, string> = {
     stripe: "Create invoices and receive payment events from this agency's Stripe account.",
     meta_whatsapp: "Send confirmations and onboarding links from this agency's WhatsApp number.",
     twilio_sms: "Send and receive SMS/MMS from this agency's Twilio number.",
+    meta_ads: "Authorize the agency's Business Portfolio for Meta Ads reporting.",
 }
 
 const inputClass = "mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-sm text-white outline-none focus:border-neutral-400"
@@ -60,6 +63,7 @@ function connectionDetail(connection: WorkspaceConnection) {
     const hint = connection.config_hint ?? {}
     if (connection.provider === "stripe") return [hint.account_name, hint.account_id, hint.mode].filter(Boolean).join(" · ")
     if (connection.provider === "meta_whatsapp") return [hint.display_phone_number ?? hint.phone_number_id, hint.verified_name].filter(Boolean).join(" · ")
+    if (connection.provider === "meta_ads") return [hint.business_name, hint.business_id, hint.business_verification_status].filter(Boolean).join(" · ")
     return [hint.phone_number, hint.friendly_name, hint.account_sid].filter(Boolean).join(" · ")
 }
 
@@ -82,12 +86,15 @@ function CapabilityList({ connection }: { connection: WorkspaceConnection }) {
         ? { account_access: "Account accessible", invoice_access: "Invoice access granted", webhook_routing: "Payment events routed" }
         : connection.provider === "meta_whatsapp"
             ? { phone_access: "Phone number accessible", outbound_messages: "Outbound messaging allowed", webhook_subscribed: "Incoming events routed", consent_template_approved: "Confirmation template approved" }
-            : { phone_access: "Phone number accessible", outbound_messages: "Outbound SMS allowed", webhook_subscribed: "Incoming messages routed", mms: "MMS media supported" }
+            : connection.provider === "meta_ads"
+                ? { business_access: "Business Portfolio accessible", business_management: "Portfolio access granted", ads_read: "Ads reporting access granted" }
+                : { phone_access: "Phone number accessible", outbound_messages: "Outbound SMS allowed", webhook_subscribed: "Incoming messages routed", mms: "MMS media supported" }
     const capabilities = connection.capabilities ?? (connection.config_hint?.capabilities as Record<string, unknown> | undefined) ?? {}
     return <div className="grid gap-2 sm:grid-cols-2">{Object.entries(labels).map(([key, label]) => <div key={key} className="flex items-center gap-2 text-sm text-neutral-300"><Status compact label={capabilities[key] ? "Ready" : "Not verified"} tone={capabilities[key] ? "green" : "grey"} /><span>{label}</span></div>)}</div>
 }
 
 function ManualFields({ provider }: { provider: IntegrationProvider }) {
+    if (provider === "meta_ads") return null
     if (provider === "stripe") return <>
         <label className="block text-sm text-neutral-300">Restricted or secret key<input className={inputClass} name="secret_key" type="password" required placeholder="rk_live_… or sk_live_…" /></label>
         <label className="block text-sm text-neutral-300">Webhook signing secret<input className={inputClass} name="webhook_secret" type="password" required placeholder="whsec_…" /></label>
@@ -104,7 +111,7 @@ function ManualFields({ provider }: { provider: IntegrationProvider }) {
     </>
 }
 
-export function WorkspaceConnections({ workspaceSlug, connections, verifyAction, manualAction, completeWhatsAppAction, verifyPendingAction, discardPendingAction, rollbackAction, disconnectAction, canManage, metaAppId, metaEmbeddedSignupConfigId, showHeader = true }: Props) {
+export function WorkspaceConnections({ workspaceSlug, connections, verifyAction, manualAction, completeWhatsAppAction, selectMetaAdsBusinessAction, verifyPendingAction, discardPendingAction, rollbackAction, disconnectAction, canManage, metaAppId, metaEmbeddedSignupConfigId, showHeader = true }: Props) {
     const router = useRouter()
     const [selected, setSelected] = useState<IntegrationProvider | null>(null)
     const [advanced, setAdvanced] = useState(false)
@@ -113,6 +120,7 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
     const [stripeMode, setStripeMode] = useState<"test" | "live">("live")
     const [templateName, setTemplateName] = useState("onboarding_confirmation")
     const [templateLanguage, setTemplateLanguage] = useState("en_US")
+    const [metaBusinessId, setMetaBusinessId] = useState("")
     const popupRef = useRef<Window | null>(null)
 
     useEffect(() => {
@@ -131,16 +139,28 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
         const receive = (event: MessageEvent) => {
             if (event.origin !== window.location.origin) return
             if (event.data?.type !== "betelgeze:connection") return
-            if (event.data.provider !== "stripe") return
+            if (event.data.provider !== "stripe" && event.data.provider !== "meta_ads") return
             popupRef.current = null
-            if (event.data.ok) { setError(null); setSelected(null); router.refresh() }
-            else setError(event.data.error || "Stripe could not be connected.")
+            if (event.data.ok) {
+                setError(null)
+                if (event.data.needsSelection) setSelected("meta_ads")
+                else setSelected(null)
+                router.refresh()
+            } else setError(event.data.error || `${event.data.provider === "meta_ads" ? "Meta Ads" : "Stripe"} could not be connected.`)
         }
         window.addEventListener("message", receive)
         return () => window.removeEventListener("message", receive)
     }, [router])
 
     const connection = selected ? connections.find((item) => item.provider === selected) ?? null : null
+    const metaBusinessOptions = connection?.provider === "meta_ads" && Array.isArray(connection.candidate_config_hint?.business_options)
+        ? connection.candidate_config_hint.business_options.flatMap((item): Array<{ id: string; name: string; verificationStatus: string | null }> => {
+            if (!item || typeof item !== "object") return []
+            const value = item as Record<string, unknown>
+            if (typeof value.id !== "string" || typeof value.name !== "string") return []
+            return [{ id: value.id, name: value.name, verificationStatus: typeof value.verificationStatus === "string" ? value.verificationStatus : null }]
+        })
+        : []
 
     function run(action: () => Promise<WorkspaceConnectionActionResult>, close = false) {
         setError(null)
@@ -167,6 +187,16 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
         const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2)
         popupRef.current = window.open(`/api/workspace-connections/stripe/start?workspace=${encodeURIComponent(workspaceSlug)}&mode=${stripeMode}`, "betelgeze-stripe-connect", `popup=yes,width=${width},height=${height},left=${left},top=${top}`)
         if (!popupRef.current) setError("Your browser blocked the Stripe popup. Allow popups for Betelgeze and try again.")
+    }
+
+    function startMetaAds() {
+        setError(null)
+        const width = 620
+        const height = 760
+        const left = Math.max(0, window.screenX + (window.outerWidth - width) / 2)
+        const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2)
+        popupRef.current = window.open(`/api/workspace-connections/meta-ads/start?workspace=${encodeURIComponent(workspaceSlug)}`, "betelgeze-meta-ads-connect", `popup=yes,width=${width},height=${height},left=${left},top=${top}`)
+        if (!popupRef.current) setError("Your browser blocked the Meta popup. Allow popups for Betelgeze and try again.")
     }
 
     function startWhatsApp() {
@@ -214,14 +244,14 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
 
     return <section className={`${showHeader ? "mt-8 " : ""}min-w-0 max-w-full`}>
         {showHeader ? <><h2 className="text-lg font-semibold">Connections</h2><p className="mt-1 text-sm text-neutral-400">Connect each agency&apos;s own provider accounts without exposing credentials.</p></> : null}
-        <div className={`${showHeader ? "mt-4 " : ""}grid min-w-0 max-w-full gap-4 md:grid-cols-2 xl:grid-cols-3`}>{connections.map((item) => {
+        <div className={`${showHeader ? "mt-4 " : ""}grid min-w-0 max-w-full gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4`}>{connections.map((item) => {
             const state = statusFor(item)
             const detail = connectionDetail(item)
             return <article key={item.provider} className="min-w-0 max-w-full rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                 <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:justify-between sm:gap-4"><div className="min-w-0"><h3 className="font-medium text-white">{titles[item.provider]}</h3><p className="mt-1 text-sm leading-5 text-neutral-500">{descriptions[item.provider]}</p></div><Status label={state.label} tone={state.tone} wrap className="max-w-full sm:shrink-0" /></div>
                 {detail ? <p className="mt-4 break-all text-sm text-neutral-300">{detail}</p> : null}
                 {item.last_error ? <p className="mt-3 break-words text-sm leading-5 text-red-300">{item.last_error}</p> : null}
-                <button type="button" disabled={!canManage} onClick={() => { setSelected(item.provider); setAdvanced(false); setError(null) }} className="mt-5 h-10 w-full rounded-lg border border-neutral-700 px-3 text-sm font-medium text-neutral-100 transition hover:border-neutral-500 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40">{item.enabled ? "Manage connection" : "Connect"}</button>
+                <button type="button" disabled={!canManage} onClick={() => { setSelected(item.provider); setAdvanced(false); setMetaBusinessId(""); setError(null) }} className="mt-5 h-10 w-full rounded-lg border border-neutral-700 px-3 text-sm font-medium text-neutral-100 transition hover:border-neutral-500 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40">{item.enabled ? "Manage connection" : "Connect"}</button>
             </article>
         })}</div>
         {!canManage ? <p className="mt-3 text-xs text-neutral-500">Only the workspace owner can connect or disconnect provider accounts.</p> : null}
@@ -234,11 +264,13 @@ export function WorkspaceConnections({ workspaceSlug, connections, verifyAction,
 
                 {selected === "stripe" ? <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Stripe</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Stripe opens in a separate secure window. Betelgeze receives only the permissions declared by its Stripe App.</p><label className="mt-4 block text-sm text-neutral-300">Account mode<select value={stripeMode} onChange={(event) => setStripeMode(event.target.value as "test" | "live")} className={inputClass}><option value="live">Live account</option><option value="test">Test account</option></select></label><button type="button" disabled={pending} onClick={startStripe} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue to Stripe</button></div>
                 : selected === "meta_whatsapp" ? <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with Meta</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Choose the agency&apos;s Meta business and WhatsApp number. Betelgeze then subscribes its webhook and verifies the confirmation template.</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Confirmation template<input value={templateName} onChange={(event) => setTemplateName(event.target.value)} className={inputClass} /></label><label className="block text-sm text-neutral-300">Language<input value={templateLanguage} onChange={(event) => setTemplateLanguage(event.target.value)} className={inputClass} /></label></div><button type="button" disabled={pending || !templateName.trim()} onClick={startWhatsApp} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue with Meta</button></div>
+                : selected === "meta_ads" ? <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect with the Betelgeze Meta App</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Meta opens in a separate secure window. Log in with the Facebook account that can access the agency&apos;s Business Portfolio and approve read-only ads reporting.</p><button type="button" disabled={pending} onClick={startMetaAds} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">Continue with Meta</button></div>
                 : <div className="rounded-xl border border-neutral-800 p-4"><h3 className="font-medium text-white">Connect a Twilio number</h3><p className="mt-1 text-sm leading-6 text-neutral-500">Use the account SID, Auth Token, and an SMS-capable number owned by that account. Betelgeze verifies the number and configures its incoming-message webhook.</p><button type="button" onClick={() => setAdvanced(true)} className="mt-4 h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black">Enter Twilio credentials</button></div>}
 
-                <div className="border-t border-neutral-800 pt-4"><button type="button" onClick={() => setAdvanced((value) => !value)} className="text-sm text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-white">{advanced ? "Hide manual connection" : "Use manual credentials"}</button>{advanced ? <form onSubmit={submitManual} className="mt-4 space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"><p className="text-xs leading-5 text-neutral-500">Credentials are encrypted before storage and are never returned to the browser. The current connection is replaced only after verification succeeds.</p><ManualFields provider={selected} /><button disabled={pending} className="h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Verifying…" : "Save and verify"}</button></form> : null}</div>
+                {selected !== "meta_ads" ? <div className="border-t border-neutral-800 pt-4"><button type="button" onClick={() => setAdvanced((value) => !value)} className="text-sm text-neutral-400 underline decoration-neutral-700 underline-offset-4 hover:text-white">{advanced ? "Hide manual connection" : "Use manual credentials"}</button>{advanced ? <form onSubmit={submitManual} className="mt-4 space-y-3 rounded-xl border border-neutral-800 bg-neutral-900/50 p-4"><p className="text-xs leading-5 text-neutral-500">Credentials are encrypted before storage and are never returned to the browser. The current connection is replaced only after verification succeeds.</p><ManualFields provider={selected} /><button disabled={pending} className="h-10 w-full rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-50">{pending ? "Verifying…" : "Save and verify"}</button></form> : null}</div> : null}
 
-                {connection.candidate_auth_method ? <div className="rounded-xl border border-yellow-700/40 bg-yellow-950/20 p-4"><Status label="Connection waiting for verification" tone="yellow" /><p className="mt-2 text-sm leading-5 text-neutral-400">The active connection has not been changed.</p><div className="mt-3 flex gap-2"><button type="button" disabled={pending} onClick={() => run(() => verifyPendingAction(selected), true)} className="h-9 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-50">Try verification again</button><button type="button" disabled={pending} onClick={() => run(() => discardPendingAction(selected))} className="h-9 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-300 disabled:opacity-50">Discard</button></div></div> : null}
+                {connection.candidate_auth_method && selected === "meta_ads" && metaBusinessOptions.length > 1 ? <div className="rounded-xl border border-yellow-700/40 bg-yellow-950/20 p-4"><Status label="Choose a Business Portfolio" tone="yellow" /><p className="mt-2 text-sm leading-5 text-neutral-400">Meta returned more than one portfolio. Choose the one owned by this agency.</p><label className="mt-4 block text-sm text-neutral-300">Business Portfolio<select value={metaBusinessId} onChange={(event) => setMetaBusinessId(event.target.value)} className={inputClass}><option value="">Choose a portfolio</option>{metaBusinessOptions.map((business) => <option key={business.id} value={business.id}>{business.name}</option>)}</select></label><div className="mt-3 flex gap-2"><button type="button" disabled={pending || !metaBusinessId} onClick={() => run(() => selectMetaAdsBusinessAction(metaBusinessId), true)} className="h-9 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-50">Use this portfolio</button><button type="button" disabled={pending} onClick={() => run(() => discardPendingAction(selected))} className="h-9 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-300 disabled:opacity-50">Discard</button></div></div>
+                : connection.candidate_auth_method ? <div className="rounded-xl border border-yellow-700/40 bg-yellow-950/20 p-4"><Status label="Connection waiting for verification" tone="yellow" /><p className="mt-2 text-sm leading-5 text-neutral-400">The active connection has not been changed.</p><div className="mt-3 flex gap-2"><button type="button" disabled={pending} onClick={() => run(() => verifyPendingAction(selected), true)} className="h-9 rounded-lg bg-white px-3 text-sm font-medium text-black disabled:opacity-50">Try verification again</button><button type="button" disabled={pending} onClick={() => run(() => discardPendingAction(selected))} className="h-9 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-300 disabled:opacity-50">Discard</button></div></div> : null}
 
                 {connection.previous_mode ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-800 pt-4"><p className="text-sm text-neutral-500">A previous connection is available as a rollback.</p><button type="button" disabled={pending} onClick={() => { if (window.confirm(`Restore the previous ${titles[selected]} connection?`)) run(() => rollbackAction(selected), true) }} className="h-9 rounded-lg border border-neutral-700 px-3 text-sm text-neutral-200 disabled:opacity-50">Restore previous</button></div> : null}
                 {connection.enabled && connection.mode !== "platform_legacy" ? <div className="flex flex-wrap items-center justify-between gap-3 border-t border-red-950 pt-4"><div><p className="text-sm font-medium text-red-200">Disconnect {titles[selected]}</p><p className="mt-1 text-xs text-neutral-600">Provider automations will stop immediately.</p></div><button type="button" disabled={pending} onClick={() => { if (window.confirm(`Disconnect ${titles[selected]} from this workspace?`)) run(() => disconnectAction(selected), true) }} className="h-9 rounded-lg border border-red-900 px-3 text-sm text-red-200 disabled:opacity-50">Disconnect</button></div> : null}

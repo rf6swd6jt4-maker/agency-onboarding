@@ -153,6 +153,10 @@ export function normalizeServiceDefinition(input: unknown) {
     if (!/^[A-Z]{3}$/.test(currency)) return { ok: false as const, error: "Use a three-letter currency code, such as USD." }
     const moduleIds = (Array.isArray(value.modules) ? value.modules : []).map((module) => String(module.moduleId ?? "")).filter(Boolean)
     if (new Set(moduleIds).size !== moduleIds.length) return { ok: false as const, error: "A service cannot contain the same module twice." }
+    const templateId = cleanText(value.templateId, 120) || null
+    const requiredConnectionKeys = (Array.isArray(value.requiredConnectionKeys) ? value.requiredConnectionKeys : [])
+        .map((key) => cleanText(key, 120))
+        .filter((key): key is string => key === "meta_ads")
     return {
         ok: true as const,
         definition: {
@@ -171,6 +175,8 @@ export function normalizeServiceDefinition(input: unknown) {
             isTest: Boolean(value.isTest),
             displayPriority: Math.max(0, Math.min(10_000, Math.round(Number(value.displayPriority) || 0))),
             moduleIds,
+            templateId,
+            requiredConnectionKeys: [...new Set(requiredConnectionKeys)],
         },
     }
 }

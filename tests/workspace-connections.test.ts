@@ -15,6 +15,9 @@ const outbox = readFileSync("lib/onboarding/outbox.ts", "utf8")
 const twilio = readFileSync("lib/client-messages/twilio.ts", "utf8")
 const twilioWebhook = readFileSync("app/api/client-messages/twilio/route.ts", "utf8")
 const omnichannelMigration = readFileSync("supabase/migrations/20260817110000_twilio_omnichannel_messaging.sql", "utf8")
+const metaAdsMigration = readFileSync("supabase/migrations/20260830110000_meta_ads_workspace_connection.sql", "utf8")
+const metaAdsStart = readFileSync("app/api/workspace-connections/meta-ads/start/route.ts", "utf8")
+const metaAdsCallback = readFileSync("app/api/workspace-connections/meta-ads/callback/route.ts", "utf8")
 const privacy = readFileSync("app/privacy/page.tsx", "utf8")
 const terms = readFileSync("app/terms/page.tsx", "utf8")
 
@@ -34,6 +37,31 @@ test("OAuth state is short lived, random, hashed, single use, and tied to its in
     assert.match(integrations, /data\.status !== "pending"/u)
     assert.match(stripeCallback, /authenticated\.user\.id !== attempt\.requested_by/u)
     assert.match(stripeStart, /createConnectionAttempt/u)
+    assert.match(metaAdsStart, /createConnectionAttempt/u)
+    assert.match(metaAdsCallback, /authenticated\.user\.id !== attempt\.requested_by/u)
+})
+
+test("Meta Ads template installation atomically creates its optional workspace connection", () => {
+    assert.match(metaAdsMigration, /create or replace function public\.install_onboarding_service_template/u)
+    assert.match(metaAdsMigration, /public\.save_onboarding_service_revision/u)
+    assert.match(metaAdsMigration, /insert into public\.workspace_integrations/u)
+    assert.match(metaAdsMigration, /on conflict \(workspace_id, provider\) do nothing/u)
+    assert.doesNotMatch(metaAdsMigration, /select id, 'meta_ads'/u)
+})
+
+test("Meta Ads uses server-side OAuth, explicit portfolio selection, and read-only ads access", () => {
+    assert.match(metaAdsStart, /business_management,ads_read/u)
+    assert.match(metaAdsStart, /META_ADS_LOGIN_CONFIG_ID/u)
+    assert.match(metaAdsCallback, /fb_exchange_token/u)
+    assert.match(metaAdsCallback, /stageMetaAdsWorkspaceIntegrationCandidate/u)
+    assert.match(integrations, /getMetaAdsBusinessOptions/u)
+    assert.match(integrations, /selectMetaAdsWorkspaceIntegrationBusiness/u)
+    assert.match(integrations, /appsecret_proof/u)
+    assert.match(settingsUi, /Choose a Business Portfolio/u)
+    assert.doesNotMatch(metaAdsStart, /ads_management/u)
+    assert.match(privacy, /Connected Meta Business Portfolios/u)
+    assert.match(privacy, /read-only advertising access/u)
+    assert.match(privacy, /support@betelgeze\.com/u)
 })
 
 test("Settings uses one popup lifecycle with automatic and manual connection paths", () => {

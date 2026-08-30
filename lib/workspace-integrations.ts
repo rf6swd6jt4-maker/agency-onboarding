@@ -1,9 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto"
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from "crypto"
 import { getRequiredEnv } from "@/lib/env"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { stripeAccountMode } from "@/lib/stripe/mode"
 
-export const INTEGRATION_PROVIDERS = ["stripe", "meta_whatsapp", "twilio_sms"] as const
+export const BASE_INTEGRATION_PROVIDERS = ["stripe", "meta_whatsapp", "twilio_sms"] as const
+export const INTEGRATION_PROVIDERS = [...BASE_INTEGRATION_PROVIDERS, "meta_ads"] as const
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number]
 export type IntegrationConfig = Record<string, string>
 export type ConnectionAuthMethod = "legacy" | "oauth" | "embedded_signup" | "manual"
@@ -26,6 +27,7 @@ export type WorkspaceConnection = {
 }
 
 const META_GRAPH_VERSION = "v25.0"
+export const META_ADS_GRAPH_VERSION = process.env.META_ADS_GRAPH_VERSION?.trim() || "v26.0"
 
 function forceSavedLegacy(mode: string | null | undefined) {
     return process.env.WORKSPACE_CONNECTIONS_FORCE_LEGACY === "true" && mode === "platform_legacy"
@@ -70,6 +72,12 @@ export function integrationHint(provider: IntegrationProvider, config: Integrati
         waba_id: config.waba_id || null,
         template: config.consent_template_name || null,
     }
+    if (provider === "meta_ads") return {
+        business_id: config.business_id || null,
+        business_name: config.business_name || null,
+        business_verification_status: config.business_verification_status || null,
+        token_expires_at: config.access_token_expires_at || null,
+    }
     return {
         account_sid: config.account_sid || null,
         phone_number: config.phone_number || null,
@@ -86,7 +94,7 @@ export async function listWorkspaceConnections(workspaceId: string): Promise<Wor
         .from("workspace_integrations")
         .select("provider, enabled, mode, config_hint, connection_status, auth_method, capabilities, last_verified_at, last_webhook_at, last_error, candidate_config_hint, candidate_auth_method, previous_mode")
         .eq("workspace_id", workspaceId)
-    if (!universal.error) return (universal.data ?? []) as WorkspaceConnection[]
+    if (!universal.error) return (universal.data ?? []).filter((item) => (INTEGRATION_PROVIDERS as readonly string[]).includes(item.provider)) as WorkspaceConnection[]
     if (!isMissingUniversalConnectionSchema(universal.error)) throw new Error(`Could not load workspace connections: ${universal.error.message}`)
 
     const legacy = await supabaseAdmin
@@ -94,7 +102,7 @@ export async function listWorkspaceConnections(workspaceId: string): Promise<Wor
         .select("provider, enabled, mode, config_hint")
         .eq("workspace_id", workspaceId)
     if (legacy.error) throw new Error(`Could not load workspace connections: ${legacy.error.message}`)
-    return (legacy.data ?? []).map((item) => ({
+    return (legacy.data ?? []).filter((item) => (INTEGRATION_PROVIDERS as readonly string[]).includes(item.provider)).map((item) => ({
         ...(item as WorkspaceConnection),
         connection_status: item.enabled ? (item.mode === "platform_legacy" || Boolean((item.config_hint as Record<string, unknown>)?.verified_at) ? "connected" : "needs_attention") : "not_connected",
         auth_method: item.mode === "platform_legacy" ? "legacy" : item.mode === "connected" ? "manual" : null,
@@ -157,6 +165,77 @@ async function candidateConfig(workspaceId: string, provider: IntegrationProvide
     }
 }
 
+export type MetaAdsBusinessOption = {
+    id: string
+    name: string
+    verificationStatus: string | null
+}
+
+function metaAdsBusinessOptions(config: IntegrationConfig): MetaAdsBusinessOption[] {
+    try {
+        const parsed = JSON.parse(config.business_options || "[]") as unknown
+        if (!Array.isArray(parsed)) return []
+        return parsed.flatMap((item): MetaAdsBusinessOption[] => {
+            if (!item || typeof item !== "object") return []
+            const value = item as Record<string, unknown>
+            if (typeof value.id !== "string" || typeof value.name !== "string") return []
+            return [{ id: value.id, name: value.name, verificationStatus: typeof value.verificationStatus === "string" ? value.verificationStatus : null }]
+        })
+    } catch {
+        return []
+    }
+}
+
+export async function stageMetaAdsWorkspaceIntegrationCandidate(input: {
+    workspaceId: string
+    userId: string
+    accessToken: string
+    accessTokenExpiresAt: string
+    facebookUserId: string
+    facebookUserName: string
+    businesses: MetaAdsBusinessOption[]
+}) {
+    if (!input.businesses.length) throw new Error("Meta did not return a Business Portfolio that this account can access.")
+    const config: IntegrationConfig = {
+        access_token: input.accessToken,
+        access_token_expires_at: input.accessTokenExpiresAt,
+        facebook_user_id: input.facebookUserId,
+        facebook_user_name: input.facebookUserName,
+        business_options: JSON.stringify(input.businesses),
+    }
+    await stageWorkspaceIntegrationCandidate({ workspaceId: input.workspaceId, provider: "meta_ads", config, authMethod: "oauth", userId: input.userId })
+    const safeOptions = input.businesses.map((business) => ({ id: business.id, name: business.name, verificationStatus: business.verificationStatus }))
+    const { error } = await supabaseAdmin.from("workspace_integrations").update({
+        candidate_config_hint: {
+            ...integrationHint("meta_ads", config),
+            business_options: safeOptions,
+        },
+    }).eq("workspace_id", input.workspaceId).eq("provider", "meta_ads")
+    if (error) throw new Error(`Meta was authorized, but Betelgeze could not prepare portfolio selection: ${error.message}`)
+}
+
+export async function selectMetaAdsWorkspaceIntegrationBusiness(workspaceId: string, businessId: string, userId: string) {
+    const candidate = await candidateConfig(workspaceId, "meta_ads")
+    if (candidate.authMethod !== "oauth") throw new Error("Start the Meta connection again before selecting a Business Portfolio.")
+    const business = metaAdsBusinessOptions(candidate.config).find((option) => option.id === businessId)
+    if (!business) throw new Error("Choose one of the Business Portfolios returned by Meta.")
+    const selectedConfig = { ...candidate.config }
+    delete selectedConfig.business_options
+    await stageWorkspaceIntegrationCandidate({
+        workspaceId,
+        provider: "meta_ads",
+        authMethod: "oauth",
+        userId,
+        config: {
+            ...selectedConfig,
+            business_id: business.id,
+            business_name: business.name,
+            business_verification_status: business.verificationStatus ?? "",
+        },
+    })
+    return verifyAndActivateWorkspaceIntegrationCandidate(workspaceId, "meta_ads")
+}
+
 async function stripeAccount(config: IntegrationConfig) {
     const token = config.access_token || config.secret_key
     if (!token) throw new Error("Stripe did not provide an access token.")
@@ -174,6 +253,35 @@ async function metaGet(path: string, accessToken: string) {
     const body = await response.text()
     if (!response.ok) throw new Error(`Meta rejected this connection (${response.status}). Reconnect WhatsApp and try again.`)
     return body ? JSON.parse(body) as Record<string, unknown> : {}
+}
+
+async function metaAdsGet(path: string, accessToken: string) {
+    const appSecret = process.env.META_ADS_APP_SECRET?.trim() || process.env.META_APP_SECRET?.trim()
+    if (!appSecret) throw new Error("The Betelgeze Meta Ads App secret is not configured.")
+    const url = new URL(`https://graph.facebook.com/${META_ADS_GRAPH_VERSION}/${path}`)
+    url.searchParams.set("appsecret_proof", createHmac("sha256", appSecret).update(accessToken).digest("hex"))
+    const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${accessToken}`, accept: "application/json" },
+        cache: "no-store",
+    })
+    const payload = await response.json().catch(() => ({})) as { error?: { message?: string }; [key: string]: unknown }
+    if (!response.ok) throw new Error(payload.error?.message || `Meta rejected this connection (${response.status}). Reconnect Meta Ads and try again.`)
+    return payload
+}
+
+export async function getMetaAdsBusinessOptions(accessToken: string): Promise<{ userId: string; userName: string; businesses: MetaAdsBusinessOption[] }> {
+    const [user, businessPayload] = await Promise.all([
+        metaAdsGet("me?fields=id,name", accessToken),
+        metaAdsGet("me/businesses?fields=id,name,verification_status&limit=200", accessToken),
+    ])
+    if (typeof user.id !== "string") throw new Error("Meta authorized the account but did not return its user identity.")
+    const businesses = Array.isArray(businessPayload.data) ? businessPayload.data.flatMap((item): MetaAdsBusinessOption[] => {
+        if (!item || typeof item !== "object") return []
+        const value = item as Record<string, unknown>
+        if (typeof value.id !== "string" || typeof value.name !== "string") return []
+        return [{ id: value.id, name: value.name, verificationStatus: typeof value.verification_status === "string" ? value.verification_status : null }]
+    }) : []
+    return { userId: user.id, userName: typeof user.name === "string" ? user.name : "Facebook user", businesses }
 }
 
 async function verifyStripeCandidate(config: IntegrationConfig) {
@@ -226,6 +334,42 @@ async function verifyWhatsAppCandidate(config: IntegrationConfig) {
         verified_name: typeof phone.verified_name === "string" ? phone.verified_name : null,
         verified_at: new Date().toISOString(),
         capabilities: { phone_access: true, outbound_messages: true, webhook_subscribed: true, consent_template_approved: true },
+    }
+}
+
+async function verifyMetaAdsCandidate(config: IntegrationConfig) {
+    if (!config.access_token || !config.business_id) throw new Error("Choose the agency Business Portfolio before verifying Meta Ads.")
+    const [permissions, identity] = await Promise.all([
+        metaAdsGet("me/permissions", config.access_token),
+        getMetaAdsBusinessOptions(config.access_token),
+    ])
+    const granted = new Set(Array.isArray(permissions.data) ? permissions.data.flatMap((item) => {
+        if (!item || typeof item !== "object") return []
+        const permission = item as { permission?: unknown; status?: unknown }
+        return permission.status === "granted" && typeof permission.permission === "string" ? [permission.permission] : []
+    }) : [])
+    for (const required of ["business_management", "ads_read"]) {
+        if (!granted.has(required)) throw new Error(`Meta did not grant ${required}. Reconnect and approve the requested Business Portfolio permissions.`)
+    }
+    const business = identity.businesses.find((option) => option.id === config.business_id)
+    if (!business) throw new Error("This Facebook account no longer has access to the selected Business Portfolio.")
+    return {
+        ...integrationHint("meta_ads", {
+            ...config,
+            business_name: business.name,
+            business_verification_status: business.verificationStatus ?? "",
+            facebook_user_id: identity.userId,
+            facebook_user_name: identity.userName,
+        }),
+        business_id: business.id,
+        business_name: business.name,
+        business_verification_status: business.verificationStatus,
+        verified_at: new Date().toISOString(),
+        capabilities: {
+            business_access: true,
+            business_management: true,
+            ads_read: true,
+        },
     }
 }
 
@@ -303,6 +447,7 @@ async function verifyTwilioCandidate(config: IntegrationConfig) {
 async function verifyCandidate(provider: IntegrationProvider, config: IntegrationConfig) {
     if (provider === "stripe") return verifyStripeCandidate(config)
     if (provider === "meta_whatsapp") return verifyWhatsAppCandidate(config)
+    if (provider === "meta_ads") return verifyMetaAdsCandidate(config)
     return verifyTwilioCandidate(config)
 }
 
@@ -314,7 +459,9 @@ export async function verifyAndActivateWorkspaceIntegrationCandidate(workspaceId
             ? (hint as Record<string, unknown>).account_id
             : provider === "meta_whatsapp"
                 ? (hint as Record<string, unknown>).waba_id
-                : (hint as Record<string, unknown>).account_sid
+                : provider === "meta_ads"
+                    ? (hint as Record<string, unknown>).business_id
+                    : (hint as Record<string, unknown>).account_sid
         if (typeof externalAccountId === "string" && externalAccountId) {
             const { data: alreadyConnected, error: connectedLookupError } = await supabaseAdmin.from("workspace_integrations")
                 .select("workspace_id")
@@ -326,7 +473,7 @@ export async function verifyAndActivateWorkspaceIntegrationCandidate(workspaceId
                 .limit(1)
                 .maybeSingle()
             if (connectedLookupError) throw new Error(`Betelgeze could not confirm that this provider account is unique: ${connectedLookupError.message}`)
-            if (alreadyConnected) throw new Error(`This ${provider === "stripe" ? "Stripe" : provider === "meta_whatsapp" ? "WhatsApp" : "Twilio"} account is already connected to another Betelgeze workspace.`)
+            if (alreadyConnected) throw new Error(`This ${provider === "stripe" ? "Stripe" : provider === "meta_whatsapp" ? "WhatsApp" : provider === "meta_ads" ? "Meta Business Portfolio" : "Twilio"} account is already connected to another Betelgeze workspace.`)
         }
         const hintUpdate = await supabaseAdmin.from("workspace_integrations").update({ candidate_config_hint: hint }).eq("workspace_id", workspaceId).eq("provider", provider)
         if (hintUpdate.error) throw new Error(hintUpdate.error.message)
@@ -408,10 +555,16 @@ export async function finishConnectionAttempt(id: string, error?: string) {
 }
 
 export async function verifyWorkspaceIntegration(workspaceId: string, provider: IntegrationProvider) {
-    const config = await getWorkspaceProviderConfig(workspaceId, provider)
-    const hint = await verifyCandidate(provider, config)
-    const { error } = await supabaseAdmin.from("workspace_integrations").update({ config_hint: hint, capabilities: hint.capabilities, connection_status: "connected", last_verified_at: new Date().toISOString(), last_error: null }).eq("workspace_id", workspaceId).eq("provider", provider).eq("mode", "connected")
-    if (error) throw new Error("Could not record the successful connection check.")
+    try {
+        const config = await getWorkspaceProviderConfig(workspaceId, provider)
+        const hint = await verifyCandidate(provider, config)
+        const { error } = await supabaseAdmin.from("workspace_integrations").update({ config_hint: hint, capabilities: hint.capabilities, connection_status: "connected", last_verified_at: new Date().toISOString(), last_error: null }).eq("workspace_id", workspaceId).eq("provider", provider).eq("mode", "connected")
+        if (error) throw new Error("Could not record the successful connection check.")
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "Connection verification failed."
+        await supabaseAdmin.from("workspace_integrations").update({ connection_status: "needs_attention", last_error: message }).eq("workspace_id", workspaceId).eq("provider", provider)
+        throw error
+    }
 }
 
 export async function requireLegacyProviderAccess(workspaceId: string, provider: IntegrationProvider) {
@@ -433,6 +586,7 @@ function legacyConfig(provider: IntegrationProvider): IntegrationConfig {
         consent_template_name: process.env.META_WHATSAPP_CONSENT_TEMPLATE_NAME ?? process.env.META_WHATSAPP_ONBOARDING_TEMPLATE_NAME ?? "",
         consent_template_language: process.env.META_WHATSAPP_CONSENT_TEMPLATE_LANGUAGE ?? process.env.META_WHATSAPP_ONBOARDING_TEMPLATE_LANGUAGE ?? "en_US",
     }
+    if (provider === "meta_ads") throw new Error("Meta Ads does not support legacy credentials. Connect it from Workspace Settings.")
     throw new Error("Twilio does not have a platform legacy connection. Connect it in Workspace Settings.")
 }
 

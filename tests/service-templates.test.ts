@@ -12,7 +12,7 @@ test("the service template catalogue starts with the Meta Ads template", () => {
     assert.equal(metaAds.name, "Meta Ads")
     assert.ok(metaAds.description.length > 0)
     assert.equal(metaAds.serviceDefaults.thumbnailSrc, metaAds.thumbnail.src)
-    assert.equal(metaAds.setup.kind, "none")
+    assert.deepEqual(metaAds.setup, { kind: "connection", connectionKey: "meta_ads" })
     assert.equal(existsSync(`public${metaAds.thumbnail.src}`), true)
 })
 
@@ -21,11 +21,13 @@ test("New service opens templates and the first card reaches the preserved custo
     assert.match(servicesUi, />Add your own</)
     assert.match(servicesUi, />Create a custom service from scratch\.</)
     assert.match(servicesUi, /SERVICE_TEMPLATES\.map/)
+    assert.match(servicesUi, /onSelectTemplate\(template\)/)
     assert.match(servicesUi, /onClick=\{\(\) => setTemplatesOpen\(true\)\}/)
     assert.doesNotMatch(servicesUi, /onClick=\{\(\) => setSelectedId\("new"\)\}/)
     assert.match(servicesUi, /onCreateCustom=\{\(\) => \{ setTemplatesOpen\(false\); setSelectedId\("new"\) \}\}/)
     assert.match(servicesUi, /initialServiceId && initialServiceId !== "new"/)
     assert.match(servicesUi, /selectedId === "new" \? blankService\(\)/)
+    assert.match(servicesUi, /blankService\(selectedTemplate\)/)
     assert.match(servicesUi, /"Create service"/)
 })
 

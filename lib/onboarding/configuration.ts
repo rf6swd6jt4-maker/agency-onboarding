@@ -655,6 +655,8 @@ function mapServices(rows: UnknownRow[], revisions: UnknownRow[], assignments: U
                 const moduleDefinition = moduleById.get(moduleId)
                 return moduleDefinition ? [{ moduleId, moduleCode: moduleDefinition.code, moduleName: moduleDefinition.name, sortOrder }] : []
             }),
+            templateId: text(definition.templateId, definition.template_id) ?? null,
+            requiredConnectionKeys: array(definition.requiredConnectionKeys ?? definition.required_connection_keys).filter((key): key is string => typeof key === "string"),
             archiveBlockers: [...array(row.archive_blockers).filter((item): item is string => typeof item === "string"), ...(computedBlockers.get(text(row.id) ?? "") ?? [])],
             lastEditedAt: text(revision.updated_at, revision.created_at, row.updated_at) ?? null,
         }

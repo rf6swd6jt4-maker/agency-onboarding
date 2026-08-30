@@ -21,7 +21,7 @@ import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import { loadWorkspaceTeams, loadWorkspaceMemberProfiles } from "@/lib/teams/server"
-import { INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
+import { BASE_INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa, updateWorkspaceUserRole } from "../users/actions"
@@ -36,6 +36,7 @@ import {
     saveWorkspaceClientPortalDomain,
     saveWorkspaceConnection,
     saveWorkspaceOnboardingDomain,
+    selectMetaAdsBusinessPortfolio,
     updateWorkspaceCoverLayout,
     updateWorkspaceName,
     uploadWorkspaceBanner,
@@ -123,10 +124,10 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
     })))
     const isOwner = role === "owner"
     const teamConversationIds = Object.fromEntries((teamConversationResult.data ?? []).flatMap((conversation) => conversation.team_id ? [[conversation.team_id, conversation.id]] : []))
-    const connections = INTEGRATION_PROVIDERS.map((provider) =>
+    const connections = [...BASE_INTEGRATION_PROVIDERS.map((provider) =>
         integrationResult.find((item) => item.provider === provider)
         ?? { provider, enabled: false, mode: "disabled", config_hint: {} }
-    ) as Parameters<typeof WorkspaceConnections>[0]["connections"]
+    ), ...integrationResult.filter((item) => item.provider === "meta_ads")] as Parameters<typeof WorkspaceConnections>[0]["connections"]
 
     return (
         <main className="min-h-screen max-w-full overflow-x-clip bg-neutral-950 px-4 pb-8 text-white sm:px-6">
@@ -237,6 +238,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                 verifyAction={verifyWorkspaceConnection.bind(null, workspace.slug)}
                                 manualAction={stageManualWorkspaceConnection.bind(null, workspace.slug)}
                                 completeWhatsAppAction={completeWhatsAppEmbeddedSignup.bind(null, workspace.slug)}
+                                selectMetaAdsBusinessAction={selectMetaAdsBusinessPortfolio.bind(null, workspace.slug)}
                                 verifyPendingAction={verifyPendingWorkspaceConnection.bind(null, workspace.slug)}
                                 discardPendingAction={discardPendingWorkspaceConnection.bind(null, workspace.slug)}
                                 rollbackAction={rollbackWorkspaceConnection.bind(null, workspace.slug)}
