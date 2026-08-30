@@ -119,6 +119,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     let checklistCount = 0
     let videoCount = 0
     let buttonCount = 0
+    let connectionCount = 0
     const blocks = step.blocks.map((block, index): OnboardingBlock => {
         const blockName = name(block, block.kind === "header" ? "Header block" : block.kind)
         const blockId = uuid(block.id, `${location}, block “${blockName}” has damaged internal data. Reload the Builder and try publishing again. If it remains, the failure will appear in Admin Activity.`)
@@ -185,6 +186,21 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
                 } : null,
                 legacyEmbedUrl: options.allowPendingVideo ? text(block.legacyEmbedUrl, 2_000) || null : null,
                 requirement: block.requirement === "finish" ? "finish" : "none",
+                layout: layout(block),
+            }
+        }
+        if (block.kind === "connection") {
+            connectionCount += 1
+            if (connectionCount > 1) throw new Error("A step can contain only one Connection block.")
+            if (block.provider !== "meta_ads") throw new Error("That onboarding connection is not supported.")
+            return {
+                id: blockId,
+                name: name(block, "Facebook connection"),
+                kind: "connection",
+                provider: "meta_ads",
+                label: text(block.label, 120) || "Connect Facebook",
+                description: text(block.description, 1_000),
+                required: true,
                 layout: layout(block),
             }
         }

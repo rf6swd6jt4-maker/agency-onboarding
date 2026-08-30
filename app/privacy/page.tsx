@@ -32,7 +32,7 @@ const SECTIONS = [
     {
         title: "Connected Meta Business Portfolios",
         body: [
-            "A workspace owner may connect an agency-owned Meta Business Portfolio to Betelgeze. During connection, Meta may provide the Facebook user's name and identifier, the Business Portfolios they can access, portfolio identifiers and names, business verification status, granted permissions, and a time-limited access token. Betelgeze encrypts the token and does not return it to the browser.",
+            "A workspace owner may connect an agency-owned Meta Business Portfolio to Betelgeze, and a client may connect Facebook during onboarding for a specific agency relationship. During connection, Meta may provide the Facebook user's name and identifier, the Business Portfolios and advertising accounts they can access, portfolio and account identifiers and names, business verification status, granted permissions, and a time-limited access token. Betelgeze encrypts the token and does not return it to the browser.",
             "Betelgeze uses this connection only to verify portfolio access and, when enabled in the portal, read advertising account and campaign reporting data for agency services. The initial connection requests read-only advertising access and does not give Betelgeze permission to create or change ads.",
             "A workspace owner can disconnect Meta Ads in Workspace Settings. To request deletion of stored Meta connection data, email support@betelgeze.com from the workspace owner's account and identify the workspace. We will delete the stored token and connection metadata unless retention is required for security, legal, or audit purposes.",
         ],

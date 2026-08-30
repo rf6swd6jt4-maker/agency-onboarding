@@ -51,7 +51,7 @@ export function OnboardingBlocks({
     const [satisfied, setSatisfied] = useState(() => new Set(initiallySatisfied))
     const [requirementError, setRequirementError] = useState<string | null>(null)
     const formBlock = blocks.find((block) => block.kind === "form")
-    const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required))
+    const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "connection")
     const unsatisfied = requiredBlocks.filter((block) => !satisfied.has(block.sessionBlockId ?? block.id))
     const form = useMemo(() => formBlock?.kind === "form" ? {
         key: stepKey,
@@ -70,10 +70,14 @@ export function OnboardingBlocks({
     } : null, [formBlock, stepKey])
     const formId = `onboarding-form-${stepKey.replace(/[^a-zA-Z0-9_-]/g, "")}`
 
-    async function satisfy(block: RuntimeBlock, kind: "button_opened" | "video_finished") {
+    async function satisfy(block: RuntimeBlock, kind: "button_opened" | "video_finished" | "meta_ads_connected") {
         const id = block.sessionBlockId ?? block.id
         if (satisfied.has(id)) return
         if (preview || !block.sessionBlockId) {
+            setSatisfied((current) => new Set(current).add(id))
+            return
+        }
+        if (kind === "meta_ads_connected") {
             setSatisfied((current) => new Set(current).add(id))
             return
         }
@@ -124,6 +128,19 @@ export function OnboardingBlocks({
                         <p className="font-semibold text-[var(--onboarding-text)]">{block.title}</p>
                         <ul className="mt-4 space-y-2 text-sm leading-6 text-[var(--onboarding-text)]">{items.length ? items.map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span aria-hidden="true" className="font-semibold text-[var(--onboarding-primary)]">✓</span><span>{item}</span></li>) : <li className="text-[var(--onboarding-muted)]">No onboarding modules assigned yet.</li>}</ul>
                         {block.footer ? <p className="mt-4 text-sm leading-6 text-[var(--onboarding-muted)]">{block.footer}</p> : null}
+                    </div>
+                </BlockFrame>
+            }
+            if (block.kind === "connection") {
+                const requirementId = block.sessionBlockId ?? block.id
+                const connected = satisfied.has(requirementId)
+                const href = preview || !block.sessionBlockId ? undefined : `/api/onboarding/session/${encodeURIComponent(token)}/meta-ads/start?block=${encodeURIComponent(block.sessionBlockId)}`
+                return <BlockFrame key={block.id} block={block}>
+                    <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page)] p-5">
+                        <p className="font-semibold text-[var(--onboarding-text)]">Facebook Ads</p>
+                        {block.description ? <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted)]">{block.description}</p> : null}
+                        {connected ? <div className="mt-4 inline-flex min-h-12 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-5 py-3 font-medium text-emerald-900"><span aria-hidden="true">✓</span> Facebook connected</div> : preview ? <button type="button" onClick={() => void satisfy(block, "meta_ads_connected")} className="mt-4 inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white">{block.label}</button> : <a href={href} className="mt-4 inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white">{block.label}</a>}
+                        {!connected && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">Connect Facebook to continue.</p> : null}
                     </div>
                 </BlockFrame>
             }

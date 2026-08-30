@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic"
 
 type PageProps = {
     params: Promise<{ token: string }>
-    searchParams: Promise<{ step?: string; payment?: string; reason?: string }>
+    searchParams: Promise<{ step?: string; payment?: string; reason?: string; meta?: string; connection_reason?: string }>
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
@@ -35,7 +35,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
 export default async function CanonicalSessionPage({ params, searchParams }: PageProps) {
     const { token } = await params
-    const { step: requestedStepKey, payment: paymentResult, reason: paymentReason } = await searchParams
+    const { step: requestedStepKey, payment: paymentResult, reason: paymentReason, meta: metaResult, connection_reason: connectionReason } = await searchParams
     const requestHeaders = await headers()
     const customOnboardingDomain = requestHeaders.get("x-betelgeze-custom-onboarding-domain")
     const resolved = await getCanonicalSessionByToken(token)
@@ -163,7 +163,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                 initialResponse={initialResponse}
                 locked={stepIsLocked}
                 allowEditRequest={session.status === "active" && completedKeys.has(currentStep.key)}
-                notice={migrationNotice ? (
+                notice={metaResult === "connected" ? <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">Facebook is connected. You can continue onboarding.</div> : metaResult === "error" ? <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">{connectionReason || "Facebook could not be connected. Please try again."}</div> : migrationNotice ? (
                     <OnboardingSessionNotice
                         token={token}
                         noticeId={migrationNotice.id}

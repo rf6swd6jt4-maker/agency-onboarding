@@ -46,6 +46,10 @@ function encrypt(config: IntegrationConfig) {
     return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64")
 }
 
+export function encryptIntegrationCredential(config: IntegrationConfig) {
+    return encrypt(cleanConfig(config))
+}
+
 export function decryptWorkspaceIntegration(value: string): IntegrationConfig {
     const payload = Buffer.from(value, "base64")
     const iv = payload.subarray(0, 12)
@@ -171,6 +175,16 @@ export type MetaAdsBusinessOption = {
     verificationStatus: string | null
 }
 
+export type MetaAdsAdAccountOption = {
+    id: string
+    accountId: string
+    name: string
+    status: number | null
+    currency: string | null
+    businessId: string | null
+    businessName: string | null
+}
+
 function metaAdsBusinessOptions(config: IntegrationConfig): MetaAdsBusinessOption[] {
     try {
         const parsed = JSON.parse(config.business_options || "[]") as unknown
@@ -282,6 +296,25 @@ export async function getMetaAdsBusinessOptions(accessToken: string): Promise<{ 
         return [{ id: value.id, name: value.name, verificationStatus: typeof value.verification_status === "string" ? value.verification_status : null }]
     }) : []
     return { userId: user.id, userName: typeof user.name === "string" ? user.name : "Facebook user", businesses }
+}
+
+export async function getMetaAdsAdAccountOptions(accessToken: string): Promise<MetaAdsAdAccountOption[]> {
+    const payload = await metaAdsGet("me/adaccounts?fields=id,account_id,name,account_status,currency,business{id,name}&limit=200", accessToken)
+    return Array.isArray(payload.data) ? payload.data.flatMap((item): MetaAdsAdAccountOption[] => {
+        if (!item || typeof item !== "object") return []
+        const value = item as Record<string, unknown>
+        const business = value.business && typeof value.business === "object" ? value.business as Record<string, unknown> : null
+        if (typeof value.id !== "string" || typeof value.name !== "string") return []
+        return [{
+            id: value.id,
+            accountId: typeof value.account_id === "string" ? value.account_id : value.id.replace(/^act_/, ""),
+            name: value.name,
+            status: typeof value.account_status === "number" ? value.account_status : null,
+            currency: typeof value.currency === "string" ? value.currency : null,
+            businessId: typeof business?.id === "string" ? business.id : null,
+            businessName: typeof business?.name === "string" ? business.name : null,
+        }]
+    }) : []
 }
 
 async function verifyStripeCandidate(config: IntegrationConfig) {

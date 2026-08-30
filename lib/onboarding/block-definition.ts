@@ -76,7 +76,15 @@ export type ButtonBlock = BlockBase & {
     openInSameTab?: boolean
 }
 
-export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock
+export type ConnectionBlock = BlockBase & {
+    kind: "connection"
+    provider: "meta_ads"
+    label: string
+    description: string
+    required: true
+}
+
+export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock | ConnectionBlock
 
 export type OnboardingStepV2 = {
     id: string
@@ -175,6 +183,19 @@ export function createVideoBlock(): VideoBlock {
 
 export function createButtonBlock(): ButtonBlock {
     return { id: stableUuid(), name: "Button", kind: "button", label: "Open link", url: "", required: false, appearance: "primary", layout: DEFAULT_BLOCK_LAYOUT }
+}
+
+export function createConnectionBlock(): ConnectionBlock {
+    return {
+        id: stableUuid(),
+        name: "Facebook connection",
+        kind: "connection",
+        provider: "meta_ads",
+        label: "Connect Facebook",
+        description: "Sign in with Facebook so we can securely connect the advertising accounts you manage.",
+        required: true,
+        layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
+    }
 }
 
 export function defaultOnboardingPaymentDefinition(): OnboardingPaymentDefinitionV2 {

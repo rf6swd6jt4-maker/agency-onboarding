@@ -392,7 +392,7 @@ test("runtime requirements persist by stable session block and gate atomic step 
     assert.match(runtimeBlocks, /disabled=\{unsatisfied\.length > 0\}/)
     assert.match(runtimePage, /satisfiedBlockIds/)
     assert.match(runtimePage, /Boolean\(currentStep\.blocks\?\.length\)/)
-    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button"\]/)
+    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button", "connection"\]/)
 })
 
 test("frozen visual previews and Settings style share the release pipeline without live draft leakage", () => {

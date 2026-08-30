@@ -298,7 +298,7 @@ export async function loadNormalizedSessionSnapshot(session: SnapshotSession) {
             const definition = row.definition && typeof row.definition === "object" && !Array.isArray(row.definition)
                 ? row.definition as unknown as OnboardingBlock
                 : null
-            if (!definition || !["header", "estimate", "form", "checklist", "video", "button"].includes(String(definition.kind))) continue
+            if (!definition || !["header", "estimate", "form", "checklist", "video", "button", "connection"].includes(String(definition.kind))) continue
             const stepId = String(row.session_step_id)
             blocksByStep.set(stepId, [...(blocksByStep.get(stepId) ?? []), {
                 ...definition,
