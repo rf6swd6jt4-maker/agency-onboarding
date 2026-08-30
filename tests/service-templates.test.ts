@@ -43,4 +43,5 @@ test("Services uses the shared responsive list anatomy", () => {
     assert.doesNotMatch(servicesUi, />Service<\/span>/)
     assert.match(servicesUi, /sm:flex-row sm:items-end sm:justify-between/)
     assert.match(servicesUi, /w-full shrink-0[\s\S]*sm:w-auto/)
+    assert.match(servicesUi, /settings\/services\/\$\{encodeURIComponent\(service\.id\)\}/)
 })

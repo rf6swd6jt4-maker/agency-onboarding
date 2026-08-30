@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { createPortal } from "react-dom"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import { saveOnboardingService, setOnboardingServiceState } from "@/app/[workspaceSlug]/settings/service-actions"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone } from "@/components/detail"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
@@ -138,12 +139,13 @@ function ServiceTemplatesModal({ onClose, onCreateCustom, onSelectTemplate }: { 
     </div>
 }
 
-function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose }: {
+export function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose, presentation = "dialog" }: {
     workspaceSlug: string
     service: OnboardingServiceDefinition
     assignees: OnboardingAssigneeOption[]
     schemaReady: boolean
-    onClose: () => void
+    onClose?: () => void
+    presentation?: "dialog" | "page"
 }) {
     const router = useRouter()
     const [draft, setDraft] = useState(service)
@@ -158,15 +160,20 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
     const parsedRecurringPriceCents = draft.serviceType === "retainer" ? Math.max(0, Math.round((Number(recurringPrice) || 0) * 100)) : 0
     const effectiveDraft = { ...draft, defaultUpfrontPriceCents: parsedUpfrontPriceCents, defaultRecurringPriceCents: parsedRecurringPriceCents }
     const dirty = JSON.stringify(effectiveDraft) !== JSON.stringify(service)
+    const closeEditor = useCallback(() => {
+        if (onClose) onClose()
+        else router.push(`/${encodeURIComponent(workspaceSlug)}/settings#services`)
+    }, [onClose, router, workspaceSlug])
 
     useEffect(() => {
+        if (presentation !== "dialog") return
         const hostDocument = editorRef.current?.ownerDocument ?? document
         const origin = hostDocument.activeElement instanceof HTMLElement ? hostDocument.activeElement : null
         const previousOverflow = hostDocument.body.style.overflow
         const handleKey = (event: KeyboardEvent) => {
             if (event.key === "Escape") {
                 event.preventDefault()
-                onClose()
+                closeEditor()
                 return
             }
             if (event.key !== "Tab" || !editorRef.current) return
@@ -185,7 +192,7 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
             hostDocument.removeEventListener("keydown", handleKey)
             origin?.focus()
         }
-    }, [onClose])
+    }, [closeEditor, presentation])
 
     function run(operation: () => Promise<{ ok: boolean; error?: string }>) {
         setError(null)
@@ -193,7 +200,7 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
             const outcome = await operation()
             if (!outcome.ok) { setError(outcome.error ?? "The service could not be saved."); return }
             router.refresh()
-            onClose()
+            closeEditor()
         })
     }
 
@@ -242,12 +249,12 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
         || (draft.serviceType === "retainer" && (!draft.recurringName.trim() || parsedRecurringPriceCents < 1))
         || (service.state === "active" && !dirty && Boolean(service.id))
 
-    return <div className="fixed inset-0 z-[140] flex items-center justify-center bg-black/70 p-3 text-white backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <section ref={editorRef} role="dialog" aria-modal="true" aria-labelledby="service-editor-title" className="flex max-h-[min(92dvh,54rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
-            <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-6">
+    return <div className={presentation === "dialog" ? "fixed inset-0 z-[140] flex items-center justify-center bg-black/70 p-3 text-white backdrop-blur-sm" : "mt-5 text-white"} onMouseDown={presentation === "dialog" ? (event) => { if (event.target === event.currentTarget) closeEditor() } : undefined}>
+        <section ref={editorRef} role={presentation === "dialog" ? "dialog" : undefined} aria-modal={presentation === "dialog" ? true : undefined} aria-labelledby={presentation === "dialog" ? "service-editor-title" : undefined} className={presentation === "dialog" ? "flex max-h-[min(92dvh,54rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70" : "overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950"}>
+            {presentation === "dialog" ? <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-6">
                 <div className="min-w-0 flex-1"><p className="text-xs font-medium text-neutral-500">{service.id ? `Revision ${service.version} · ${service.code}` : "Service catalogue"}</p><h2 id="service-editor-title" className="mt-1 truncate text-xl font-semibold">{service.id ? service.name : "New service"}</h2></div>
-                <button ref={closeRef} type="button" onClick={onClose} aria-label="Close service editor" className="inline-flex h-9 w-9 items-center justify-center text-xl text-neutral-500 hover:text-white">×</button>
-            </header>
+                <button ref={closeRef} type="button" onClick={closeEditor} aria-label="Close service editor" className="inline-flex h-9 w-9 items-center justify-center text-xl text-neutral-500 hover:text-white">×</button>
+            </header> : null}
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
                 {!schemaReady ? <p className="mb-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-100">The editable catalogue schema is not available yet. Existing services remain visible but read-only.</p> : null}
@@ -304,13 +311,24 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
             </div>
 
             <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-neutral-800 bg-neutral-950 px-4 py-3 sm:px-6">
-                {service.id && service.state === "active" ? <button type="button" disabled={pending || dirty} onClick={() => changeState("retired")} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-30">Retire</button> : null}
-                {service.id && service.state === "retired" ? <button type="button" disabled={pending || dirty || Boolean(service.archiveBlockers.length)} onClick={() => changeState("archived")} className="h-9 px-2 text-sm text-red-300 hover:text-red-200 disabled:opacity-30">Archive</button> : null}
+                {presentation === "dialog" && service.id && service.state === "active" ? <button type="button" disabled={pending || dirty} onClick={() => changeState("retired")} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-30">Retire</button> : null}
+                {presentation === "dialog" && service.id && service.state === "retired" ? <button type="button" disabled={pending || dirty || Boolean(service.archiveBlockers.length)} onClick={() => changeState("archived")} className="h-9 px-2 text-sm text-red-300 hover:text-red-200 disabled:opacity-30">Archive</button> : null}
                 {service.id && service.state === "archived" ? <button type="button" disabled={pending} onClick={() => changeState("retired")} className="h-9 px-2 text-sm text-neutral-300 hover:text-white disabled:opacity-30">Restore as Retired</button> : null}
-                <button type="button" onClick={onClose} className="ml-auto h-9 px-3 text-sm text-neutral-400 hover:text-white">Cancel</button>
+                <button type="button" onClick={closeEditor} className="ml-auto h-9 px-3 text-sm text-neutral-400 hover:text-white">Cancel</button>
                 <button type="button" disabled={saveDisabled} onClick={save} className="h-9 rounded-lg bg-white px-4 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40">{pending ? "Saving…" : !service.id ? "Create service" : service.state === "retired" ? "Save and reactivate" : "Save new revision"}</button>
             </footer>
         </section>
+        {presentation === "page" && service.id && service.state !== "archived" ? <DetailDangerZone>
+            {service.state === "active" ? <DetailDangerAction
+                title="Retire service"
+                description="Removes this service from new sales while preserving existing relationships and revision history."
+                control={<DetailDangerButton type="button" disabled={pending || dirty} onClick={() => changeState("retired")}>Retire service</DetailDangerButton>}
+            /> : <DetailDangerAction
+                title="Archive service"
+                description={service.archiveBlockers.length ? "Resolve the listed dependencies before archiving this retired service." : "Removes this retired service from the catalogue while preserving its revision history."}
+                control={<DetailDangerButton type="button" disabled={pending || dirty || Boolean(service.archiveBlockers.length)} onClick={() => changeState("archived")}>Archive service</DetailDangerButton>}
+            />}
+        </DetailDangerZone> : null}
     </div>
 }
 
@@ -346,7 +364,7 @@ export function ServiceCatalogue({ workspaceSlug, services, assignees, schemaRea
             {services.map((service) => {
                 const status = serviceStatus(service.state)
                 const assignee = service.defaultAssigneeId ? assigneeById.get(service.defaultAssigneeId) : null
-                const href = `?service=${encodeURIComponent(service.id)}#services`
+                const href = `/${encodeURIComponent(workspaceSlug)}/settings/services/${encodeURIComponent(service.id)}`
                 const actions = [{ label: "Edit service", href }]
                 const description = service.description || (service.serviceType === "retainer" ? service.recurringName : "No description")
                 return <ListItem key={service.id}>

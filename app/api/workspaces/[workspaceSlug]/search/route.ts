@@ -240,7 +240,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
                 const revision = latestByService.get(item.id)
                 const name = revision?.name ?? item.internal_code
                 return includesQuery([item.id, item.internal_code, name, revision?.description], query) ? [{ item, revision, name }] : []
-            }).slice(0, 6)) results.push(result(`onboarding-service-${service.item.id}`, "Service", service.name, service.revision?.description ?? `${service.item.state} service`, `/${workspace.slug}/settings?service=${encodeURIComponent(service.item.id)}#services`, { path: `${workspace.name} > Settings > Services`, recordId: shortId(service.item.id) }))
+            }).slice(0, 6)) results.push(result(`onboarding-service-${service.item.id}`, "Service", service.name, service.revision?.description ?? `${service.item.state} service`, `/${workspace.slug}/settings/services/${encodeURIComponent(service.item.id)}`, { path: `${workspace.name} > Settings > Services`, recordId: shortId(service.item.id) }))
         }
     }
 

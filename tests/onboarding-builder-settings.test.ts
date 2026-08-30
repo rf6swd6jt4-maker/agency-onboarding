@@ -293,7 +293,7 @@ test("private search includes dynamic services and modules without weakening the
     assert.match(searchRoute, /if \(canAccessPrivatePanels\)[\s\S]*from\("onboarding_modules"\)/)
     assert.match(searchRoute, /from\("onboarding_services"\)/)
     assert.match(searchRoute, /onboarding-builder\?module=/)
-    assert.match(searchRoute, /settings\?service=/)
+    assert.match(searchRoute, /settings\/services\/\$\{encodeURIComponent\(service\.item\.id\)\}/)
     assert.match(searchRoute, /revision_number, status, definition/)
     assert.match(searchRoute, /admin\/activity\/\$\{event\.id\}/)
     assert.doesNotMatch(searchRoute, /event\.source_href \?\? `\/\$\{workspace\.slug\}\/admin\/activity`/)
