@@ -90,8 +90,7 @@ export function workspaceRouteIsRecordDetail(value: string, workspaceSlug: strin
     if (segments.length === 2 && ["relationships", "onboarding", "work", "work-items", "assets"].includes(segments[0])) return true
     return segments.length === 3
         && ((segments[0] === "leadgen" && segments[1] === "poll")
-            || (segments[0] === "admin" && ["activity", "okrs"].includes(segments[1]))
-            || (segments[0] === "settings" && segments[1] === "services"))
+            || (segments[0] === "admin" && ["activity", "okrs"].includes(segments[1])))
 }
 
 export function workspaceTabFrameMatchesUrl(actualValue: string, desiredValue: string, tabId: string, origin: string) {

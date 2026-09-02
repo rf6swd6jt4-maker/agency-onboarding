@@ -293,15 +293,17 @@ test("private search includes dynamic services and modules without weakening the
     assert.match(searchRoute, /if \(canAccessPrivatePanels\)[\s\S]*from\("onboarding_modules"\)/)
     assert.match(searchRoute, /from\("onboarding_services"\)/)
     assert.match(searchRoute, /onboarding-builder\?module=/)
-    assert.match(searchRoute, /settings\/services\/\$\{encodeURIComponent\(service\.item\.id\)\}/)
+    assert.match(searchRoute, /settings\?service=\$\{encodeURIComponent\(service\.item\.id\)\}#services/)
     assert.match(searchRoute, /revision_number, status, definition/)
     assert.match(searchRoute, /admin\/activity\/\$\{event\.id\}/)
     assert.doesNotMatch(searchRoute, /event\.source_href \?\? `\/\$\{workspace\.slug\}\/admin\/activity`/)
 })
 
-test("Services uses the canonical List while non-list authoring controls keep their own surfaces", () => {
-    assert.match(servicesUi, /components\/list\/List/)
+test("Services and non-list authoring controls keep Settings-specific surfaces", () => {
+    assert.doesNotMatch(servicesUi, /components\/list\/List/)
     for (const source of [onboardingUi, brandingUi, builderUi]) assert.doesNotMatch(source, /components\/list\/List/)
+    assert.match(servicesUi, /role="list" aria-label="Services"/)
+    assert.match(servicesUi, /<ServiceStatusSummary services=\{services\}/)
     assert.match(servicesUi, /SquarePill tone="yellow">Test/)
     assert.match(onboardingUi, /OnboardingBuilderLauncher/)
     assert.match(builderWindowControls, /Open Onboarding Builder/)
