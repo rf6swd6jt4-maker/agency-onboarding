@@ -7,10 +7,11 @@ export default async function WorkspacesRedirectPage() {
     const supabase = await createSupabaseServerClient()
     const user = await requireAal2User(supabase)
 
-    const { data: memberships } = await supabaseAdmin
+    const { data: memberships, error: membershipsError } = await supabaseAdmin
         .from("workspace_memberships")
-        .select("workspaces!inner(slug, status)")
+        .select("workspaces!workspace_memberships_workspace_id_fkey(slug, status)")
         .eq("user_id", user.id)
+    if (membershipsError) throw new Error("Could not load workspace memberships.", { cause: membershipsError })
 
     const active = (memberships ?? []).filter(
         (membership) =>

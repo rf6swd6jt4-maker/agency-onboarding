@@ -16,12 +16,13 @@ export async function GET(_: Request, context: { params: Promise<{ workspaceSlug
     ])
     if (membershipError || !targetMembership) return Response.json({ error: "Profile not found." }, { status: 404 })
     const currentWorkspaceIds = (currentMemberships ?? []).map((membership) => membership.workspace_id)
-    const [{ data: profile, error: profileError }, { data: authResult }, { data: targetMemberships }] = await Promise.all([
+    const [{ data: profile, error: profileError }, { data: authResult }, { data: targetMemberships, error: targetMembershipsError }] = await Promise.all([
         supabaseAdmin.from("user_profiles").select("username, display_name, avatar_path").eq("user_id", userId).maybeSingle(),
         supabaseAdmin.auth.admin.getUserById(userId),
-        currentWorkspaceIds.length ? supabaseAdmin.from("workspace_memberships").select("workspace_id, workspaces!inner(name, slug, status)").eq("user_id", userId).in("workspace_id", currentWorkspaceIds) : Promise.resolve({ data: [], error: null }),
+        currentWorkspaceIds.length ? supabaseAdmin.from("workspace_memberships").select("workspace_id, workspaces!workspace_memberships_workspace_id_fkey(name, slug, status)").eq("user_id", userId).in("workspace_id", currentWorkspaceIds) : Promise.resolve({ data: [], error: null }),
     ])
     if (profileError || !profile || !authResult.user) return Response.json({ error: "Profile not found." }, { status: 404 })
+    if (targetMembershipsError) return Response.json({ error: "Could not load shared workspaces." }, { status: 503 })
     const isSelf = userId === user.id
     return Response.json({
         profile: {

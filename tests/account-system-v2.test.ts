@@ -209,6 +209,21 @@ test("database and server guards reject AAL1 workspace access", () => {
     assert.match(aal, /export async function requireAal2User/)
 })
 
+test("workspace membership embeds remain explicit after service-scoped access adds another relationship", () => {
+    const accountPage = source("app/users/[username]/page.tsx")
+    const workspaceRedirect = source("app/workspaces/page.tsx")
+    const memberProfile = source("app/api/workspaces/[workspaceSlug]/members/[userId]/profile/route.ts")
+    for (const route of [accountPage, workspaceRedirect, memberProfile]) {
+        assert.match(route, /workspaces!workspace_memberships_workspace_id_fkey/)
+    }
+    assert.doesNotMatch(accountPage, /from\("workspace_memberships"\)\.select\("workspace_id, role, workspaces!inner/)
+    assert.doesNotMatch(workspaceRedirect, /\.select\("workspaces!inner\(slug, status\)"\)/)
+    assert.doesNotMatch(memberProfile, /from\("workspace_memberships"\)\.select\("workspace_id, workspaces!inner/)
+    assert.match(accountPage, /if \(membershipsResult\.error\) throw new Error/)
+    assert.match(workspaceRedirect, /if \(membershipsError\) throw new Error/)
+    assert.match(memberProfile, /if \(targetMembershipsError\).*status: 503/)
+})
+
 test("guarded reset defaults to rollback and requires exact identities", () => {
     const cleanup = source("scripts/reset-account-system-v2.sql")
     assert.match(cleanup, /\\set execute false/)

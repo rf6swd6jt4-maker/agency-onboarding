@@ -23,10 +23,11 @@ export default async function UserAccountPage({ params }: PageProps) {
 
     const [avatarSrc, membershipsResult, invitationsResult, factorResult] = await Promise.all([
         profile.avatar_path ? createUploadSignedUrl(profile.avatar_path) : Promise.resolve(null),
-        supabaseAdmin.from("workspace_memberships").select("workspace_id, role, workspaces!inner(name, slug, status)").eq("user_id", user.id),
+        supabaseAdmin.from("workspace_memberships").select("workspace_id, role, workspaces!workspace_memberships_workspace_id_fkey(name, slug, status)").eq("user_id", user.id),
         supabaseAdmin.from("workspace_invitations").select("id, role, expires_at, delivery_status, workspaces!inner(name, slug)").eq("email", user.email.toLowerCase()).is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString()),
         supabaseAdmin.auth.admin.mfa.listFactors({ userId: user.id }),
     ])
+    if (membershipsResult.error) throw new Error("Could not load workspace memberships.", { cause: membershipsResult.error })
     const activeMemberships = (membershipsResult.data ?? []).filter((membership) => (membership.workspaces as unknown as { status: string }).status === "active")
     const factors = factorResult.data?.factors.filter((factor) => factor.status === "verified") ?? []
 
