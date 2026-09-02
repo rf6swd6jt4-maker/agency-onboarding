@@ -54,17 +54,45 @@ test("invitation failures stay inline instead of crashing Settings", () => {
     const form = source("components/admin/WorkspaceInvitationForm.tsx")
     const settings = source("app/[workspaceSlug]/settings/page.tsx")
 
-    assert.match(form, /useActionState\(action, \{\}\)/)
-    assert.match(form, /data-global-loading="false"/)
-    assert.match(form, /role=\{state\.ok \? "status" : "alert"\}/)
-    assert.match(settings, /<WorkspaceInvitationForm action=\{inviteWorkspaceUser\.bind\(null, workspace\.slug\)\}/)
+    assert.match(form, /setSubmitError\(result\.message\)/)
+    assert.match(form, /role="alert"/)
+    assert.match(settings, /<WorkspaceInvitationForm workspaceSlug=\{workspace\.slug\} action=\{inviteWorkspaceUser\.bind\(null, workspace\.slug\)\}/)
 })
 
 test("Staff invitations cannot be submitted without an assigned service", () => {
     const form = source("components/admin/WorkspaceInvitationForm.tsx")
     const action = source("app/[workspaceSlug]/users/actions.ts")
 
-    assert.match(form, /disabled=\{role === "staff" && selectedServiceIds\.size === 0\}/)
+    assert.match(
+        form,
+        /const invitationDisabled = pending \|\| \(role === "staff" && selectedServiceIds\.size === 0\)/,
+    )
+    assert.match(form, /disabled=\{invitationDisabled\}/)
     assert.match(action, /requestedRole === "staff" && !serviceIds\.length/)
     assert.match(action, /Choose at least one service for this Staff member\./)
+})
+
+test("Add user is a lookup-first popup with account and pending invitation statuses", () => {
+    const form = source("components/admin/WorkspaceInvitationForm.tsx")
+    const lookup = source("app/api/workspaces/[workspaceSlug]/users/lookup/route.ts")
+    const migration = source("supabase/migrations/20260903090000_workspace_invitation_target_lookup.sql")
+
+    assert.match(form, />Add user</)
+    assert.match(form, /fixed inset-0[\s\S]*items-center justify-center/)
+    assert.match(form, /Username or email/)
+    assert.match(form, /On Betelgeze/)
+    assert.match(form, /Not on Betelgeze/)
+    assert.match(form, /Invite to BE pending/)
+    assert.match(form, /Invite to workspace pending/)
+    assert.match(form, /"Invite to workspace" \| "Invite to Betelgeze"/)
+    assert.match(form, /WorkspaceSuccessNotice label=\{notice\}/)
+    assert.match(form, /setNotice\("Invitation email sent"\)/)
+    assert.match(lookup, /requireWorkspace\(workspaceSlug, "admin"\)/)
+    assert.match(lookup, /lookup_workspace_invitation_target/)
+    assert.match(migration, /join auth\.users account on account\.id = profile\.user_id/)
+    assert.match(migration, /lower\(account\.email\) = v_identifier/)
+    assert.match(migration, /v_actor_role is null or v_actor_role not in \('owner', 'admin'\)/)
+    assert.match(migration, /invitation\.accepted_at is null/)
+    assert.match(migration, /invitation\.expires_at > now\(\)/)
+    assert.match(migration, /grant execute on function public\.lookup_workspace_invitation_target\(uuid, uuid, text\) to service_role/)
 })

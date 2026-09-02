@@ -10,8 +10,8 @@ import { accountFlowV2Enabled } from "@/lib/auth/account-flow"
 import { authOrigin } from "@/lib/auth/origin"
 
 export type WorkspaceInvitationActionState = {
-    ok?: boolean
-    message?: string
+    ok: boolean
+    message: string
 }
 
 function invitedRole(value: FormDataEntryValue | null) {
@@ -28,11 +28,11 @@ async function requireUserManager(slug: string) {
     return requireWorkspace(slug, "admin")
 }
 
-export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitationActionState, formData: FormData): Promise<WorkspaceInvitationActionState> {
+export async function inviteWorkspaceUser(slug: string, formData: FormData): Promise<WorkspaceInvitationActionState> {
     if (!accountFlowV2Enabled()) return { ok: false, message: "New account invitations are paused until Account Flow V2 is enabled." }
     const { workspace, role, user } = await requireUserManager(slug)
     const email = String(formData.get("email") ?? "").trim().toLowerCase()
-    if (!email) return { ok: false, message: "Enter an email address." }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 320) return { ok: false, message: "Enter a valid email address." }
     let requestedRole: "staff" | "admin"
     try {
         requestedRole = invitedRole(formData.get("role"))
@@ -46,6 +46,15 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
     if (requestedRole === "staff" && !serviceIds.length) {
         return { ok: false, message: "Choose at least one service for this Staff member." }
     }
+    const { data: targetState, error: targetStateError } = await supabaseAdmin.rpc("lookup_workspace_invitation_target", {
+        p_workspace_id: workspace.id,
+        p_actor_user_id: user.id,
+        p_identifier: email,
+    })
+    if (targetStateError || !targetState) return { ok: false, message: "Betelgeze could not confirm that invitation target. Search for them again." }
+    const currentTarget = targetState as { is_workspace_member?: unknown; invitation_pending?: unknown }
+    if (currentTarget.is_workspace_member === true) return { ok: false, message: "That person is already in this workspace." }
+    if (currentTarget.invitation_pending === true) return { ok: false, message: "An invitation for that person is already pending." }
 
     const proposedInvitationId = crypto.randomUUID()
     const invitationToken = createAccountToken()
@@ -116,7 +125,7 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
         return { ok: false, message: `The invitation was saved, but its email failed because ${reason}. Resend it after the connection is fixed.` }
     }
     revalidatePath(`/${slug}/settings`)
-    return { ok: true, message: `Invitation accepted by Resend for ${email}. Delivery is being tracked.` }
+    return { ok: true, message: "Invitation email sent." }
 }
 
 export async function removeWorkspaceUser(slug: string, formData: FormData) {

@@ -269,7 +269,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Users"
                             description="Invite teammates and control workspace access."
                         >
-                            <WorkspaceInvitationForm action={inviteWorkspaceUser.bind(null, workspace.slug)} canInviteAdmins={isOwner} services={activeServiceOptions} />
+                            <WorkspaceInvitationForm workspaceSlug={workspace.slug} action={inviteWorkspaceUser.bind(null, workspace.slug)} canInviteAdmins={isOwner} services={activeServiceOptions} />
                             <div className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
                                 <PendingWorkspaceInvitations workspaceId={workspace.id} removeAction={removeWorkspaceInvitation.bind(null, workspace.slug)} services={serviceOptions} />
                                 {users.map(({ user: workspaceUser, role: assignedRole }) => (
