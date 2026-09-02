@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { loadCommunicationMessages } from "@/lib/communications/server"
 import { deleteOnboardingUploads, prepareStoredCommunicationSticker, storeCommunicationSticker } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -74,7 +74,7 @@ async function saveStickerFromMessage(workspaceId: string, userId: string, messa
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace } = await requireWorkspace(workspaceSlug)
+    const { workspace } = await requireWorkspacePanel(workspaceSlug, "communications")
     const { data, error } = await supabaseAdmin
         .from("communication_stickers")
         .select("id, file_name, storage_path, size_bytes, created_at")
@@ -86,7 +86,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ wo
 
 export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     if (request.headers.get("content-type")?.toLowerCase().includes("application/json")) {
         const input = await request.json().catch(() => null) as { messageId?: unknown } | null
         const messageId = typeof input?.messageId === "string" ? input.messageId : ""

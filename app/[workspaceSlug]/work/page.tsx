@@ -14,7 +14,7 @@ import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { listWorkQueueItems, nativeItemHref, workspaceHref } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { accessibleRelationshipIds, accessibleWorkItemIds, requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -25,9 +25,14 @@ type PageProps = {
 
 export default async function FulfilmentPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, access } = await requireWorkspacePanel(workspaceSlug, "fulfilment")
+    const allowedRelationshipIds = await accessibleRelationshipIds(access)
+    const allowedWorkItemIds = await accessibleWorkItemIds(access, allowedRelationshipIds)
     const allItems = await listWorkQueueItems(workspace.slug, workspace.id)
-    const items = allItems.filter((item) => item.lifecycle_phase === "fulfilment" || item.relationship?.lifecycle_phase === "fulfilment")
+    const items = allItems.filter((item) => (
+        (!allowedWorkItemIds || allowedWorkItemIds.has(item.id) || Boolean(item.synthesized && item.relationship_id && allowedRelationshipIds?.has(item.relationship_id)))
+        && (item.lifecycle_phase === "fulfilment" || item.relationship?.lifecycle_phase === "fulfilment")
+    ))
     const fulfilmentRelationshipIds = new Set(items.map((item) => item.relationship_id).filter(Boolean))
     const blockedItems = items.filter((item) => item.status === "blocked")
     const dueItems = items.filter((item) => item.due_date && new Date(item.due_date) <= new Date())

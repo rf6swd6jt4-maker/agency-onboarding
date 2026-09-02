@@ -6,7 +6,7 @@ import { createRelationshipOnboardingSession } from "@/lib/onboarding/canonical"
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireRelationshipAccess, requireWorkspacePanel } from "@/lib/workspace-access"
 
 type MutationRpcError = { code?: string; message?: string } | null | undefined
 
@@ -20,7 +20,8 @@ function isMissingOnboardingMutationRpc(error: MutationRpcError, functionName: s
 }
 
 async function requireOnboardingManager(workspaceSlug: string, relationshipId: string) {
-    const access = await requireWorkspace(workspaceSlug)
+    const access = await requireWorkspacePanel(workspaceSlug, "onboarding")
+    await requireRelationshipAccess(access.access, relationshipId)
     if (access.role !== "owner" && access.role !== "admin") throw new Error("You do not have permission to manage onboarding")
     const { data: relationship } = await supabaseAdmin
         .from("relationships")

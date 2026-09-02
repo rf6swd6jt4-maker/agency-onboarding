@@ -20,7 +20,7 @@ import { getProgressPercentage } from "@/lib/onboarding/progress"
 import { isOnboardingStuck } from "@/lib/onboarding/stuck"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { fullyAccessibleRelationshipIds, requireRelationshipAccess, requireWorkspacePanel } from "@/lib/workspace-access"
 import { loadNormalizedSessionSnapshot } from "@/lib/onboarding/session-snapshot"
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
 
@@ -390,9 +390,12 @@ function AssetRowLink({ asset, workspaceSlug }: { asset: AssetRow; workspaceSlug
 
 export default async function OnboardingDetailPage({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role, access } = await requireWorkspacePanel(workspaceSlug, "onboarding")
+    await requireRelationshipAccess(access, relationshipId)
     const relationship = await getRelationship(workspace.id, relationshipId)
     if (!relationship) notFound()
+    const fullyAllowedRelationshipIds = await fullyAccessibleRelationshipIds(access)
+    const canOpenCompleteClientSession = !fullyAllowedRelationshipIds || fullyAllowedRelationshipIds.has(relationship.id)
 
     const [
         { data: session },
@@ -416,17 +419,30 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
             .order("created_at", { ascending: true }),
         supabaseAdmin
             .from("relationship_services")
-            .select("service_key, service_revision_id, due_date")
+            .select("service_key, service_id, service_revision_id, due_date")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
             .order("created_at", { ascending: true }),
     ])
 
+    const scopedServices = (services ?? []).filter((service) => role !== "staff" || access.allowedServiceIds.includes(service.service_id ?? ""))
     const moduleKeys = (modules ?? []).map((module) => module.module_key).filter((key): key is string => Boolean(key))
-    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, (services ?? []).map((service) => service.service_revision_id))
+    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, scopedServices.map((service) => service.service_revision_id))
     const normalizedSnapshot = session ? await loadNormalizedSessionSnapshot(session) : null
+    const scopedServiceRevisionIds = new Set(scopedServices.map((service) => service.service_revision_id).filter((id): id is string => Boolean(id)))
+    const scopedSnapshotModules = (normalizedSnapshot?.modules ?? []).filter((module) => (
+        role !== "staff"
+        || module.sourceKind === "mandatory"
+        || Boolean(module.sourceServiceRevisionId && scopedServiceRevisionIds.has(module.sourceServiceRevisionId))
+    ))
+    const scopedSnapshotModuleIds = new Set(scopedSnapshotModules.map((module) => module.id))
+    const scopedSnapshotSteps = (normalizedSnapshot?.actionableSteps ?? []).filter((step) => (
+        role !== "staff"
+        || !step.sessionModuleId
+        || scopedSnapshotModuleIds.has(step.sessionModuleId)
+    ))
     const canonicalSteps: StaffSessionStep[] = normalizedSnapshot
-        ? normalizedSnapshot.actionableSteps.map((step) => ({
+        ? scopedSnapshotSteps.map((step) => ({
             key: step.id,
             sessionStepId: step.id,
             title: step.title,
@@ -462,12 +478,16 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
         ])
         : [{ data: [] }, { data: [] }, { data: [] }]
 
-    const steps = buildStepDetails(canonicalSteps, (workItems ?? []) as WorkItemRow[], (assets ?? []) as AssetRow[], new Set((editRequests ?? []).map((request) => request.session_step_id)))
+    const scopedStepIds = new Set(canonicalSteps.map((step) => step.sessionStepId ?? step.key))
+    const scopedWorkItems = (workItems ?? []).filter((item) => role !== "staff" || scopedStepIds.has(metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")))
+    const scopedAssets = (assets ?? []).filter((asset) => role !== "staff" || scopedStepIds.has(metadataValue(asset.metadata, "session_step_id") || metadataValue(asset.metadata, "step_key")))
+    const scopedEditRequests = (editRequests ?? []).filter((request) => role !== "staff" || scopedStepIds.has(request.session_step_id))
+    const steps = buildStepDetails(canonicalSteps, scopedWorkItems as WorkItemRow[], scopedAssets as AssetRow[], new Set(scopedEditRequests.map((request) => request.session_step_id)))
     const percentage = getProgressPercentage(steps.map((step) => ({ key: step.key })), steps.filter((step) => step.status === "submitted" || step.status === "reviewed").map((step) => step.key))
     const latestActivity = [
         session?.updated_at,
-        ...(workItems ?? []).map((item) => item.updated_at ?? item.created_at),
-        ...(assets ?? []).map((asset) => asset.updated_at ?? asset.created_at),
+        ...scopedWorkItems.map((item) => item.updated_at ?? item.created_at),
+        ...scopedAssets.map((asset) => asset.updated_at ?? asset.created_at),
     ].filter((value): value is string => Boolean(value)).reduce<string | null>((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, null)
     const onboardingUrl = session ? getOnboardingUrl(workspace.slug, session.session_token, workspace.custom_onboarding_domain, workspace.custom_onboarding_domain_status === "verified") : null
     const canManage = role === "owner" || role === "admin"
@@ -488,7 +508,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                             title={relationship.primary_person_name}
                             subtitle={relationship.business_name ?? "No company saved"}
                             labels={isTest || sessionStuck ? <>{isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}{sessionStuck ? <SquarePill tone="red">Stuck</SquarePill> : null}</> : null}
-                            facts={[{ label: "assets", value: assets?.length ?? 0 }]}
+                            facts={[{ label: "assets", value: scopedAssets.length }]}
                             updated={formatRelativeTime(latestActivity ?? relationship.updated_at)}
                         />
 
@@ -497,15 +517,15 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                             <DetailField label="Status" icon="status" className="lg:border-l lg:border-neutral-900 lg:pl-8"><Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} /></DetailField>
                             <DetailField label="Services" icon="services" className="lg:col-span-2">
                                 <div className="flex flex-wrap gap-1.5">
-                                    {(services ?? []).map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
-                                    {!services?.length ? <span className="text-neutral-600">None</span> : null}
+                                    {scopedServices.map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
+                                    {!scopedServices.length ? <span className="text-neutral-600">None</span> : null}
                                 </div>
                             </DetailField>
                             <DetailField label="Modules" icon="modules" className="lg:col-span-2">
                                 <div className="flex flex-wrap gap-1.5">
-                                    {(normalizedSnapshot?.modules ?? []).map((snapshotModule) => <RoundPill key={snapshotModule.id} tone="sky">{snapshotModule.title}</RoundPill>)}
+                                    {scopedSnapshotModules.map((snapshotModule) => <RoundPill key={snapshotModule.id} tone="sky">{snapshotModule.title}</RoundPill>)}
                                     {!normalizedSnapshot && (modules ?? []).map((module) => <RoundPill key={module.module_key} tone="sky">{MODULES[module.module_key]?.title ?? module.module_key}</RoundPill>)}
-                                    {!normalizedSnapshot?.modules.length && !modules?.length ? <span className="text-neutral-600">None</span> : null}
+                                    {!scopedSnapshotModules.length && (Boolean(normalizedSnapshot) || !modules?.length) ? <span className="text-neutral-600">None</span> : null}
                                 </div>
                             </DetailField>
                         </DetailFields>
@@ -543,7 +563,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                                         revokeAction={revokeOnboardingToken.bind(null, workspace.slug, relationship.id)}
                                         rotateAction={rotateOnboardingToken.bind(null, workspace.slug, relationship.id)}
                                     />
-                                ) : onboardingUrl && !session?.token_revoked_at ? (
+                                ) : onboardingUrl && !session?.token_revoked_at && canOpenCompleteClientSession ? (
                                     <div className="grid grid-cols-2 gap-2 sm:flex">
                                         <CopyOnboardingLink path={onboardingUrl} />
                                         <a href={onboardingUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black">
@@ -551,7 +571,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                                         </a>
                                     </div>
                                 ) : (
-                                    <span className="text-sm text-neutral-500">No active session</span>
+                                    <span className="text-sm text-neutral-500">{session && !canOpenCompleteClientSession ? "The complete client session is restricted because this relationship includes other services." : "No active session"}</span>
                                 )}
                             </div>
                         </section>
@@ -584,6 +604,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                     <ClientContextPanel
                         workspaceSlug={workspace.slug}
                         relationship={relationship}
+                        allowedDestinations={role === "staff" ? ["onboarding", "fulfilment"] : undefined}
                         metrics={[
                             { label: "Progress", value: `${percentage}%` },
                             { label: "Assets", value: assets?.length ?? 0 },

@@ -1,14 +1,14 @@
 import { assertNativeConversationAccess } from "@/lib/teams/server"
 import { createSignedNativeMessageUpload, deleteOnboardingUploads } from "@/lib/onboarding/uploads"
 import { ensurePlatformDirectUploads } from "@/lib/onboarding/r2-cors"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
     if (!await assertNativeConversationAccess(conversationId, user.id, "write")) return Response.json({ error: "Conversation is unavailable or read-only." }, { status: 403 })
@@ -22,7 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
 
 export async function DELETE(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
     const storagePath = typeof input?.storagePath === "string" ? input.storagePath : ""

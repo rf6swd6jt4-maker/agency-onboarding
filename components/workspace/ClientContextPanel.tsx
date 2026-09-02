@@ -49,6 +49,7 @@ type Props = {
     workspaceSlug: string
     relationship: ContextRelationship | null
     metrics?: ContextMetric[]
+    allowedDestinations?: Array<"relationships" | "onboarding" | "fulfilment">
 }
 
 function phaseLabel(phase: string) {
@@ -63,7 +64,7 @@ function displayValue(value: string | null | undefined, fallback = "Not saved") 
     return value?.trim() || fallback
 }
 
-export function ClientContextPanel({ workspaceSlug, relationship, metrics = [] }: Props) {
+export function ClientContextPanel({ workspaceSlug, relationship, metrics = [], allowedDestinations = ["relationships", "onboarding", "fulfilment"] }: Props) {
     const searchParams = useSearchParams()
     const tabId = searchParams.get(WORKSPACE_TAB_FRAME_PARAM) ?? "standalone"
     const storageKey = useMemo(() => workspaceTabContextStorageKey(workspaceSlug, tabId), [tabId, workspaceSlug])
@@ -199,15 +200,15 @@ export function ClientContextPanel({ workspaceSlug, relationship, metrics = [] }
                 <section className="mt-5 border-t border-neutral-900 pt-4">
                     <p className="text-xs uppercase tracking-wide text-neutral-500">Open</p>
                     <div className="mt-3 grid gap-2 text-sm">
-                        <Link href={workspaceHref(workspaceSlug, `relationships/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
+                        {allowedDestinations.includes("relationships") ? <Link href={workspaceHref(workspaceSlug, `relationships/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
                             Relationship summary
-                        </Link>
-                        <Link href={workspaceHref(workspaceSlug, `onboarding/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
+                        </Link> : null}
+                        {allowedDestinations.includes("onboarding") ? <Link href={workspaceHref(workspaceSlug, `onboarding/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
                             Onboarding
-                        </Link>
-                        <Link href={workspaceHref(workspaceSlug, `work/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
+                        </Link> : null}
+                        {allowedDestinations.includes("fulfilment") ? <Link href={workspaceHref(workspaceSlug, `work/${relationship.id}`)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:border-neutral-600 hover:text-white">
                             Fulfilment
-                        </Link>
+                        </Link> : null}
                     </div>
                 </section>
             </div>

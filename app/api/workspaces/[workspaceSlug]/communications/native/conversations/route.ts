@@ -1,6 +1,6 @@
 import { loadNativeCommunications } from "@/lib/teams/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -8,14 +8,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export async function GET(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspacePanel(workspaceSlug, "communications")
     const url = new URL(request.url)
     return Response.json(await loadNativeCommunications({ workspaceId: workspace.id, workspaceSlug: workspace.slug, currentUserId: user.id, role, requestedConversationId: url.searchParams.get("conversation"), requestedDmUserId: url.searchParams.get("dm") }), { headers: { "Cache-Control": "no-store" } })
 }
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as { userId?: unknown } | null
     const targetUserId = typeof input?.userId === "string" ? input.userId : ""
     if (!UUID_PATTERN.test(targetUserId) || targetUserId === user.id) return Response.json({ error: "Choose another workspace member." }, { status: 400 })

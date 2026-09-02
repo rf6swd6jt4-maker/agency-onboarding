@@ -6,6 +6,7 @@ import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { normalizeWorkspaceRole } from "@/lib/workspaces"
 import { createOkrFromModal } from "@/app/[workspaceSlug]/admin/actions"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
+import { accessibleRelationshipIds, accessibleWorkItemIds, loadWorkspaceAccess } from "@/lib/workspace-access"
 
 type Product = "client-work" | "leadgen"
 
@@ -16,15 +17,21 @@ type Props = {
 }
 
 export async function WorkspaceTopBar({ userId, workspace }: Props) {
-    const [{ data: profile }, { data: authResult }, { data: membership }, { data: workItems }, { data: relationships }] = await Promise.all([
+    const [{ data: profile }, { data: authResult }, { data: membership }] = await Promise.all([
         supabaseAdmin.from("user_profiles").select("username, avatar_path").eq("user_id", userId).maybeSingle(),
         supabaseAdmin.auth.admin.getUserById(userId),
         supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspace.id).eq("user_id", userId).maybeSingle(),
-        supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspace.id).eq("visibility", "workspace").order("title").limit(200),
-        supabaseAdmin.from("relationships").select("id, primary_person_name, business_name").eq("workspace_id", workspace.id).order("updated_at", { ascending: false }).limit(200),
     ])
     const username = profile?.username ?? "account"
     const workspaceRole = normalizeWorkspaceRole(membership?.role) ?? "staff"
+    const access = await loadWorkspaceAccess({ workspaceId: workspace.id, workspaceSlug: workspace.slug, userId, role: workspaceRole })
+    const relationshipIds = await accessibleRelationshipIds(access)
+    const workItemIds = await accessibleWorkItemIds(access, relationshipIds)
+    let workItemsQuery = supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspace.id).eq("visibility", "workspace").order("title").limit(200)
+    let relationshipsQuery = supabaseAdmin.from("relationships").select("id, primary_person_name, business_name").eq("workspace_id", workspace.id).order("updated_at", { ascending: false }).limit(200)
+    if (workItemIds) workItemsQuery = workItemIds.size ? workItemsQuery.in("id", [...workItemIds]) : workItemsQuery.eq("id", "00000000-0000-0000-0000-000000000000")
+    if (relationshipIds) relationshipsQuery = relationshipIds.size ? relationshipsQuery.in("id", [...relationshipIds]) : relationshipsQuery.eq("id", "00000000-0000-0000-0000-000000000000")
+    const [{ data: workItems }, { data: relationships }] = await Promise.all([workItemsQuery, relationshipsQuery])
     const { data: adminMemberships } = workspaceRole === "owner" || workspaceRole === "admin"
         ? await supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", workspace.id).in("role", ["owner", "admin"]).order("created_at")
         : { data: [] }
@@ -54,6 +61,7 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
         email={authResult.user?.email ?? ""}
         avatarSrc={avatarSrc}
         workspaceRole={workspaceRole}
+        workspaceCapabilities={access.capabilities}
         leaveAction={leaveWorkspace.bind(null, username)}
         createRelationshipAction={createRelationshipFromModal.bind(null, workspace.slug)}
         createWorkItemAction={createWorkItemFromModal.bind(null, workspace.slug)}

@@ -7,7 +7,7 @@ import { communicationFileKeyForCurrentUser, createCommunicationMediaGrant } fro
 import { communicationAttachmentFromValue, MAX_COMMUNICATION_MEDIA_CAPTION_LENGTH } from "@/lib/communications/attachments"
 import { verifyClientMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 import type { CommunicationAttachment } from "@/lib/communications/types"
 
 export const runtime = "nodejs"
@@ -23,7 +23,7 @@ async function scopedRelationship(workspaceId: string, relationshipId: string) {
 
 export async function GET(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace } = await requireWorkspace(workspaceSlug)
+    const { workspace } = await requireWorkspacePanel(workspaceSlug, "communications")
     const relationshipId = request.nextUrl.searchParams.get("relationshipId") ?? ""
     const messageId = request.nextUrl.searchParams.get("messageId") ?? ""
     if (!UUID_PATTERN.test(relationshipId) || (messageId && !UUID_PATTERN.test(messageId))) return Response.json({ error: "Invalid conversation" }, { status: 400 })
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
 
 export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as { relationshipId?: unknown; body?: unknown; clientRequestId?: unknown; retry?: unknown; attachment?: unknown; replyToMessageId?: unknown; stickerId?: unknown } | null
     const relationshipId = typeof input?.relationshipId === "string" ? input.relationshipId : ""
     const clientRequestId = typeof input?.clientRequestId === "string" ? input.clientRequestId : ""

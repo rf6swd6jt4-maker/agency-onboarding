@@ -2,7 +2,7 @@ import { NextRequest } from "next/server"
 
 import { sendMetaWhatsAppReaction } from "@/lib/client-messages/meta-whatsapp"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -27,7 +27,7 @@ function providerMessageId(value: unknown) {
 
 export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as { relationshipId?: unknown; messageId?: unknown; emoji?: unknown } | null
     const relationshipId = typeof input?.relationshipId === "string" ? input.relationshipId : ""
     const messageId = typeof input?.messageId === "string" ? input.messageId : ""

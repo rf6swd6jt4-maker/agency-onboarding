@@ -3,7 +3,7 @@ import { NextRequest } from "next/server"
 import { deleteOnboardingUploads, createSignedClientMessageUpload } from "@/lib/onboarding/uploads"
 import { ensurePlatformDirectUploads } from "@/lib/onboarding/r2-cors"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -24,7 +24,7 @@ async function activeRelationship(workspaceId: string, relationshipId: string) {
 
 export async function POST(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace } = await requireWorkspace(workspaceSlug)
+    const { workspace } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as {
         relationshipId?: unknown
         name?: unknown
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace } = await requireWorkspace(workspaceSlug)
+    const { workspace } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as { relationshipId?: unknown; storagePath?: unknown } | null
     const relationshipId = typeof input?.relationshipId === "string" ? input.relationshipId : ""
     const storagePath = typeof input?.storagePath === "string" ? input.storagePath : ""

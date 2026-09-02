@@ -15,6 +15,7 @@ import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { WorkspaceAutosaveForm } from "@/components/workspace/WorkspaceAutosaveForm"
 import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
 import { AdminMfaResetButton } from "@/components/admin/AdminMfaResetButton"
+import { WorkspaceUserAccessEditor } from "@/components/admin/WorkspaceUserAccessEditor"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
@@ -102,6 +103,8 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         teamResult,
         teamPeople,
         teamConversationResult,
+        memberServiceAccessResult,
+        serviceCapabilitiesResult,
     ] = await Promise.all([
         workspace.banner_path ? createUploadSignedUrl(workspace.banner_path) : null,
         workspace.logo_path ? createUploadSignedUrl(workspace.logo_path) : null,
@@ -116,6 +119,8 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         loadWorkspaceTeams(workspace.id),
         loadWorkspaceMemberProfiles(workspace.id),
         supabaseAdmin.from("workspace_native_conversations").select("id, team_id").eq("workspace_id", workspace.id).eq("kind", "team"),
+        supabaseAdmin.from("workspace_member_service_access").select("user_id, service_id").eq("workspace_id", workspace.id),
+        supabaseAdmin.from("workspace_service_capabilities").select("service_id, capability").eq("workspace_id", workspace.id),
     ])
 
     const users = await Promise.all((membershipsResult.data ?? []).map(async (membership) => ({
@@ -123,6 +128,18 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         user: (await supabaseAdmin.auth.admin.getUserById(membership.user_id)).data.user,
     })))
     const isOwner = role === "owner"
+    const capabilitiesByService = new Map<string, string[]>()
+    for (const grant of serviceCapabilitiesResult.data ?? []) {
+        capabilitiesByService.set(grant.service_id, [...(capabilitiesByService.get(grant.service_id) ?? []), grant.capability])
+    }
+    const serviceOptions = onboardingSettings.services
+        .filter((service) => /^[0-9a-f-]{36}$/i.test(service.id))
+        .map((service) => ({ id: service.id, name: service.name, state: service.state, capabilities: capabilitiesByService.get(service.id) ?? [] }))
+    const activeServiceOptions = serviceOptions.filter((service) => service.state === "active")
+    const serviceIdsByUser = new Map<string, string[]>()
+    for (const assignment of memberServiceAccessResult.data ?? []) {
+        serviceIdsByUser.set(assignment.user_id, [...(serviceIdsByUser.get(assignment.user_id) ?? []), assignment.service_id])
+    }
     const teamConversationIds = Object.fromEntries((teamConversationResult.data ?? []).flatMap((conversation) => conversation.team_id ? [[conversation.team_id, conversation.id]] : []))
     const connections = [...BASE_INTEGRATION_PROVIDERS.map((provider) =>
         integrationResult.find((item) => item.provider === provider)
@@ -255,9 +272,9 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                             title="Users"
                             description="Invite teammates and control workspace access."
                         >
-                            <WorkspaceInvitationForm action={inviteWorkspaceUser.bind(null, workspace.slug)} canInviteAdmins={isOwner} />
+                            <WorkspaceInvitationForm action={inviteWorkspaceUser.bind(null, workspace.slug)} canInviteAdmins={isOwner} services={activeServiceOptions} />
                             <div className="mt-5 overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-900">
-                                <PendingWorkspaceInvitations workspaceId={workspace.id} removeAction={removeWorkspaceInvitation.bind(null, workspace.slug)} />
+                                <PendingWorkspaceInvitations workspaceId={workspace.id} removeAction={removeWorkspaceInvitation.bind(null, workspace.slug)} services={serviceOptions} />
                                 {users.map(({ user: workspaceUser, role: assignedRole }) => (
                                     <div key={workspaceUser?.id} className="flex flex-col gap-3 border-b border-neutral-800 p-4 last:border-0 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                                         <div>
@@ -265,17 +282,16 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                             <p className="text-sm text-neutral-500">{workspaceRoleLabel(assignedRole)}</p>
                                         </div>
                                         {normalizeWorkspaceRole(assignedRole) !== "owner" && (
-                                            <div className="flex flex-wrap gap-2">
-                                                {isOwner && (
-                                                    <form action={updateWorkspaceUserRole.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex min-w-0 flex-1 gap-2 sm:flex-none">
-                                                        <input type="hidden" name="userId" value={workspaceUser?.id} />
-                                                        <select name="role" defaultValue={normalizeWorkspaceRole(assignedRole) ?? "staff"} className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm sm:w-auto">
-                                                            <option value="staff">Staff</option>
-                                                            <option value="admin">Admin</option>
-                                                        </select>
-                                                        <WorkspaceActionButton pendingLabel="Saving…" className="rounded-lg border border-neutral-700 px-3 py-1 text-sm">Save</WorkspaceActionButton>
-                                                    </form>
-                                                )}
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                {workspaceUser?.id && (isOwner || normalizeWorkspaceRole(assignedRole) === "staff") ? <WorkspaceUserAccessEditor
+                                                    userId={workspaceUser.id}
+                                                    email={workspaceUser.email ?? "Workspace user"}
+                                                    role={normalizeWorkspaceRole(assignedRole) ?? "staff"}
+                                                    services={serviceOptions}
+                                                    selectedServiceIds={serviceIdsByUser.get(workspaceUser.id) ?? []}
+                                                    canChangeRole={isOwner}
+                                                    action={updateWorkspaceUserRole.bind(null, workspace.slug)}
+                                                /> : null}
                                                 {(isOwner || normalizeWorkspaceRole(assignedRole) === "staff") ? <AdminMfaResetButton email={workspaceUser?.email ?? "this user"} userId={workspaceUser?.id ?? ""} action={resetWorkspaceUserMfa.bind(null, workspace.slug)} /> : null}
                                                 <form action={removeWorkspaceUser.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex-1 sm:flex-none">
                                                     <input type="hidden" name="userId" value={workspaceUser?.id} />

@@ -9,7 +9,7 @@ import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { assetHref, listWorkspaceAssets, workspaceHref, type RelationshipAsset } from "@/lib/relationships"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -33,7 +33,7 @@ function encryptedMessageAssetUrl(storagePath: string) {
 
 export default async function AssetsPage({ params }: PageProps) {
     const { workspaceSlug } = await params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "library")
     const assets = await listWorkspaceAssets(workspace.id)
     const imageAssets = assets.filter(isImage)
     const documentCount = assets.filter((asset) => asset.asset_kind === "document" || asset.content_type === "application/pdf").length

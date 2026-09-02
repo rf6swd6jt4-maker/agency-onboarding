@@ -11,7 +11,7 @@ import {
 } from "@/lib/relationships"
 import { effectiveGanttRanges, getRelationshipGanttPlan } from "@/lib/relationship-gantt"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import { buildRelationshipDealServiceOptions } from "@/lib/onboarding/service-display"
@@ -30,7 +30,7 @@ type PageProps = {
 
 export default async function RelationshipDetailPage({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspacePanel(workspaceSlug, "relationships")
     const relationship = await getRelationship(workspace.id, relationshipId)
     if (!relationship) notFound()
     await ensureCurrentRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: user.id })

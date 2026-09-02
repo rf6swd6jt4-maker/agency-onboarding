@@ -1,7 +1,7 @@
 import { nativeAttachmentFromInput, assertNativeConversationAccess, loadNativeMessageForCurrentUser, loadNativeMessagesForCurrentUser } from "@/lib/teams/server"
 import { deleteOnboardingUploads, inspectStoredCommunicationSticker, verifyNativeMessageUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 import { after } from "next/server"
 import { notifyNativeChatMessage } from "@/lib/push/chat-notifications"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic"
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 export async function GET(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const searchParams = new URL(request.url).searchParams
     const conversationId = searchParams.get("conversationId") ?? ""
     const messageId = searchParams.get("messageId") ?? ""
@@ -35,7 +35,7 @@ export async function GET(request: Request, context: { params: Promise<{ workspa
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
     const clientRequestId = typeof input?.clientRequestId === "string" ? input.clientRequestId : ""
@@ -104,7 +104,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
 
 export async function PATCH(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
     const messageId = typeof input?.messageId === "string" ? input.messageId : ""
@@ -148,7 +148,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
 
 export async function DELETE(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { user } = await requireWorkspace(workspaceSlug)
+    const { user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const url = new URL(request.url)
     const conversationId = url.searchParams.get("conversationId") ?? ""
     const messageId = url.searchParams.get("messageId") ?? ""

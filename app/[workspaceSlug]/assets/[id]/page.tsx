@@ -17,7 +17,7 @@ import {
 } from "@/lib/relationships"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { accessibleRelationshipIds, accessibleWorkItemIds, requireAssetAccess, requireWorkspaceAccess, workspaceAccessHasCapability } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -68,14 +68,20 @@ function slugAnchor(value: string) {
 
 export default async function AssetDetailPage({ params }: PageProps) {
     const { workspaceSlug, id } = await params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role, access } = await requireWorkspaceAccess(workspaceSlug)
+    if (!workspaceAccessHasCapability(access, "fulfilment.manage") && !workspaceAccessHasCapability(access, "onboarding.manage")) notFound()
+    await requireAssetAccess(access, id)
     const asset = await getAsset(workspace.id, id)
     if (!asset) notFound()
     const [relationships, workItems] = await Promise.all([
         listAssetRelationships(workspace.id, asset.id),
         listAssetWorkItems(workspace.id, asset.id),
     ])
-    const contextRelationshipId = relationships[0]?.relationship_id
+    const allowedRelationshipIds = await accessibleRelationshipIds(access)
+    const allowedWorkItemIds = await accessibleWorkItemIds(access, allowedRelationshipIds)
+    const scopedRelationships = relationships.filter((relationship) => !allowedRelationshipIds || allowedRelationshipIds.has(relationship.relationship_id))
+    const scopedWorkItems = workItems.filter((item) => !allowedWorkItemIds || allowedWorkItemIds.has(item.work_item_id))
+    const contextRelationshipId = scopedRelationships[0]?.relationship_id
     const contextRelationship = contextRelationshipId ? await getRelationship(workspace.id, contextRelationshipId) : null
     const previewUrl = asset.storage_path
         ? asset.source_kind === "message"
@@ -100,7 +106,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
                             reference={shortId(asset.id)}
                             title={asset.title}
                             labels={<SquarePill>{asset.asset_kind.replace(/_/g, " ")}</SquarePill>}
-                            facts={[{ label: relationships.length + workItems.length === 1 ? "link" : "links", value: relationships.length + workItems.length }]}
+                            facts={[{ label: scopedRelationships.length + scopedWorkItems.length === 1 ? "link" : "links", value: scopedRelationships.length + scopedWorkItems.length }]}
                             updated={formatRelativeTime(asset.updated_at)}
                         />
 
@@ -111,12 +117,12 @@ export default async function AssetDetailPage({ params }: PageProps) {
                             <DetailField label="Reference" icon="identity" className="lg:border-l lg:border-neutral-900 lg:pl-8"><span className="font-mono">{shortId(asset.id)}</span></DetailField>
                             <DetailField label="Relationships" icon="relationship" className="lg:col-span-2">
                                 <div className="flex flex-wrap gap-1.5">
-                                    {relationships.length ? relationships.map((link) => <Link key={link.relationship_id} href={relationshipHubHref(workspace.slug, link.relationship_id)}><RoundPill tone="sky">{link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship"}</RoundPill></Link>) : <span className="text-neutral-600">Workspace only</span>}
+                                    {scopedRelationships.length ? scopedRelationships.map((link) => role === "staff" ? <RoundPill key={link.relationship_id} tone="sky">{link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship"}</RoundPill> : <Link key={link.relationship_id} href={relationshipHubHref(workspace.slug, link.relationship_id)}><RoundPill tone="sky">{link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship"}</RoundPill></Link>) : <span className="text-neutral-600">Workspace only</span>}
                                 </div>
                             </DetailField>
                             <DetailField label="Work items" icon="activity" className="lg:col-span-2">
                                 <div className="flex flex-wrap gap-1.5">
-                                    {workItems.length ? workItems.map((link) => <Link key={link.work_item_id} href={workItemHref(workspace.slug, link.work_item_id)}><RoundPill tone="sky">{link.work_item?.title ?? "Work item"}</RoundPill></Link>) : <span className="text-neutral-600">None</span>}
+                                    {scopedWorkItems.length ? scopedWorkItems.map((link) => <Link key={link.work_item_id} href={workItemHref(workspace.slug, link.work_item_id)}><RoundPill tone="sky">{link.work_item?.title ?? "Work item"}</RoundPill></Link>) : <span className="text-neutral-600">None</span>}
                                 </div>
                             </DetailField>
                             <DetailField label="Description" icon="description" className="lg:col-span-2">{asset.description || <span className="text-neutral-600">No description</span>}</DetailField>
@@ -194,9 +200,13 @@ export default async function AssetDetailPage({ params }: PageProps) {
                     <ClientContextPanel
                         workspaceSlug={workspace.slug}
                         relationship={contextRelationship}
+                        allowedDestinations={role === "staff" ? [
+                            ...(workspaceAccessHasCapability(access, "onboarding.manage") ? ["onboarding" as const] : []),
+                            ...(workspaceAccessHasCapability(access, "fulfilment.manage") ? ["fulfilment" as const] : []),
+                        ] : undefined}
                         metrics={[
                             { label: "Reference", value: shortId(asset.id) },
-                            { label: "Links", value: relationships.length + workItems.length },
+                            { label: "Links", value: scopedRelationships.length + scopedWorkItems.length },
                         ]}
                     />
                 </div>

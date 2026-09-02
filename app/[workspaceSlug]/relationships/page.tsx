@@ -21,7 +21,7 @@ import {
     workspaceHref,
     type RelationshipPhase,
 } from "@/lib/relationships"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 
@@ -50,7 +50,7 @@ function relationshipWorkStatus(openWorkCount: number, urgent = false) {
 export default async function RelationshipsPage({ params, searchParams }: PageProps) {
     const { workspaceSlug } = await params
     const { phase: requestedPhase } = await searchParams
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "relationships")
     const [relationships, openWorkCounts] = await Promise.all([
         listRelationshipsForWorkspace(workspace.id),
         countOpenWorkItemsByRelationship(workspace.id),

@@ -28,7 +28,7 @@ async function response(workspaceId: string) {
 
 export async function GET(_: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace } = await requireWorkspace(workspaceSlug)
+    const { workspace } = await requireWorkspace(workspaceSlug, "admin")
     return response(workspace.id)
 }
 

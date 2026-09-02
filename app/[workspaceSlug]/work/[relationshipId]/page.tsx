@@ -12,7 +12,7 @@ import {
     workItemHref,
 } from "@/lib/relationships"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { accessibleWorkItemIds, requireRelationshipAccess, requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -22,10 +22,17 @@ type PageProps = {
 
 export default async function FulfilmentDetailPlaceholder({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role, access } = await requireWorkspacePanel(workspaceSlug, "fulfilment")
+    await requireRelationshipAccess(access, relationshipId)
     const relationship = await getRelationship(workspace.id, relationshipId)
     if (!relationship) notFound()
-    const workItems = await listRelationshipTimelineItems(workspace.slug, relationship)
+    const allWorkItems = await listRelationshipTimelineItems(workspace.slug, relationship)
+    const allowedWorkItemIds = await accessibleWorkItemIds(access, new Set([relationship.id]))
+    const workItems = allWorkItems.filter((item) => (
+        !allowedWorkItemIds
+        || allowedWorkItemIds.has(item.id)
+        || Boolean(item.synthesized && item.lifecycle_phase === "fulfilment")
+    ))
     const openItems = workItems.filter((item) => !["done", "canceled"].includes(item.status))
 
     return (
@@ -66,9 +73,9 @@ export default async function FulfilmentDetailPlaceholder({ params }: PageProps)
                             <p className="px-3 py-4 text-sm text-neutral-500">No open work items are attached yet.</p>
                         )}
                     </div>
-                    <Link href={relationshipHubHref(workspace.slug, relationship.id)} className="mt-4 inline-flex rounded-lg border border-neutral-800 px-3 py-2 text-sm text-neutral-300 hover:text-white">
+                    {role !== "staff" ? <Link href={relationshipHubHref(workspace.slug, relationship.id)} className="mt-4 inline-flex rounded-lg border border-neutral-800 px-3 py-2 text-sm text-neutral-300 hover:text-white">
                         Open relationship summary
-                    </Link>
+                    </Link> : null}
                 </section>
 
                         {role === "owner" || role === "admin" ? <DetailDangerZone>
@@ -81,6 +88,7 @@ export default async function FulfilmentDetailPlaceholder({ params }: PageProps)
                         workspaceSlug={workspace.slug}
                         relationship={relationship}
                         metrics={[{ label: "Open work", value: openItems.length }]}
+                        allowedDestinations={role === "staff" ? ["onboarding", "fulfilment"] : undefined}
                     />
                 </div>
             </div>

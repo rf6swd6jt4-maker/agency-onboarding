@@ -25,7 +25,7 @@ import {
 } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { accessibleRelationshipIds, fullyAccessibleRelationshipIds, requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -46,9 +46,19 @@ function metadataStepKey(metadata: unknown) {
         : ""
 }
 
+function metadataSessionStepId(metadata: unknown) {
+    return metadata && typeof metadata === "object" && "session_step_id" in metadata
+        ? String((metadata as Record<string, unknown>).session_step_id ?? "")
+        : ""
+}
+
 export default async function RelationshipOnboardingPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, access } = await requireWorkspacePanel(workspaceSlug, "onboarding")
+    const [allowedRelationshipIds, fullyAllowedRelationshipIds] = await Promise.all([
+        accessibleRelationshipIds(access),
+        fullyAccessibleRelationshipIds(access),
+    ])
     const [
         relationships,
         { data: sessions },
@@ -56,6 +66,8 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
         { data: assets },
         { data: modules },
         { data: services },
+        { data: snapshotModules },
+        { data: snapshotSteps },
     ] = await Promise.all([
         listRelationshipsForWorkspace(workspace.id),
         supabaseAdmin
@@ -85,38 +97,68 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
             .order("created_at", { ascending: true }),
         supabaseAdmin
             .from("relationship_services")
-            .select("relationship_id, service_key, service_revision_id")
+            .select("relationship_id, service_key, service_id, service_revision_id")
             .eq("workspace_id", workspace.id)
             .order("created_at", { ascending: true }),
+        supabaseAdmin
+            .from("relationship_onboarding_session_modules")
+            .select("id, session_id, source_kind, source_service_revision_id")
+            .eq("workspace_id", workspace.id),
+        supabaseAdmin
+            .from("relationship_onboarding_session_steps")
+            .select("id, session_id, session_module_id, kind, is_actionable")
+            .eq("workspace_id", workspace.id),
     ])
 
-    const relationshipById = new Map(relationships.map((relationship) => [relationship.id, relationship]))
+    const relationshipAllowed = (relationshipId: string) => !allowedRelationshipIds || allowedRelationshipIds.has(relationshipId)
+    const scopedRelationships = relationships.filter((relationship) => relationshipAllowed(relationship.id))
+    const relationshipById = new Map(scopedRelationships.map((relationship) => [relationship.id, relationship]))
     const activeSessionByRelationship = new Map<string, NonNullable<typeof sessions>[number]>()
-    for (const session of sessions ?? []) {
+    for (const session of (sessions ?? []).filter((item) => relationshipAllowed(item.relationship_id))) {
         if (!activeSessionByRelationship.has(session.relationship_id)) {
             activeSessionByRelationship.set(session.relationship_id, session)
         }
     }
 
     const moduleKeysByRelationship = new Map<string, string[]>()
-    for (const onboardingModule of modules ?? []) {
+    for (const onboardingModule of (modules ?? []).filter((item) => relationshipAllowed(item.relationship_id))) {
         moduleKeysByRelationship.set(onboardingModule.relationship_id, [...(moduleKeysByRelationship.get(onboardingModule.relationship_id) ?? []), onboardingModule.module_key])
     }
-    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, (services ?? []).map((service) => service.service_revision_id))
+    const scopedServices = (services ?? []).filter((item) => relationshipAllowed(item.relationship_id) && (access.role !== "staff" || access.allowedServiceIds.includes(item.service_id ?? "")))
+    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, scopedServices.map((service) => service.service_revision_id))
     const servicesByRelationship = new Map<string, Array<StoredRelationshipService & { relationship_id: string }>>()
-    for (const service of services ?? []) {
+    for (const service of scopedServices) {
         servicesByRelationship.set(service.relationship_id, [...(servicesByRelationship.get(service.relationship_id) ?? []), service])
     }
 
+    const scopedServiceRevisionIds = new Set(scopedServices.map((service) => service.service_revision_id).filter((id): id is string => Boolean(id)))
+    const scopedSnapshotModuleIds = new Set((snapshotModules ?? []).filter((module) => (
+        access.role !== "staff"
+        || module.source_kind === "mandatory"
+        || Boolean(module.source_service_revision_id && scopedServiceRevisionIds.has(module.source_service_revision_id))
+    )).map((module) => module.id))
+    const snapshotSessionIds = new Set((snapshotSteps ?? []).map((step) => step.session_id))
+    const scopedSnapshotStepIds = new Set((snapshotSteps ?? []).filter((step) => (
+        step.is_actionable !== false
+        && step.kind !== "completion"
+        && (access.role !== "staff" || !step.session_module_id || scopedSnapshotModuleIds.has(step.session_module_id))
+    )).map((step) => step.id))
+    const scopedSnapshotStepIdsBySession = new Map<string, string[]>()
+    for (const step of snapshotSteps ?? []) {
+        if (!scopedSnapshotStepIds.has(step.id)) continue
+        scopedSnapshotStepIdsBySession.set(step.session_id, [...(scopedSnapshotStepIdsBySession.get(step.session_id) ?? []), step.id])
+    }
+    const recordIsInScope = (metadata: unknown) => access.role !== "staff" || scopedSnapshotStepIds.has(metadataSessionStepId(metadata))
+
     const workItemsBySession = new Map<string, NonNullable<typeof workItems>>()
-    for (const item of workItems ?? []) {
+    for (const item of (workItems ?? []).filter((record) => recordIsInScope(record.metadata))) {
         const sessionId = metadataSessionId(item.metadata)
         if (!sessionId) continue
         workItemsBySession.set(sessionId, [...(workItemsBySession.get(sessionId) ?? []), item])
     }
 
     const assetsBySession = new Map<string, { submissions: number; uploads: number; latest: string | null }>()
-    for (const asset of assets ?? []) {
+    for (const asset of (assets ?? []).filter((record) => recordIsInScope(record.metadata))) {
         const sessionId = metadataSessionId(asset.metadata)
         if (!sessionId) continue
         const existing = assetsBySession.get(sessionId) ?? { submissions: 0, uploads: 0, latest: null }
@@ -133,8 +175,11 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
             const relationship = relationshipById.get(session.relationship_id)
             if (!relationship) return null
             const items = workItemsBySession.get(session.id) ?? []
-            const steps = getOnboardingStepsForModules(moduleKeysByRelationship.get(session.relationship_id) ?? [])
-            const completedKeys = items.filter((item) => item.status === "done").map((item) => metadataStepKey(item.metadata)).filter(Boolean)
+            const snapshotStepIds = scopedSnapshotStepIdsBySession.get(session.id) ?? []
+            const steps = snapshotSessionIds.has(session.id)
+                ? snapshotStepIds.map((key) => ({ key }))
+                : access.role === "staff" ? [] : getOnboardingStepsForModules(moduleKeysByRelationship.get(session.relationship_id) ?? [])
+            const completedKeys = items.filter((item) => item.status === "done").map((item) => metadataSessionStepId(item.metadata) || metadataStepKey(item.metadata)).filter(Boolean)
             const percentage = getProgressPercentage(steps, completedKeys)
             const latestWork = items.reduce<string | null>((latest, item) => {
                 const date = item.updated_at ?? item.created_at ?? null
@@ -206,16 +251,16 @@ export default async function RelationshipOnboardingPage({ params, searchParams 
                         const creator = session.created_by ? creatorById.get(session.created_by) : null
                         const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
                         const relationshipServices = servicesByRelationship.get(relationship.id) ?? []
-                        const moduleKeys = moduleKeysByRelationship.get(relationship.id) ?? []
+                        const moduleKeys = access.role === "staff" ? [] : moduleKeysByRelationship.get(relationship.id) ?? []
                         const serviceLabels = relationshipServices.map((service) => relationshipServiceDisplayName(service, serviceRevisions))
                         const actions = [
                             { label: "Open onboarding", href: onboardingHref },
-                            { label: "Copy onboarding link", copyText: getOnboardingUrl({
+                            ...(!fullyAllowedRelationshipIds || fullyAllowedRelationshipIds.has(relationship.id) ? [{ label: "Copy onboarding link", copyText: getOnboardingUrl({
                                 workspaceSlug: workspace.slug,
                                 sessionToken: session.session_token,
                                 customDomain: workspace.custom_onboarding_domain,
                                 customDomainVerified: workspace.custom_onboarding_domain_status === "verified",
-                            }) },
+                            }) }] : []),
                         ]
                         const stats = <span className="whitespace-nowrap text-neutral-500">
                             <span className="text-neutral-200">{completedCount}</span>/{completedCount + missingCount} steps · <span className="text-neutral-200">{assetSummary.submissions}</span> submissions · <span className="text-neutral-200">{assetSummary.uploads}</span> files

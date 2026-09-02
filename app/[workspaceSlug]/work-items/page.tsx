@@ -15,7 +15,7 @@ import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { listWorkspaceWorkItems, workItemHref, workspaceHref } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 import { workItemPriorityLabel } from "@/lib/work-item-priority"
 
 export const dynamic = "force-dynamic"
@@ -27,7 +27,7 @@ type PageProps = {
 
 export default async function WorkItemsPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "library")
     const items = await listWorkspaceWorkItems(workspace.id)
     const openItems = items.filter((item) => !["done", "canceled"].includes(item.status))
     const completedItems = items.filter((item) => ["done", "canceled"].includes(item.status))

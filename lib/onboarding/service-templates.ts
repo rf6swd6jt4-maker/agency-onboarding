@@ -1,4 +1,5 @@
 import type { OnboardingBillingInterval, OnboardingServiceType } from "@/lib/onboarding/configuration-types"
+import type { WorkspaceCapability } from "@/lib/workspace-capabilities"
 
 export type ServiceTemplateSetup =
     | { kind: "none" }
@@ -23,6 +24,7 @@ export type ServiceTemplateDefinition = {
         defaultBillingIntervalCount: number
     }
     setup: ServiceTemplateSetup
+    capabilities: readonly WorkspaceCapability[]
 }
 
 const metaAdsThumbnail = "/service-templates/meta-ads.png"
@@ -46,4 +48,25 @@ export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
         defaultBillingIntervalCount: 1,
     },
     setup: { kind: "connection", connectionKey: "meta_ads" },
+    capabilities: ["onboarding.manage", "fulfilment.manage"],
+}, {
+    id: "appointment-setting",
+    name: "Appointment Setting",
+    description: "Manage leads, setter availability, bookings, and appointment outcomes.",
+    thumbnail: {
+        src: "/service-templates/appointment-setting.svg",
+        alt: "Appointment Setting service cover",
+    },
+    serviceDefaults: {
+        name: "Appointment Setting",
+        description: "Manage leads, setter availability, bookings, and appointment outcomes.",
+        thumbnailSrc: "/service-templates/appointment-setting.svg",
+        serviceType: "retainer",
+        recurringName: "Appointment setting",
+        recurringDescription: "Ongoing lead follow-up, booking, and appointment outcome management.",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
+    },
+    setup: { kind: "none" },
+    capabilities: ["onboarding.manage", "fulfilment.manage", "appointment_setting.manage"],
 }]

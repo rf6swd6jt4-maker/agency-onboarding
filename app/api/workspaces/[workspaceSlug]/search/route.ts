@@ -16,8 +16,9 @@ import {
 import { shortId } from "@/lib/ui/relative-time"
 import { okrDisplayTitle, type WorkspaceOkrType } from "@/lib/admin/okr-title"
 import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, WORKSPACE_PANELS, workspacePanelHref } from "@/lib/workspace-panels"
-import { normalizeWorkspaceRole, type WorkspaceRole } from "@/lib/workspaces"
+import { normalizeWorkspaceRole } from "@/lib/workspaces"
 import { getAal2User } from "@/lib/auth/aal"
+import { accessibleRelationshipIds, accessibleWorkItemIds, loadWorkspaceAccess, workspaceAccessHasCapability, type WorkspaceAccess } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -48,12 +49,14 @@ function result(id: string, type: string, label: string, description: string, hr
     return { id, type, label, description, href, ...options }
 }
 
-function staticNavigationResults(workspace: { name: string; slug: string }, query: string, role: WorkspaceRole): SearchResult[] {
+function staticNavigationResults(workspace: { name: string; slug: string }, query: string, access: WorkspaceAccess): SearchResult[] {
     const settingsPath = `${workspace.name} > Settings`
     const libraryPath = `${workspace.name} > Library`
-    const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(role)
+    const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(access.role)
+    const canAccessLibrary = workspaceAccessHasCapability(access, "library.manage")
+    const canAccessRelationships = workspaceAccessHasCapability(access, "relationships.view")
     const panelEntries = WORKSPACE_PANELS
-        .filter((panel) => canAccessWorkspacePanel(panel, role))
+        .filter((panel) => canAccessWorkspacePanel(panel, access.role, access.capabilities))
         .map((panel) => ({
             id: `panel-${panel.key}`,
             type: "Panel",
@@ -65,9 +68,11 @@ function staticNavigationResults(workspace: { name: string; slug: string }, quer
         }))
     const entries = [
         ...panelEntries,
-        { id: "tab-work-items", type: "Tab", label: "Work Items", description: "Workspace-native task IDs and work item list", href: workspaceHref(workspace.slug, "work-items"), path: `${libraryPath} > Work Items`, keywords: ["tasks", "work item ids", "work ids"] },
-        { id: "tab-assets", type: "Tab", label: "Assets", description: "Workspace asset IDs and file gallery", href: workspaceHref(workspace.slug, "assets"), path: `${libraryPath} > Assets`, keywords: ["files", "uploads", "asset ids", "gallery"] },
-        { id: "action-new-relationship", type: "Action", label: "Start New Relationship", description: "Create a relationship manually at any lifecycle stage", href: workspaceHref(workspace.slug, "relationships?create=relationship"), path: `${workspace.name} > Relationships > New`, keywords: ["manual relationship", "new relationship", "add relationship", "manual client", "new client", "add client"] },
+        ...(canAccessLibrary ? [
+            { id: "tab-work-items", type: "Tab", label: "Work Items", description: "Workspace-native task IDs and work item list", href: workspaceHref(workspace.slug, "work-items"), path: `${libraryPath} > Work Items`, keywords: ["tasks", "work item ids", "work ids"] },
+            { id: "tab-assets", type: "Tab", label: "Assets", description: "Workspace asset IDs and file gallery", href: workspaceHref(workspace.slug, "assets"), path: `${libraryPath} > Assets`, keywords: ["files", "uploads", "asset ids", "gallery"] },
+        ] : []),
+        ...(canAccessRelationships ? [{ id: "action-new-relationship", type: "Action", label: "Start New Relationship", description: "Create a relationship manually at any lifecycle stage", href: workspaceHref(workspace.slug, "relationships?create=relationship"), path: `${workspace.name} > Relationships > New`, keywords: ["manual relationship", "new relationship", "add relationship", "manual client", "new client", "add client"] }] : []),
         ...(canAccessPrivatePanels ? [
             { id: "action-new-poll", type: "Action", label: "New Poll", description: "Create and preflight a new lead-generation poll", href: workspaceHref(workspace.slug, "leadgen/new"), path: `${workspace.name} > Lead Gen > New Poll`, keywords: ["create poll", "start poll", "run poll", "poll preflight", "leadgen new"] },
             { id: "tab-leads", type: "Tab", label: "Leads", description: "Qualified and discovered lead list", href: workspaceHref(workspace.slug, "leadgen"), path: `${workspace.name} > Lead Gen > Leads`, keywords: ["leadgen companies", "lead list"] },
@@ -131,6 +136,7 @@ async function requireSearchWorkspace(workspaceSlug: string) {
     return membership && role ? {
         workspace: workspace as { id: string; slug: string; name: string; status: string },
         role,
+        userId: user.id,
     } : null
 }
 
@@ -138,28 +144,34 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
     const { workspaceSlug } = await context.params
     const access = await requireSearchWorkspace(workspaceSlug)
     if (!access) return Response.json({ results: [] }, { status: 401 })
-    const { workspace, role } = access
+    const { workspace, role, userId } = access
+    const workspaceAccess = await loadWorkspaceAccess({ workspaceId: workspace.id, workspaceSlug: workspace.slug, userId, role })
     const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(role)
+    const canAccessCommunications = workspaceAccessHasCapability(workspaceAccess, "communications.manage")
+    const canAccessLibrary = workspaceAccessHasCapability(workspaceAccess, "library.manage")
+    const canAccessOnboarding = workspaceAccessHasCapability(workspaceAccess, "onboarding.manage")
 
     const rawQuery = request.nextUrl.searchParams.get("q") ?? ""
     const query = rawQuery.trim().toLowerCase()
     if (query.length < 2) return Response.json({ results: [] })
 
     const results: SearchResult[] = []
-    results.push(...staticNavigationResults(workspace, query, role))
+    results.push(...staticNavigationResults(workspace, query, workspaceAccess))
 
-    const relationships = await listRelationshipsForWorkspace(workspace.id)
+    const allowedRelationshipIds = await accessibleRelationshipIds(workspaceAccess)
+    const relationships = (await listRelationshipsForWorkspace(workspace.id)).filter((relationship) => !allowedRelationshipIds || allowedRelationshipIds.has(relationship.id))
 
     for (const relationship of relationships.filter((item) => relationshipSearchHaystack(item).includes(query) || includesQuery([item.id, item.client_id, item.leadgen_company_id], query)).slice(0, 8)) {
+        const staffHref = canAccessOnboarding ? onboardingDetailHref(workspace.slug, relationship.id) : workspaceHref(workspace.slug, `work/${relationship.id}`)
         results.push(result(
             `relationship-${relationship.id}`,
             "Relationship",
             relationship.primary_person_name,
             relationship.business_name ?? relationship.primary_email ?? relationship.primary_phone ?? "Relationship Hub",
-            relationshipNativeLocation(workspace.slug, relationship),
+            role === "staff" ? staffHref : relationshipNativeLocation(workspace.slug, relationship),
             {
-                hubHref: relationshipHubHref(workspace.slug, relationship.id),
-                path: `${workspace.name} > Relationships`,
+                hubHref: role === "staff" ? undefined : relationshipHubHref(workspace.slug, relationship.id),
+                path: role === "staff" ? `${workspace.name} > ${canAccessOnboarding ? "Onboarding" : "Fulfilment"}` : `${workspace.name} > Relationships`,
                 recordId: shortId(relationship.id),
             }
         ))
@@ -175,9 +187,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
             : Promise.resolve({ data: [], error: null }),
     ])
     const workItems = { data: [...(publicWorkItems.data ?? []), ...(privateWorkItems.data ?? [])], error: publicWorkItems.error ?? privateWorkItems.error }
+    const allowedWorkItemIds = await accessibleWorkItemIds(workspaceAccess, allowedRelationshipIds)
 
     if (!workItems.error) {
-        for (const item of (workItems.data ?? []).filter((item) => includesQuery([item.id, item.native_id, item.title, item.description, item.lifecycle_phase], query)).slice(0, 6)) {
+        for (const item of (workItems.data ?? []).filter((item) => (!allowedWorkItemIds || allowedWorkItemIds.has(item.id)) && includesQuery([item.id, item.native_id, item.title, item.description, item.lifecycle_phase], query)).slice(0, 6)) {
             const isPrivate = item.visibility === "admins_only"
             results.push(result(
                 `work-${item.id}`,
@@ -186,10 +199,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
                 item.description ?? (isPrivate ? "Admin work item" : "Workspace work item"),
                 workItemHref(workspace.slug, item.id),
                 {
-                    hubHref: item.native_href?.startsWith("/") ? item.native_href : undefined,
+                    hubHref: role === "staff" ? undefined : item.native_href?.startsWith("/") ? item.native_href : undefined,
                     path: isPrivate
                         ? `${workspace.name} > Admin > ${item.kind === "maintenance" ? "Maintenance" : "Work"}`
-                        : `${workspace.name} > Library > Work Items`,
+                        : role === "staff" ? `${workspace.name} > Fulfilment` : `${workspace.name} > Library > Work Items`,
                     recordId: shortId(item.id),
                 }
             ))
@@ -252,13 +265,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
         { data: activities, error: activityError },
         { data: assets, error: assetError },
     ] = await Promise.all([
-        supabaseAdmin
+        canAccessPrivatePanels ? supabaseAdmin
             .from("clients")
             .select("id, relationship_id, name, email, phone, created_at, archived_at")
             .eq("workspace_id", workspace.id)
             .is("archived_at", null)
             .order("created_at", { ascending: false })
-            .limit(80),
+            .limit(80) : Promise.resolve({ data: [], error: null }),
         canAccessPrivatePanels
             ? supabaseAdmin
                 .from("leadgen_companies")
@@ -275,27 +288,27 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
                 .order("created_at", { ascending: false })
                 .limit(80)
             : Promise.resolve({ data: [], error: null }),
-        supabaseAdmin
+        canAccessCommunications ? supabaseAdmin
             .from("client_communication_channels")
             .select("id, client_id, external_address, provider")
             .eq("workspace_id", workspace.id)
-            .limit(60),
-        supabaseAdmin
+            .limit(60) : Promise.resolve({ data: [], error: null }),
+        canAccessPrivatePanels ? supabaseAdmin
             .from("client_activity")
             .select("id, client_id, activity_text, activity_type")
             .eq("workspace_id", workspace.id)
             .order("created_at", { ascending: false })
-            .limit(60),
-        supabaseAdmin
+            .limit(60) : Promise.resolve({ data: [], error: null }),
+        canAccessLibrary ? supabaseAdmin
             .from("assets")
             .select("id, asset_kind, source_kind, title, description, external_url, native_kind, native_id")
             .eq("workspace_id", workspace.id)
             .order("created_at", { ascending: false })
-            .limit(80),
+            .limit(80) : Promise.resolve({ data: [], error: null }),
     ])
 
     if (!clientError) {
-        for (const client of (clients ?? []).filter((client) => includesQuery([client.id, client.name, client.email, client.phone], query)).slice(0, 6)) {
+        for (const client of (clients ?? []).filter((client) => Boolean(relationshipByClientId.get(client.id) || client.relationship_id && (!allowedRelationshipIds || allowedRelationshipIds.has(client.relationship_id))) && includesQuery([client.id, client.name, client.email, client.phone], query)).slice(0, 6)) {
             const relationship = relationshipByClientId.get(client.id)
             results.push(result(
                 `client-${client.id}`,
@@ -380,7 +393,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ wor
     }
 
     if (!activityError) {
-        for (const activity of (activities ?? []).filter((activity) => includesQuery([activity.id, activity.client_id, activity.activity_text, activity.activity_type], query)).slice(0, 4)) {
+        for (const activity of (activities ?? []).filter((activity) => relationshipByClientId.has(activity.client_id) && includesQuery([activity.id, activity.client_id, activity.activity_text, activity.activity_type], query)).slice(0, 4)) {
             const relationship = relationshipByClientId.get(activity.client_id)
             results.push(result(
                 `activity-${activity.id}`,

@@ -3,6 +3,7 @@ import { assertNativeConversationAccess } from "@/lib/teams/server"
 import { getCurrentUser } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { communicationFileKeyForCurrentUser, redeemCommunicationMediaGrant } from "@/lib/communications/encryption"
+import { normalizeWorkspaceRole } from "@/lib/workspace-roles"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -35,11 +36,11 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
         if (!user) return { error: new Response("Unauthorized", { status: 401 }) }
         const { data: membership } = await supabaseAdmin
             .from("workspace_memberships")
-            .select("user_id")
+            .select("user_id, role")
             .eq("workspace_id", workspaceId)
             .eq("user_id", user.id)
             .maybeSingle()
-        if (!membership) return { error: new Response("Media not found", { status: 404 }) }
+        if (!membership || normalizeWorkspaceRole(membership.role) === "staff") return { error: new Response("Media not found", { status: 404 }) }
         if (path[1] === "communications" && path[2] === "native") {
             const conversationId = path[3] ?? ""
             if (!await assertNativeConversationAccess(conversationId, user.id, "read")) return { error: new Response("Media not found", { status: 404 }) }

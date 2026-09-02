@@ -20,6 +20,10 @@ function invitedRole(value: FormDataEntryValue | null) {
     throw new Error("Invalid role")
 }
 
+function requestedServiceIds(formData: FormData) {
+    return [...new Set(formData.getAll("serviceId").map(String).filter((value) => /^[0-9a-f-]{36}$/i.test(value)))]
+}
+
 async function requireUserManager(slug: string) {
     return requireWorkspace(slug, "admin")
 }
@@ -37,6 +41,10 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
     }
     if (role !== "owner" && requestedRole !== "staff") {
         return { ok: false, message: "Only workspace owners can invite admins." }
+    }
+    const serviceIds = requestedRole === "staff" ? requestedServiceIds(formData) : []
+    if (requestedRole === "staff" && !serviceIds.length) {
+        return { ok: false, message: "Choose at least one service for this Staff member." }
     }
 
     const proposedInvitationId = crypto.randomUUID()
@@ -58,6 +66,7 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
         p_invited_by: user.id,
         p_expires_at: expiresAt,
         p_token_hash: invitationTokenHash,
+        p_service_ids: serviceIds,
     })
     if (persistError || !persistedInvitation) return { ok: false, message: "Betelgeze could not safely save the invitation, so no email was sent." }
     const invitationId = (persistedInvitation as { invitation_id: string }).invitation_id
@@ -111,16 +120,38 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
 }
 
 export async function updateWorkspaceUserRole(slug: string, formData: FormData) {
-    const { workspace, role: actingRole } = await requireUserManager(slug)
-    if (actingRole !== "owner") throw new Error("Only workspace owners can change roles")
+    const { workspace, role: actingRole, user } = await requireUserManager(slug)
     const userId = String(formData.get("userId") ?? "")
-    const role = invitedRole(formData.get("role")) as WorkspaceRole
-    await supabaseAdmin
-        .from("workspace_memberships")
-        .update({ role })
-        .eq("workspace_id", workspace.id)
-        .eq("user_id", userId)
-    revalidatePath(`/${slug}/users`)
+    const requestedRole = invitedRole(formData.get("role")) as WorkspaceRole
+    const serviceIds = requestedRole === "staff" ? requestedServiceIds(formData) : []
+    if (requestedRole === "staff" && !serviceIds.length) throw new Error("Staff members must have at least one service.")
+    const { error } = await supabaseAdmin.rpc("set_workspace_member_service_access", {
+        p_workspace_id: workspace.id,
+        p_actor_user_id: user.id,
+        p_target_user_id: userId,
+        p_role: requestedRole,
+        p_service_ids: serviceIds,
+    })
+    if (error) {
+        if (actingRole !== "owner" && requestedRole !== "staff") throw new Error("Only workspace owners can change roles.")
+        throw new Error("Workspace access could not be updated safely.")
+    }
+    await recordAdminActivity({
+        workspaceId: workspace.id,
+        category: "system",
+        level: "info",
+        eventKey: "workspace.member.access.updated",
+        summary: `Workspace member access updated to ${requestedRole}`,
+        sourceHref: `/${slug}/settings#users`,
+        actorUserId: user.id,
+        actorKind: "staff",
+        outcome: "succeeded",
+        entityType: "workspace_member",
+        entityId: userId,
+        metricClassification: "internal_call",
+        metadata: { role: requestedRole, service_ids: serviceIds },
+    })
+    revalidatePath(`/${slug}/settings`)
 }
 
 export async function removeWorkspaceUser(slug: string, formData: FormData) {

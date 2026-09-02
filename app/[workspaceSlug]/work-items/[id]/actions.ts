@@ -2,15 +2,21 @@
 
 import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { accessibleRelationshipIds, accessibleWorkItemIds, requireWorkspaceAccess, workspaceAccessCanWorkItem, workspaceAccessHasCapability } from "@/lib/workspace-access"
 import { workItemHref } from "@/lib/relationships"
 
 async function requireWorkItem(slug: string, workItemId: string) {
-    const context = await requireWorkspace(slug, "admin")
+    const context = await requireWorkspaceAccess(slug)
     const { data: item } = await supabaseAdmin.from("work_items")
         .select("id, status, native_kind, parent_work_item_id, area, visibility, execution_owner_id, actual_completed_at, actual_completed_has_time, updated_at")
         .eq("workspace_id", context.workspace.id).eq("id", workItemId).maybeSingle()
     if (!item) throw new Error("Work item not found")
+    if (context.role === "staff" && (
+        item.area === "admin"
+        || item.visibility === "admins_only"
+        || (!workspaceAccessHasCapability(context.access, "onboarding.manage") && !workspaceAccessHasCapability(context.access, "fulfilment.manage"))
+        || !await workspaceAccessCanWorkItem(context.access, workItemId)
+    )) throw new Error("Work item not found")
     return { ...context, item }
 }
 
@@ -98,20 +104,22 @@ export async function updateWorkItemAssignees(slug: string, workItemId: string, 
 }
 
 export async function updateWorkItemParent(slug: string, workItemId: string, parentWorkItemId: string | null, waitForParent: boolean) {
-    const { workspace, user, item } = await requireWorkItem(slug, workItemId)
+    const { workspace, user, item, access } = await requireWorkItem(slug, workItemId)
     const [{ data: items }, { data: dependencyEdges }] = await Promise.all([
         supabaseAdmin.from("work_items").select("id, parent_work_item_id, status").eq("workspace_id", workspace.id).eq("visibility", item.visibility),
         supabaseAdmin.from("work_item_dependencies").select("work_item_id, depends_on_work_item_id").eq("workspace_id", workspace.id).neq("work_item_id", workItemId),
     ])
-    const itemIds = new Set((items ?? []).map((row) => row.id))
+    const allowedWorkItemIds = await accessibleWorkItemIds(access)
+    const scopedItems = (items ?? []).filter((row) => !allowedWorkItemIds || allowedWorkItemIds.has(row.id))
+    const itemIds = new Set(scopedItems.map((row) => row.id))
     if (parentWorkItemId && (!itemIds.has(parentWorkItemId) || parentWorkItemId === workItemId)) throw new Error("Invalid parent")
     const children = new Map<string, string[]>()
-    for (const row of items ?? []) if (row.parent_work_item_id) children.set(row.parent_work_item_id, [...(children.get(row.parent_work_item_id) ?? []), row.id])
+    for (const row of scopedItems) if (row.parent_work_item_id) children.set(row.parent_work_item_id, [...(children.get(row.parent_work_item_id) ?? []), row.id])
     const queue = [...(children.get(workItemId) ?? [])]
     const descendants = new Set<string>()
     while (queue.length) { const id = queue.pop()!; if (descendants.has(id)) continue; descendants.add(id); queue.push(...(children.get(id) ?? [])) }
     if (parentWorkItemId && descendants.has(parentWorkItemId)) throw new Error("A child cannot become its ancestor's parent")
-    if (item.status === "doing" && parentWorkItemId && waitForParent && items?.find((row) => row.id === parentWorkItemId)?.status !== "done") throw new Error("An in-progress task cannot wait for an unfinished parent")
+    if (item.status === "doing" && parentWorkItemId && waitForParent && scopedItems.find((row) => row.id === parentWorkItemId)?.status !== "done") throw new Error("An in-progress task cannot wait for an unfinished parent")
     if (parentWorkItemId && waitForParent) {
         const prerequisites = new Map<string, string[]>()
         for (const edge of dependencyEdges ?? []) prerequisites.set(edge.work_item_id, [...(prerequisites.get(edge.work_item_id) ?? []), edge.depends_on_work_item_id])
@@ -130,13 +138,14 @@ export async function updateWorkItemParent(slug: string, workItemId: string, par
 }
 
 export async function updateWorkItemDependencies(slug: string, workItemId: string, dependencyIds: string[]) {
-    const { workspace, user, item } = await requireWorkItem(slug, workItemId)
+    const { workspace, user, item, access } = await requireWorkItem(slug, workItemId)
     const uniqueIds = [...new Set(dependencyIds)].filter((id) => id !== workItemId && id !== item.parent_work_item_id)
     const [{ data: items }, { data: edges }] = await Promise.all([
         supabaseAdmin.from("work_items").select("id, status").eq("workspace_id", workspace.id).eq("visibility", item.visibility),
         supabaseAdmin.from("work_item_dependencies").select("work_item_id, depends_on_work_item_id").eq("workspace_id", workspace.id).neq("work_item_id", workItemId),
     ])
-    const statuses = new Map((items ?? []).map((row) => [row.id, row.status]))
+    const allowedWorkItemIds = await accessibleWorkItemIds(access)
+    const statuses = new Map((items ?? []).filter((row) => !allowedWorkItemIds || allowedWorkItemIds.has(row.id)).map((row) => [row.id, row.status]))
     if (uniqueIds.some((id) => !statuses.has(id))) throw new Error("Dependencies must belong to this workspace")
     if (item.status === "doing" && uniqueIds.some((id) => statuses.get(id) !== "done")) throw new Error("An in-progress task cannot gain an unfinished dependency")
     const prerequisites = new Map<string, string[]>()
@@ -154,7 +163,7 @@ export async function updateWorkItemDependencies(slug: string, workItemId: strin
 }
 
 export async function updateWorkItemLinks(slug: string, workItemId: string, relationshipIds: string[], keyResultLinks: Array<{ keyResultId: string; expectedMovement: number; impactHypothesis: string }>) {
-    const { workspace, user, item } = await requireWorkItem(slug, workItemId)
+    const { workspace, user, item, access, role } = await requireWorkItem(slug, workItemId)
     if (item.native_kind === "onboarding_step") throw new Error("Onboarding work-item links are managed by onboarding")
     const uniqueIds = [...new Set(relationshipIds)]
     const normalizedKeyResultLinks = [...new Map(keyResultLinks.map((link) => [link.keyResultId, {
@@ -163,6 +172,7 @@ export async function updateWorkItemLinks(slug: string, workItemId: string, rela
         impactHypothesis: String(link.impactHypothesis ?? "").trim(),
     }])).values()]
     const uniqueKeyResultIds = normalizedKeyResultLinks.map((link) => link.keyResultId)
+    if (role === "staff" && uniqueKeyResultIds.length) throw new Error("Staff cannot link work to private Admin goals")
     if (uniqueKeyResultIds.length && !item.execution_owner_id) throw new Error("Choose an execution owner before linking this work item to a Key Result")
     if (normalizedKeyResultLinks.some((link) => !Number.isFinite(link.expectedMovement) || link.expectedMovement <= 0)) throw new Error("Every linked Key Result needs a positive expected movement")
     if (normalizedKeyResultLinks.some((link) => !link.impactHypothesis)) throw new Error("Every linked Key Result needs an impact hypothesis")
@@ -171,7 +181,8 @@ export async function updateWorkItemLinks(slug: string, workItemId: string, rela
         supabaseAdmin.from("relationships").select("id").eq("workspace_id", workspace.id),
         supabaseAdmin.from("workspace_okr_work_items").select("key_result_id").eq("workspace_id", workspace.id).eq("work_item_id", workItemId),
     ])
-    const allowedIds = new Set((relationships ?? []).map((row) => row.id))
+    const accessibleIds = await accessibleRelationshipIds(access)
+    const allowedIds = new Set((relationships ?? []).filter((row) => !accessibleIds || accessibleIds.has(row.id)).map((row) => row.id))
     if (uniqueIds.some((id) => !allowedIds.has(id))) throw new Error("Relationships must belong to this workspace")
 
     if (uniqueKeyResultIds.length) {

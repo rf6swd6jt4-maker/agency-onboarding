@@ -6,14 +6,20 @@ import { SERVICE_TEMPLATES } from "../lib/onboarding/service-templates.ts"
 const servicesUi = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
 
 test("the service template catalogue starts with the Meta Ads template", () => {
-    assert.equal(SERVICE_TEMPLATES.length, 1)
-    const [metaAds] = SERVICE_TEMPLATES
+    assert.equal(SERVICE_TEMPLATES.length, 2)
+    const [metaAds, appointmentSetting] = SERVICE_TEMPLATES
     assert.equal(metaAds.id, "meta-ads")
     assert.equal(metaAds.name, "Meta Ads")
     assert.ok(metaAds.description.length > 0)
     assert.equal(metaAds.serviceDefaults.thumbnailSrc, metaAds.thumbnail.src)
     assert.deepEqual(metaAds.setup, { kind: "connection", connectionKey: "meta_ads" })
+    assert.deepEqual(metaAds.capabilities, ["onboarding.manage", "fulfilment.manage"])
     assert.equal(existsSync(`public${metaAds.thumbnail.src}`), true)
+    assert.equal(appointmentSetting.id, "appointment-setting")
+    assert.equal(appointmentSetting.name, "Appointment Setting")
+    assert.deepEqual(appointmentSetting.setup, { kind: "none" })
+    assert.deepEqual(appointmentSetting.capabilities, ["onboarding.manage", "fulfilment.manage", "appointment_setting.manage"])
+    assert.equal(existsSync(`public${appointmentSetting.thumbnail.src}`), true)
 })
 
 test("New service opens templates and the first card reaches the preserved custom editor", () => {

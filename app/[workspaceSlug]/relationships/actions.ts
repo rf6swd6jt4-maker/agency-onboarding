@@ -181,7 +181,7 @@ function currencyCode(value: string) {
 }
 
 export async function saveRelationshipCommercialDetails(slug: string, relationshipId: string, formData: FormData) {
-    const { workspace, user, role } = await requireWorkspace(slug)
+    const { workspace, user, role } = await requireWorkspace(slug, "admin")
     const serviceKeys = [...new Set(formData.getAll("service_key").map(String).filter(Boolean))]
     let sellerId = nullableFormString(formData, "seller_user_id")
     const managerId = nullableFormString(formData, "fulfilment_manager_user_id")
@@ -376,7 +376,7 @@ export async function saveRelationshipDealDetails(slug: string, relationshipId: 
 }
 
 export async function saveRelationshipBackgroundDetails(slug: string, relationshipId: string, input: RelationshipBackgroundDetailsInput): Promise<{ ok: true; version: string } | { ok: false; error: string; conflict?: boolean; version?: string }> {
-    const { workspace, user, role } = await requireWorkspace(slug)
+    const { workspace, user, role } = await requireWorkspace(slug, "admin")
     const primaryPersonName = input.primaryPersonName.trim()
     if (!primaryPersonName) return { ok: false, error: "Add the client's name before saving the relationship" }
     const { data: relationship, error: relationshipError } = await supabaseAdmin.from("relationships")
@@ -472,7 +472,7 @@ export async function proceedRelationshipCurrentWork(
     let workflowAction: string | null = null
     let sale: Awaited<ReturnType<typeof prepareRelationshipSale>> | null = null
     try {
-        const { workspace, user, role } = await requireWorkspace(slug)
+        const { workspace, user, role } = await requireWorkspace(slug, "admin")
         const { data: item } = await supabaseAdmin.from("work_items")
             .select("id, workflow_action")
             .eq("workspace_id", workspace.id).eq("id", workItemId).maybeSingle()

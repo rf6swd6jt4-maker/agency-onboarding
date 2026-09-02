@@ -1,6 +1,6 @@
 import { assertNativeConversationAccess } from "@/lib/teams/server"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -14,7 +14,7 @@ function validReactionEmoji(value: string) {
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await context.params
-    const { workspace, user } = await requireWorkspace(workspaceSlug)
+    const { workspace, user } = await requireWorkspacePanel(workspaceSlug, "communications")
     const input = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof input?.conversationId === "string" ? input.conversationId : ""
     const messageId = typeof input?.messageId === "string" ? input.messageId : ""

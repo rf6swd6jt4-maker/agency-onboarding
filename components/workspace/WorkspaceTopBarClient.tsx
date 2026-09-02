@@ -18,7 +18,8 @@ import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorksp
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
 import { ONBOARDING_BUILDER_WINDOW_SOURCE, openOnboardingBuilderWindow, type OnboardingBuilderWindowSignal } from "@/lib/onboarding-builder-window"
-import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, shouldShowPrivateWorkspacePanelIcon, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
+import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, canAccessWorkspaceUrl, WORKSPACE_PANELS, workspacePanelHref, type WorkspacePanelKey } from "@/lib/workspace-panels"
+import type { WorkspaceCapability } from "@/lib/workspace-capabilities"
 import type { WorkspaceRole } from "@/lib/workspaces"
 import { WORKSPACE_MEMBER_PROFILE_EVENT, WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE } from "@/lib/workspace-member-profile"
 import { WORKSPACE_COMPOSER_FOCUS_EVENT, type WorkspaceComposerFocusEventDetail } from "@/lib/workspace-composer-viewport"
@@ -108,6 +109,7 @@ type Props = {
     email: string
     avatarSrc?: string | null
     workspaceRole: WorkspaceRole
+    workspaceCapabilities: WorkspaceCapability[]
     leaveAction: (formData: FormData) => void
     createRelationshipAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createWorkItemAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
@@ -193,10 +195,11 @@ function contextPanelDisplayValue(value: string | null | undefined, fallback = "
     return value?.trim() || fallback
 }
 
-function ShellRelationshipContextPanel({ context, workspaceSlug, onNavigate }: {
+function ShellRelationshipContextPanel({ context, workspaceSlug, onNavigate, workspaceCapabilities }: {
     context: WorkspaceTabRelationshipContext
     workspaceSlug: string
     onNavigate: (href: string) => void
+    workspaceCapabilities: WorkspaceCapability[]
 }) {
     const relationshipHref = `/${workspaceSlug}/relationships/${context.id}`
     const onboardingHref = `/${workspaceSlug}/onboarding/${context.id}`
@@ -289,15 +292,15 @@ function ShellRelationshipContextPanel({ context, workspaceSlug, onNavigate }: {
                 <section className="mt-5 border-t border-neutral-900 pt-4">
                     <p className="text-xs uppercase tracking-wide text-neutral-500">Open</p>
                     <div className="mt-3 grid gap-2 text-sm">
-                        <button type="button" onClick={() => onNavigate(relationshipHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
+                        {workspaceCapabilities.includes("relationships.view") ? <button type="button" onClick={() => onNavigate(relationshipHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
                             Relationship summary
-                        </button>
-                        <button type="button" onClick={() => onNavigate(onboardingHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
+                        </button> : null}
+                        {workspaceCapabilities.includes("onboarding.manage") ? <button type="button" onClick={() => onNavigate(onboardingHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
                             Onboarding
-                        </button>
-                        <button type="button" onClick={() => onNavigate(workHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
+                        </button> : null}
+                        {workspaceCapabilities.includes("fulfilment.manage") ? <button type="button" onClick={() => onNavigate(workHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
                             Fulfilment
-                        </button>
+                        </button> : null}
                     </div>
                 </section>
             </div>
@@ -335,6 +338,10 @@ function WorkIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="m3 6 .8.8L5.5 5" /><path d="m3 12 .8.8 1.7-1.8" /><path d="m3 18 .8.8 1.7-1.8" /></svg>
 }
 
+function AppointmentIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16" /><path d="m9 15 2 2 4-4" /></svg>
+}
+
 function AssetsIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="8" cy="10" r="1.5" /><path d="m4 17 5-5 4 4 2-2 5 5" /></svg>
 }
@@ -349,10 +356,6 @@ function LibraryIcon() {
 
 function BuilderIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><path d="M4 5h16v14H4z" /><path d="M8 9h8" /><path d="M8 13h5" /><path d="M17 12v5" /><path d="M14.5 14.5h5" /></svg>
-}
-
-function PrivatePanelIcon() {
-    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-none stroke-current stroke-2"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
 }
 
 function CommunicationsIcon() {
@@ -375,6 +378,7 @@ function workspacePanelIcon(key: WorkspacePanelKey) {
     if (key === "relationships") return <RelationshipsIcon />
     if (key === "onboarding") return <HomeIcon />
     if (key === "fulfilment") return <WorkIcon />
+    if (key === "appointment-setting") return <AppointmentIcon />
     if (key === "communications") return <CommunicationsIcon />
     if (key === "library") return <LibraryIcon />
     if (key === "onboarding-builder") return <BuilderIcon />
@@ -425,7 +429,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
+function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -507,6 +511,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [isCreating, startCreateTransition] = useTransition()
     const defaultWorkspaceUrl = `/${workspace.slug}`
     const tabsStorageKey = `betelgeze:workspace-tabs:${workspace.slug}`
+    const capabilitySet = new Set(workspaceCapabilities)
+    const canOpenWorkspaceUrl = useCallback((value: string) => canAccessWorkspaceUrl(value, workspace.slug, workspaceRole, workspaceCapabilities), [workspace.slug, workspaceRole, workspaceCapabilities])
 
     useEffect(() => {
         const openFromEvent = (event: Event) => {
@@ -561,6 +567,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (suffix.startsWith("onboarding/")) return "Onboarding Detail"
         if (suffix === "work") return "Fulfilment"
         if (suffix.startsWith("work/")) return "Fulfilment Detail"
+        if (suffix === "appointment-setting") return "Appointment Setting"
         if (suffix === "work-items") return "Work Items"
         if (suffix.startsWith("work-items/")) return "Work Item"
         if (suffix === "assets") return "Assets"
@@ -700,6 +707,11 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         historyIndex,
                         seenRevision: typeof candidate.seenRevision === "number" && Number.isFinite(candidate.seenRevision) ? candidate.seenRevision : 0,
                     }
+                }).filter((tab) => canOpenWorkspaceUrl(tab.url)).map((tab) => {
+                    const allowedHistory = tab.history.filter(canOpenWorkspaceUrl)
+                    const history = allowedHistory.length ? allowedHistory : [tab.url]
+                    const historyIndex = Math.min(tab.historyIndex, history.length - 1)
+                    return { ...tab, history, historyIndex }
                 })
                 : []
             const freshTab = { id: createTabId(), url: currentUrl, title: titleForUrl(currentUrl), history: [currentUrl], historyIndex: 0, seenRevision: 0 }
@@ -719,7 +731,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             const tab = { id: createTabId(), url: currentUrl, title: titleForUrl(currentUrl), history: [currentUrl], historyIndex: 0, seenRevision: 0 }
             return { activeId: tab.id, mode: "live", tabs: [tab] }
         }
-    }, [normalizeWorkspaceUrl, tabsStorageKey, titleForUrl])
+    }, [canOpenWorkspaceUrl, normalizeWorkspaceUrl, tabsStorageKey, titleForUrl])
 
     useEffect(() => {
         if (tabsBootstrappedRef.current) return
@@ -1427,13 +1439,15 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const url = new URL(tab.url, window.location.origin)
         const intent = url.searchParams.get("create")
         if (intent !== "relationship" && intent !== "work-item" && intent !== "asset" && intent !== "okr") return
-        if (intent === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole)) return
+        if ((intent === "relationship" && !canAccessWorkspacePanel(WORKSPACE_PANELS[0], workspaceRole, workspaceCapabilities))
+            || ((intent === "work-item" || intent === "asset") && !canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities))
+            || (intent === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole))) return
         const key = `${tab.id}:${url.pathname}:${intent}`
         if (createIntentHandledRef.current === key) return
         createIntentHandledRef.current = key
         setCreateTarget(intent)
         setCreateError(null)
-    }, [activeTabId, tabs, tabsHydrated, workspaceRole])
+    }, [activeTabId, tabs, tabsHydrated, workspaceCapabilities, workspaceRole])
 
     useEffect(() => {
         if (!tabsHydrated) return
@@ -1539,6 +1553,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     }
 
     function openCreate(target: "relationship" | "work-item" | "asset" | "okr") {
+        if (target === "relationship" && !canAccessWorkspacePanel(WORKSPACE_PANELS[0], workspaceRole, workspaceCapabilities)) return
+        if ((target === "work-item" || target === "asset") && !canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities)) return
         if (target === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole)) return
         window.dispatchEvent(new CustomEvent("betelgeze:dropdown-open", { detail: "workspace-create" }))
         setCreateError(null)
@@ -1549,8 +1565,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ")
         const canAccessPrivatePanels = canAccessPrivateWorkspacePanels(workspaceRole)
         if (canAccessPrivatePanels && (normalized === "new poll" || normalized === "create poll" || normalized === "start poll" || normalized === "run poll")) return `/${workspace.slug}/leadgen/new`
-        if (normalized === "communications" || normalized === "communication" || normalized === "messages" || normalized === "client messages" || normalized === "chat") return `/${workspace.slug}/communications`
-        if (normalized === "manual relationship" || normalized === "start relationship" || normalized === "new relationship" || normalized === "add relationship" || normalized === "manual client" || normalized === "add manual client" || normalized === "new client" || normalized === "add client") return `/${workspace.slug}/relationships?create=relationship`
+        if (capabilitySet.has("communications.manage") && (normalized === "communications" || normalized === "communication" || normalized === "messages" || normalized === "client messages" || normalized === "chat")) return `/${workspace.slug}/communications`
+        if (capabilitySet.has("relationships.view") && (normalized === "manual relationship" || normalized === "start relationship" || normalized === "new relationship" || normalized === "add relationship" || normalized === "manual client" || normalized === "add manual client" || normalized === "new client" || normalized === "add client")) return `/${workspace.slug}/relationships?create=relationship`
         if (canAccessPrivatePanels && (normalized === "teams" || normalized === "fulfilment teams" || normalized === "maintenance team" || normalized === "officers" || normalized === "responsible officers" || normalized === "global officer" || normalized === "maintenance routing")) return `/${workspace.slug}/settings#teams`
         if (canAccessPrivatePanels && (normalized === "lead gen settings" || normalized === "leadgen settings")) return `/${workspace.slug}/settings#leadgen`
         if (canAccessPrivatePanels && (normalized === "poll automation" || normalized === "lead gen automation")) return `/${workspace.slug}/settings#leadgen-automation`
@@ -2008,16 +2024,17 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     }
 
     const navButtonClass = "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-neutral-400"
-    const sidebarItems = WORKSPACE_PANELS.map((panel) => ({
+    const sidebarItems = WORKSPACE_PANELS.filter((panel) => canAccessWorkspacePanel(panel, workspaceRole, workspaceCapabilities)).map((panel) => ({
         ...panel,
         href: workspacePanelHref(workspace.slug, panel),
         activeHrefs: ("activeRoutes" in panel ? panel.activeRoutes : [panel.route]).map((route) => `/${workspace.slug}/${route}`),
         icon: workspacePanelIcon(panel.key),
         meta: panel.key === "leadgen" ? LEADGEN_POLLING_SYSTEM_VERSION_LABEL : null,
-        disabled: !canAccessWorkspacePanel(panel, workspaceRole),
         standalone: "standalone" in panel && panel.standalone === true,
     }))
     const canCreateOkr = canAccessPrivateWorkspacePanels(workspaceRole)
+    const canCreateRelationship = canAccessWorkspacePanel(WORKSPACE_PANELS[0], workspaceRole, workspaceCapabilities)
+    const canCreateLibraryItem = canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities)
     const visibleTabs = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrder)
     const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
@@ -2281,15 +2298,15 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                         )}
                     </div>
                     <div className="hidden items-center gap-0.5 md:flex" aria-label="Create">
-                        <button data-icon-button type="button" onClick={() => openCreate("relationship")} aria-label="Add relationship" title="Add relationship" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
+                        {canCreateRelationship && <button data-icon-button type="button" onClick={() => openCreate("relationship")} aria-label="Add relationship" title="Add relationship" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
                             <RelationshipsIcon />
-                        </button>
-                        <button data-icon-button type="button" onClick={() => openCreate("work-item")} aria-label="Add work item" title="Add work item" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
+                        </button>}
+                        {canCreateLibraryItem && <button data-icon-button type="button" onClick={() => openCreate("work-item")} aria-label="Add work item" title="Add work item" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
                             <WorkIcon />
-                        </button>
-                        <button data-icon-button type="button" onClick={() => openCreate("asset")} aria-label="Add asset" title="Add asset" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
+                        </button>}
+                        {canCreateLibraryItem && <button data-icon-button type="button" onClick={() => openCreate("asset")} aria-label="Add asset" title="Add asset" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
                             <AssetsIcon />
-                        </button>
+                        </button>}
                         {canCreateOkr && <button data-icon-button type="button" onClick={() => openCreate("okr")} aria-label="Create OKR" title="Create OKR" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:text-white md:h-9 md:w-9">
                             <OkrIcon />
                         </button>}
@@ -2473,6 +2490,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 context={activeRelationshipContext}
                 workspaceSlug={workspace.slug}
                 onNavigate={navigateActiveTab}
+                workspaceCapabilities={workspaceCapabilities}
             />
         )}
 
@@ -2499,45 +2517,33 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                     </button>
                 </div>
                 {sidebarItems.map((item) => {
-                    const disabled = item.disabled
-                    const showPrivateIcon = shouldShowPrivateWorkspacePanelIcon(item, workspaceRole)
                     const active = item.activeHrefs?.some((href) => activePathname === href || activePathname.startsWith(`${href}/`))
                         ?? (item.href === defaultWorkspaceUrl
                         ? activePathname === defaultWorkspaceUrl
                         : activePathname === item.href || activePathname.startsWith(`${item.href}/`))
-                    const itemClassName = `flex min-h-12 items-center gap-3 rounded-lg px-4 text-base transition md:min-h-10 md:px-3 md:text-sm ${disabled ? "cursor-not-allowed text-neutral-700" : active ? "bg-neutral-900 text-white" : "text-neutral-400 hover:bg-neutral-900/70 hover:text-white"}`
-
-                    if (disabled) return (
-                        <button key={item.key} type="button" disabled aria-label={`${item.label} — private panel`} className={`${itemClassName} w-full text-left`}>
-                            <span className="shrink-0">{item.icon}</span>
-                            <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                            {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-600">{item.meta}</span>}
-                            {showPrivateIcon && <span className="shrink-0 text-neutral-600"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
-                        </button>
-                    )
+                    const itemClassName = `flex min-h-12 items-center gap-3 rounded-lg px-4 text-base transition md:min-h-10 md:px-3 md:text-sm ${active ? "bg-neutral-900 text-white" : "text-neutral-400 hover:bg-neutral-900/70 hover:text-white"}`
 
                     return (
                         <Link key={item.key} href={item.href} target={item.standalone ? "_blank" : undefined} rel={item.standalone ? "noopener noreferrer" : undefined} data-global-loading="false" onClick={(event) => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigateWorkspaceDestination(item.href); closeSidebarAfterNavigation() }} className={itemClassName}>
                             <span className="shrink-0">{item.icon}</span>
                             <span className="min-w-0 flex-1 truncate">{item.label}</span>
                             {item.meta && <span className="shrink-0 font-mono text-[11px] text-neutral-500">{item.meta}</span>}
-                            {showPrivateIcon && <span className="shrink-0 text-neutral-500"><span className="sr-only">Private panel</span><PrivatePanelIcon /></span>}
                         </Link>
                     )
                 })}
                 <div className="mt-auto border-t border-neutral-800 pt-3 md:hidden">
-                    <button type="button" onClick={() => { openCreate("relationship"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
+                    {canCreateRelationship && <button type="button" onClick={() => { openCreate("relationship"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
                         <RelationshipsIcon />
                         <span>Add relationship</span>
-                    </button>
-                    <button type="button" onClick={() => { openCreate("work-item"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
+                    </button>}
+                    {canCreateLibraryItem && <button type="button" onClick={() => { openCreate("work-item"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
                         <WorkIcon />
                         <span>Add work item</span>
-                    </button>
-                    <button type="button" onClick={() => { openCreate("asset"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
+                    </button>}
+                    {canCreateLibraryItem && <button type="button" onClick={() => { openCreate("asset"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
                         <AssetsIcon />
                         <span>Add asset</span>
-                    </button>
+                    </button>}
                     {canCreateOkr && <button type="button" onClick={() => { openCreate("okr"); closeSidebarAfterNavigation() }} className="flex min-h-10 w-full items-center gap-3 rounded-lg px-4 text-left text-sm text-neutral-500 transition hover:bg-neutral-900/70 hover:text-neutral-200">
                         <OkrIcon />
                         <span>Create OKR</span>

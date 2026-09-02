@@ -1,7 +1,7 @@
 import { CommunicationsPanel } from "@/components/communications/CommunicationsPanel"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { loadClientCommunicationsBootstrap } from "@/lib/communications/bootstrap"
-import { requireWorkspace } from "@/lib/workspaces"
+import { requireWorkspacePanel } from "@/lib/workspace-access"
 import { loadNativeCommunications } from "@/lib/teams/server"
 
 export const dynamic = "force-dynamic"
@@ -13,7 +13,7 @@ type PageProps = {
 
 export default async function CommunicationsPage({ params, searchParams }: PageProps) {
     const [{ workspaceSlug }, query] = await Promise.all([params, searchParams])
-    const { workspace, user, role } = await requireWorkspace(workspaceSlug)
+    const { workspace, user, role } = await requireWorkspacePanel(workspaceSlug, "communications")
     const [bootstrap, nativeBootstrap] = await Promise.all([
         loadClientCommunicationsBootstrap({ currentUserId: user.id, requestedConversationId: query.conversation, workspaceId: workspace.id, workspaceSlug: workspace.slug }),
         loadNativeCommunications({ workspaceId: workspace.id, workspaceSlug: workspace.slug, currentUserId: user.id, role, requestedConversationId: query.nativeConversation, requestedDmUserId: query.dm }),

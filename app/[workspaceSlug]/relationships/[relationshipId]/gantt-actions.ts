@@ -15,8 +15,8 @@ export type GanttMutationResult =
     | { status: "stale"; message: string }
     | { status: "invalid"; message: string }
 
-async function requireGantt(slug: string, relationshipId: string, edit = true) {
-    const context = await requireWorkspace(slug, edit ? "admin" : "staff")
+async function requireGantt(slug: string, relationshipId: string) {
+    const context = await requireWorkspace(slug, "admin")
     const { data: relationship } = await supabaseAdmin.from("relationships")
         .select("id, lifecycle_phase")
         .eq("workspace_id", context.workspace.id).eq("id", relationshipId).maybeSingle()
@@ -49,7 +49,7 @@ async function reportGanttFailure(workspaceId: string, slug: string, relationshi
 }
 
 export async function loadGanttPlan(slug: string, relationshipId: string): Promise<RelationshipGanttPlan | null> {
-    const { workspace } = await requireGantt(slug, relationshipId, false)
+    const { workspace } = await requireGantt(slug, relationshipId)
     const relationship = await getRelationship(workspace.id, relationshipId)
     if (!relationship) return null
     return getRelationshipGanttPlan(workspace.slug, relationship)
