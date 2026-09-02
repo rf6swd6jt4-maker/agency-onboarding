@@ -4,7 +4,7 @@ import type { ConfigurationActionResult, OnboardingServiceDefinition, Onboarding
 import { configurationRpc, configurationSchemaUnavailable, revalidateOnboardingConfiguration, unexpectedConfigurationError } from "@/lib/onboarding/configuration-actions"
 import { normalizeServiceDefinition } from "@/lib/onboarding/configuration-validation"
 import { SERVICE_TEMPLATES } from "@/lib/onboarding/service-templates"
-import { DEFAULT_SERVICE_CAPABILITIES } from "@/lib/workspace-capabilities"
+import { DEFAULT_SERVICE_CAPABILITIES, STAFF_SERVICE_PERMISSION_OPTIONS, type StaffServicePermission } from "@/lib/workspace-capabilities"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -42,7 +42,7 @@ export async function saveOnboardingService(slug: string, serviceId: string | nu
                 p_connection_provider: template.setup.connectionKey,
             } : {}),
         })
-        if (outcome.ok && (!serviceId || template)) {
+        if (outcome.ok && !serviceId) {
             const savedService = outcome.data
             if (!savedService) return { ok: false, error: "The service was created without a Staff access identity. Do not assign it until an administrator retries." }
             const capabilities = template?.capabilities ?? DEFAULT_SERVICE_CAPABILITIES
@@ -56,6 +56,26 @@ export async function saveOnboardingService(slug: string, serviceId: string | nu
             )
             if (capabilityError) return { ok: false, error: "The service was saved, but its Staff access profile could not be synchronized. Open it and save again before assigning it." }
         }
+        if (outcome.ok) revalidateOnboardingConfiguration(slug)
+        return outcome
+    } catch (error) {
+        return unexpectedConfigurationError(error)
+    }
+}
+
+export async function saveOnboardingServiceStaffPermissions(slug: string, serviceId: string, permissions: StaffServicePermission[]): Promise<ConfigurationActionResult<{ service_id: string; capability_count: number }>> {
+    try {
+        const { workspace, user } = await requireWorkspace(slug, "admin")
+        if (configurationSchemaUnavailable(serviceId)) return { ok: false, error: "Legacy services cannot control Staff permissions until the catalogue migration is complete." }
+        const allowed = new Set(STAFF_SERVICE_PERMISSION_OPTIONS.map((option) => option.capability))
+        const normalized = [...new Set(permissions)]
+        if (normalized.some((permission) => !allowed.has(permission))) return { ok: false, error: "Choose permissions from the available Staff panel list." }
+        const outcome = await configurationRpc<{ service_id: string; capability_count: number }>("set_workspace_service_capabilities", {
+            p_workspace_id: workspace.id,
+            p_actor_user_id: user.id,
+            p_service_id: serviceId,
+            p_capabilities: normalized,
+        })
         if (outcome.ok) revalidateOnboardingConfiguration(slug)
         return outcome
     } catch (error) {

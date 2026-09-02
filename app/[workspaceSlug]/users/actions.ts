@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { normalizeWorkspaceRole, requireWorkspace, type WorkspaceRole } from "@/lib/workspaces"
+import { normalizeWorkspaceRole, requireWorkspace } from "@/lib/workspaces"
 import { emailDeliveryFailureDetails, sendSecurityNotice, sendWorkspaceInvitation } from "@/lib/email"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { createAccountToken, hashAccountToken } from "@/lib/auth/account-tokens"
@@ -117,41 +117,6 @@ export async function inviteWorkspaceUser(slug: string, _state: WorkspaceInvitat
     }
     revalidatePath(`/${slug}/settings`)
     return { ok: true, message: `Invitation accepted by Resend for ${email}. Delivery is being tracked.` }
-}
-
-export async function updateWorkspaceUserRole(slug: string, formData: FormData) {
-    const { workspace, role: actingRole, user } = await requireUserManager(slug)
-    const userId = String(formData.get("userId") ?? "")
-    const requestedRole = invitedRole(formData.get("role")) as WorkspaceRole
-    const serviceIds = requestedRole === "staff" ? requestedServiceIds(formData) : []
-    if (requestedRole === "staff" && !serviceIds.length) throw new Error("Staff members must have at least one service.")
-    const { error } = await supabaseAdmin.rpc("set_workspace_member_service_access", {
-        p_workspace_id: workspace.id,
-        p_actor_user_id: user.id,
-        p_target_user_id: userId,
-        p_role: requestedRole,
-        p_service_ids: serviceIds,
-    })
-    if (error) {
-        if (actingRole !== "owner" && requestedRole !== "staff") throw new Error("Only workspace owners can change roles.")
-        throw new Error("Workspace access could not be updated safely.")
-    }
-    await recordAdminActivity({
-        workspaceId: workspace.id,
-        category: "system",
-        level: "info",
-        eventKey: "workspace.member.access.updated",
-        summary: `Workspace member access updated to ${requestedRole}`,
-        sourceHref: `/${slug}/settings#users`,
-        actorUserId: user.id,
-        actorKind: "staff",
-        outcome: "succeeded",
-        entityType: "workspace_member",
-        entityId: userId,
-        metricClassification: "internal_call",
-        metadata: { role: requestedRole, service_ids: serviceIds },
-    })
-    revalidatePath(`/${slug}/settings`)
 }
 
 export async function removeWorkspaceUser(slug: string, formData: FormData) {

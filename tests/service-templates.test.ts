@@ -51,3 +51,12 @@ test("Services uses a compact Settings option list with popup editing", () => {
     assert.doesNotMatch(servicesUi, /settings\/services\/\$\{encodeURIComponent\(service\.id\)\}/)
     assert.doesNotMatch(servicesUi, /<List|<MobileListActionSurface|<ListActionMenu/)
 })
+
+test("Services owns the centred Staff permissions editor", () => {
+    assert.match(servicesUi, />Staff permissions</)
+    assert.match(servicesUi, /STAFF_SERVICE_PERMISSION_OPTIONS\.map/)
+    assert.match(servicesUi, /Permissions from multiple assigned services add together\./)
+    assert.match(servicesUi, /saveOnboardingServiceStaffPermissions/)
+    assert.match(servicesUi, /createPortal\(<ServiceStaffPermissionsEditor/)
+    assert.match(servicesUi, /fixed inset-0[\s\S]*items-center justify-center/)
+})

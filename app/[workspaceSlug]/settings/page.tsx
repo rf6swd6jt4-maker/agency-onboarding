@@ -15,7 +15,6 @@ import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { WorkspaceAutosaveForm } from "@/components/workspace/WorkspaceAutosaveForm"
 import { WorkspaceActionButton } from "@/components/workspace/WorkspaceActionButton"
 import { AdminMfaResetButton } from "@/components/admin/AdminMfaResetButton"
-import { WorkspaceUserAccessEditor } from "@/components/admin/WorkspaceUserAccessEditor"
 import { loadLeadgenSettingsPageData } from "@/lib/leadgen/settings-page-data"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { loadOnboardingSettingsPageData } from "@/lib/onboarding/configuration"
@@ -23,9 +22,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import { loadWorkspaceTeams, loadWorkspaceMemberProfiles } from "@/lib/teams/server"
 import { BASE_INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
+import { normalizeWorkspaceCapability, type WorkspaceCapability } from "@/lib/workspace-capabilities"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
-import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa, updateWorkspaceUserRole } from "../users/actions"
+import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa } from "../users/actions"
 import {
     cancelWorkspaceClientPortalDomain,
     cancelWorkspaceOnboardingDomain,
@@ -103,7 +103,6 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         teamResult,
         teamPeople,
         teamConversationResult,
-        memberServiceAccessResult,
         serviceCapabilitiesResult,
     ] = await Promise.all([
         workspace.banner_path ? createUploadSignedUrl(workspace.banner_path) : null,
@@ -119,7 +118,6 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         loadWorkspaceTeams(workspace.id),
         loadWorkspaceMemberProfiles(workspace.id),
         supabaseAdmin.from("workspace_native_conversations").select("id, team_id").eq("workspace_id", workspace.id).eq("kind", "team"),
-        supabaseAdmin.from("workspace_member_service_access").select("user_id, service_id").eq("workspace_id", workspace.id),
         supabaseAdmin.from("workspace_service_capabilities").select("service_id, capability").eq("workspace_id", workspace.id),
     ])
 
@@ -128,18 +126,16 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         user: (await supabaseAdmin.auth.admin.getUserById(membership.user_id)).data.user,
     })))
     const isOwner = role === "owner"
-    const capabilitiesByService = new Map<string, string[]>()
+    const capabilitiesByService = new Map<string, WorkspaceCapability[]>()
     for (const grant of serviceCapabilitiesResult.data ?? []) {
-        capabilitiesByService.set(grant.service_id, [...(capabilitiesByService.get(grant.service_id) ?? []), grant.capability])
+        const capability = normalizeWorkspaceCapability(grant.capability)
+        if (capability) capabilitiesByService.set(grant.service_id, [...(capabilitiesByService.get(grant.service_id) ?? []), capability])
     }
+    const serviceCapabilities = Object.fromEntries(capabilitiesByService)
     const serviceOptions = onboardingSettings.services
         .filter((service) => /^[0-9a-f-]{36}$/i.test(service.id))
-        .map((service) => ({ id: service.id, name: service.name, state: service.state, capabilities: capabilitiesByService.get(service.id) ?? [] }))
+        .map((service) => ({ id: service.id, name: service.name, state: service.state }))
     const activeServiceOptions = serviceOptions.filter((service) => service.state === "active")
-    const serviceIdsByUser = new Map<string, string[]>()
-    for (const assignment of memberServiceAccessResult.data ?? []) {
-        serviceIdsByUser.set(assignment.user_id, [...(serviceIdsByUser.get(assignment.user_id) ?? []), assignment.service_id])
-    }
     const teamConversationIds = Object.fromEntries((teamConversationResult.data ?? []).flatMap((conversation) => conversation.team_id ? [[conversation.team_id, conversation.id]] : []))
     const connections = [...BASE_INTEGRATION_PROVIDERS.map((provider) =>
         integrationResult.find((item) => item.provider === provider)
@@ -194,6 +190,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                 assignees={onboardingSettings.assignees}
                                 schemaReady={onboardingSettings.schemaReady}
                                 initialServiceId={query.service}
+                                serviceCapabilities={serviceCapabilities}
                             />
                         </section>
 
@@ -283,15 +280,6 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                                         </div>
                                         {normalizeWorkspaceRole(assignedRole) !== "owner" && (
                                             <div className="flex flex-wrap items-center gap-2">
-                                                {workspaceUser?.id && (isOwner || normalizeWorkspaceRole(assignedRole) === "staff") ? <WorkspaceUserAccessEditor
-                                                    userId={workspaceUser.id}
-                                                    email={workspaceUser.email ?? "Workspace user"}
-                                                    role={normalizeWorkspaceRole(assignedRole) ?? "staff"}
-                                                    services={serviceOptions}
-                                                    selectedServiceIds={serviceIdsByUser.get(workspaceUser.id) ?? []}
-                                                    canChangeRole={isOwner}
-                                                    action={updateWorkspaceUserRole.bind(null, workspace.slug)}
-                                                /> : null}
                                                 {(isOwner || normalizeWorkspaceRole(assignedRole) === "staff") ? <AdminMfaResetButton email={workspaceUser?.email ?? "this user"} userId={workspaceUser?.id ?? ""} action={resetWorkspaceUserMfa.bind(null, workspace.slug)} /> : null}
                                                 <form action={removeWorkspaceUser.bind(null, workspace.slug)} data-workspace-mutation="background" className="flex-1 sm:flex-none">
                                                     <input type="hidden" name="userId" value={workspaceUser?.id} />

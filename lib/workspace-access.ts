@@ -2,7 +2,7 @@ import "server-only"
 
 import { notFound } from "next/navigation"
 import { supabaseAdmin } from "@/lib/supabase/admin"
-import { normalizeWorkspaceCapability, WORKSPACE_CAPABILITIES, type WorkspaceCapability } from "@/lib/workspace-capabilities"
+import { combineWorkspaceCapabilities, WORKSPACE_CAPABILITIES, type WorkspaceCapability } from "@/lib/workspace-capabilities"
 import { canAccessWorkspacePanel, workspacePanelByKey, workspacePanelHref, WORKSPACE_PANELS, type WorkspacePanelKey } from "@/lib/workspace-panels"
 import type { WorkspaceRole } from "@/lib/workspace-roles"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -71,10 +71,7 @@ export async function loadWorkspaceAccess(input: {
         return { ...input, capabilities: [], allowedServiceIds, serviceAccessSchemaReady: false }
     }
 
-    const capabilities = [...new Set((grants ?? []).flatMap((item) => {
-        const capability = normalizeWorkspaceCapability(item.capability)
-        return capability ? [capability] : []
-    }))]
+    const capabilities = combineWorkspaceCapabilities((grants ?? []).map((item) => [item.capability]))
 
     return { ...input, capabilities, allowedServiceIds, serviceAccessSchemaReady: true }
 }

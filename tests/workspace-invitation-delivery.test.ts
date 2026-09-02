@@ -9,7 +9,7 @@ function source(path: string) {
 test("workspace invitations are persisted with a hashed rotating token before delivery", () => {
     const action = source("app/[workspaceSlug]/users/actions.ts")
     const start = action.indexOf("export async function inviteWorkspaceUser")
-    const end = action.indexOf("export async function updateWorkspaceUserRole", start)
+    const end = action.indexOf("export async function removeWorkspaceUser", start)
     const invitationAction = action.slice(start, end)
 
     const send = invitationAction.indexOf("await sendWorkspaceInvitation")
@@ -58,4 +58,13 @@ test("invitation failures stay inline instead of crashing Settings", () => {
     assert.match(form, /data-global-loading="false"/)
     assert.match(form, /role=\{state\.ok \? "status" : "alert"\}/)
     assert.match(settings, /<WorkspaceInvitationForm action=\{inviteWorkspaceUser\.bind\(null, workspace\.slug\)\}/)
+})
+
+test("Staff invitations cannot be submitted without an assigned service", () => {
+    const form = source("components/admin/WorkspaceInvitationForm.tsx")
+    const action = source("app/[workspaceSlug]/users/actions.ts")
+
+    assert.match(form, /disabled=\{role === "staff" && selectedServiceIds\.size === 0\}/)
+    assert.match(action, /requestedRole === "staff" && !serviceIds\.length/)
+    assert.match(action, /Choose at least one service for this Staff member\./)
 })
