@@ -17,6 +17,7 @@ const searchRoute = readFileSync("app/api/workspaces/[workspaceSlug]/search/rout
 const leadgenPanel = readFileSync("app/[workspaceSlug]/leadgen/page.tsx", "utf8")
 const leadgenPollsPanel = readFileSync("app/[workspaceSlug]/leadgen/polls/page.tsx", "utf8")
 const leadgenPollPanel = readFileSync("app/[workspaceSlug]/leadgen/poll/[pollId]/page.tsx", "utf8")
+const workspaceTopBar = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
 const staffMigration = readFileSync("supabase/migrations/20260804090000_rename_workspace_member_role_to_staff.sql", "utf8")
 const serviceAccessMigration = readFileSync("supabase/migrations/20260902170000_service_scoped_staff_access.sql", "utf8")
 
@@ -52,6 +53,12 @@ test("workspace panels derive Staff access from service capabilities", () => {
     assert.equal(WORKSPACE_PANELS.every((panel) => canAccessWorkspacePanel(panel, "admin")), true)
     assert.equal(canAccessWorkspaceUrl("/acme/settings", "acme", "staff", appointmentSettingCapabilities), false)
     assert.equal(canAccessWorkspaceUrl("/acme/appointment-setting", "acme", "staff", appointmentSettingCapabilities), true)
+})
+
+test("mobile workspace navigation scrolls within the dynamic viewport", () => {
+    assert.match(workspaceTopBar, /h-\[calc\(100dvh-3\.5rem\)\]/)
+    assert.match(workspaceTopBar, /touch-pan-y flex-col gap-2 overflow-y-auto overscroll-contain/)
+    assert.match(workspaceTopBar, /md:overflow-visible md:overscroll-auto/)
 })
 
 test("search calls top-level destinations panels and hides all private records from staff", () => {
