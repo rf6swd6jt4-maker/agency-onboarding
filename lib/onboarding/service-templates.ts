@@ -5,6 +5,11 @@ export type ServiceTemplateSetup =
     | { kind: "none" }
     | { kind: "connection"; connectionKey: string }
 
+export type ServiceTemplateOnboardingBlock = {
+    kind: "connection" | "appointment_medium" | "appointment_fields"
+    label: string
+}
+
 export type ServiceTemplateDefinition = {
     id: string
     name: string
@@ -25,6 +30,7 @@ export type ServiceTemplateDefinition = {
     }
     setup: ServiceTemplateSetup
     capabilities: readonly WorkspaceCapability[]
+    onboardingBlocks: readonly ServiceTemplateOnboardingBlock[]
 }
 
 const metaAdsThumbnail = "/service-templates/meta-ads.png"
@@ -50,6 +56,7 @@ export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
     },
     setup: { kind: "connection", connectionKey: "meta_ads" },
     capabilities: ["onboarding.manage", "fulfilment.manage"],
+    onboardingBlocks: [{ kind: "connection", label: "Facebook connection" }],
 }, {
     id: "appointment-setting",
     name: "Appointment Setting",
@@ -70,4 +77,8 @@ export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
     },
     setup: { kind: "none" },
     capabilities: ["onboarding.manage", "fulfilment.manage", "appointment_setting.manage"],
+    onboardingBlocks: [
+        { kind: "appointment_medium", label: "Appointment medium" },
+        { kind: "appointment_fields", label: "Appointment information" },
+    ],
 }]

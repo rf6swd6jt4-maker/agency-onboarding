@@ -35,6 +35,7 @@ export type OnboardingSessionRenderModel = {
     allowEditRequest?: boolean
     action?: React.ReactNode
     satisfiedBlockIds?: string[]
+    blockResponses?: Record<string, unknown>
     backHref?: string | null
     forceMobile?: boolean
 }
@@ -75,6 +76,7 @@ export function OnboardingSessionRenderer({
     allowEditRequest = false,
     action,
     satisfiedBlockIds = [],
+    blockResponses = {},
     backHref = null,
     forceMobile = false,
 }: OnboardingSessionRenderModel) {
@@ -110,6 +112,7 @@ export function OnboardingSessionRenderer({
                     onPreviewSubmit={onPreviewSubmit}
                     allowEditRequest={allowEditRequest}
                     initiallySatisfied={satisfiedBlockIds}
+                    initialBlockResponses={blockResponses}
                     continueAction={action}
                     continueLabel={step.navigation?.continueLabel || "Complete and continue"}
                     backLabel={step.navigation?.backLabel || "Back"}

@@ -12,6 +12,8 @@ import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessN
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import {
     createButtonBlock,
+    createAppointmentFieldsBlock,
+    createAppointmentMediumBlock,
     createChecklistBlock,
     createConnectionBlock,
     createEstimateBlock,
@@ -30,6 +32,7 @@ import {
     type OnboardingStepV2,
     type VideoBlock,
 } from "@/lib/onboarding/block-definition"
+import { SERVICE_TEMPLATES } from "@/lib/onboarding/service-templates"
 import { visualStepTitle } from "@/lib/onboarding/block-validation"
 import { normalizedBuilderCursor } from "@/lib/onboarding/builder-presence"
 import type { OnboardingBuilderData, OnboardingHelpSettings, OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
@@ -45,6 +48,7 @@ type Selection = { groupKey: string; stepId: string; blockId: string | null; fie
 type LeftTab = "outline" | "blocks" | "modules"
 type RightTab = "inspect" | "styles"
 type OnboardingField = Extract<OnboardingBlock, { kind: "form" }>["fields"][number]
+type BuilderBlockKind = Exclude<OnboardingBlock["kind"], "header">
 const HELP_BLOCK_ID = "builder:client-help"
 
 type ReleaseFingerprint = {
@@ -78,7 +82,18 @@ function definitionId(groupKey: string) {
 }
 
 function blockName(block: OnboardingBlock) {
-    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "checklist" ? "Checklist" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.kind === "connection" ? "Facebook connection" : "Button")
+    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "checklist" ? "Checklist" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.kind === "connection" ? "Facebook connection" : block.kind === "appointment_medium" ? "Appointment medium" : block.kind === "appointment_fields" ? "Appointment information" : "Button")
+}
+
+function createBuilderBlock(kind: BuilderBlockKind): OnboardingBlock {
+    if (kind === "estimate") return createEstimateBlock()
+    if (kind === "checklist") return createChecklistBlock()
+    if (kind === "form") return createFormBlock()
+    if (kind === "video") return createVideoBlock()
+    if (kind === "connection") return createConnectionBlock()
+    if (kind === "appointment_medium") return createAppointmentMediumBlock()
+    if (kind === "appointment_fields") return createAppointmentFieldsBlock()
+    return createButtonBlock()
 }
 
 function nextDuplicateName(sourceName: string, siblingNames: string[]) {
@@ -174,7 +189,7 @@ function ChevronIcon({ collapsed }: { collapsed: boolean }) {
     return <svg viewBox="0 0 20 20" aria-hidden="true" className={`h-3.5 w-3.5 fill-none stroke-current stroke-2 transition-transform ${collapsed ? "-rotate-90" : ""}`}><path d="m5 7 5 5 5-5" /></svg>
 }
 
-function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "header" | "estimate" | "checklist" | "form" | "video" | "button" | "connection" | "field" | "help" | "payment" }) {
+function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | OnboardingBlock["kind"] | "field" | "help" | "payment" }) {
     const tone = {
         bookend: "bg-indigo-500/15 text-indigo-300",
         module: "bg-blue-500/15 text-blue-300",
@@ -186,6 +201,8 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         video: "bg-violet-500/15 text-violet-300",
         button: "bg-amber-500/15 text-amber-300",
         connection: "bg-blue-500/15 text-blue-300",
+        appointment_medium: "bg-fuchsia-500/15 text-fuchsia-300",
+        appointment_fields: "bg-rose-500/15 text-rose-300",
         field: "bg-emerald-500/15 text-emerald-300",
         help: "bg-indigo-500/15 text-indigo-300",
         payment: "bg-amber-500/15 text-amber-300",
@@ -201,6 +218,8 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | "head
         video: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="m8 8 5 2-5 2Z" /></>,
         button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
         connection: <><circle cx="10" cy="10" r="7" /><path d="M8 6.5h2.3c1.8 0 3 1 3 2.5s-1.2 2.5-3 2.5H9v3M7 9.5h4" /></>,
+        appointment_medium: <><circle cx="10" cy="10" r="6" /><path d="M7 10h6M10 7v6" /></>,
+        appointment_fields: <><path d="M5 5h10M5 10h10M5 15h10" /><circle cx="3" cy="5" r=".5" /><circle cx="3" cy="10" r=".5" /><circle cx="3" cy="15" r=".5" /></>,
         field: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="M6 10h5" /></>,
         help: <><circle cx="10" cy="10" r="7" /><path d="M8 8a2 2 0 1 1 3 1.7c-.8.4-1 1-1 1.8M10 14h.01" /></>,
         payment: <><rect x="3" y="5" width="14" height="10" rx="2" /><path d="M3 8h14M6 12h3" /></>,
@@ -406,6 +425,21 @@ function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, 
         <p className="text-xs leading-5 text-neutral-600">This required action completes only after Facebook authorization succeeds.</p>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete connection</button>
     </div>
+    if (block.kind === "appointment_medium") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Description<textarea value={block.description} disabled={!editable} onChange={(event) => updateBlock({ ...block, description: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
+        <p className="text-xs leading-5 text-neutral-600">Clients can choose one or more of Phone call, Google Meet, and Zoom. This choice controls the setter’s appointment table.</p>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete appointment medium</button>
+    </div>
+    if (block.kind === "appointment_fields") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Description<textarea value={block.description} disabled={!editable} onChange={(event) => updateBlock({ ...block, description: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
+        <label className="block text-xs text-neutral-500">Maximum extra fields<select value={block.maximumFields} disabled={!editable} onChange={(event) => updateBlock({ ...block, maximumFields: Number(event.target.value) })} className={inspectorInputClass}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
+        <p className="text-xs leading-5 text-neutral-600">Name, date, and time are always included. Clients may add up to {block.maximumFields} simple fields and decide whether each is optional or required.</p>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete appointment information</button>
+    </div>
     if (currentGroup.kind === "payment" && block.id === ONBOARDING_PAYMENT_BUTTON_ID) return <div className="space-y-4">
         <p className="text-xs leading-5 text-neutral-400">The button label and Stripe branding are fixed so clients can immediately recognise the secure payment action.</p>
         <p className="text-xs leading-5 text-neutral-600">This required button creates or reuses the client’s secure Stripe Checkout page. Its destination is assigned automatically and it cannot be moved or removed.</p>
@@ -512,9 +546,29 @@ function ModulesPanel({ modules, services, editable, updateModule, removeModule,
     </div>
 }
 
+const LIBRARY_BLOCK_PRESENTATION: Record<BuilderBlockKind, { label: string; icon: string }> = {
+    estimate: { label: "Estimated time", icon: "◷" },
+    checklist: { label: "Checklist", icon: "✓" },
+    form: { label: "Form", icon: "▤" },
+    video: { label: "Video", icon: "▶" },
+    button: { label: "Button", icon: "↗" },
+    connection: { label: "Facebook connection", icon: "f" },
+    appointment_medium: { label: "Appointment medium", icon: "◉" },
+    appointment_fields: { label: "Appointment information", icon: "≡" },
+}
+
+function BlockLibraryItem({ kind, label, editable, addBlock }: { kind: BuilderBlockKind; label?: string; editable: boolean; addBlock: (kind: BuilderBlockKind) => void }) {
+    const presentation = LIBRARY_BLOCK_PRESENTATION[kind]
+    return <button type="button" draggable={editable} disabled={!editable} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-sm">{presentation.icon}</span><span className="text-sm">{label ?? presentation.label}</span></button>
+}
+
 export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data, initialBookend }: { workspaceSlug: string; workspaceName: string; data: OnboardingBuilderData; initialBookend?: "welcome" | "completion" | null }) {
     const initialDocument = useMemo<VisualBuilderDocument>(() => ({ modules: data.visualModules, welcome: data.visualWelcome, completion: data.visualCompletion, payment: data.visualPayment, theme: data.theme, linkedChangeSets: [] }), [data])
     const collaboration = useCollaborativeOnboardingDocument({ workspaceSlug, initial: initialDocument, collaboration: data.collaboration })
+    const installedServiceBlockGroups = SERVICE_TEMPLATES.filter((template) => (
+        template.onboardingBlocks.length > 0
+        && data.services.some((service) => service.templateId === template.id && service.state !== "archived")
+    ))
     const [publishedVersion, setPublishedVersion] = useState(data.collaboration.publishedVersion)
     const [publishedBaseline, setPublishedBaseline] = useState<ReleaseFingerprint | null>(() => data.collaboration.version === data.collaboration.publishedVersion
         ? releaseFingerprint(collaboration.initialDocument)
@@ -786,7 +840,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         if (!raw) return
         event.preventDefault()
         try {
-            const payload = JSON.parse(raw) as { type: "module" | "step" | "block" | "field" | "library"; moduleId?: string; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: "estimate" | "checklist" | "form" | "video" | "button" | "connection"; copy?: boolean }
+            const payload = JSON.parse(raw) as { type: "module" | "step" | "block" | "field" | "library"; moduleId?: string; groupKey?: string; stepId?: string; blockId?: string; formBlockId?: string; fieldId?: string; kind?: BuilderBlockKind; copy?: boolean }
             if (payload.type === "module" && payload.moduleId && target.moduleIndex !== undefined) reorderModule(payload.moduleId, target.moduleIndex)
             else if (payload.type === "step" && payload.groupKey && payload.stepId && target.stepIndex !== undefined) moveStep(payload.groupKey, target.groupKey, payload.stepId, target.stepIndex, Boolean(payload.copy))
             else if (payload.type === "block" && payload.groupKey && payload.stepId && payload.blockId && target.stepId) moveBlock(payload.groupKey, payload.stepId, payload.blockId, target.groupKey, target.stepId, target.blockIndex ?? Number.MAX_SAFE_INTEGER, Boolean(payload.copy))
@@ -797,7 +851,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                 }
                 moveField(target.groupKey, target.stepId!, target.formBlockId, payload.fieldId, target.fieldIndex, Boolean(payload.copy))
             } else if (payload.type === "library" && payload.kind && target.stepId) {
-                const block = payload.kind === "estimate" ? createEstimateBlock() : payload.kind === "checklist" ? createChecklistBlock() : payload.kind === "form" ? createFormBlock() : payload.kind === "video" ? createVideoBlock() : payload.kind === "connection" ? createConnectionBlock() : createButtonBlock()
+                const block = createBuilderBlock(payload.kind)
                 let inserted = false
                 collaboration.updateDocument((document) => {
                     const targetDefinition = documentDefinition(document, target.groupKey)
@@ -900,13 +954,13 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
         setSelection({ groupKey: currentGroup.key, stepId: step.id, blockId: step.blocks[0].id })
     }
 
-    function addBlock(kind: "estimate" | "checklist" | "form" | "video" | "button" | "connection") {
+    function addBlock(kind: BuilderBlockKind) {
         if (!currentStep || !currentGroup) return
         if (currentStep.blocks.some((block) => block.kind === kind)) {
             setError(`This step already contains a ${kind === "estimate" ? "Estimated time" : kind} block.`)
             return
         }
-        const block = kind === "estimate" ? createEstimateBlock() : kind === "checklist" ? createChecklistBlock() : kind === "form" ? createFormBlock() : kind === "video" ? createVideoBlock() : kind === "connection" ? createConnectionBlock() : createButtonBlock()
+        const block = createBuilderBlock(kind)
         updateCurrentStep({ ...currentStep, blocks: [...currentStep.blocks, block] })
         setSelection({ ...selection, blockId: block.id })
     }
@@ -1079,7 +1133,12 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                         {leftTab === "outline" ? <>
                             <div className="mb-2 px-1"><p className="text-[11px] text-neutral-600">Drag modules to order them · Cmd/Ctrl-drag steps and elements to duplicate</p></div>
                             <OutlineTree groups={groups} visibleModuleIds={visibleModuleIds} selection={selection} editable={collaboration.editable} onSelectStep={(groupKey, stepId) => { setSelection({ groupKey, stepId, blockId: null }); setRightTab("inspect") }} onSelectBlock={(groupKey, stepId, blockId) => { setSelection({ groupKey, stepId, blockId, fieldId: null }); setRightTab("inspect") }} onSelectField={(groupKey, stepId, blockId, fieldId) => { setSelection({ groupKey, stepId, blockId, fieldId }); setRightTab("inspect") }} onSelectHelp={() => { setSelection({ ...selection, blockId: HELP_BLOCK_ID, fieldId: null }); setRightTab("inspect") }} onToggleModule={toggleModuleVisibility} onDeleteSelection={confirmDeleteSelection} onDrop={acceptStructureDrop} />
-                        </> : <div className="space-y-2"><p className="px-2 text-xs text-neutral-500">Drag a block into any step. Each block type can appear once per step, or click to append to the selected step.</p><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button>{(["estimate", "checklist", "form", "video", "button", "connection"] as const).map((kind) => <button key={kind} type="button" draggable={collaboration.editable} disabled={!collaboration.editable} onDragStart={(event) => { event.dataTransfer.setData("application/x-betelgeze-builder-item", JSON.stringify({ type: "library", kind })); event.dataTransfer.effectAllowed = "copy" }} onClick={() => addBlock(kind)} className="flex w-full cursor-grab items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left capitalize hover:border-neutral-600 disabled:cursor-not-allowed disabled:opacity-30"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-sm">{kind === "estimate" ? "◷" : kind === "checklist" ? "✓" : kind === "form" ? "▤" : kind === "video" ? "▶" : kind === "connection" ? "f" : "↗"}</span><span className="text-sm">{kind === "estimate" ? "Estimated time" : kind === "connection" ? "Facebook connection" : kind}</span></button>)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></div>}
+                        </> : <div className="space-y-5">
+                            <p className="px-2 text-xs leading-5 text-neutral-500">Drag a block into any step, or click to append it to the selected step. A block type can appear once per step.</p>
+                            <section className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Info</h3><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button><BlockLibraryItem kind="estimate" editable={collaboration.editable} addBlock={addBlock} /><BlockLibraryItem kind="checklist" editable={collaboration.editable} addBlock={addBlock} /></section>
+                            <section className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Interactions</h3>{(["video", "form", "button"] as const).map((kind) => <BlockLibraryItem key={kind} kind={kind} editable={collaboration.editable} addBlock={addBlock} />)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></section>
+                            {installedServiceBlockGroups.map((template) => <section key={template.id} className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">{template.name}</h3>{template.onboardingBlocks.map((block) => <BlockLibraryItem key={block.kind} kind={block.kind} label={block.label} editable={collaboration.editable} addBlock={addBlock} />)}</section>)}
+                        </div>}
                         </div>
                     </div>
                     {leftTab === "outline" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={!currentGroup || currentGroup.kind === "payment" || !collaboration.editable} onClick={addStep} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300 disabled:opacity-30">Add step</button></div> : leftTab === "modules" ? <div className="border-t border-neutral-800 p-2"><button type="button" disabled={pending || !collaboration.editable} onClick={createModule} className="h-9 w-full rounded-lg border border-neutral-700 text-xs text-neutral-300 disabled:opacity-30">Add module</button></div> : null}

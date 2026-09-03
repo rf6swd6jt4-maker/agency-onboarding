@@ -131,6 +131,17 @@ test("the visual Builder is standalone, responsive, collapsible, and composition
     assert.match(builderUi, /Coming later/)
 })
 
+test("the block library groups general interactions and installed service blocks", () => {
+    assert.match(builderUi, />Info</)
+    assert.match(builderUi, />Interactions</)
+    assert.match(builderUi, /installedServiceBlockGroups/)
+    assert.match(builderUi, /template\.onboardingBlocks\.map/)
+    assert.match(builderUi, /appointment_medium/)
+    assert.match(builderUi, /appointment_fields/)
+    assert.match(runtimeBlocks, /<AppointmentSetupBlock/)
+    assert.match(sessionSnapshot, /"appointment_medium", "appointment_fields"/)
+})
+
 test("Builder defaults expose bookends and mandatory modules with expanded modules and collapsed steps", () => {
     assert.match(builderUi, /data\.mandatory\.draftModuleIds\.length \? data\.mandatory\.draftModuleIds : data\.mandatory\.publishedModuleIds/)
     assert.match(builderUi, /const \[collapsedGroups, setCollapsedGroups\] = useState<Set<string>>\(\(\) => new Set\(\)\)/)
@@ -203,7 +214,7 @@ test("structural authoring supports library drag, flexible cross-module moves, d
     assert.match(builderUi, /hidden md:flex/)
     assert.doesNotMatch(visualCanvas, /aria-label="Add a block"|aria-label="Insert a block here"/)
     assert.match(visualCanvas, /application\/x-betelgeze-block/)
-    assert.match(builderUi, /draggable=\{collaboration\.editable\} disabled=\{!collaboration\.editable\}/)
+    assert.match(builderUi, /draggable=\{editable\} disabled=\{!editable\}/)
 })
 
 test("outline drag distinguishes moving from numbered platform-modifier duplication", () => {
@@ -392,7 +403,7 @@ test("runtime requirements persist by stable session block and gate atomic step 
     assert.match(runtimeBlocks, /disabled=\{unsatisfied\.length > 0\}/)
     assert.match(runtimePage, /satisfiedBlockIds/)
     assert.match(runtimePage, /Boolean\(currentStep\.blocks\?\.length\)/)
-    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button", "connection"\]/)
+    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button", "connection", "appointment_medium", "appointment_fields"\]/)
 })
 
 test("frozen visual previews and Settings style share the release pipeline without live draft leakage", () => {

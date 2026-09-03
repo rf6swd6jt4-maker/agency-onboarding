@@ -1,4 +1,5 @@
 import type { ConfiguredOnboardingField, ConfiguredOnboardingStep, OnboardingBookendDefinition, OnboardingModuleDefinition } from "@/lib/onboarding/configuration-types"
+import type { AppointmentFieldKey, AppointmentMedium } from "@/lib/appointment-setting"
 
 export const ONBOARDING_BLOCK_SCHEMA_VERSION = 2 as const
 
@@ -84,7 +85,24 @@ export type ConnectionBlock = BlockBase & {
     required: true
 }
 
-export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock | ConnectionBlock
+export type AppointmentMediumBlock = BlockBase & {
+    kind: "appointment_medium"
+    title: string
+    description: string
+    options: AppointmentMedium[]
+    required: true
+}
+
+export type AppointmentFieldsBlock = BlockBase & {
+    kind: "appointment_fields"
+    title: string
+    description: string
+    options: AppointmentFieldKey[]
+    maximumFields: number
+    required: true
+}
+
+export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock | ConnectionBlock | AppointmentMediumBlock | AppointmentFieldsBlock
 
 export type OnboardingStepV2 = {
     id: string
@@ -193,6 +211,33 @@ export function createConnectionBlock(): ConnectionBlock {
         provider: "meta_ads",
         label: "Connect Facebook",
         description: "Sign in with Facebook so we can securely connect the advertising accounts you manage.",
+        required: true,
+        layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
+    }
+}
+
+export function createAppointmentMediumBlock(): AppointmentMediumBlock {
+    return {
+        id: stableUuid(),
+        name: "Appointment medium",
+        kind: "appointment_medium",
+        title: "How can appointments take place?",
+        description: "Choose every option your team can offer. Appointment setters will use one of these for each booking.",
+        options: ["phone", "google_meet", "zoom"],
+        required: true,
+        layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
+    }
+}
+
+export function createAppointmentFieldsBlock(): AppointmentFieldsBlock {
+    return {
+        id: stableUuid(),
+        name: "Appointment information",
+        kind: "appointment_fields",
+        title: "What should setters add to each appointment?",
+        description: "Name and appointment date and time are always included. Choose up to four extra details and whether each one is optional or required.",
+        options: ["phone", "email", "service", "address", "notes"],
+        maximumFields: 4,
         required: true,
         layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
     }

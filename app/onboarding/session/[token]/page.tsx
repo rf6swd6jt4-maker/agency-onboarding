@@ -48,7 +48,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
         )
     }
 
-    const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds } = resolved
+    const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds, blockResponses } = resolved
     if (session.status === "completed") {
         const clientPortalUrl = await getClientPortalUrlForOnboardingSession({
             workspaceId: session.workspace_id,
@@ -186,6 +186,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                     </form>
                 ) : null}
                 satisfiedBlockIds={[...satisfiedBlockIds]}
+                blockResponses={blockResponses}
                 backHref={previousStep ? (customOnboardingDomain ? `/${token}?step=${previousStep.key}` : `/onboarding/session/${token}?step=${previousStep.key}`) : null}
             />
         </OnboardingLayout>

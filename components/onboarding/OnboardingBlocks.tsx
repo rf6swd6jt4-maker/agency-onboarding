@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react"
 import { satisfyBlockRequirement } from "@/app/onboarding/session/[token]/actions"
 import { OnboardingForm } from "@/components/onboarding/OnboardingForm"
+import { AppointmentSetupBlock } from "@/components/onboarding/AppointmentSetupBlock"
 import { StripePaymentButtonLabel } from "@/components/onboarding/StripePaymentButtonLabel"
 import { WhyWeAskCard } from "@/components/onboarding/WhyWeAskCard"
 import { ONBOARDING_PAYMENT_BUTTON_ID, type OnboardingBlock } from "@/lib/onboarding/block-definition"
@@ -26,6 +27,7 @@ export function OnboardingBlocks({
     onPreviewSubmit,
     allowEditRequest,
     initiallySatisfied = [],
+    initialBlockResponses = {},
     continueAction,
     continueLabel,
     backLabel,
@@ -42,6 +44,7 @@ export function OnboardingBlocks({
     onPreviewSubmit?: () => void
     allowEditRequest: boolean
     initiallySatisfied?: string[]
+    initialBlockResponses?: Record<string, unknown>
     continueAction?: ReactNode
     continueLabel: string
     backLabel: string
@@ -51,7 +54,7 @@ export function OnboardingBlocks({
     const [satisfied, setSatisfied] = useState(() => new Set(initiallySatisfied))
     const [requirementError, setRequirementError] = useState<string | null>(null)
     const formBlock = blocks.find((block) => block.kind === "form")
-    const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "connection")
+    const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "connection" || block.kind === "appointment_medium" || block.kind === "appointment_fields")
     const unsatisfied = requiredBlocks.filter((block) => !satisfied.has(block.sessionBlockId ?? block.id))
     const form = useMemo(() => formBlock?.kind === "form" ? {
         key: stepKey,
@@ -130,6 +133,10 @@ export function OnboardingBlocks({
                         {block.footer ? <p className="mt-4 text-sm leading-6 text-[var(--onboarding-muted)]">{block.footer}</p> : null}
                     </div>
                 </BlockFrame>
+            }
+            if (block.kind === "appointment_medium" || block.kind === "appointment_fields") {
+                const requirementId = block.sessionBlockId ?? block.id
+                return <BlockFrame key={block.id} block={block}><AppointmentSetupBlock block={block} token={token} initialResponse={initialBlockResponses[requirementId]} locked={locked} preview={preview} satisfied={satisfied.has(requirementId)} onSatisfied={() => setSatisfied((current) => new Set(current).add(requirementId))} onUnsatisfied={() => setSatisfied((current) => { const next = new Set(current); next.delete(requirementId); return next })} /></BlockFrame>
             }
             if (block.kind === "connection") {
                 const requirementId = block.sessionBlockId ?? block.id

@@ -107,6 +107,7 @@ export type PublicOnboardingSession = {
     usesSnapshot: boolean
     notices: OnboardingSessionNotice[]
     satisfiedBlockIds: Set<string>
+    blockResponses: Record<string, unknown>
 }
 
 type CanonicalStepWorkItem = {
@@ -433,7 +434,7 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
     const completedKeys = new Set(completableSteps.filter((step) => step.status === "done").map((step) => step.key))
 
     const requirementResult = isVisualSnapshot
-        ? await supabaseAdmin.from("onboarding_block_requirements").select("session_block_id").eq("workspace_id", session.workspace_id).eq("session_id", session.id)
+        ? await supabaseAdmin.from("onboarding_block_requirements").select("session_block_id, response").eq("workspace_id", session.workspace_id).eq("session_id", session.id)
         : { data: [], error: null }
 
     return {
@@ -481,6 +482,7 @@ export async function getCanonicalSessionByToken(token: string): Promise<PublicO
             })),
         ],
         satisfiedBlockIds: new Set((requirementResult.data ?? []).map((row) => String(row.session_block_id))),
+        blockResponses: Object.fromEntries((requirementResult.data ?? []).map((row) => [String(row.session_block_id), row.response ?? {}])),
     }
 }
 

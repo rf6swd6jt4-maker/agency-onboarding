@@ -18,6 +18,10 @@ import {
 } from "@/lib/onboarding/block-definition"
 import { normalizeHexColour } from "@/lib/onboarding/theme"
 import { isStableOnboardingId } from "@/lib/onboarding/stable-id"
+import {
+    APPOINTMENT_FIELD_OPTIONS,
+    normalizeAppointmentMediums,
+} from "@/lib/appointment-setting"
 
 const fieldTypes = new Set(["text", "email", "tel", "url", "textarea", "file"])
 const fileAcceptTypes = new Set(["image", "video", "document", "any"])
@@ -120,6 +124,8 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     let videoCount = 0
     let buttonCount = 0
     let connectionCount = 0
+    let appointmentMediumCount = 0
+    let appointmentFieldsCount = 0
     const blocks = step.blocks.map((block, index): OnboardingBlock => {
         const blockName = name(block, block.kind === "header" ? "Header block" : block.kind)
         const blockId = uuid(block.id, `${location}, block “${blockName}” has damaged internal data. Reload the Builder and try publishing again. If it remains, the failure will appear in Admin Activity.`)
@@ -200,6 +206,41 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
                 provider: "meta_ads",
                 label: text(block.label, 120) || "Connect Facebook",
                 description: text(block.description, 1_000),
+                required: true,
+                layout: layout(block),
+            }
+        }
+        if (block.kind === "appointment_medium") {
+            appointmentMediumCount += 1
+            if (appointmentMediumCount > 1) throw new Error("A step can contain only one Appointment medium block.")
+            const options = normalizeAppointmentMediums(block.options)
+            if (!options.length) throw new Error("Appointment medium must offer at least one option.")
+            return {
+                id: blockId,
+                name: name(block, "Appointment medium"),
+                kind: "appointment_medium",
+                title: text(block.title, 160) || "How can appointments take place?",
+                description: text(block.description, 1_000),
+                options,
+                required: true,
+                layout: layout(block),
+            }
+        }
+        if (block.kind === "appointment_fields") {
+            appointmentFieldsCount += 1
+            if (appointmentFieldsCount > 1) throw new Error("A step can contain only one Appointment information block.")
+            const allowed = new Set(APPOINTMENT_FIELD_OPTIONS.map((option) => option.key))
+            const options = [...new Set((Array.isArray(block.options) ? block.options : []).filter((option) => allowed.has(option)))].slice(0, APPOINTMENT_FIELD_OPTIONS.length)
+            const maximumFields = Math.min(4, Math.max(1, Math.trunc(Number(block.maximumFields) || 4)))
+            if (!options.length) throw new Error("Appointment information must offer at least one field.")
+            return {
+                id: blockId,
+                name: name(block, "Appointment information"),
+                kind: "appointment_fields",
+                title: text(block.title, 160) || "What should setters add to each appointment?",
+                description: text(block.description, 1_000),
+                options,
+                maximumFields,
                 required: true,
                 layout: layout(block),
             }

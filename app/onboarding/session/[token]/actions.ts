@@ -20,6 +20,12 @@ import {
 import { createSignedRelationshipOnboardingUpload } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { redirect } from "next/navigation"
+import {
+    normalizeAppointmentMediums,
+    normalizeAppointmentRequestedFields,
+    type AppointmentFieldKey,
+    type AppointmentMedium,
+} from "@/lib/appointment-setting"
 
 async function getPublicSession(token: string) {
     const session = await getCanonicalSessionByToken(token)
@@ -45,6 +51,35 @@ export async function satisfyBlockRequirement(token: string, sessionBlockId: str
         return { ok: true as const, data }
     } catch (error) {
         return { ok: false as const, error: error instanceof Error ? error.message : "Could not record the required action." }
+    }
+}
+
+export async function configureAppointmentSettingBlock(
+    token: string,
+    sessionBlockId: string,
+    kind: "appointment_medium" | "appointment_fields",
+    input: { mediums?: AppointmentMedium[]; fields?: Array<{ key: AppointmentFieldKey; required: boolean }> },
+) {
+    try {
+        const resolved = await getPublicSession(token)
+        if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+        let configuration: { mediums: AppointmentMedium[] } | { fields: Array<{ key: AppointmentFieldKey; required: boolean }> }
+        if (kind === "appointment_medium") {
+            const mediums = normalizeAppointmentMediums(input.mediums)
+            if (mediums.length === 0) throw new Error("Choose at least one appointment option.")
+            configuration = { mediums }
+        } else {
+            configuration = { fields: normalizeAppointmentRequestedFields(input.fields) }
+        }
+        const { data, error } = await supabaseAdmin.rpc("configure_appointment_setting_onboarding_block", {
+            p_token: token,
+            p_session_block_id: sessionBlockId,
+            p_configuration: configuration,
+        })
+        if (error) throw new Error(error.message)
+        return { ok: true as const, data }
+    } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : "Could not save the appointment preferences." }
     }
 }
 

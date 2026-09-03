@@ -4,7 +4,7 @@ import { DetailPageHeader } from "@/components/detail"
 import { RelationshipStage, SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
-import { loadAppointmentSettingRelationshipService, listAppointmentSettingAppointments } from "@/lib/appointment-setting-server"
+import { loadAppointmentSettingConfiguration, loadAppointmentSettingRelationshipService, listAppointmentSettingAppointments } from "@/lib/appointment-setting-server"
 import { getRelationship } from "@/lib/relationships"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { requireWorkspacePanel } from "@/lib/workspace-access"
@@ -29,12 +29,11 @@ export default async function AppointmentSettingRelationshipPage({ params }: Pag
         || relationship.lifecycle_phase !== "retention"
     ) notFound()
 
-    const appointments = await listAppointmentSettingAppointments({
-        workspaceId: workspace.id,
-        relationshipId: relationship.id,
-        serviceId,
-    })
-    const uniquePhoneCount = new Set(appointments.map((appointment) => appointment.phone)).size
+    const [appointments, configuration] = await Promise.all([
+        listAppointmentSettingAppointments({ workspaceId: workspace.id, relationshipId: relationship.id, serviceId }),
+        loadAppointmentSettingConfiguration({ workspaceId: workspace.id, relationshipId: relationship.id, serviceId }),
+    ])
+    const uniquePhoneCount = new Set(appointments.map((appointment) => appointment.phone).filter(Boolean)).size
     const latestUpdatedAt = appointments.reduce((latest, appointment) => (
         appointment.updated_at > latest ? appointment.updated_at : latest
     ), relationship.updated_at)
@@ -64,6 +63,7 @@ export default async function AppointmentSettingRelationshipPage({ params }: Pag
                         relationshipId={relationship.id}
                         serviceId={serviceId}
                         initialAppointments={appointments}
+                        configuration={configuration}
                     />
                 </div>
 
