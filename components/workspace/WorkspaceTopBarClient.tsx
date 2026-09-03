@@ -585,6 +585,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if (suffix === "work") return "Fulfilment"
         if (suffix.startsWith("work/")) return "Fulfilment Detail"
         if (suffix === "appointment-setting") return "Appointment Setting"
+        if (suffix.startsWith("appointment-setting/")) return "Appointment Setting Detail"
         if (suffix === "work-items") return "Work Items"
         if (suffix.startsWith("work-items/")) return "Work Item"
         if (suffix === "assets") return "Assets"

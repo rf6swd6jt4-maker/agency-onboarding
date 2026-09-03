@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { filterAppointmentSettingRelationships } from "../lib/appointment-setting.ts"
+import { appointmentSettingDetailHref, filterAppointmentSettingRelationships } from "../lib/appointment-setting.ts"
 import type { RelationshipRecord } from "../lib/relationships.ts"
 
 function relationship(id: string, lifecyclePhase: RelationshipRecord["lifecycle_phase"], status: RelationshipRecord["status"] = "active") {
@@ -17,21 +17,50 @@ test("Appointment Setting includes only visible, non-archived Retention relation
     ]
 
     assert.deepEqual(
-        filterAppointmentSettingRelationships(relationships, new Set(["retention-allowed", "retention-archived", "fulfilment-allowed"])).map((item) => item.id),
+        filterAppointmentSettingRelationships(
+            relationships,
+            new Set(["retention-allowed", "retention-archived", "fulfilment-allowed"]),
+            new Set(["retention-allowed", "retention-unassigned", "retention-archived", "fulfilment-allowed"]),
+        ).map((item) => item.id),
         ["retention-allowed"],
     )
     assert.deepEqual(
-        filterAppointmentSettingRelationships(relationships, null).map((item) => item.id),
-        ["retention-allowed", "retention-unassigned"],
+        filterAppointmentSettingRelationships(relationships, null, new Set(["retention-allowed"])).map((item) => item.id),
+        ["retention-allowed"],
     )
 })
 
-test("Appointment Setting uses the shared list and keeps unfinished detail routes out of the UI", () => {
+test("Appointment Setting opens the relationship's dedicated appointment table", () => {
     const source = readFileSync("app/[workspaceSlug]/appointment-setting/page.tsx", "utf8")
+    const detail = readFileSync("app/[workspaceSlug]/appointment-setting/[relationshipId]/page.tsx", "utf8")
 
     assert.match(source, /<List ariaLabel="Relationships ready for appointment setting">/)
     assert.match(source, /<RelationshipStage phase="retention"/)
     assert.match(source, /<Status label="Ready" tone="green"/)
     assert.match(source, /accessibleRelationshipIds\(access\)/)
-    assert.doesNotMatch(source, /appointment-setting\/\$\{relationship\.id\}/)
+    assert.match(source, /loadAppointmentSettingRelationshipServices\(access\)/)
+    assert.equal(appointmentSettingDetailHref("acme", "relationship-1"), "/acme/appointment-setting/relationship-1")
+    assert.match(detail, /<DetailPageHeader/)
+    assert.match(detail, /<AppointmentTable/)
+    assert.match(detail, /loadAppointmentSettingRelationshipService\(access, relationshipId\)/)
+})
+
+test("Appointment Setting appointments are relationship and service scoped with secure realtime reads", () => {
+    const migration = readFileSync("supabase/migrations/20260903220000_appointment_setting_appointments.sql", "utf8")
+    const actions = readFileSync("app/[workspaceSlug]/appointment-setting/[relationshipId]/actions.ts", "utf8")
+    const table = readFileSync("components/appointment-setting/AppointmentTable.tsx", "utf8")
+
+    assert.match(migration, /create table if not exists public\.appointment_setting_appointments/)
+    assert.match(migration, /relationship_id uuid not null/)
+    assert.match(migration, /service_id uuid not null/)
+    assert.match(migration, /contact_name text not null/)
+    assert.match(migration, /phone text not null/)
+    assert.match(migration, /appointment_at timestamptz not null/)
+    assert.match(migration, /workspace_user_can_manage_appointment_setting/)
+    assert.match(migration, /capability\.capability = 'appointment_setting\.manage'/)
+    assert.match(migration, /alter publication supabase_realtime add table public\.appointment_setting_appointments/)
+    assert.match(actions, /requireWorkspacePanel\(workspaceSlug, "appointment-setting"\)/)
+    assert.match(actions, /loadAppointmentSettingRelationshipService\(context\.access, relationshipId\)/)
+    assert.match(table, /\.on\("postgres_changes"/)
+    assert.match(table, /updateAppointmentSettingAppointment/)
 })

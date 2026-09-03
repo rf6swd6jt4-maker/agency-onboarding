@@ -31,7 +31,7 @@ function serviceTemplateId(definition: unknown) {
     return typeof value === "string" ? value : null
 }
 
-const loadAppointmentSettingServiceIds = cache(async (workspaceId: string) => {
+export const loadAppointmentSettingServiceIds = cache(async (workspaceId: string) => {
     const { data: services, error: serviceError } = await supabaseAdmin
         .from("onboarding_services")
         .select("id")

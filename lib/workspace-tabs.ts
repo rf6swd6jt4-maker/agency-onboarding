@@ -97,7 +97,7 @@ export function workspaceRouteIsRecordDetail(value: string, workspaceSlug: strin
     const prefix = `/${workspaceSlug}/`
     if (!parsed.pathname.startsWith(prefix)) return false
     const segments = parsed.pathname.slice(prefix.length).split("/").filter(Boolean)
-    if (segments.length === 2 && ["relationships", "onboarding", "work", "work-items", "assets"].includes(segments[0])) return true
+    if (segments.length === 2 && ["relationships", "onboarding", "work", "appointment-setting", "work-items", "assets"].includes(segments[0])) return true
     return segments.length === 3
         && ((segments[0] === "leadgen" && segments[1] === "poll")
             || (segments[0] === "admin" && ["activity", "okrs"].includes(segments[1])))
@@ -125,7 +125,7 @@ export function workspaceRouteCanShowRelationshipContext(value: string, workspac
         ? parsed.pathname.slice(defaultWorkspaceUrl.length + 1)
         : ""
     const [section, id] = suffix.split("/")
-    return Boolean(id) && (section === "relationships" || section === "onboarding" || section === "work")
+    return Boolean(id) && (section === "relationships" || section === "onboarding" || section === "work" || section === "appointment-setting")
 }
 
 export function isReopenClosedTabShortcut(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">) {

@@ -95,6 +95,7 @@ test("workspace shell only supports relationship context on detail routes", () =
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/relationships/client-1", "scaylup", origin), true)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/onboarding/client-1", "scaylup", origin), true)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/work/client-1", "scaylup", origin), true)
+    assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/appointment-setting/client-1", "scaylup", origin), true)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/onboarding", "scaylup", origin), false)
     assert.equal(workspaceRouteCanShowRelationshipContext("/scaylup/relationships", "scaylup", origin), false)
 })
@@ -110,6 +111,7 @@ test("record details open as switchable workspace tabs while hubs and actions st
         "/scaylup/relationships/client-1",
         "/scaylup/onboarding/client-1",
         "/scaylup/work/client-1",
+        "/scaylup/appointment-setting/client-1",
         "/scaylup/work-items/item-1",
         "/scaylup/assets/asset-1",
         "/scaylup/leadgen/poll/poll-1",

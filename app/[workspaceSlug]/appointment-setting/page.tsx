@@ -6,8 +6,9 @@ import { MobileListActionSurface } from "@/components/list/MobileCardActionSurfa
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { RelationshipStage, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
-import { filterAppointmentSettingRelationships } from "@/lib/appointment-setting"
-import { listRelationshipsForWorkspace, relationshipHubHref, relationshipLocationLabel } from "@/lib/relationships"
+import { appointmentSettingDetailHref, filterAppointmentSettingRelationships } from "@/lib/appointment-setting"
+import { loadAppointmentSettingRelationshipServices } from "@/lib/appointment-setting-server"
+import { listRelationshipsForWorkspace, relationshipLocationLabel } from "@/lib/relationships"
 import { accessibleRelationshipIds, requireWorkspacePanel } from "@/lib/workspace-access"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 
@@ -20,11 +21,12 @@ function displayPhone(value: string | null | undefined) {
 export default async function AppointmentSettingPage({ params }: { params: Promise<{ workspaceSlug: string }> }) {
     const { workspaceSlug } = await params
     const { workspace, user, role, access } = await requireWorkspacePanel(workspaceSlug, "appointment-setting")
-    const [relationships, allowedRelationshipIds] = await Promise.all([
+    const [relationships, allowedRelationshipIds, appointmentSettingServices] = await Promise.all([
         listRelationshipsForWorkspace(workspace.id),
         accessibleRelationshipIds(access),
+        loadAppointmentSettingRelationshipServices(access),
     ])
-    const eligibleRelationships = filterAppointmentSettingRelationships(relationships, allowedRelationshipIds)
+    const eligibleRelationships = filterAppointmentSettingRelationships(relationships, allowedRelationshipIds, new Set(appointmentSettingServices.keys()))
 
     return <main className="min-h-screen bg-neutral-950 px-4 pb-7 text-white sm:px-6">
         <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
@@ -40,8 +42,8 @@ export default async function AppointmentSettingPage({ params }: { params: Promi
                     const location = relationshipLocationLabel(relationship)
                     const phone = displayPhone(relationship.whatsapp_phone ?? relationship.primary_phone)
                     const isTest = Boolean(relationship.source_metadata.is_test)
-                    const relationshipHref = role === "staff" ? null : relationshipHubHref(workspace.slug, relationship.id)
-                    const actions = relationshipHref ? [{ label: "Open relationship", href: relationshipHref }] : []
+                    const relationshipHref = appointmentSettingDetailHref(workspace.slug, relationship.id)
+                    const actions = [{ label: "Open appointment table", href: relationshipHref }]
                     const rows = <>
                         <ListPrimaryRow>
                             <ListTitle href={relationshipHref} className="flex-1">{relationshipTitle}</ListTitle>
@@ -57,14 +59,12 @@ export default async function AppointmentSettingPage({ params }: { params: Promi
                             <ListTrailing>
                                 <span className="font-mono text-neutral-500">{shortId(relationship.id)}</span>
                                 <span className="whitespace-nowrap text-neutral-500">{formatRelativeTime(relationship.updated_at)}</span>
-                                {relationshipHref ? <ListActionMenu actions={actions} className="hidden sm:block" /> : null}
+                                <ListActionMenu actions={actions} className="hidden sm:block" />
                             </ListTrailing>
                         </ListSecondaryRow>
                     </>
                     return <ListItem key={relationship.id}>
-                        {relationshipHref
-                            ? <MobileListActionSurface actions={actions} label={`Open actions for ${relationshipTitle}`}>{rows}</MobileListActionSurface>
-                            : rows}
+                        <MobileListActionSurface actions={actions} label={`Open actions for ${relationshipTitle}`}>{rows}</MobileListActionSurface>
                     </ListItem>
                 }) : <div className="p-6">
                     <p className="text-lg font-semibold">No relationships ready for appointment setting.</p>
