@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server"
 import { migrateLegacyAuthCookies } from "@/lib/supabase/legacy-cookies"
 import { applySessionResponseHeaders, carrySessionResponse, persistentSessionOptions, sessionCookieDomain, sessionCookieOptions } from "@/lib/supabase/session-cookies"
 import { authHostname, authOrigin } from "@/lib/auth/origin"
+import { WORKSPACE_TAB_FRAME_PARAM } from "@/lib/workspace-tabs"
+import { WORKSPACE_SHELL_INTERNAL_PREFIX, WORKSPACE_SHELL_REQUEST_HEADER, workspaceRouteUsesShell, workspaceShellRoute } from "@/lib/workspace-shell"
 
 async function refreshSession(request: NextRequest) {
     const headers = requestHeadersWithCurrentPath(request)
@@ -183,6 +185,9 @@ export async function proxy(request: NextRequest) {
         if (path === "/leadgen" || path.startsWith("/leadgen/")) {
             return new NextResponse("Not Found", { status: 404 })
         }
+        if (path === WORKSPACE_SHELL_INTERNAL_PREFIX || path.startsWith(`${WORKSPACE_SHELL_INTERNAL_PREFIX}/`)) {
+            return new NextResponse("Not Found", { status: 404 })
+        }
 
         const publicDashboardPaths = [
             "/login", "/sign-up", "/forgot-password", "/update-password",
@@ -197,6 +202,10 @@ export async function proxy(request: NextRequest) {
             const [, workspaceSlug] = workspacePath
             const headers = new Headers(request.headers)
             headers.set("x-betelgeze-workspace-slug", workspaceSlug)
+            if (!request.nextUrl.searchParams.has(WORKSPACE_TAB_FRAME_PARAM) && workspaceRouteUsesShell(path)) {
+                headers.set(WORKSPACE_SHELL_REQUEST_HEADER, "1")
+                return withSession(withRewrite(request, workspaceShellRoute(workspaceSlug), headers))
+            }
             return withSession(withRewrite(request, path, headers))
         }
         if (path === "/") return withSession(withRewrite(request, "/workspaces"))

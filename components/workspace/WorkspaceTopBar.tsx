@@ -1,12 +1,15 @@
 import { WorkspaceTopBarClient } from "@/components/workspace/WorkspaceTopBarClient"
+import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { createAssetFromModal, createRelationshipFromModal, createWorkItemFromModal } from "@/app/[workspaceSlug]/relationships/actions"
+import { headers } from "next/headers"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { leaveWorkspace } from "@/app/users/[username]/actions"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { normalizeWorkspaceRole } from "@/lib/workspaces"
 import { createOkrFromModal } from "@/app/[workspaceSlug]/admin/actions"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
-import { accessibleRelationshipIds, accessibleWorkItemIds, loadWorkspaceAccess } from "@/lib/workspace-access"
+import { accessibleRelationshipIds, accessibleWorkItemIds, loadWorkspaceAccess, type WorkspaceAccess } from "@/lib/workspace-access"
+import { workspaceTabIdFromUrl } from "@/lib/workspace-tabs"
 
 type Product = "client-work" | "leadgen"
 
@@ -14,17 +17,25 @@ type Props = {
     userId: string
     workspace: { id: string; name: string; slug: string; logo_path?: string | null }
     currentProduct: Product
+    workspaceAccess?: WorkspaceAccess
+    initialWorkspaceUrl?: string
 }
 
-export async function WorkspaceTopBar({ userId, workspace }: Props) {
+export async function WorkspaceTopBar({ userId, workspace, workspaceAccess, initialWorkspaceUrl }: Props) {
+    const currentPath = (await headers()).get("x-betelgeze-current-path")
+    const tabId = workspaceTabIdFromUrl(currentPath)
+    if (tabId) return <WorkspaceTabBridge tabId={tabId} workspaceSlug={workspace.slug} />
+
     const [{ data: profile }, { data: authResult }, { data: membership }] = await Promise.all([
         supabaseAdmin.from("user_profiles").select("username, avatar_path").eq("user_id", userId).maybeSingle(),
         supabaseAdmin.auth.admin.getUserById(userId),
-        supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspace.id).eq("user_id", userId).maybeSingle(),
+        workspaceAccess
+            ? Promise.resolve({ data: { role: workspaceAccess.role } })
+            : supabaseAdmin.from("workspace_memberships").select("role").eq("workspace_id", workspace.id).eq("user_id", userId).maybeSingle(),
     ])
     const username = profile?.username ?? "account"
     const workspaceRole = normalizeWorkspaceRole(membership?.role) ?? "staff"
-    const access = await loadWorkspaceAccess({ workspaceId: workspace.id, workspaceSlug: workspace.slug, userId, role: workspaceRole })
+    const access = workspaceAccess ?? await loadWorkspaceAccess({ workspaceId: workspace.id, workspaceSlug: workspace.slug, userId, role: workspaceRole })
     const relationshipIds = await accessibleRelationshipIds(access)
     const workItemIds = await accessibleWorkItemIds(access, relationshipIds)
     let workItemsQuery = supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspace.id).eq("visibility", "workspace").order("title").limit(200)
@@ -55,6 +66,7 @@ export async function WorkspaceTopBar({ userId, workspace }: Props) {
 
     return <WorkspaceTopBarClient
         workspace={workspace}
+        initialWorkspaceUrl={initialWorkspaceUrl}
         currentUserId={userId}
         workspaceLogoSrc={workspaceLogoSrc}
         username={username}

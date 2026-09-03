@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
     isWorkspaceOnboardingBuilderUrl,
     isReopenClosedTabShortcut,
@@ -29,6 +29,7 @@ type Props = {
 
 export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
     const pathname = usePathname()
+    const router = useRouter()
     const searchParams = useSearchParams()
     const startedPollNoticeRef = useRef("")
 
@@ -124,7 +125,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
                 reportNavigationStart(nextUrl)
                 await flushWorkspaceAutosaves()
-                window.location.assign(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
+                router.push(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
                 return
             }
             if (anchor.target === "_blank") return
@@ -143,13 +144,13 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 return
             }
             event.preventDefault()
-            // Stop page-local refreshers before replacing the frame URL. A
-            // queued router.refresh() can otherwise win the App Router race
-            // and restore the source page (especially Polls) after a click.
+            // Stop page-local refreshers before starting the App Router
+            // transition. The host retains a delayed hard-navigation fallback
+            // in case a streamed transition cannot complete.
             window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
             reportNavigationStart(nextUrl)
             await flushWorkspaceAutosaves()
-            window.location.assign(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
+            router.push(workspaceTabFrameUrl(nextUrl, tabId, window.location.origin))
         }
 
         async function receiveHostMessage(event: MessageEvent<WorkspaceTabParentMessage>) {
@@ -163,7 +164,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 if (target !== current) {
                     window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
                     await flushWorkspaceAutosaves()
-                    window.location.assign(target)
+                    router.push(target)
                 }
             } else if (message.type === "traverse" && message.url) {
                 window.dispatchEvent(new Event("betelgeze:clear-loading"))
@@ -172,11 +173,12 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 if (target !== current) {
                     window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
                     await flushWorkspaceAutosaves()
-                    window.location.replace(target)
+                    router.replace(target)
                 }
             } else if (message.type === "activate") {
                 document.body.dataset.workspaceTabActive = message.active ? "true" : "false"
                 window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
+                if (!message.active) await flushWorkspaceAutosaves()
                 if (message.active && message.refresh) window.location.reload()
             }
         }
@@ -267,7 +269,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             reportContextObstruction(false)
             delete document.body.dataset.workspaceTabActive
         }
-    }, [tabId, workspaceSlug])
+    }, [router, tabId, workspaceSlug])
 
     return null
 }

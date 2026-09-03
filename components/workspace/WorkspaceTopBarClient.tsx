@@ -58,6 +58,8 @@ const WORKSPACE_KEYBOARD_MOTION_MS = 300
 // Mobile Safari continues resizing its browser chrome after the keyboard itself
 // has finished. Keep the known resting edge until that secondary resize settles.
 const WORKSPACE_KEYBOARD_SETTLE_MS = WORKSPACE_KEYBOARD_MOTION_MS + 340
+const MAX_RESIDENT_WORKSPACE_FRAMES = 2
+const WORKSPACE_SOFT_NAVIGATION_FALLBACK_MS = 8_000
 const WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX = 64
 type WorkspacePresenceChannel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>
 
@@ -103,6 +105,7 @@ type WorkspaceTabNavigationState = {
 
 type Props = {
     workspace: { id: string; name: string; slug: string }
+    initialWorkspaceUrl?: string
     currentUserId: string
     workspaceLogoSrc?: string | null
     username: string
@@ -404,13 +407,14 @@ function deferNavigationStateUpdate(update: () => void) {
 function WorkspaceTabFrame({ tab, active, assignRef, onLoad }: {
     tab: WorkspaceTab
     active: boolean
-    assignRef: (node: HTMLIFrameElement | null) => void
+    assignRef: (tabId: string, node: HTMLIFrameElement | null) => void
     onLoad: () => void
 }) {
     const [src] = useState(() => workspaceTabFrameUrl(tab.url, tab.id, "http://localhost"))
+    const frameRef = useCallback((node: HTMLIFrameElement | null) => assignRef(tab.id, node), [assignRef, tab.id])
 
     return <iframe
-        ref={assignRef}
+        ref={frameRef}
         name={`${WORKSPACE_TAB_FRAME_NAME_PREFIX}${tab.id}`}
         src={src}
         aria-label={`${workspaceTabDisplayTitle(tab)} workspace tab`}
@@ -429,7 +433,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
+function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -454,6 +458,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const pendingNavigationRef = useRef(new Map<string, string>())
     const navigationFallbackRef = useRef(new Map<string, WorkspaceTab>())
     const navigationTimeoutRef = useRef(new Map<string, number>())
+    const softNavigationFallbackRef = useRef(new Map<string, number>())
     const navigationErrorRef = useRef(new Set<string>())
     const closedTabsRef = useRef<ClosedWorkspaceTab[]>([])
     const canAddTabRef = useRef(true)
@@ -478,6 +483,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const [sidebarTransitionEnabled, setSidebarTransitionEnabled] = useState(false)
     const [tabsHydrated, setTabsHydrated] = useState(false)
     const [loadedTabIds, setLoadedTabIds] = useState<Set<string>>(() => new Set())
+    const [residentTabIds, setResidentTabIds] = useState<string[]>([])
     const [tabs, setTabs] = useState<WorkspaceTab[]>([])
     const [tabFrameOrder, setTabFrameOrder] = useState<string[]>([])
     const [activeTabId, setActiveTabId] = useState("")
@@ -513,6 +519,13 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const tabsStorageKey = `betelgeze:workspace-tabs:${workspace.slug}`
     const capabilitySet = new Set(workspaceCapabilities)
     const canOpenWorkspaceUrl = useCallback((value: string) => canAccessWorkspaceUrl(value, workspace.slug, workspaceRole, workspaceCapabilities), [workspace.slug, workspaceRole, workspaceCapabilities])
+    const activateWorkspaceTab = useCallback((tabId: string) => {
+        setResidentTabIds((current) => {
+            const next = [tabId, ...current.filter((id) => id !== tabId)].slice(0, MAX_RESIDENT_WORKSPACE_FRAMES)
+            return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next
+        })
+        setActiveTabId(tabId)
+    }, [])
 
     useEffect(() => {
         const openFromEvent = (event: Event) => {
@@ -623,6 +636,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     }, [saveTabsState, titleForUrl])
 
     const completeTabNavigation = useCallback((tabId: string) => {
+        const softFallback = softNavigationFallbackRef.current.get(tabId)
+        if (softFallback) window.clearTimeout(softFallback)
+        softNavigationFallbackRef.current.delete(tabId)
         const timeout = navigationTimeoutRef.current.get(tabId)
         if (timeout) window.clearTimeout(timeout)
         navigationTimeoutRef.current.delete(tabId)
@@ -680,6 +696,8 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     useEffect(() => () => {
         for (const timeout of navigationTimeoutRef.current.values()) window.clearTimeout(timeout)
         navigationTimeoutRef.current.clear()
+        for (const timeout of softNavigationFallbackRef.current.values()) window.clearTimeout(timeout)
+        softNavigationFallbackRef.current.clear()
     }, [])
 
     const readTabsState = useCallback((currentUrl: string): WorkspaceTabsState => {
@@ -737,7 +755,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         if (tabsBootstrappedRef.current) return
         tabsBootstrappedRef.current = true
         const query = searchParams.toString()
-        const current = normalizeWorkspaceUrl(`${pathname}${query ? `?${query}` : ""}`)
+        const current = normalizeWorkspaceUrl(initialWorkspaceUrl ?? `${pathname}${query ? `?${query}` : ""}`)
         const stored = readTabsState(current)
         activeTabIdRef.current = stored.activeId
         tabsRef.current = stored.tabs
@@ -745,12 +763,12 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         mutationRevisionRef.current = Math.max(0, ...stored.tabs.map((tab) => tab.seenRevision))
         saveTabsState(stored.tabs, stored.activeId)
         deferNavigationStateUpdate(() => {
-            setActiveTabId(stored.activeId)
+            activateWorkspaceTab(stored.activeId)
             setTabs(stored.tabs)
             setTabFrameOrder(stored.tabs.map((tab) => tab.id))
             setTabsHydrated(true)
         })
-    }, [normalizeWorkspaceUrl, pathname, readTabsState, saveTabsState, searchParams])
+    }, [activateWorkspaceTab, initialWorkspaceUrl, normalizeWorkspaceUrl, pathname, readTabsState, saveTabsState, searchParams])
 
     useEffect(() => {
         activeTabIdRef.current = activeTabId
@@ -784,6 +802,22 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         return true
     }, [])
 
+    const assignTabFrameRef = useCallback((tabId: string, node: HTMLIFrameElement | null) => {
+        if (node) {
+            iframeRefs.current.set(tabId, node)
+            return
+        }
+        iframeRefs.current.delete(tabId)
+        loadedTabIdsRef.current.delete(tabId)
+        readyTabIdsRef.current.delete(tabId)
+        setLoadedTabIds((current) => {
+            if (!current.has(tabId)) return current
+            const next = new Set(current)
+            next.delete(tabId)
+            return next
+        })
+    }, [])
+
     const ensureTabFrameLocation = useCallback((tabId: string, url: string, mode: "assign" | "replace" = "assign") => {
         const frame = iframeRefs.current.get(tabId)
         if (!frame?.contentWindow) return false
@@ -802,21 +836,31 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         return true
     }, [])
 
+    const scheduleSoftNavigationFallback = useCallback((tabId: string, url: string, mode: "assign" | "replace" = "assign") => {
+        const existing = softNavigationFallbackRef.current.get(tabId)
+        if (existing) window.clearTimeout(existing)
+        const timeout = window.setTimeout(() => {
+            softNavigationFallbackRef.current.delete(tabId)
+            if (pendingNavigationRef.current.get(tabId) === url) ensureTabFrameLocation(tabId, url, mode)
+        }, WORKSPACE_SOFT_NAVIGATION_FALLBACK_MS)
+        softNavigationFallbackRef.current.set(tabId, timeout)
+    }, [ensureTabFrameLocation])
+
     const requestTabFrameNavigation = useCallback((tabId: string, url: string, mode: "assign" | "replace" = "assign") => {
         const messageType = mode === "replace" ? "traverse" : "navigate"
         if (readyTabIdsRef.current.has(tabId) && postToTab(tabId, { type: messageType, url })) {
             readyTabIdsRef.current.delete(tabId)
-            // The bridge normally starts the hard navigation immediately.
-            // Reconcile on the next frame as a backstop if it unmounted while
-            // a streamed route/loading boundary was being replaced.
-            window.requestAnimationFrame(() => ensureTabFrameLocation(tabId, url, mode))
+            // Let the frame keep its current UI while the App Router streams
+            // the next route. A delayed direct navigation remains as a safety
+            // net for a transition that never acknowledges its destination.
+            scheduleSoftNavigationFallback(tabId, url, mode)
             return
         }
 
         // A loading frame may not have a live message listener. The host owns
         // the desired route, so cancel the stale document load directly.
         ensureTabFrameLocation(tabId, url, mode)
-    }, [ensureTabFrameLocation, postToTab])
+    }, [ensureTabFrameLocation, postToTab, scheduleSoftNavigationFallback])
 
     const setTabContextOpen = useCallback((tabId: string, open: boolean) => {
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tabId), open ? "true" : "false")
@@ -856,13 +900,13 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 ...existingTabs.slice(insertionIndex),
             ]
             activeTabIdRef.current = restoredTab.id
-            setActiveTabId(restoredTab.id)
+            activateWorkspaceTab(restoredTab.id)
             saveTabsState(nextTabs, restoredTab.id)
             return nextTabs
         })
         window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
         return true
-    }, [postToTab, saveTabsState])
+    }, [activateWorkspaceTab, postToTab, saveTabsState])
 
     const openWorkspaceTab = useCallback((href: string) => {
         const url = normalizeWorkspaceUrl(href)
@@ -879,7 +923,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             tabsRef.current = nextTabs
             activeTabIdRef.current = existingTab.id
             setTabs(nextTabs)
-            setActiveTabId(existingTab.id)
+            activateWorkspaceTab(existingTab.id)
             saveTabsState(nextTabs, existingTab.id)
             if (refresh) setRouteLoadingTabId(existingTab.id)
             window.requestAnimationFrame(() => {
@@ -915,12 +959,12 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         tabsRef.current = nextTabs
         activeTabIdRef.current = tab.id
         setTabs(nextTabs)
-        setActiveTabId(tab.id)
+        activateWorkspaceTab(tab.id)
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tab.id), "true")
         setContextOpenByTab((current) => ({ ...current, [tab.id]: true }))
         saveTabsState(nextTabs, tab.id)
         window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
-    }, [beginTabNavigation, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [activateWorkspaceTab, beginTabNavigation, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
 
     useEffect(() => {
         function receiveFrameMessage(event: MessageEvent<WorkspaceTabFrameMessage>) {
@@ -1049,6 +1093,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                     beginTabNavigation(message.tabId, url)
                     pendingNavigationRef.current.set(message.tabId, url)
                     updateTabForShellNavigation(message.tabId, url)
+                    scheduleSoftNavigationFallback(message.tabId, url)
                 }
                 readyTabIdsRef.current.delete(message.tabId)
             }
@@ -1089,7 +1134,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
 
         window.addEventListener("message", receiveFrameMessage)
         return () => window.removeEventListener("message", receiveFrameMessage)
-    }, [beginTabNavigation, completeTabNavigation, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [beginTabNavigation, completeTabNavigation, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, scheduleSoftNavigationFallback, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
 
     useEffect(() => {
         function start(event: Event) {
@@ -1749,7 +1794,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             : existingTab)
         activeTabIdRef.current = tab.id
         setTabs(nextTabs)
-        setActiveTabId(tab.id)
+        activateWorkspaceTab(tab.id)
         saveTabsState(nextTabs, tab.id)
         if (refresh) setRouteLoadingTabId(tab.id)
         window.requestAnimationFrame(() => {
@@ -1760,7 +1805,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                 beginTabNavigation(tab.id, desiredUrl)
             }
         })
-    }, [beginTabNavigation, ensureTabFrameLocation, postToTab, saveTabsState, tabs])
+    }, [activateWorkspaceTab, beginTabNavigation, ensureTabFrameLocation, postToTab, saveTabsState, tabs])
 
     useEffect(() => {
         function receiveBuilderReturn(event: MessageEvent<OnboardingBuilderWindowSignal>) {
@@ -1944,7 +1989,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const nextTabs = [...tabs, tab]
         activeTabIdRef.current = tab.id
         setTabs(nextTabs)
-        setActiveTabId(tab.id)
+        activateWorkspaceTab(tab.id)
         const currentContextStatus = currentTab ? contextStatusByTabRef.current[currentTab.id] : null
         const currentContextOpen = currentContextStatus?.supported ? true : currentTab ? contextOpenByTab[currentTab.id] ?? true : true
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tab.id), currentContextOpen ? "true" : "false")
@@ -1977,6 +2022,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
         const navigationTimeout = navigationTimeoutRef.current.get(tabId)
         if (navigationTimeout) window.clearTimeout(navigationTimeout)
         navigationTimeoutRef.current.delete(tabId)
+        const softFallback = softNavigationFallbackRef.current.get(tabId)
+        if (softFallback) window.clearTimeout(softFallback)
+        softNavigationFallbackRef.current.delete(tabId)
         navigationFallbackRef.current.delete(tabId)
         navigationErrorRef.current.delete(tabId)
         mutationIdsByTabRef.current.delete(tabId)
@@ -2014,7 +2062,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
             : nextTabs.find((tab) => tab.id === activeTabId) ?? nextTabs[0]
         activeTabIdRef.current = nextActiveTab.id
         setTabs(nextTabs)
-        setActiveTabId(nextActiveTab.id)
+        activateWorkspaceTab(nextActiveTab.id)
         saveTabsState(nextTabs, nextActiveTab.id)
         if (tabId === activeTabId) {
             const refresh = nextActiveTab.seenRevision < mutationRevisionRef.current
@@ -2036,7 +2084,9 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
     const canCreateRelationship = canAccessWorkspacePanel(WORKSPACE_PANELS[0], workspaceRole, workspaceCapabilities)
     const canCreateLibraryItem = canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities)
     const visibleTabs = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
+    const residentTabIdSet = new Set(residentTabIds)
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrder)
+        .filter((tab) => tab.id === activeTabId || residentTabIdSet.has(tab.id))
     const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
     const activeTabLoaded = loadedTabIds.has(activeTab.id)
     const canGoBack = activeTabLoaded && activeTab.historyIndex > 0
@@ -2472,7 +2522,7 @@ function WorkspaceTabsShell({ workspace, currentUserId, workspaceLogoSrc, userna
                     key={tab.id}
                     tab={tab}
                     active={tab.id === activeTabId}
-                    assignRef={(node) => { if (node) iframeRefs.current.set(tab.id, node); else iframeRefs.current.delete(tab.id) }}
+                    assignRef={assignTabFrameRef}
                     onLoad={() => handleFrameLoad(tab.id, tab.url)}
                 />
             ))}

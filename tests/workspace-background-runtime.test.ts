@@ -42,7 +42,7 @@ test("workspace presence roster includes active and inactive peers without dupli
     ])
 })
 
-test("workspace navigation keeps frame content mounted and reports progress inline", () => {
+test("workspace navigation keeps recent frame content mounted and reports progress inline", () => {
     const shell = source("components/workspace/WorkspaceTopBarClient.tsx")
     const bridge = source("components/workspace/WorkspaceTabBridge.tsx")
     const navigationCase = shell.slice(shell.indexOf('message.type === "navigation-start"'), shell.indexOf('message.type === "open-tab"'))
@@ -54,6 +54,11 @@ test("workspace navigation keeps frame content mounted and reports progress inli
     assert.match(bridge, /await flushWorkspaceAutosaves\(\)/)
     assert.match(shell, /frameTabs\.map\(\(tab\) =>/)
     assert.match(shell, /hidden=\{!active\}/)
+    assert.match(shell, /MAX_RESIDENT_WORKSPACE_FRAMES = 2/)
+    assert.match(shell, /residentTabIdSet\.has\(tab\.id\)/)
+    assert.match(bridge, /router\.push\(workspaceTabFrameUrl\(nextUrl, tabId/)
+    assert.match(shell, /scheduleSoftNavigationFallback\(tabId, url, mode\)/)
+    assert.match(bridge, /if \(!message\.active\) await flushWorkspaceAutosaves\(\)/)
 })
 
 test("chat sends stay local and refreshed tabs remain covered until their frame load completes", () => {

@@ -75,6 +75,16 @@ export function workspaceTabFrameUrl(value: string, tabId: string, origin: strin
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
 }
 
+export function workspaceTabIdFromUrl(value: string | null, origin = "http://localhost") {
+    if (!value) return null
+    try {
+        const tabId = new URL(value, origin).searchParams.get(WORKSPACE_TAB_FRAME_PARAM)?.trim()
+        return tabId || null
+    } catch {
+        return null
+    }
+}
+
 export function isWorkspaceOnboardingBuilderUrl(value: string, workspaceSlug: string, origin: string) {
     const parsed = new URL(value, origin)
     return parsed.origin === new URL(origin).origin
