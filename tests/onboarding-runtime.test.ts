@@ -37,6 +37,7 @@ const builderInvoiceSessions = readFileSync("supabase/migrations/20260811113000_
 const relationshipArchive = readFileSync("supabase/migrations/20260811143000_archive_relationships.sql", "utf8")
 const relationshipArchiveFix = readFileSync("supabase/migrations/20260811150000_fix_relationship_archive_activity.sql", "utf8")
 const salePaymentGateMigration = readFileSync("supabase/migrations/20260814140000_sale_confirmation_payment_gate.sql", "utf8")
+const testBlockSkipMigration = readFileSync("supabase/migrations/20260903110000_allow_test_onboarding_block_skips.sql", "utf8")
 const environmentExample = readFileSync(".env.example", "utf8")
 const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
@@ -271,6 +272,14 @@ test("test clients autofill the frozen current form and advance without legacy f
     assert.doesNotMatch(publicActions, /Test response for/u)
     assert.doesNotMatch(publicActions, /if \(formKey\)/u)
     assert.match(publicPage, /skipTestStep\(token, currentStep\.key\)/u)
+})
+
+test("test clients can skip steps with unsatisfied mandatory runtime blocks", () => {
+    assert.match(publicActions, /if \(!session\.is_test\) throw new Error\("Invalid test onboarding session"\)/u)
+    assert.match(testBlockSkipMigration, /join public\.relationship_onboarding_sessions session/u)
+    assert.match(testBlockSkipMigration, /session\.id = block\.session_id/u)
+    assert.match(testBlockSkipMigration, /and not session\.is_test/u)
+    assert.match(testBlockSkipMigration, /Complete the required video or link before continuing\./u)
 })
 
 test("paid consent queues one idempotent onboarding-link delivery after consent persistence", () => {
