@@ -50,23 +50,22 @@ export async function markSmsConsentConfirmed(input: { workspaceId: string; cons
 
 export async function recordSmsOptOut(input: { workspaceId: string; fromAddress: string }) {
     const optedOutAt = new Date().toISOString()
-    const { error } = await supabaseAdmin.from("relationship_sms_consents").update({
-        status: "opted_out",
-        opted_out_at: optedOutAt,
-        last_error: null,
-    }).eq("workspace_id", input.workspaceId)
-        .eq("phone_e164", toE164Recipient(input.fromAddress))
-        .in("status", ["sending_confirmation", "awaiting_confirmation", "confirmed"])
-    if (error) throw new Error(error.message)
-}
-
-export async function recordSmsStart(input: { workspaceId: string; fromAddress: string }) {
-    const { error } = await supabaseAdmin.from("relationship_sms_consents").update({
-        status: "pending",
-        opted_out_at: null,
-        last_error: null,
-    }).eq("workspace_id", input.workspaceId)
-        .eq("phone_e164", toE164Recipient(input.fromAddress))
-        .eq("status", "opted_out")
-    if (error) throw new Error(error.message)
+    const phoneE164 = toE164Recipient(input.fromAddress)
+    const [relationshipResult, workspaceResult] = await Promise.all([
+        supabaseAdmin.from("relationship_sms_consents").update({
+            status: "opted_out",
+            opted_out_at: optedOutAt,
+            last_error: null,
+        }).eq("workspace_id", input.workspaceId)
+            .eq("phone_e164", phoneE164)
+            .in("status", ["sending_confirmation", "awaiting_confirmation", "confirmed"]),
+        supabaseAdmin.from("workspace_sms_opt_ins").update({
+            status: "opted_out",
+            opted_out_at: optedOutAt,
+        }).eq("workspace_id", input.workspaceId)
+            .eq("phone_e164", phoneE164),
+    ])
+    if (relationshipResult.error || workspaceResult.error) {
+        throw new Error(relationshipResult.error?.message ?? workspaceResult.error?.message ?? "SMS opt-out could not be recorded")
+    }
 }

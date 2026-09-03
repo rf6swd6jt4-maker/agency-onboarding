@@ -8,7 +8,7 @@ import { storeClientMessageMedia } from "@/lib/onboarding/uploads"
 import { notifyClientChatMessage } from "@/lib/push/chat-notifications"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { getWorkspaceIdForTwilioNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
-import { recordSmsOptOut, recordSmsStart } from "@/lib/client-sales/sms-consent-state"
+import { recordSmsOptOut } from "@/lib/client-sales/sms-consent-state"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -191,10 +191,6 @@ export async function POST(request: NextRequest) {
     const standardOptOut = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "REVOKE", "OPTOUT"].includes(body.toUpperCase())
     if (optOutType === "STOP" || standardOptOut) {
         await recordSmsOptOut({ workspaceId, fromAddress: from })
-    }
-    const standardStart = ["START", "UNSTOP"].includes(body.toUpperCase())
-    if (optOutType === "START" || standardStart) {
-        await recordSmsStart({ workspaceId, fromAddress: from })
     }
     if (body.toUpperCase() === "HELP") {
         if (optOutType === "HELP") return twimlResponse()

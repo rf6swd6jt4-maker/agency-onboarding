@@ -16,10 +16,10 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, finalizeRelationshipSaleConfirmation, prepareRelationshipSale } from "@/lib/relationship-workflow"
 import { sendSaleConsentTemplate } from "@/lib/client-sales/automation"
-import { getSmsConsentUrl } from "@/lib/client-sales/sms-consent"
+import { sendSaleSmsConfirmationIfOptedIn } from "@/lib/client-sales/sms-consent"
 import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
-import { isUsablePhoneNumber, normalizeProviderAddress, resolvePrimaryMessagingProvider } from "@/lib/client-messages/addresses"
+import { isUsablePhoneNumber, normalizeProviderAddress, resolvePrimaryMessagingProvider, toE164Recipient } from "@/lib/client-messages/addresses"
 
 const creatableRelationshipPhases = new Set(["potential_client", "retention"] as const)
 const creatableAssetKinds = new Set(["file", "media", "document"])
@@ -167,6 +167,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
                 client_name: businessName ?? primaryPersonName,
                 client_email: nullableFormString(formData, "primary_email"),
                 client_phone: normalizeProviderAddress(communicationPrimaryProvider, confirmationAddress ?? ""),
+                sms_recipient_e164: communicationPrimaryProvider === "twilio_sms" ? toE164Recipient(primaryPhone ?? "") : null,
                 service_keys: [],
                 line_items: [],
                 currency: "usd",
@@ -187,8 +188,11 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
         return { ok: false, error: "workflow-create-failed" }
     }
 
-    if (retentionConfirmationSaleId && !retentionRequiresSmsConsent) {
-        const confirmation = await sendSaleConsentTemplate(retentionConfirmationSaleId, workspace.id)
+    let retentionConfirmationSent = false
+    if (retentionConfirmationSaleId) {
+        const confirmation = retentionRequiresSmsConsent
+            ? await sendSaleSmsConfirmationIfOptedIn({ workspaceId: workspace.id, saleId: retentionConfirmationSaleId })
+            : await sendSaleConsentTemplate(retentionConfirmationSaleId, workspace.id)
         if (!confirmation.ok) {
             relationshipRevalidatePaths(slug, relationship.id)
             return {
@@ -197,6 +201,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
                 notice: "Relationship added, but the confirmation could not be sent. Check the messaging connection and contact details.",
             }
         }
+        retentionConfirmationSent = "sent" in confirmation ? confirmation.sent : !("inProgress" in confirmation && confirmation.inProgress)
     }
 
     relationshipRevalidatePaths(slug, relationship.id)
@@ -204,7 +209,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
     return {
         ok: true,
         href: relationshipHubHref(slug, relationship.id),
-        ...(phase === "retention" ? { notice: retentionRequiresSmsConsent ? "Relationship added. Copy its SMS consent link and share it outside SMS." : "Relationship added and confirmation sent" } : {}),
+        ...(phase === "retention" ? { notice: retentionRequiresSmsConsent && !retentionConfirmationSent ? "Relationship added and waiting for SMS opt-in" : "Relationship added and confirmation sent" } : {}),
     }
 }
 
@@ -510,7 +515,7 @@ export async function proceedRelationshipCurrentWork(
 ) {
     let workflowAction: string | null = null
     let sale: Awaited<ReturnType<typeof prepareRelationshipSale>> | null = null
-    let saleResult: { id: string; kind: "checkout" | "sms_consent"; href: string | null } | null = null
+    let saleResult: { id: string; kind: "sms" | "whatsapp"; sent: boolean } | null = null
     try {
         const { workspace, user, role } = await requireWorkspace(slug, "admin")
         const { data: item } = await supabaseAdmin.from("work_items")
@@ -536,15 +541,13 @@ export async function proceedRelationshipCurrentWork(
                 billingIntervalCount: payment?.billingIntervalCount,
             })
             if (sale.requiresSmsConsent) {
+                const confirmation = await sendSaleSmsConfirmationIfOptedIn({ workspaceId: workspace.id, saleId: sale.saleId })
+                if (!confirmation.ok) throw new Error(confirmation.error ?? "The client confirmation could not be sent")
                 await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: sale.saleId })
                 saleResult = {
                     id: sale.saleId,
-                    kind: "sms_consent",
-                    href: getSmsConsentUrl({
-                        token: sale.smsConsentToken,
-                        customDomain: workspace.custom_onboarding_domain,
-                        customDomainVerified: workspace.custom_onboarding_domain_status === "verified",
-                    }),
+                    kind: "sms",
+                    sent: confirmation.sent,
                 }
             } else {
                 const consent = await sendSaleConsentTemplate(sale.saleId, workspace.id)
@@ -552,7 +555,7 @@ export async function proceedRelationshipCurrentWork(
                 if (!("inProgress" in consent && consent.inProgress)) {
                     await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: sale.saleId })
                 }
-                saleResult = { id: sale.saleId, kind: "checkout", href: null }
+                saleResult = { id: sale.saleId, kind: "whatsapp", sent: true }
             }
         } else {
             if (workflowAction === "await_payment" || workflowAction === "await_onboarding") throw new Error("This stage advances automatically when the external step completes")

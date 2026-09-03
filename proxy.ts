@@ -67,10 +67,23 @@ function isAuthHostPath(path: string) {
     return [...AUTH_PATHS, ...AUTH_API_PATHS].some((authPath) => path === authPath || path.startsWith(`${authPath}/`))
 }
 
-function withRewrite(request: NextRequest, pathname: string, headers = request.headers) {
+const INTERNAL_WORKSPACE_HEADERS = [
+    "x-betelgeze-workspace-slug",
+    "x-betelgeze-custom-onboarding-domain",
+    "x-betelgeze-custom-client-portal-domain",
+]
+
+function requestHeadersWithCurrentPath(request: NextRequest, headers = request.headers, preserveInternal = false) {
+    const nextHeaders = new Headers(headers)
+    if (!preserveInternal) INTERNAL_WORKSPACE_HEADERS.forEach((header) => nextHeaders.delete(header))
+    nextHeaders.set("x-betelgeze-current-path", requestCurrentPath(request))
+    return nextHeaders
+}
+
+function withRewrite(request: NextRequest, pathname: string, headers?: Headers) {
     const url = request.nextUrl.clone()
     url.pathname = pathname
-    return NextResponse.rewrite(url, { request: { headers: requestHeadersWithCurrentPath(request, headers) } })
+    return NextResponse.rewrite(url, { request: { headers: requestHeadersWithCurrentPath(request, headers, Boolean(headers)) } })
 }
 
 function withRedirect(request: NextRequest, pathname: string) {
@@ -93,12 +106,6 @@ function shouldRefreshSessionForDomain(domain: string | null) {
 
 function requestCurrentPath(request: NextRequest) {
     return `${request.nextUrl.pathname}${request.nextUrl.search}`
-}
-
-function requestHeadersWithCurrentPath(request: NextRequest, headers = request.headers) {
-    const nextHeaders = new Headers(headers)
-    nextHeaders.set("x-betelgeze-current-path", requestCurrentPath(request))
-    return nextHeaders
 }
 
 function isAppHost(domain: string | null) {
@@ -200,7 +207,7 @@ export async function proxy(request: NextRequest) {
         const workspacePath = path.match(/^\/([a-z0-9][a-z0-9-]*)(?:\/(.*))?$/i)
         if (!isPublicDashboardPath && workspacePath) {
             const [, workspaceSlug] = workspacePath
-            const headers = new Headers(request.headers)
+            const headers = requestHeadersWithCurrentPath(request)
             headers.set("x-betelgeze-workspace-slug", workspaceSlug)
             if (!request.nextUrl.searchParams.has(WORKSPACE_TAB_FRAME_PARAM) && workspaceRouteUsesShell(path)) {
                 headers.set(WORKSPACE_SHELL_REQUEST_HEADER, "1")
@@ -243,17 +250,17 @@ export async function proxy(request: NextRequest) {
     }
 
     if (domain === ONBOARDING_HOST) {
-        if (path === "/sms-consent") {
-            const headers = new Headers(request.headers)
+        if (path === "/smsoptin") {
+            const headers = requestHeadersWithCurrentPath(request)
             headers.set("x-betelgeze-custom-onboarding-domain", domain)
-            return withSession(withRewrite(request, "/onboarding/sms-consent", headers))
+            return withSession(withRewrite(request, "/onboarding/smsoptin", headers))
         }
         const canonicalOnboarding = path.match(/^\/onboarding\/[a-z0-9][a-z0-9-]*\/([a-f0-9]{64})$/i)
         if (canonicalOnboarding) return withSession(withRedirect(request, `/${canonicalOnboarding[1]}`))
 
         const token = path.match(/^\/([a-f0-9]{64})$/i)
         if (token) {
-            const headers = new Headers(request.headers)
+            const headers = requestHeadersWithCurrentPath(request)
             headers.set("x-betelgeze-custom-onboarding-domain", domain)
             return withSession(withRewrite(request, `/onboarding/session/${token[1]}`, headers))
         }
@@ -270,11 +277,11 @@ export async function proxy(request: NextRequest) {
             if (!isDomainProbe && workspace.status !== "verified") {
                 return new NextResponse("Not Found", { status: 404 })
             }
-            if (workspace.surface === "onboarding" && path === "/sms-consent") {
-                const headers = new Headers(request.headers)
+            if (workspace.surface === "onboarding" && path === "/smsoptin") {
+                const headers = requestHeadersWithCurrentPath(request)
                 headers.set("x-betelgeze-workspace-slug", workspace.slug)
                 headers.set("x-betelgeze-custom-onboarding-domain", domain)
-                return withSession(withRewrite(request, "/onboarding/sms-consent", headers))
+                return withSession(withRewrite(request, "/onboarding/smsoptin", headers))
             }
             // Checkout sessions created before custom-domain return URLs were
             // canonicalized still point here. Preserve their query string and
@@ -283,7 +290,7 @@ export async function proxy(request: NextRequest) {
                 return withSession(withRedirect(request, `/${platformSessionToken[1]}`))
             }
             if (!customToken) return new NextResponse("Not Found", { status: 404 })
-            const headers = new Headers(request.headers)
+            const headers = requestHeadersWithCurrentPath(request)
             headers.set("x-betelgeze-workspace-slug", workspace.slug)
             headers.set(workspace.surface === "client_portal" ? "x-betelgeze-custom-client-portal-domain" : "x-betelgeze-custom-onboarding-domain", domain)
             const url = request.nextUrl.clone()

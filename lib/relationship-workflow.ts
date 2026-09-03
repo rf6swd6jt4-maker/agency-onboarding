@@ -598,6 +598,7 @@ async function preflightRelationshipSale(input: {
     }
     const currencies = new Set(input.services.map((service) => (service.currency ?? "usd").toUpperCase()))
     if (currencies.size !== 1) throw new Error("Every selected service must use the same currency")
+    const smsDestination = channels.destinations.find((destination) => destination.provider === "twilio_sms")
     const versionedServiceDefinitions = input.services.map((selected) =>
         versionedServiceDefinitionForDeal(configuration, selected)
     )
@@ -610,6 +611,7 @@ async function preflightRelationshipSale(input: {
     return {
         configuration,
         normalizedPhone: primaryDestination.address,
+        smsRecipientE164: smsDestination ? toE164Recipient(smsDestination.address) : null,
         destinations: channels.destinations,
         serviceDefinitions: versionedServiceDefinitions,
     }
@@ -617,7 +619,7 @@ async function preflightRelationshipSale(input: {
 
 async function findResumableFrozenSale(workspaceId: string, relationshipId: string) {
     const result = await supabaseAdmin.from("client_sales")
-        .select("id, correlation_id, status, sms_consent_token")
+        .select("id, correlation_id, status, sms_recipient_e164")
         .eq("workspace_id", workspaceId)
         .eq("relationship_id", relationshipId)
         .in("status", [
@@ -722,6 +724,7 @@ export async function prepareRelationshipSale(input: {
             client_name: relationship.business_name ?? relationship.primary_person_name,
             client_email: relationship.primary_email,
             client_phone: preflight.normalizedPhone,
+            sms_recipient_e164: preflight.smsRecipientE164,
             service_keys: selectedServices.map((service) => service.service_key),
             project_timeframe_days: relationship.project_timeframe_days,
             currency,
@@ -737,7 +740,7 @@ export async function prepareRelationshipSale(input: {
             status: "draft",
             created_by: input.actorId,
             correlation_id: correlationId,
-        }).select("id, correlation_id, status, sms_consent_token").single()
+        }).select("id, correlation_id, status, sms_recipient_e164").single()
         if (insertedSale.error || !insertedSale.data) {
             throw new Error(insertedSale.error?.message ?? "Could not create the sale")
         }
@@ -779,6 +782,7 @@ export async function prepareRelationshipSale(input: {
         billing_interval_count: billingIntervalCount,
         upfront_total_amount: upfrontTotal,
         recurring_total_amount: recurringTotal,
+        sms_recipient_e164: preflight.smsRecipientE164,
         updated_at: preparedAt,
     }).eq("workspace_id", input.workspaceId).eq("id", sale.id)
     if (preparedError) throw new Error(preparedError.message)
@@ -814,7 +818,6 @@ export async function prepareRelationshipSale(input: {
         referenceId: sale.id,
         href: null,
         assetId: null,
-        smsConsentToken: sale.sms_consent_token,
         requiresSmsConsent: preflight.destinations.some((destination) => destination.provider === "twilio_sms"),
     }
 }
