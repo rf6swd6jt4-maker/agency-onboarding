@@ -122,7 +122,7 @@ test("Communications interactions are durable and native to WhatsApp", async () 
 })
 
 test("message interactions keep the approved mobile and profile parity", async () => {
-    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, messagePaneScroll, globals, actions, pinnedBar, rootLayout, paneInteractions, composerViewport] = await Promise.all([
+    const [clients, team, composer, composerPreview, composerScroll, keyboardSlide, page, bootstrap, panel, types, icons, shell, resizableColumns, jumpToLatest, messagePaneScroll, globals, actions, pinnedBar, rootLayout, paneInteractions, composerViewport, readAvatars] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/MessageComposer.tsx", "utf8"),
@@ -144,6 +144,7 @@ test("message interactions keep the approved mobile and profile parity", async (
         readFile("app/layout.tsx", "utf8"),
         readFile("components/communications/useMessagePaneInteractions.ts", "utf8"),
         readFile("lib/workspace-composer-viewport.ts", "utf8"),
+        readFile("components/communications/MessageReadAvatars.tsx", "utf8"),
     ])
     assert.match(clients, /data-message-action-popup/)
     for (const source of [clients, team]) {
@@ -312,8 +313,9 @@ test("message interactions keep the approved mobile and profile parity", async (
     }
     assert.doesNotMatch(team, /ring-2 ring-white ring-offset-2 ring-offset-black/)
     assert.match(team, /isSticker \? "mb-1 w-fit rounded-full bg-neutral-950\/80 px-2 py-0\.5" : "mb-0\.5"/)
-    assert.match(team, /readers\.map\(\(person\) => <button data-icon-button/)
-    assert.match(team, /h-4 w-4 shrink-0 aspect-square/)
+    for (const source of [clients, team]) assert.match(source, /<MessageReadAvatars readers=\{readers\} \/>/)
+    assert.match(readAvatars, /flex min-w-0 items-center -space-x-1/)
+    assert.match(readAvatars, /h-4 w-4 shrink-0 aspect-square/)
     assert.match(composer, /flex shrink-0 items-center -space-x-1/)
     assert.match(clients, /<MessageComposer/)
     assert.match(team, /<MessageComposer/)

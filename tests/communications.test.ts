@@ -74,14 +74,18 @@ test("Communications preserves its section and both selected chats across shell 
 })
 
 test("Communications avatar controls stay circular on mobile", async () => {
-    const [clients, team, avatar] = await Promise.all([
+    const [clients, team, avatar, readAvatars] = await Promise.all([
         readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
         readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
         readFile("components/account/Avatar.tsx", "utf8"),
+        readFile("components/communications/MessageReadAvatars.tsx", "utf8"),
     ])
 
-    assert.match(clients, /readers\.map\(\(person\) => <button data-icon-button/)
-    assert.match(team, /readers\.map\(\(person\) => <button data-icon-button/)
+    assert.match(clients, /<MessageReadAvatars readers=\{readers\} \/>/)
+    assert.match(team, /<MessageReadAvatars readers=\{readers\} \/>/)
+    assert.match(readAvatars, /readers\.map\(\(person\) => <button/)
+    assert.match(readAvatars, /data-icon-button/)
+    assert.match(readAvatars, /h-4 w-4 shrink-0 aspect-square/)
     assert.match(team, /<button data-icon-button type="button" onClick=\{\(\) => openWorkspaceMemberProfile\(message\.senderUserId\)\}/)
     assert.match(avatar, /object-cover object-center/)
     assert.match(avatar, /objectPosition: "50% 50%"/)
