@@ -29,6 +29,7 @@ import { formatRelativeTime } from "@/lib/ui/relative-time"
 import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import { clientConversationUnreadCount } from "@/lib/communications/unread"
 import { clientMessageSupportsReaction } from "@/lib/communications/interactions"
+import { closeWorkspaceComposer } from "@/lib/workspace-composer-viewport"
 
 function record(value: unknown) {
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -387,6 +388,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     }, [persistReadCursor])
 
     const selectConversation = useCallback((conversationId: string | null) => {
+        closeWorkspaceComposer(composerRef.current)
         void flushPendingRead().catch(() => undefined)
         const pendingAttachment = attachmentRef.current
         const previousRelationshipId = selectedRef.current

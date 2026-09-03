@@ -26,6 +26,7 @@ import type { CommunicationAttachment, CommunicationSticker } from "@/lib/commun
 import { nativeConversationUnreadCount } from "@/lib/communications/unread"
 import { nativeMessageCanEdit } from "@/lib/teams/message-editing"
 import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, NativeReadCursor, WorkspaceTeam } from "@/lib/teams/types"
+import { closeWorkspaceComposer } from "@/lib/workspace-composer-viewport"
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
 function text(value: unknown) { return typeof value === "string" && value ? value : null }
@@ -353,6 +354,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }, [bootstrap.requestedDmUserId, bootstrap.workspaceSlug, refresh])
 
     function selectConversation(id: string | null) {
+        closeWorkspaceComposer(composerRef.current)
         void flushPendingRead().catch(() => undefined)
         followLatestRef.current = true; setAtLatest(true); setShowJumpToLatest(false)
         setSelectedId(id); setReplyingTo(null); setEditingMessage(null); setEditState("idle"); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
@@ -752,7 +754,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                 >
                                     {selected.kind === "team" ? sender?.former
                                         ? <span className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500`}>{sender.name} · former member</span>
-                                        : <button type="button" onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(message.senderUserId) }} className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500 hover:underline`}>{own ? "You" : sender?.name ?? "Team member"}</button> : null}
+                                        : <button data-icon-button type="button" onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(message.senderUserId) }} className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500 hover:underline`}>{own ? "You" : sender?.name ?? "Team member"}</button> : null}
                                     {reply ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${own ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{reply.senderUserId === bootstrap.currentUser.id ? "You" : peopleById.get(reply.senderUserId)?.name ?? "Team member"}</p><p className="mt-0.5 truncate text-xs opacity-65">{messagePreview(reply)}</p></div> : null}
                                     {message.attachment ? <NativeAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={own} /> : null}
                                     {message.body ? <MessageText body={message.body} /> : null}

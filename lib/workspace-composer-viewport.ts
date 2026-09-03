@@ -11,3 +11,11 @@ export function reportWorkspaceComposerFocus(focused: boolean) {
         detail: { focused },
     }))
 }
+
+export function closeWorkspaceComposer(composer: HTMLTextAreaElement | null) {
+    composer?.blur()
+    // A focused element can be removed before React delivers its blur handler.
+    // Always release the shell viewport so a hidden keyboard cannot leave the
+    // conversation list constrained to the keyboard-open height.
+    reportWorkspaceComposerFocus(false)
+}
