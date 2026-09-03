@@ -1,5 +1,6 @@
 import "server-only"
 
+import { cache } from "react"
 import { notFound } from "next/navigation"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { combineWorkspaceCapabilities, WORKSPACE_CAPABILITIES, type WorkspaceCapability } from "@/lib/workspace-capabilities"
@@ -21,18 +22,61 @@ function isAdminRole(role: WorkspaceRole) {
     return role === "owner" || role === "admin"
 }
 
+const APPOINTMENT_SETTING_CAPABILITY = "appointment_setting.manage" satisfies WorkspaceCapability
+const APPOINTMENT_SETTING_TEMPLATE_ID = "appointment-setting"
+
+function serviceTemplateId(definition: unknown) {
+    if (!definition || typeof definition !== "object" || Array.isArray(definition)) return null
+    const value = (definition as Record<string, unknown>).templateId ?? (definition as Record<string, unknown>).template_id
+    return typeof value === "string" ? value : null
+}
+
+const loadAppointmentSettingServiceIds = cache(async (workspaceId: string) => {
+    const { data: services, error: serviceError } = await supabaseAdmin
+        .from("onboarding_services")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .neq("state", "archived")
+    if (serviceError) {
+        console.error("Appointment Setting service activation could not be loaded", { workspaceId, code: serviceError.code })
+        return { ids: new Set<string>(), ready: false }
+    }
+    const serviceIds = (services ?? []).map((service) => service.id).filter(Boolean)
+    if (!serviceIds.length) return { ids: new Set<string>(), ready: true }
+
+    const { data: revisions, error: revisionError } = await supabaseAdmin
+        .from("onboarding_service_revisions")
+        .select("service_id, definition")
+        .eq("workspace_id", workspaceId)
+        .in("service_id", serviceIds)
+    if (revisionError) {
+        console.error("Appointment Setting service revisions could not be loaded", { workspaceId, code: revisionError.code })
+        return { ids: new Set<string>(), ready: false }
+    }
+    return {
+        ids: new Set((revisions ?? [])
+            .filter((revision) => serviceTemplateId(revision.definition) === APPOINTMENT_SETTING_TEMPLATE_ID)
+            .map((revision) => revision.service_id)
+            .filter(Boolean)),
+        ready: true,
+    }
+})
+
 export async function loadWorkspaceAccess(input: {
     workspaceId: string
     workspaceSlug: string
     userId: string
     role: WorkspaceRole
 }): Promise<WorkspaceAccess> {
+    const appointmentSettingServices = await loadAppointmentSettingServiceIds(input.workspaceId)
     if (isAdminRole(input.role)) {
         return {
             ...input,
-            capabilities: [...WORKSPACE_CAPABILITIES],
+            capabilities: WORKSPACE_CAPABILITIES.filter((capability) => (
+                capability !== APPOINTMENT_SETTING_CAPABILITY || appointmentSettingServices.ids.size > 0
+            )),
             allowedServiceIds: [],
-            serviceAccessSchemaReady: true,
+            serviceAccessSchemaReady: appointmentSettingServices.ready,
         }
     }
 
@@ -53,7 +97,7 @@ export async function loadWorkspaceAccess(input: {
 
     const allowedServiceIds = [...new Set((assignments ?? []).map((item) => item.service_id).filter(Boolean))]
     if (!allowedServiceIds.length) {
-        return { ...input, capabilities: [], allowedServiceIds: [], serviceAccessSchemaReady: true }
+        return { ...input, capabilities: [], allowedServiceIds: [], serviceAccessSchemaReady: appointmentSettingServices.ready }
     }
 
     const { data: grants, error: capabilityError } = await supabaseAdmin
@@ -71,9 +115,12 @@ export async function loadWorkspaceAccess(input: {
         return { ...input, capabilities: [], allowedServiceIds, serviceAccessSchemaReady: false }
     }
 
-    const capabilities = combineWorkspaceCapabilities((grants ?? []).map((item) => [item.capability]))
+    const assignedAppointmentSettingService = allowedServiceIds.some((serviceId) => appointmentSettingServices.ids.has(serviceId))
+    const capabilities = combineWorkspaceCapabilities((grants ?? []).map((item) => [item.capability])).filter((capability) => (
+        capability !== APPOINTMENT_SETTING_CAPABILITY || assignedAppointmentSettingService
+    ))
 
-    return { ...input, capabilities, allowedServiceIds, serviceAccessSchemaReady: true }
+    return { ...input, capabilities, allowedServiceIds, serviceAccessSchemaReady: appointmentSettingServices.ready }
 }
 
 export async function requireWorkspaceAccess(slug: string) {
@@ -88,6 +135,7 @@ export async function requireWorkspaceAccess(slug: string) {
 }
 
 export function workspaceAccessHasCapability(access: WorkspaceAccess, capability: WorkspaceCapability) {
+    if (capability === APPOINTMENT_SETTING_CAPABILITY) return access.capabilities.includes(capability)
     return isAdminRole(access.role) || access.capabilities.includes(capability)
 }
 

@@ -27,7 +27,7 @@ export default async function AppointmentSettingPage({ params }: { params: Promi
     const eligibleRelationships = filterAppointmentSettingRelationships(relationships, allowedRelationshipIds)
 
     return <main className="min-h-screen bg-neutral-950 px-4 pb-7 text-white sm:px-6">
-        <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
+        <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
         <div className="mx-auto max-w-7xl pt-5">
             <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
             <PanelTabHeader title="Appointment Setting" description="Retention relationships eligible to begin appointment setting." />

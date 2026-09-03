@@ -1,11 +1,12 @@
 # Service-scoped Staff access
 
-Staff remains one workspace role. A Staff member's usable product surfaces are the union of the capabilities granted by their assigned services. Owner and Admin continue to have full workspace access.
+Staff remains one workspace role. A Staff member's usable product surfaces are the union of the capabilities granted by their assigned services. Owner and Admin continue to have full access to the workspace's available product surfaces.
 
 ## Capability rules
 
 - Every service grants `onboarding.manage` and `fulfilment.manage`.
 - The Appointment Setting template also grants `appointment_setting.manage`.
+- Appointment Setting is a service-activated product surface: it is absent for everyone until the workspace creates a template-derived Appointment Setting service. A non-archived service activates it for Owner and Admin; Staff must be assigned that service and retain its capability.
 - Assigning multiple services combines their capabilities; it does not create another role.
 - Staff without an assigned service have no product panel and land on the no-access screen.
 - Settings, Admin, Relationships, Communications, Library, Builder, and Lead Gen remain Owner/Admin-only until a deliberate service capability is introduced for one of them.
@@ -29,4 +30,4 @@ Staff remains one workspace role. A Staff member's usable product surfaces are t
 
 Apply `supabase/migrations/20260902170000_service_scoped_staff_access.sql` before deploying the application revision that consumes the new tables and RPCs.
 
-For acceptance, verify a new Staff account assigned only Meta Ads sees Onboarding and Fulfilment; assigning Appointment Setting also exposes Appointment Setting; combining services produces the union; unassigned records and direct panel URLs return no data or a not-found response; and Owner/Admin navigation remains unchanged.
+For acceptance, verify a workspace without Appointment Setting hides the panel and rejects its direct URL for every role; creating the template service exposes it to Owner and Admin; a new Staff account assigned only Meta Ads sees Onboarding and Fulfilment; assigning the Appointment Setting service also exposes Appointment Setting; combining services produces the union; and unassigned records and direct panel URLs return no data or a not-found response.

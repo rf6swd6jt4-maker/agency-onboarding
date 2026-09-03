@@ -8,6 +8,7 @@ export type WorkspacePanelDefinition = {
     activeRoutes?: readonly string[]
     capability: WorkspaceCapability
     minimumRole?: "admin"
+    requiresService?: boolean
     description: string
     keywords: readonly string[]
     standalone?: boolean
@@ -17,7 +18,7 @@ export const WORKSPACE_PANELS = [
     { key: "relationships", label: "Relationships", route: "relationships", capability: "relationships.view", minimumRole: "admin", description: "Relationship Hub list", keywords: ["dashboard", "crm", "people", "accounts"] },
     { key: "onboarding", label: "Onboarding", route: "onboarding", capability: "onboarding.manage", description: "Relationship onboarding status and submissions", keywords: ["forms", "submissions", "portal"] },
     { key: "fulfilment", label: "Fulfilment", route: "work", capability: "fulfilment.manage", description: "Fulfilment relationship work items", keywords: ["tasks", "project management", "queue", "fulfilment"] },
-    { key: "appointment-setting", label: "Appointment Setting", route: "appointment-setting", capability: "appointment_setting.manage", description: "Leads, bookings, setter availability, and appointment outcomes", keywords: ["appointments", "bookings", "setters", "calendar", "leads"] },
+    { key: "appointment-setting", label: "Appointment Setting", route: "appointment-setting", capability: "appointment_setting.manage", requiresService: true, description: "Leads, bookings, setter availability, and appointment outcomes", keywords: ["appointments", "bookings", "setters", "calendar", "leads"] },
     { key: "communications", label: "Communications", route: "communications", capability: "communications.manage", description: "Relationship communication summaries", keywords: ["messages", "chat", "whatsapp", "communication"] },
     { key: "library", label: "Library", route: "work-items", activeRoutes: ["work-items", "assets"], capability: "library.manage", minimumRole: "admin", description: "Workspace work items and assets", keywords: ["tasks", "files", "uploads", "gallery"] },
     { key: "onboarding-builder", label: "Onboarding Builder", route: "onboarding-builder", capability: "onboarding_builder.manage", minimumRole: "admin", standalone: true, description: "Build workspace onboarding modules and session structure", keywords: ["onboarding modules", "session builder", "forms builder", "form fields", "welcome", "completion", "visual builder"] },
@@ -33,13 +34,15 @@ export function canAccessPrivateWorkspacePanels(role: WorkspaceRole) {
 }
 
 export function canAccessWorkspacePanel(
-    panel: Pick<WorkspacePanelDefinition, "capability" | "minimumRole">,
+    panel: Pick<WorkspacePanelDefinition, "capability" | "minimumRole" | "requiresService">,
     role: WorkspaceRole,
     capabilities: ReadonlySet<WorkspaceCapability> | readonly WorkspaceCapability[] = []
 ) {
+    const capabilitySet = new Set(capabilities)
+    if (panel.requiresService && !capabilitySet.has(panel.capability)) return false
     if (canAccessPrivateWorkspacePanels(role)) return true
     if (panel.minimumRole === "admin") return false
-    return new Set(capabilities).has(panel.capability)
+    return capabilitySet.has(panel.capability)
 }
 
 export function workspacePanelByKey(key: WorkspacePanelKey) {

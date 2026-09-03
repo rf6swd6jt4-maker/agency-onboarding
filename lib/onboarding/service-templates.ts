@@ -28,6 +28,7 @@ export type ServiceTemplateDefinition = {
 }
 
 const metaAdsThumbnail = "/service-templates/meta-ads.png"
+const appointmentSettingThumbnail = "/service-templates/appointment-setting.png"
 
 export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
     id: "meta-ads",
@@ -54,13 +55,13 @@ export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
     name: "Appointment Setting",
     description: "Manage leads, setter availability, bookings, and appointment outcomes.",
     thumbnail: {
-        src: "/service-templates/appointment-setting.svg",
+        src: appointmentSettingThumbnail,
         alt: "Appointment Setting service cover",
     },
     serviceDefaults: {
         name: "Appointment Setting",
         description: "Manage leads, setter availability, bookings, and appointment outcomes.",
-        thumbnailSrc: "/service-templates/appointment-setting.svg",
+        thumbnailSrc: appointmentSettingThumbnail,
         serviceType: "retainer",
         recurringName: "Appointment setting",
         recurringDescription: "Ongoing lead follow-up, booking, and appointment outcome management.",

@@ -23,6 +23,7 @@ const staffMigration = readFileSync("supabase/migrations/20260804090000_rename_w
 const serviceAccessMigration = readFileSync("supabase/migrations/20260902170000_service_scoped_staff_access.sql", "utf8")
 const servicePermissionMigration = readFileSync("supabase/migrations/20260902213000_service_staff_permission_controls.sql", "utf8")
 const settingsPage = readFileSync("app/[workspaceSlug]/settings/page.tsx", "utf8")
+const workspaceAccess = readFileSync("lib/workspace-access.ts", "utf8")
 
 test("workspace roles are Owner, Admin, and Staff with legacy member normalization", () => {
     assert.deepEqual(WORKSPACE_ROLES, ["owner", "admin", "staff"])
@@ -54,9 +55,20 @@ test("workspace panels derive Staff access from service capabilities", () => {
     assert.equal(canAccessWorkspacePanel(byKey.get("appointment-setting")!, "staff", appointmentSettingCapabilities), true)
     assert.equal(canAccessWorkspacePanel(byKey.get("communications")!, "staff", ["communications.manage"]), true)
     assert.equal(canAccessWorkspacePanel(byKey.get("settings")!, "staff", appointmentSettingCapabilities), false)
-    assert.equal(WORKSPACE_PANELS.every((panel) => canAccessWorkspacePanel(panel, "admin")), true)
+    assert.equal(canAccessWorkspacePanel(byKey.get("appointment-setting")!, "admin", metaAdsCapabilities), false)
+    assert.equal(canAccessWorkspacePanel(byKey.get("appointment-setting")!, "admin", appointmentSettingCapabilities), true)
+    assert.equal(WORKSPACE_PANELS.filter((panel) => panel.key !== "appointment-setting").every((panel) => canAccessWorkspacePanel(panel, "admin")), true)
     assert.equal(canAccessWorkspaceUrl("/acme/settings", "acme", "staff", appointmentSettingCapabilities), false)
     assert.equal(canAccessWorkspaceUrl("/acme/appointment-setting", "acme", "staff", appointmentSettingCapabilities), true)
+})
+
+test("Appointment Setting activates only for a non-archived template service and assigned Staff", () => {
+    const appointmentSettingPanel = WORKSPACE_PANELS.find((panel) => panel.key === "appointment-setting")!
+    assert.equal("requiresService" in appointmentSettingPanel && appointmentSettingPanel.requiresService, true)
+    assert.match(workspaceAccess, /APPOINTMENT_SETTING_TEMPLATE_ID = "appointment-setting"/)
+    assert.match(workspaceAccess, /\.neq\("state", "archived"\)/)
+    assert.match(workspaceAccess, /assignedAppointmentSettingService/)
+    assert.match(workspaceAccess, /capability !== APPOINTMENT_SETTING_CAPABILITY \|\| assignedAppointmentSettingService/)
 })
 
 test("Staff permissions from multiple assigned services add together", () => {
