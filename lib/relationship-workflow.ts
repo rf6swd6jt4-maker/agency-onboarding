@@ -617,7 +617,7 @@ async function preflightRelationshipSale(input: {
 
 async function findResumableFrozenSale(workspaceId: string, relationshipId: string) {
     const result = await supabaseAdmin.from("client_sales")
-        .select("id, correlation_id, status")
+        .select("id, correlation_id, status, sms_consent_token")
         .eq("workspace_id", workspaceId)
         .eq("relationship_id", relationshipId)
         .in("status", [
@@ -737,7 +737,7 @@ export async function prepareRelationshipSale(input: {
             status: "draft",
             created_by: input.actorId,
             correlation_id: correlationId,
-        }).select("id, correlation_id, status").single()
+        }).select("id, correlation_id, status, sms_consent_token").single()
         if (insertedSale.error || !insertedSale.data) {
             throw new Error(insertedSale.error?.message ?? "Could not create the sale")
         }
@@ -814,6 +814,8 @@ export async function prepareRelationshipSale(input: {
         referenceId: sale.id,
         href: null,
         assetId: null,
+        smsConsentToken: sale.sms_consent_token,
+        requiresSmsConsent: preflight.destinations.some((destination) => destination.provider === "twilio_sms"),
     }
 }
 

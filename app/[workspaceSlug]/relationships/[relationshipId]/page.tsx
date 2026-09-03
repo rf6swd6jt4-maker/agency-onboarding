@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailPageHeader } from "@/components/detail"
-import { RelationshipStage, SquarePill } from "@/components/ui"
+import { RelationshipStage, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
 import {
@@ -21,6 +21,8 @@ import { archiveRelationship } from "../actions"
 import { ArchiveRelationshipForm } from "./ArchiveRelationshipForm"
 import { RelationshipDealWorkspace } from "./RelationshipDealWorkspace"
 import { loadWorkspaceTeams } from "@/lib/teams/server"
+import { getSmsConsentUrl } from "@/lib/client-sales/sms-consent"
+import { CopyOnboardingLink } from "@/components/onboarding/OnboardingDetailActions"
 
 export const dynamic = "force-dynamic"
 
@@ -36,20 +38,21 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
     await ensureCurrentRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: user.id })
     const plan = await getRelationshipGanttPlan(workspace.slug, relationship)
     const planRanges = effectiveGanttRanges(plan.items)
-    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult] = await Promise.all([
+    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult, smsConsentResult] = await Promise.all([
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id),
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
         supabaseAdmin.from("client_sales")
-            .select("id, status, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
+            .select("id, status, sms_consent_token, stripe_checkout_session_id, stripe_checkout_status, stripe_checkout_url, created_at")
             .eq("workspace_id", workspace.id)
             .eq("relationship_id", relationship.id)
-            .in("status", ["sale_confirmation_pending", "sold_confirmation_sending", "sold_awaiting_whatsapp_confirm", "sold_confirmation_failed", "onboarding_payment_pending", "onboarding_link_sent", "onboarding_link_failed", "payment_failed", "paid"])
+            .in("status", ["sale_confirmation_pending", "sold_confirmation_sending", "sold_awaiting_whatsapp_confirm", "sold_confirmation_failed", "onboarding_payment_pending", "onboarding_created", "onboarding_link_sent", "onboarding_link_failed", "payment_failed", "paid", "manual_consent_pending", "manual_consent_template_failed", "manual_awaiting_whatsapp_confirm", "retention_confirmed"])
             .order("created_at", { ascending: false })
             .limit(1)
             .maybeSingle(),
         loadWorkspaceTeams(workspace.id),
         supabaseAdmin.from("workspace_integrations").select("enabled, connection_status").eq("workspace_id", workspace.id).eq("provider", "twilio_sms").maybeSingle(),
+        supabaseAdmin.from("relationship_sms_consents").select("status, consented_at, confirmation_sent_at, confirmed_at, opted_out_at").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     ])
     const memberIds = (membershipsResult.data ?? []).map((member) => member.user_id)
     const profilesResult = memberIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name").in("user_id", memberIds).order("username") : { data: [] }
@@ -64,6 +67,21 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
         revisions: serviceRevisions,
     })
     const currentSale = currentSaleResult.data
+    const smsConsent = smsConsentResult.data
+    const smsConsentUrl = currentSale?.sms_consent_token ? getSmsConsentUrl({
+        token: currentSale.sms_consent_token,
+        customDomain: workspace.custom_onboarding_domain,
+        customDomainVerified: workspace.custom_onboarding_domain_status === "verified",
+    }) : null
+    const smsConsentStatus = smsConsent?.status === "confirmed"
+        ? { label: "Confirmed", tone: "green" as const }
+        : smsConsent?.status === "awaiting_confirmation" || smsConsent?.status === "sending_confirmation"
+            ? { label: "Awaiting CONFIRM", tone: "yellow" as const }
+            : smsConsent?.status === "opted_out"
+                ? { label: "Opted out", tone: "red" as const }
+                : smsConsent?.status === "send_failed"
+                    ? { label: "Send failed", tone: "red" as const }
+                    : { label: "Not opted in", tone: "grey" as const }
     const lookedUpCurrentWork = await currentRelationshipWork({ workspaceId: workspace.id, relationshipId: relationship.id, userId: user.id, isManager: role === "owner" || role === "admin" })
     // The Gantt plan is the authoritative rendered view. If the compact current-work
     // query temporarily misses a just-created link, keep the visible assigned stage actionable.
@@ -171,6 +189,24 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                             {isOnboarding && <Link href={onboardingDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open onboarding detail</Link>}
                             {isFulfilment && <Link href={fulfilmentDetailHref(workspace.slug, relationship.id)} className="rounded-lg border border-neutral-800 px-3 py-2 text-neutral-300 hover:text-white">Open fulfilment detail</Link>}
                         </section>
+
+                        {smsConsentUrl && twilioConnectionResult.data?.enabled ? (
+                            <section className="mt-5 rounded-xl border border-neutral-800 bg-black p-5">
+                                <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                                    <div>
+                                        <div className="flex items-center gap-3">
+                                            <h2 className="text-lg font-semibold">SMS consent</h2>
+                                            <Status label={smsConsentStatus.label} tone={smsConsentStatus.tone} />
+                                        </div>
+                                        <p className="mt-1 text-sm text-neutral-500">Share this secure web link outside SMS. The client must opt in before Betelgeze sends the confirmation text.</p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 sm:flex">
+                                        <CopyOnboardingLink path={smsConsentUrl} label="Copy SMS consent link" />
+                                        <a href={smsConsentUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black">Preview consent page</a>
+                                    </div>
+                                </div>
+                            </section>
+                        ) : null}
 
                         {(role === "owner" || role === "admin") ? (
                             <DetailDangerZone>

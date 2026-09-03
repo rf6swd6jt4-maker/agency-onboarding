@@ -11,6 +11,7 @@ import { formatWhatsAppAttributedMessage } from "@/lib/client-messages/whatsapp-
 import type { CommunicationAttachment } from "@/lib/communications/types"
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { smsConsentAllowsDelivery } from "@/lib/client-sales/sms-consent-state"
 
 export type ClientMessageProvider = "meta_whatsapp" | "twilio_sms"
 export type CommunicationDeliveryMode = "primary_only" | "primary_with_fallback" | "mirror"
@@ -170,6 +171,7 @@ async function sendProvider(input: {
     attachmentAccessUrl?: string | null
     replyToMessageId?: string | null
     whatsappTemplate?: { name: string; language: string } | null
+    smsConsentContext?: "web_opt_in"
 }) {
     const replyTo = await replyProviderId({
         workspaceId: input.workspaceId,
@@ -178,6 +180,13 @@ async function sendProvider(input: {
         provider: input.destination.provider,
     })
     if (input.destination.provider === "twilio_sms") {
+        const consentAllowed = await smsConsentAllowsDelivery({
+            workspaceId: input.workspaceId,
+            relationshipId: input.relationshipId,
+            address: input.destination.address,
+            includeSending: input.smsConsentContext === "web_opt_in",
+        })
+        if (!consentAllowed) throw new Error("This client has not opted in to SMS messages for this relationship.")
         const mediaUrls = input.attachment && input.attachment.kind !== "sticker"
             ? [input.attachmentAccessUrl ?? await createPrivateUploadSignedUrl(input.attachment.storagePath)]
             : []
@@ -246,6 +255,7 @@ export async function sendCommunicationDeliveries(input: {
     replyToMessageId?: string | null
     whatsappTemplate?: { name: string; language: string } | null
     destinations?: ResolvedCommunicationDestination[]
+    smsConsentContext?: "web_opt_in"
 }) {
     const resolved = input.destinations
         ? null

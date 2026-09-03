@@ -14,6 +14,7 @@ import { activateRelationshipOnboardingAfterPayment } from "@/lib/relationship-w
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
+import { markSmsConsentConfirmed, smsConsentForConfirmation } from "@/lib/client-sales/sms-consent-state"
 
 type ClientSale = {
     id: string
@@ -732,6 +733,11 @@ export async function handleSaleConsentConfirmation({
 
     if (!sale) return { handled: false }
 
+    const smsConsent = provider === "twilio_sms"
+        ? await smsConsentForConfirmation({ workspaceId, saleId: sale.id, fromAddress })
+        : null
+    if (provider === "twilio_sms" && !smsConsent) return { handled: false }
+
     const flow = getSaleFlow(sale.raw_payload)
     if (flow === "onboarding_payment_gate" && sale.status === "paid") {
         return { handled: true, ok: true, skipped: true }
@@ -777,6 +783,7 @@ export async function handleSaleConsentConfirmation({
             await reportSaleAutomationFailure(sale, "record_retention_confirmation", consentUpdateError.message)
             return { handled: true, ok: false, error: consentUpdateError.message }
         }
+        if (smsConsent) await markSmsConsentConfirmed({ workspaceId, consentId: smsConsent.id, messageId })
         const { error: inboundMessageError } = await supabaseAdmin.from("client_messages").insert({
             workspace_id: sale.workspace_id,
             client_id: clientId,
@@ -965,6 +972,8 @@ export async function handleSaleConsentConfirmation({
         return { handled: true, ok: false, error: inboundMessageError.message }
     }
 
+    if (smsConsent) await markSmsConsentConfirmed({ workspaceId, consentId: smsConsent.id, messageId })
+
     if (flow === "manual_migration") {
         await addSaleActivity(
             sale.workspace_id,
@@ -1008,7 +1017,7 @@ export async function handleSaleConsentConfirmation({
                 relationshipId,
                 sessionId: onboardingSessionId,
                 destination: fromAddress,
-                message: `Thanks ${sale.client_name}. Your onboarding link is ready:`,
+                message: "Your secure onboarding link is ready.",
             })
             if (queued.supported) {
                 return {

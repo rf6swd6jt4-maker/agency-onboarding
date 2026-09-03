@@ -8,14 +8,20 @@ import { storeClientMessageMedia } from "@/lib/onboarding/uploads"
 import { notifyClientChatMessage } from "@/lib/push/chat-notifications"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { getWorkspaceIdForTwilioNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
+import { recordSmsOptOut, recordSmsStart } from "@/lib/client-sales/sms-consent-state"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-function twimlResponse() {
-    return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+function xmlText(value: string) {
+    return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;")
+}
+
+function twimlResponse(message?: string) {
+    const body = message ? `<Response><Message>${xmlText(message)}</Message></Response>` : "<Response></Response>"
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?>${body}`, {
         headers: { "Content-Type": "text/xml; charset=utf-8" },
     })
 }
@@ -181,6 +187,20 @@ export async function POST(request: NextRequest) {
     const to = normalizeProviderAddress("twilio_sms", params.get("To") ?? "")
     const body = params.get("Body")?.trim() ?? ""
     if (!messageSid || !from) return twimlResponse()
+    const optOutType = params.get("OptOutType")?.toUpperCase()
+    const standardOptOut = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "REVOKE", "OPTOUT"].includes(body.toUpperCase())
+    if (optOutType === "STOP" || standardOptOut) {
+        await recordSmsOptOut({ workspaceId, fromAddress: from })
+    }
+    const standardStart = ["START", "UNSTOP"].includes(body.toUpperCase())
+    if (optOutType === "START" || standardStart) {
+        await recordSmsStart({ workspaceId, fromAddress: from })
+    }
+    if (body.toUpperCase() === "HELP") {
+        if (optOutType === "HELP") return twimlResponse()
+        const { data: workspace } = await supabaseAdmin.from("workspaces").select("name").eq("id", workspaceId).maybeSingle()
+        return twimlResponse(`${workspace?.name ?? "Betelgeze"}: For help, contact your agency or support@betelgeze.com. Reply STOP to opt out.`)
+    }
     const existing = await supabaseAdmin.from("client_messages").select("id").eq("workspace_id", workspaceId).eq("provider", "twilio_sms").eq("provider_message_id", messageSid).maybeSingle()
     if (existing.data) return twimlResponse()
 

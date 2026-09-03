@@ -148,7 +148,7 @@ async function finishDelivery(
 async function deliveryContext(row: DeliveryOutboxRow) {
     const { data: workspace, error: workspaceError } = await supabaseAdmin
         .from("workspaces")
-        .select("slug, custom_onboarding_domain, custom_onboarding_domain_status, custom_client_portal_domain, custom_client_portal_domain_status")
+        .select("name, slug, custom_onboarding_domain, custom_onboarding_domain_status, custom_client_portal_domain, custom_client_portal_domain_status")
         .eq("id", row.workspace_id)
         .maybeSingle()
     if (workspaceError || !workspace) throw new Error(workspaceError?.message ?? "Onboarding delivery workspace was not found")
@@ -165,6 +165,7 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         if (!relationshipId || portalSession.relationship_id !== relationshipId || portalSession.status !== "active" || portalSession.token_revoked_at) throw new Error("Client portal delivery session link is not available")
         return {
             relationshipId,
+            workspaceName: workspace.name,
             publicUrl: getClientPortalUrl({
                 sessionToken: portalSession.session_token,
                 customDomain: workspace.custom_client_portal_domain,
@@ -189,10 +190,10 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         workspace.custom_onboarding_domain,
         workspace.custom_onboarding_domain_status === "verified"
     )
-    return { relationshipId, publicUrl: onboardingUrl }
+    return { relationshipId, workspaceName: workspace.name, publicUrl: onboardingUrl }
 }
 
-function deliveryBody(row: DeliveryOutboxRow, publicUrl: string) {
+function deliveryBody(row: DeliveryOutboxRow, publicUrl: string, workspaceName: string, smsConsentConfirmed: boolean) {
     const payload = payloadRecord(row.payload)
     if (row.kind === "client_portal_link") {
         const introduction = payloadText(payload, "message", 2_000) || "Your client portal is ready."
@@ -203,10 +204,27 @@ function deliveryBody(row: DeliveryOutboxRow, publicUrl: string) {
             || "We updated this part of your onboarding so we can collect the right information. Please complete it again."
         return [`We've updated part of your onboarding.`, explanation, `Open your onboarding: ${publicUrl}`].join("\n\n").slice(0, 4_000)
     }
+    if (smsConsentConfirmed) {
+        return `${workspaceName}: Thanks for confirming. Complete your onboarding here: ${publicUrl}\nReply HELP for help or STOP to opt out.`.slice(0, 4_000)
+    }
     const introduction = payloadText(payload, "message", 2_000)
         || payloadText(payload, "body", 2_000)
         || "Your onboarding link is ready."
     return [introduction, publicUrl].join("\n\n").slice(0, 4_000)
+}
+
+async function deliveryHasConfirmedSmsConsent(row: DeliveryOutboxRow) {
+    if (row.kind !== "onboarding_link") return false
+    const saleId = payloadId(payloadRecord(row.payload), "sale_id")
+    if (!saleId) return false
+    const { data, error } = await supabaseAdmin.from("relationship_sms_consents")
+        .select("id")
+        .eq("workspace_id", row.workspace_id)
+        .eq("client_sale_id", saleId)
+        .eq("status", "confirmed")
+        .maybeSingle()
+    if (error) throw new Error(error.message)
+    return Boolean(data)
 }
 
 function deliveryAutomationLabel(kind: DeliveryKind) {
@@ -243,7 +261,7 @@ async function processDeliveryRow(row: DeliveryOutboxRow) {
         }
 
         const context = await deliveryContext(row)
-        const body = deliveryBody(row, context.publicUrl)
+        const body = deliveryBody(row, context.publicUrl, context.workspaceName, await deliveryHasConfirmedSmsConsent(row))
         const channels = await resolveCommunicationDestinations({ workspaceId: row.workspace_id, relationshipId: context.relationshipId })
         if (!channels.destinations.length) throw new Error("The relationship has no connected messaging destination")
         const primaryDestination = channels.destinations.find((destination) => destination.primary) ?? channels.destinations[0]

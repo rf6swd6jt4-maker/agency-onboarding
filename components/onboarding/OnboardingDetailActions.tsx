@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react"
 import { DetailDangerAction, DetailDangerButton, DetailDangerZone } from "@/components/detail"
 
-export function CopyOnboardingLink({ path }: { path: string }) {
+export function CopyOnboardingLink({ path, label = "Copy link" }: { path: string; label?: string }) {
     const [copied, setCopied] = useState(false)
 
     async function copyLink() {
@@ -14,7 +14,7 @@ export function CopyOnboardingLink({ path }: { path: string }) {
 
     return (
         <button type="button" onClick={copyLink} className="inline-flex min-h-10 items-center justify-center rounded-lg border border-neutral-700 px-3 text-sm text-neutral-200 hover:border-neutral-500 hover:text-white">
-            {copied ? "Copied" : "Copy link"}
+            {copied ? "Copied" : label}
         </button>
     )
 }

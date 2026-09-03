@@ -16,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
 import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage, finalizeRelationshipSaleConfirmation, prepareRelationshipSale } from "@/lib/relationship-workflow"
 import { sendSaleConsentTemplate } from "@/lib/client-sales/automation"
+import { getSmsConsentUrl } from "@/lib/client-sales/sms-consent"
 import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
 import { isUsablePhoneNumber, normalizeProviderAddress, resolvePrimaryMessagingProvider } from "@/lib/client-messages/addresses"
@@ -155,6 +156,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
     }
 
     let retentionConfirmationSaleId: string | null = null
+    let retentionRequiresSmsConsent = false
     try {
         await ensureRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase, assigneeId: user.id })
         if (phase === "retention") {
@@ -178,13 +180,14 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
             }).select("id").single()
             if (saleError || !sale) throw new Error(saleError?.message ?? "Could not prepare the client confirmation")
             retentionConfirmationSaleId = sale.id
+            retentionRequiresSmsConsent = communicationPrimaryProvider === "twilio_sms"
         }
     } catch {
         await supabaseAdmin.from("relationships").delete().eq("workspace_id", workspace.id).eq("id", relationship.id)
         return { ok: false, error: "workflow-create-failed" }
     }
 
-    if (retentionConfirmationSaleId) {
+    if (retentionConfirmationSaleId && !retentionRequiresSmsConsent) {
         const confirmation = await sendSaleConsentTemplate(retentionConfirmationSaleId, workspace.id)
         if (!confirmation.ok) {
             relationshipRevalidatePaths(slug, relationship.id)
@@ -201,7 +204,7 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
     return {
         ok: true,
         href: relationshipHubHref(slug, relationship.id),
-        ...(phase === "retention" ? { notice: "Relationship added and confirmation sent" } : {}),
+        ...(phase === "retention" ? { notice: retentionRequiresSmsConsent ? "Relationship added. Copy its SMS consent link and share it outside SMS." : "Relationship added and confirmation sent" } : {}),
     }
 }
 
@@ -507,6 +510,7 @@ export async function proceedRelationshipCurrentWork(
 ) {
     let workflowAction: string | null = null
     let sale: Awaited<ReturnType<typeof prepareRelationshipSale>> | null = null
+    let saleResult: { id: string; kind: "checkout" | "sms_consent"; href: string | null } | null = null
     try {
         const { workspace, user, role } = await requireWorkspace(slug, "admin")
         const { data: item } = await supabaseAdmin.from("work_items")
@@ -531,10 +535,24 @@ export async function proceedRelationshipCurrentWork(
                 billingInterval: payment?.billingInterval,
                 billingIntervalCount: payment?.billingIntervalCount,
             })
-            const consent = await sendSaleConsentTemplate(sale.saleId, workspace.id)
-            if (!consent.ok) throw new Error(consent.error ?? "The client confirmation could not be sent")
-            if (!("inProgress" in consent && consent.inProgress)) {
+            if (sale.requiresSmsConsent) {
                 await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: sale.saleId })
+                saleResult = {
+                    id: sale.saleId,
+                    kind: "sms_consent",
+                    href: getSmsConsentUrl({
+                        token: sale.smsConsentToken,
+                        customDomain: workspace.custom_onboarding_domain,
+                        customDomainVerified: workspace.custom_onboarding_domain_status === "verified",
+                    }),
+                }
+            } else {
+                const consent = await sendSaleConsentTemplate(sale.saleId, workspace.id)
+                if (!consent.ok) throw new Error(consent.error ?? "The client confirmation could not be sent")
+                if (!("inProgress" in consent && consent.inProgress)) {
+                    await finalizeRelationshipSaleConfirmation({ workspaceId: workspace.id, relationshipId, workItemId, actorId: user.id, saleId: sale.saleId })
+                }
+                saleResult = { id: sale.saleId, kind: "checkout", href: null }
             }
         } else {
             if (workflowAction === "await_payment" || workflowAction === "await_onboarding") throw new Error("This stage advances automatically when the external step completes")
@@ -543,7 +561,7 @@ export async function proceedRelationshipCurrentWork(
         relationshipRevalidatePaths(slug, relationshipId)
         return {
             ok: true as const,
-            sale: sale ? { id: sale.saleId, kind: "checkout" as const } : null,
+            sale: saleResult,
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : "Could not proceed with this work item"

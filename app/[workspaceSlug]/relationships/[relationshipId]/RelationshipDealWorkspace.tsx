@@ -240,6 +240,10 @@ export function RelationshipDealWorkspace({
     })
     const smsPhoneAvailable = isUsablePhoneNumber(draft.primaryPhone)
     const whatsappPhoneAvailable = isUsablePhoneNumber(draft.whatsappPhone)
+    const saleUsesSms = twilioVerified && smsPhoneAvailable && (
+        primaryMessagingProvider === "twilio_sms" || draft.communicationDeliveryMode === "mirror"
+    )
+    const sendConfirmationLabel = `Send ${primaryMessagingProvider === "twilio_sms" ? "SMS" : "WhatsApp"} confirmation`
     const invoiced = ["sold", "invoiced", "onboarding", "onboarding_review", "fulfilment", "retention", "completed_lost"].includes(details.lifecyclePhase)
     const backgroundDirty = backgroundDetailsKey(draft) !== savedBackgroundKey
     const commercialDirty = commercialDetailsKey(draft) !== commercialDetailsKey(baseline)
@@ -482,9 +486,16 @@ export function RelationshipDealWorkspace({
                     return
                 }
                 setInvoiceOpen(false)
-                setNotice({
-                    label: `Confirmation sent via ${draft.communicationDeliveryMode === "mirror" && whatsappVerified && twilioVerified && smsPhoneAvailable && whatsappPhoneAvailable ? "WhatsApp and SMS" : primaryMessagingProvider === "twilio_sms" ? "SMS" : "WhatsApp"}`,
-                })
+                if (outcome.sale?.kind === "sms_consent" && outcome.sale.href) {
+                    try {
+                        await navigator.clipboard.writeText(outcome.sale.href)
+                        setNotice({ label: "SMS consent link copied. Share it with the client outside SMS." })
+                    } catch {
+                        setNotice({ label: "SMS consent link created. Copy it from this relationship." })
+                    }
+                } else {
+                    setNotice({ label: "Confirmation sent via WhatsApp" })
+                }
                 router.refresh()
                 postGanttSync(workspaceSlug)
             })().catch(() => setError("The client confirmation could not be sent. Please try again."))
@@ -562,7 +573,7 @@ export function RelationshipDealWorkspace({
                 </div> : null}
                 {error ? <p role="alert" className="mt-4 rounded-lg border border-red-500/20 bg-red-950/20 px-3 py-2.5 text-sm text-red-300">{error}</p> : null}
             </div>
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? "Sending confirmation…" : `Send ${primaryMessagingProvider === "twilio_sms" ? "SMS" : "WhatsApp"} confirmation`}</button>}</footer>
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-neutral-800 px-4 py-3 sm:px-6"><button type="button" disabled={invoiceStep === 0 || pending} onClick={() => { setInvoiceStep((step) => Math.max(0, step - 1)); setError(null) }} className="h-9 px-2 text-sm text-neutral-400 hover:text-white disabled:opacity-0">Back</button>{invoiceStep === 0 ? <button type="button" disabled={pending} onClick={nextFromRelationship} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-50">{pending ? "Saving…" : "Review onboarding"}</button> : invoiceStep === 1 ? <button type="button" disabled={pending || onboardingIssues.length > 0} onClick={() => { setInvoiceStep(2); setError(null) }} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">Review pricing</button> : <button type="button" disabled={pending || pricingIssues.length > 0} onClick={invoiceClient} className="h-10 rounded-lg bg-white px-4 text-sm font-semibold text-black disabled:opacity-40">{pending ? saleUsesSms ? "Creating consent link…" : "Sending confirmation…" : saleUsesSms ? "Create SMS consent link" : sendConfirmationLabel}</button>}</footer>
         </section>
     </div>, parentDocument.body) : null
 

@@ -243,6 +243,11 @@ export async function proxy(request: NextRequest) {
     }
 
     if (domain === ONBOARDING_HOST) {
+        if (path === "/sms-consent") {
+            const headers = new Headers(request.headers)
+            headers.set("x-betelgeze-custom-onboarding-domain", domain)
+            return withSession(withRewrite(request, "/onboarding/sms-consent", headers))
+        }
         const canonicalOnboarding = path.match(/^\/onboarding\/[a-z0-9][a-z0-9-]*\/([a-f0-9]{64})$/i)
         if (canonicalOnboarding) return withSession(withRedirect(request, `/${canonicalOnboarding[1]}`))
 
@@ -264,6 +269,12 @@ export async function proxy(request: NextRequest) {
                 : request.nextUrl.searchParams.has("__betelgeze_domain_probe")
             if (!isDomainProbe && workspace.status !== "verified") {
                 return new NextResponse("Not Found", { status: 404 })
+            }
+            if (workspace.surface === "onboarding" && path === "/sms-consent") {
+                const headers = new Headers(request.headers)
+                headers.set("x-betelgeze-workspace-slug", workspace.slug)
+                headers.set("x-betelgeze-custom-onboarding-domain", domain)
+                return withSession(withRewrite(request, "/onboarding/sms-consent", headers))
             }
             // Checkout sessions created before custom-domain return URLs were
             // canonicalized still point here. Preserve their query string and
