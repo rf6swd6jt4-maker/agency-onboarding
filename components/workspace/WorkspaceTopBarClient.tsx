@@ -509,6 +509,10 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const [searchResults, setSearchResults] = useState<SearchResult[]>([])
     const [searchShortcutLabel, setSearchShortcutLabel] = useState("Ctrl+J")
     const [createTarget, setCreateTarget] = useState<"relationship" | "work-item" | "asset" | "okr" | null>(null)
+    const [relationshipStartPhase, setRelationshipStartPhase] = useState<"potential_client" | "retention">("potential_client")
+    const [relationshipPhone, setRelationshipPhone] = useState("")
+    const [relationshipWhatsappPhone, setRelationshipWhatsappPhone] = useState("")
+    const [relationshipCommunicationPreference, setRelationshipCommunicationPreference] = useState<"" | "twilio_sms" | "meta_whatsapp">("")
     const [createError, setCreateError] = useState<string | null>(null)
     const [uploadLabel, setUploadLabel] = useState<string | null>(null)
     const [creationNotice, setCreationNotice] = useState<CreationNotice | null>(null)
@@ -1603,6 +1607,12 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if (target === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole)) return
         window.dispatchEvent(new CustomEvent("betelgeze:dropdown-open", { detail: "workspace-create" }))
         setCreateError(null)
+        if (target === "relationship") {
+            setRelationshipStartPhase("potential_client")
+            setRelationshipPhone("")
+            setRelationshipWhatsappPhone("")
+            setRelationshipCommunicationPreference("")
+        }
         setCreateTarget(target)
     }
 
@@ -1705,7 +1715,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             postToTab(tabId, { type: "activate", active: true, refresh: true })
 
             showCreationNotice({
-                label: target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : target === "asset" ? "Asset added" : "OKR created",
+                label: result.notice ?? (target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : target === "asset" ? "Asset added" : "OKR created"),
                 href: result.href,
             })
         })
@@ -2398,9 +2408,21 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                                 <section className="grid gap-3 sm:grid-cols-2">
                                     <label className="block text-sm text-neutral-300 sm:col-span-2">Name<input name="primary_person_name" required autoFocus placeholder="Person or primary contact" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label>
                                     <label className="block text-sm text-neutral-300">Company<input name="business_name" placeholder="Optional" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label>
-                                    <label className="block text-sm text-neutral-300">Stage<select name="lifecycle_phase" defaultValue="potential_client" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="lead">Lead</option><option value="nurturing">Nurturing</option><option value="potential_client">Potential client</option><option value="sold">Sold</option><option value="invoiced">Invoiced</option><option value="onboarding">Onboarding</option><option value="onboarding_review">Onboarding review</option><option value="fulfilment">Fulfilment</option><option value="retention">Retention</option><option value="completed_lost">Completed/lost</option></select></label>
+                                    <label className="block text-sm text-neutral-300">Stage<select name="lifecycle_phase" value={relationshipStartPhase} onChange={(event) => setRelationshipStartPhase(event.target.value as "potential_client" | "retention")} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="potential_client">Potential client</option><option value="retention">Retention</option></select></label>
                                 </section>
-                                <section className="border-t border-neutral-900 pt-4"><p className="mb-3 text-xs font-medium text-neutral-500">Contact details</p><div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Email<input name="primary_email" type="email" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Phone<input name="primary_phone" type="tel" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">WhatsApp phone<input name="whatsapp_phone" type="tel" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Role<input name="primary_contact_role" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Website<input name="website_url" type="url" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="flex h-10 items-center gap-2 self-end text-sm text-neutral-300"><input name="is_test" type="checkbox" className="h-4 w-4 rounded border-neutral-700 bg-black" />Test client?</label></div></section>
+                                <section className="border-t border-neutral-900 pt-4">
+                                    <p className="mb-3 text-xs font-medium text-neutral-500">Contact details</p>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <label className="block text-sm text-neutral-300">Email<input name="primary_email" type="email" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                        <label className="block text-sm text-neutral-300">Phone number<input name="primary_phone" type="tel" value={relationshipPhone} onChange={(event) => { const value = event.target.value; setRelationshipPhone(value); if (!value.trim() && relationshipCommunicationPreference === "twilio_sms") setRelationshipCommunicationPreference("") }} required={relationshipStartPhase === "retention" && !relationshipWhatsappPhone.trim()} aria-describedby={relationshipStartPhase === "retention" ? "retention-phone-help" : undefined} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                        <label className="block text-sm text-neutral-300">WhatsApp number<input name="whatsapp_phone" type="tel" value={relationshipWhatsappPhone} onChange={(event) => { const value = event.target.value; setRelationshipWhatsappPhone(value); if (!value.trim() && relationshipCommunicationPreference === "meta_whatsapp") setRelationshipCommunicationPreference("") }} required={relationshipStartPhase === "retention" && !relationshipPhone.trim()} aria-describedby={relationshipStartPhase === "retention" ? "retention-phone-help" : undefined} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                        {relationshipStartPhase === "retention" ? <label className="block text-sm text-neutral-300">Communication preference<select name="communication_primary_provider" value={relationshipCommunicationPreference} onChange={(event) => setRelationshipCommunicationPreference(event.target.value as "twilio_sms" | "meta_whatsapp")} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="" disabled>Choose a channel</option><option value="twilio_sms" disabled={!relationshipPhone.trim()}>Phone (SMS)</option><option value="meta_whatsapp" disabled={!relationshipWhatsappPhone.trim()}>WhatsApp</option></select></label> : null}
+                                        <label className="block text-sm text-neutral-300">Role<input name="primary_contact_role" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                        <label className="block text-sm text-neutral-300">Website<input name="website_url" type="url" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
+                                        <label className="flex h-10 items-center gap-2 self-end text-sm text-neutral-300"><input name="is_test" type="checkbox" className="h-4 w-4 rounded border-neutral-700 bg-black" />Test client?</label>
+                                    </div>
+                                    {relationshipStartPhase === "retention" ? <p id="retention-phone-help" className="mt-2 text-xs text-neutral-500">Add at least one number and choose where the confirmation should be sent.</p> : null}
+                                </section>
                                 <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Industry<input name="industry_value" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Location<input name="location_value" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Source<input name="source_label" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300 sm:col-span-2">Notes<textarea name="notes_summary" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label></section>
                             </div>
                         )}
@@ -2433,7 +2455,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                         {createError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{createError}</p>}
                         {uploadLabel && <p className="mt-4 text-sm text-neutral-400">{uploadLabel}</p>}
                         <div className="mt-5 flex justify-end">
-                            <button disabled={isCreating || Boolean(uploadLabel)} className="inline-flex min-h-10 items-center rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-60">{isCreating || uploadLabel ? "Creating..." : createTarget === "relationship" ? "Create relationship" : createTarget === "work-item" ? "Create work item" : createTarget === "asset" ? "Create asset" : "Create OKR"}</button>
+                            <button disabled={isCreating || Boolean(uploadLabel)} className="inline-flex min-h-10 items-center rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-60">{isCreating || uploadLabel ? "Creating..." : createTarget === "relationship" ? relationshipStartPhase === "retention" ? "Add and send confirmation" : "Create relationship" : createTarget === "work-item" ? "Create work item" : createTarget === "asset" ? "Create asset" : "Create OKR"}</button>
                         </div>
                     </form>
                 </div>

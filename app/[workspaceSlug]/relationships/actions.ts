@@ -11,7 +11,6 @@ import {
     relationshipHubHref,
     workItemHref,
     workspaceHref,
-    type RelationshipPhase,
 } from "@/lib/relationships"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { requireWorkspace } from "@/lib/workspaces"
@@ -19,26 +18,16 @@ import { advanceRelationshipWorkflow, ensureRelationshipStage, ensureSalesStage,
 import { sendSaleConsentTemplate } from "@/lib/client-sales/automation"
 import type { StripeRecurringInterval } from "@/lib/stripe/api"
 import { WORKSPACE_TAB_FRAME_PARAM, workspaceTabFrameUrl } from "@/lib/workspace-tabs"
-import { resolvePrimaryMessagingProvider } from "@/lib/client-messages/addresses"
+import { isUsablePhoneNumber, normalizeProviderAddress, resolvePrimaryMessagingProvider } from "@/lib/client-messages/addresses"
 
-const creatablePhases = new Set<RelationshipPhase>([
-    "lead",
-    "nurturing",
-    "potential_client",
-    "sold",
-    "invoiced",
-    "onboarding",
-    "onboarding_review",
-    "fulfilment",
-    "retention",
-    "completed_lost",
-])
+const creatableRelationshipPhases = new Set(["potential_client", "retention"] as const)
 const creatableAssetKinds = new Set(["file", "media", "document"])
 
 export type WorkspaceCreateActionState = {
     ok: boolean
     href?: string
     error?: string
+    notice?: string
 }
 
 export type RelationshipDealDetailsInput = {
@@ -99,13 +88,36 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
     const primaryPersonName = formString(formData, "primary_person_name")
     const businessName = nullableFormString(formData, "business_name")
     const requestedPhase = formString(formData, "lifecycle_phase")
-    const phase = normalizeRelationshipPhase(requestedPhase, "potential_client")
+    const phase = creatableRelationshipPhases.has(requestedPhase as "potential_client" | "retention")
+        ? requestedPhase as "potential_client" | "retention"
+        : null
     const isTest = formData.get("is_test") === "on"
+    const primaryPhone = nullableFormString(formData, "primary_phone")
+    const whatsappPhone = nullableFormString(formData, "whatsapp_phone")
+    const requestedPrimaryProvider = formString(formData, "communication_primary_provider")
 
-    if (!primaryPersonName || !creatablePhases.has(phase)) {
+    if (!primaryPersonName || !phase) {
         return { ok: false, error: "missing-fields" }
     }
-    if (phase === "onboarding" && !isTest) return { ok: false, error: "payment-required" }
+    if (phase === "retention") {
+        if (requestedPrimaryProvider !== "twilio_sms" && requestedPrimaryProvider !== "meta_whatsapp") {
+            return { ok: false, error: "Choose the client's preferred communication channel." }
+        }
+        if (!isUsablePhoneNumber(primaryPhone) && !isUsablePhoneNumber(whatsappPhone)) {
+            return { ok: false, error: "Add a usable phone number or WhatsApp number." }
+        }
+        if (requestedPrimaryProvider === "twilio_sms" && !isUsablePhoneNumber(primaryPhone)) {
+            return { ok: false, error: "Add a usable phone number for the selected SMS channel." }
+        }
+        if (requestedPrimaryProvider === "meta_whatsapp" && !isUsablePhoneNumber(whatsappPhone)) {
+            return { ok: false, error: "Add a usable WhatsApp number for the selected WhatsApp channel." }
+        }
+    }
+    const communicationPrimaryProvider = resolvePrimaryMessagingProvider({
+        requestedProvider: requestedPrimaryProvider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp",
+        smsPhone: primaryPhone,
+        whatsappPhone,
+    })
 
     const { data: relationship, error } = await supabaseAdmin
         .from("relationships")
@@ -114,8 +126,8 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
             source_type: "manual",
             primary_person_name: primaryPersonName,
             primary_email: nullableFormString(formData, "primary_email"),
-            primary_phone: nullableFormString(formData, "primary_phone"),
-            whatsapp_phone: nullableFormString(formData, "whatsapp_phone"),
+            primary_phone: primaryPhone,
+            whatsapp_phone: whatsappPhone,
             business_name: businessName,
             website_url: nullableFormString(formData, "website_url"),
             industry_value: nullableFormString(formData, "industry_value"),
@@ -124,7 +136,11 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
             primary_contact_role: nullableFormString(formData, "primary_contact_role"),
             notes_summary: nullableFormString(formData, "notes_summary"),
             lifecycle_phase: phase,
-            status: phase === "completed_lost" ? "lost" : "active",
+            status: "active",
+            ...(phase === "retention" ? {
+                communication_primary_provider: communicationPrimaryProvider,
+                communication_delivery_mode: "primary_only",
+            } : {}),
             source_metadata: {
                 created_from: "manual_relationship_form",
                 created_by: user.id,
@@ -138,35 +154,55 @@ export async function createRelationshipFromModal(slug: string, formData: FormDa
         return { ok: false, error: "create-failed" }
     }
 
+    let retentionConfirmationSaleId: string | null = null
     try {
-        if (phase === "onboarding") {
-            await createOnboardingClient({
-                workspaceId: workspace.id,
-                workspaceSlug: workspace.slug,
-                customOnboardingDomain: workspace.custom_onboarding_domain,
-                customOnboardingDomainVerified: workspace.custom_onboarding_domain_status === "verified",
-                relationshipId: relationship.id,
-                name: businessName ?? primaryPersonName,
-                email: nullableFormString(formData, "primary_email"),
-                phone: nullableFormString(formData, "primary_phone") ?? "",
-                serviceKeys: [],
-                createClickUpResources: false,
-                createOnboardingWork: false,
-                activitySource: "Relationship manual creation",
-                createdBy: user.id,
-                isTest,
-            })
-        } else if (!["nurturing", "completed_lost"].includes(phase)) {
-            await ensureRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: phase as Exclude<RelationshipPhase, "nurturing" | "completed_lost">, assigneeId: user.id })
+        await ensureRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase, assigneeId: user.id })
+        if (phase === "retention") {
+            const confirmationAddress = communicationPrimaryProvider === "twilio_sms" ? primaryPhone : whatsappPhone
+            const { data: sale, error: saleError } = await supabaseAdmin.from("client_sales").insert({
+                workspace_id: workspace.id,
+                relationship_id: relationship.id,
+                client_name: businessName ?? primaryPersonName,
+                client_email: nullableFormString(formData, "primary_email"),
+                client_phone: normalizeProviderAddress(communicationPrimaryProvider, confirmationAddress ?? ""),
+                service_keys: [],
+                line_items: [],
+                currency: "usd",
+                total_amount: 0,
+                status: "manual_consent_pending",
+                created_by: user.id,
+                raw_payload: {
+                    flow: "retention_confirmation",
+                    relationship_start_phase: "retention",
+                },
+            }).select("id").single()
+            if (saleError || !sale) throw new Error(saleError?.message ?? "Could not prepare the client confirmation")
+            retentionConfirmationSaleId = sale.id
         }
     } catch {
         await supabaseAdmin.from("relationships").delete().eq("workspace_id", workspace.id).eq("id", relationship.id)
         return { ok: false, error: "workflow-create-failed" }
     }
 
+    if (retentionConfirmationSaleId) {
+        const confirmation = await sendSaleConsentTemplate(retentionConfirmationSaleId, workspace.id)
+        if (!confirmation.ok) {
+            relationshipRevalidatePaths(slug, relationship.id)
+            return {
+                ok: true,
+                href: relationshipHubHref(slug, relationship.id),
+                notice: "Relationship added, but the confirmation could not be sent. Check the messaging connection and contact details.",
+            }
+        }
+    }
+
     relationshipRevalidatePaths(slug, relationship.id)
 
-    return { ok: true, href: relationshipHubHref(slug, relationship.id) }
+    return {
+        ok: true,
+        href: relationshipHubHref(slug, relationship.id),
+        ...(phase === "retention" ? { notice: "Relationship added and confirmation sent" } : {}),
+    }
 }
 
 function priceCents(value: string) {

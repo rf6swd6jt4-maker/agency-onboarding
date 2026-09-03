@@ -12,6 +12,7 @@ const canonical = readFileSync("lib/onboarding/canonical.ts", "utf8")
 const saleAutomation = readFileSync("lib/client-sales/automation.ts", "utf8")
 const relationshipWorkflow = readFileSync("lib/relationship-workflow.ts", "utf8")
 const relationshipActions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
+const workspaceTopBar = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
 const archiveRelationshipForm = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/ArchiveRelationshipForm.tsx", "utf8")
 const stripeWebhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8")
 const publicPage = readFileSync("app/onboarding/session/[token]/page.tsx", "utf8")
@@ -50,6 +51,32 @@ test("sale confirmation prepares the immutable session and payment reuses it bef
     assert.match(saleAutomation, /p_idempotency_key:\s*`onboarding\.confirmed:\$\{sale\.id\}`/u)
     assert.match(saleAutomation, /handleCompletedStripeCheckout/u)
     assert.match(saleAutomation, /activateRelationshipOnboardingAfterPayment/u)
+})
+
+test("manual relationships start only at Potential Client or Retention and Retention sends confirmation", () => {
+    const relationshipForm = workspaceTopBar.slice(
+        workspaceTopBar.indexOf('{createTarget === "relationship"'),
+        workspaceTopBar.indexOf('{createTarget === "work-item"')
+    )
+    assert.match(relationshipForm, /<option value="potential_client">Potential client<\/option><option value="retention">Retention<\/option>/u)
+    assert.doesNotMatch(relationshipForm, /<option value="(?:lead|sold|onboarding|fulfilment|completed_lost)"/u)
+    assert.match(relationshipForm, /relationshipStartPhase === "retention"[\s\S]+Communication preference/u)
+    assert.match(relationshipForm, /Add at least one number and choose where the confirmation should be sent\./u)
+    assert.match(relationshipActions, /creatableRelationshipPhases = new Set\(\["potential_client", "retention"\]/u)
+    assert.match(relationshipActions, /!isUsablePhoneNumber\(primaryPhone\) && !isUsablePhoneNumber\(whatsappPhone\)/u)
+    assert.match(relationshipActions, /flow: "retention_confirmation"/u)
+    assert.match(relationshipActions, /sendSaleConsentTemplate\(retentionConfirmationSaleId, workspace\.id\)/u)
+})
+
+test("Retention confirmation records consent without moving the relationship into onboarding", () => {
+    const handler = saleAutomation.slice(saleAutomation.indexOf("export async function handleSaleConsentConfirmation"))
+    const retentionStart = handler.indexOf('if (flow === "retention_confirmation")')
+    const retentionEnd = handler.indexOf('if (!clientId && flow !== "manual_migration")', retentionStart)
+    const retentionConfirmation = handler.slice(retentionStart, retentionEnd)
+    assert.ok(retentionStart >= 0 && retentionEnd > retentionStart)
+    assert.match(retentionConfirmation, /status: "retention_confirmed"/u)
+    assert.match(retentionConfirmation, /status: "whatsapp_consent_confirmed"/u)
+    assert.doesNotMatch(retentionConfirmation, /createOnboardingClient|lifecycle_phase: "onboarding"/u)
 })
 
 test("confirmed sales expose one fixed Payment step that creates hosted Stripe Checkout before onboarding unlocks", () => {
@@ -133,8 +160,7 @@ test("invoice preflight requires a verified connection without requiring the opt
     assert.doesNotMatch(preflight, /configuration\.help\.whatsappEnabled/u)
 })
 
-test("real manual onboarding is payment-gated while flagged test relationships remain supported", () => {
-    assert.match(relationshipActions, /phase === "onboarding" && !isTest/u)
+test("real onboarding starts remain payment-gated while flagged test relationships remain supported", () => {
     assert.match(relationshipActions, /if \(!isTestRelationship\) redirect\([^\n]+payment-required/u)
 })
 

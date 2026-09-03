@@ -65,29 +65,26 @@ const CONSENT_TEMPLATE_TERMINAL_STATUSES = new Set([
     "onboarding_link_sent",
     "manual_awaiting_whatsapp_confirm",
     "manual_workspace_created",
+    "retention_confirmed",
     "sold_awaiting_whatsapp_confirm",
     "onboarding_payment_pending",
 ])
 
 const CONSENT_TEMPLATE_CLAIM_TIMEOUT_MS = 15 * 60 * 1_000
 
-type SaleFlow = "manual_migration" | "onboarding_payment_gate"
+type SaleFlow = "manual_migration" | "retention_confirmation" | "onboarding_payment_gate"
 
 function getSaleFlow(rawPayload: unknown): SaleFlow {
-    if (
-        rawPayload &&
-        typeof rawPayload === "object" &&
-        !Array.isArray(rawPayload) &&
-        (rawPayload as { flow?: unknown }).flow === "manual_migration"
-    ) {
-        return "manual_migration"
+    if (rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)) {
+        const flow = (rawPayload as { flow?: unknown }).flow
+        if (flow === "manual_migration" || flow === "retention_confirmation") return flow
     }
 
     return "onboarding_payment_gate"
 }
 
 function getConsentStatus(flow: SaleFlow, state: "sending" | "awaiting" | "failed") {
-    if (flow === "manual_migration") {
+    if (flow === "manual_migration" || flow === "retention_confirmation") {
         return {
             sending: "manual_consent_template_sending",
             awaiting: "manual_awaiting_whatsapp_confirm",
@@ -255,6 +252,9 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
         return { ok: false, error: message }
     }
     if (!channels.destinations.length) return { ok: false, error: "This relationship has no connected messaging destination." }
+    const consentBody = flow === "retention_confirmation"
+        ? `Hi ${sale.client_name}. Reply CONFIRM to confirm this messaging channel for your existing relationship.`
+        : `Hi ${sale.client_name}. Reply CONFIRM to continue and receive your secure onboarding link.`
     const whatsappDestination = channels.destinations.find((destination) => destination.provider === "meta_whatsapp")
     let templateName = ""
     let languageCode = "en_US"
@@ -357,7 +357,7 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
     }
 
     const claimStartedAt = new Date().toISOString()
-    const claimableStatuses = flow === "manual_migration"
+    const claimableStatuses = flow === "manual_migration" || flow === "retention_confirmation"
         ? ["manual_consent_pending", "manual_consent_template_failed"]
         : flow === "onboarding_payment_gate"
             ? ["sale_confirmation_pending", "sold_confirmation_failed"]
@@ -394,7 +394,7 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
             communication_channel_id: channels.destinations.find((destination) => destination.primary)?.channelId ?? channels.destinations[0].channelId,
             provider: channels.destinations.length > 1 ? "omnichannel" : channels.destinations[0].provider,
             to_address: channels.destinations.find((destination) => destination.primary)?.address ?? channels.destinations[0].address,
-            body: `Hi ${sale.client_name}. Reply CONFIRM to continue and receive your secure onboarding link.`,
+            body: consentBody,
             status: "sending",
             sender_kind: "automation",
             automation_kind: "consent_template",
@@ -443,7 +443,7 @@ export async function sendSaleConsentTemplate(saleId: string, expectedWorkspaceI
         workspaceId: sale.workspace_id,
         relationshipId: sale.relationship_id,
         messageId: messageLog.id,
-        body: `Hi ${sale.client_name}. Reply CONFIRM to continue and receive your secure onboarding link.`,
+        body: consentBody,
         destinations: channels.destinations,
         whatsappTemplate: whatsappDestination ? { name: templateName, language: languageCode } : null,
     })
@@ -758,6 +758,50 @@ export async function handleSaleConsentConfirmation({
         typeof relationship.source_metadata === "object" &&
         relationship.source_metadata.is_test === true
     )
+
+    if (flow === "retention_confirmation") {
+        if (!relationshipId) return { handled: true, ok: false, error: "Retention relationship missing" }
+        const confirmedAt = new Date().toISOString()
+        const { error: consentUpdateError } = await supabaseAdmin
+            .from("client_sales")
+            .update({
+                client_phone: fromAddress,
+                status: "retention_confirmed",
+                consent_confirmed_at: confirmedAt,
+                consent_confirmed_message_id: messageId ?? null,
+                updated_at: confirmedAt,
+            })
+            .eq("id", sale.id)
+            .eq("workspace_id", sale.workspace_id)
+        if (consentUpdateError) {
+            await reportSaleAutomationFailure(sale, "record_retention_confirmation", consentUpdateError.message)
+            return { handled: true, ok: false, error: consentUpdateError.message }
+        }
+        const { error: inboundMessageError } = await supabaseAdmin.from("client_messages").insert({
+            workspace_id: sale.workspace_id,
+            client_id: clientId,
+            relationship_id: relationshipId,
+            direction: "inbound",
+            provider,
+            provider_message_id: messageId ?? null,
+            whatsapp_message_id: provider === "meta_whatsapp" ? messageId ?? null : null,
+            from_address: fromAddress,
+            body,
+            status: "whatsapp_consent_confirmed",
+            sender_kind: "client",
+            raw_payload: rawPayload,
+        })
+        if (inboundMessageError) {
+            await reportSaleAutomationFailure(sale, "record_retention_confirmation_message", inboundMessageError.message)
+            return { handled: true, ok: false, error: inboundMessageError.message }
+        }
+        await addSaleActivity(
+            sale.workspace_id,
+            sale.id,
+            "Client confirmed the messaging channel for the retention relationship"
+        )
+        return { handled: true, ok: true }
+    }
 
     if (!clientId && flow !== "manual_migration") {
         const { data: workspace } = await supabaseAdmin
