@@ -38,6 +38,21 @@ export async function completeStep(token: string, stepKey: string) {
     if (outcome.clientPortalUrl) redirect(outcome.clientPortalUrl)
 }
 
+export async function completePreparedStep(token: string, stepKey: string) {
+    try {
+        const outcome = await completeCanonicalStep(token, stepKey)
+        return {
+            ok: true as const,
+            nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token),
+        }
+    } catch (error) {
+        return {
+            ok: false as const,
+            error: error instanceof Error ? error.message : "Could not complete this onboarding step.",
+        }
+    }
+}
+
 export async function satisfyBlockRequirement(token: string, sessionBlockId: string, kind: "button_opened" | "video_finished") {
     try {
         const resolved = await getPublicSession(token)

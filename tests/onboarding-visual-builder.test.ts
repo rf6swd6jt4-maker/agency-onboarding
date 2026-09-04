@@ -21,6 +21,9 @@ const visualCanvas = readFileSync("components/onboarding-builder/VisualBuilderCa
 const onboardingLayout = readFileSync("components/onboarding/OnboardingLayout.tsx", "utf8")
 const mobileStepBar = readFileSync("components/onboarding/MobileStepBar.tsx", "utf8")
 const runtimeBlocks = readFileSync("components/onboarding/OnboardingBlocks.tsx", "utf8")
+const appointmentSetupBlock = readFileSync("components/onboarding/AppointmentSetupBlock.tsx", "utf8")
+const onboardingStepSubmit = readFileSync("components/onboarding/OnboardingStepSubmit.tsx", "utf8")
+const publicSessionActions = readFileSync("app/onboarding/session/[token]/actions.ts", "utf8")
 const runtimePage = readFileSync("app/onboarding/session/[token]/page.tsx", "utf8")
 const sessionSnapshot = readFileSync("lib/onboarding/session-snapshot.ts", "utf8")
 const previewPage = readFileSync("app/onboarding/preview/[token]/page.tsx", "utf8")
@@ -140,6 +143,19 @@ test("the block library groups general interactions and installed service blocks
     assert.match(builderUi, /appointment_fields/)
     assert.match(runtimeBlocks, /<AppointmentSetupBlock/)
     assert.match(sessionSnapshot, /"appointment_medium", "appointment_fields"/)
+})
+
+test("appointment-setting blocks autosave without local save buttons and step submission reports failures", () => {
+    assert.doesNotMatch(appointmentSetupBlock, /Save choices/)
+    assert.match(appointmentSetupBlock, /saveQueueRef/)
+    assert.match(appointmentSetupBlock, /setTimeout\(\(\) => \{/)
+    assert.match(appointmentSetupBlock, /configureAppointmentSettingBlock/)
+    assert.match(appointmentSetupBlock, /onUnsatisfied\(\)/)
+    assert.match(appointmentSetupBlock, /onSatisfied\(\)/)
+    assert.match(runtimePage, /<OnboardingStepSubmit/)
+    assert.match(onboardingStepSubmit, /completePreparedStep/)
+    assert.match(onboardingStepSubmit, /role="alert"/)
+    assert.match(publicSessionActions, /nextPath: outcome\.clientPortalUrl \?\? await getPublicOnboardingPath\(token\)/)
 })
 
 test("Builder defaults expose bookends and mandatory modules with expanded modules and collapsed steps", () => {

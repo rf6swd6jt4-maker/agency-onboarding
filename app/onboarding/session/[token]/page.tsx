@@ -1,11 +1,11 @@
 import { getCanonicalSessionByToken, getCanonicalStepDraft, getFormResponseAsset } from "@/lib/onboarding/canonical"
 import { getOnboardingForm } from "@/lib/onboarding/forms"
-import { completeStep, skipTestStep } from "./actions"
+import { skipTestStep } from "./actions"
 import { OnboardingLayout } from "@/components/onboarding/OnboardingLayout"
 import { ScrollToTopOnStepChange } from "@/components/onboarding/ScrollToTopOnStepChange"
 import { OnboardingSessionRenderer } from "@/components/onboarding/OnboardingSessionRenderer"
 import { TestClientMenu } from "@/components/onboarding/TestClientMenu"
-import { FormPendingOverlay } from "@/components/FormPendingOverlay"
+import { OnboardingStepSubmit } from "@/components/onboarding/OnboardingStepSubmit"
 import { headers } from "next/headers"
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
 import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
@@ -173,17 +173,11 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                     />
                 ) : null}
                 action={!isFinalStep && currentStep.kind === "video" && !stepIsLocked && session.status === "active" ? (
-                    <form
-                        action={async () => {
-                            "use server"
-                            await completeStep(token, currentStep.key)
-                        }}
-                    >
-                        <FormPendingOverlay />
-                        <button className="mt-8 w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80">
-                            Complete and continue
-                        </button>
-                    </form>
+                    <OnboardingStepSubmit
+                        token={token}
+                        stepKey={currentStep.key}
+                        label={currentStep.navigation?.continueLabel || "Complete and continue"}
+                    />
                 ) : null}
                 satisfiedBlockIds={[...satisfiedBlockIds]}
                 blockResponses={blockResponses}
