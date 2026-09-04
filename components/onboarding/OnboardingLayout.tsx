@@ -27,6 +27,8 @@ type OnboardingLayoutProps = {
     embedded?: boolean
     forceMobile?: boolean
     footerText?: string
+    privacyPolicyUrl?: string | null
+    termsOfServiceUrl?: string | null
     onRoadmapSelect?: (stepKey: string) => void
     helpSelected?: boolean
     onHelpSelect?: () => void
@@ -42,6 +44,8 @@ export function OnboardingLayout({
     embedded = false,
     forceMobile = false,
     footerText = "Progress saved automatically",
+    privacyPolicyUrl,
+    termsOfServiceUrl,
     onRoadmapSelect,
     helpSelected = false,
     onHelpSelect,
@@ -97,11 +101,15 @@ export function OnboardingLayout({
                 </aside>
             </div>
 
-            <div className={forceMobile ? "hidden" : "hidden shrink-0 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-6 py-3 text-center text-sm font-medium text-[var(--onboarding-muted,#475569)] lg:block"}>
-                {footerText}
+            <div className={forceMobile ? "hidden" : "hidden shrink-0 border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-6 py-3 text-sm font-medium text-[var(--onboarding-muted,#475569)] lg:block"}>
+                <div className="mx-auto flex max-w-7xl items-center justify-center gap-4">
+                    <span>{footerText}</span>
+                    {privacyPolicyUrl ? <a href={privacyPolicyUrl} className="underline decoration-black/20 underline-offset-2 hover:text-[var(--onboarding-text,#0F172A)]">Privacy</a> : null}
+                    {termsOfServiceUrl ? <a href={termsOfServiceUrl} className="underline decoration-black/20 underline-offset-2 hover:text-[var(--onboarding-text,#0F172A)]">Terms</a> : null}
+                </div>
             </div>
 
-            <MobileStepBar steps={roadmapSteps} embedded={embedded || forceMobile} forceVisible={forceMobile} footerText={footerText} onSelect={onRoadmapSelect} />
+            <MobileStepBar steps={roadmapSteps} embedded={embedded || forceMobile} forceVisible={forceMobile} footerText={footerText} privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} onSelect={onRoadmapSelect} />
         </main>
     )
 }

@@ -15,6 +15,7 @@ import { recordAdminActivity } from "@/lib/admin/activity"
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { getWorkspaceProviderConfig } from "@/lib/workspace-integrations"
 import { markSmsConsentConfirmed, smsConsentForConfirmation } from "@/lib/client-sales/sms-consent-state"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 
 type ClientSale = {
     id: string
@@ -682,7 +683,9 @@ async function sendLegacyOnboardingLink(input: {
     }
 
     try {
-        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: formatWhatsAppAttributedMessage("Scaylup", outboundBody), callbackData: messageLog.id })
+        const { data: workspace } = await supabaseAdmin.from("workspaces").select("id, name").eq("id", input.sale.workspace_id).maybeSingle()
+        const publicBranding = workspace ? await loadWorkspacePublicBranding(workspace.id, workspace.name) : null
+        const message = await sendMetaWhatsAppMessage({ workspaceId: input.sale.workspace_id, to: input.destination, body: formatWhatsAppAttributedMessage(publicBranding?.displayName ?? "Your agency", outboundBody, "Your agency"), callbackData: messageLog.id })
         const whatsappMessageId = getWhatsAppMessageId(message)
         const sentAt = new Date().toISOString()
         const [messageUpdate, saleUpdate] = await Promise.all([

@@ -283,7 +283,7 @@ test("automated onboarding messages are attributed and reuse their durable messa
     assert.match(automation, /automation_label: "Onboarding link"/)
     assert.match(automation, /callbackData: messageLog\.id/)
     assert.match(outbox, /resolveCommunicationDestinations/)
-    assert.match(automation, /formatWhatsAppAttributedMessage\("Scaylup", outboundBody\)/)
+    assert.match(automation, /formatWhatsAppAttributedMessage\(publicBranding\?\.displayName \?\? "Your agency", outboundBody/)
     assert.match(directMessages, /select\("display_name, username"\)/)
     assert.match(directMessages, /senderName: profile\?\.display_name/)
     assert.match(profiles, /profile\?\.display_name\?\.trim\(\) \|\| profile\?\.username/)

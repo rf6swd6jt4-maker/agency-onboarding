@@ -11,10 +11,12 @@ type MobileStepBarProps = {
     embedded?: boolean
     forceVisible?: boolean
     footerText?: string
+    privacyPolicyUrl?: string | null
+    termsOfServiceUrl?: string | null
     onSelect?: (stepKey: string) => void
 }
 
-export function MobileStepBar({ steps, embedded = false, forceVisible = false, footerText = "Progress saved automatically", onSelect }: MobileStepBarProps) {
+export function MobileStepBar({ steps, embedded = false, forceVisible = false, footerText = "Progress saved automatically", privacyPolicyUrl, termsOfServiceUrl, onSelect }: MobileStepBarProps) {
     const currentIndex = steps.findIndex((step) => step.current)
     const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0
 
@@ -111,8 +113,10 @@ export function MobileStepBar({ steps, embedded = false, forceVisible = false, f
                     />
                 </div>
             </div>
-            <div data-mobile-preview-footer className="border-t border-black/10 px-6 py-3 text-center text-sm font-medium text-[var(--onboarding-muted,#475569)]">
-                {footerText}
+            <div data-mobile-preview-footer className="flex items-center justify-center gap-3 border-t border-black/10 px-6 py-3 text-center text-sm font-medium text-[var(--onboarding-muted,#475569)]">
+                <span>{footerText}</span>
+                {privacyPolicyUrl ? <a href={privacyPolicyUrl} className="text-xs underline decoration-black/20 underline-offset-2">Privacy</a> : null}
+                {termsOfServiceUrl ? <a href={termsOfServiceUrl} className="text-xs underline decoration-black/20 underline-offset-2">Terms</a> : null}
             </div>
         </div>
     )

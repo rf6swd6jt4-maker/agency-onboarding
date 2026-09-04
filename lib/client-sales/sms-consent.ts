@@ -5,10 +5,11 @@ import { headers } from "next/headers"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { isUsablePhoneNumber, normalizeProviderAddress, toE164Recipient } from "@/lib/client-messages/addresses"
 import { sendCommunicationDeliveries } from "@/lib/client-messages/omnichannel"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 
-export const SMS_OPT_IN_DISCLOSURE_VERSION = "agency-client-messaging-v2"
-export const SMS_OPT_IN_DISCLOSURE = "I agree to receive service-related SMS messages from the named agency about my client onboarding and services through Betelgeze. Messages may include confirmation requests, secure onboarding or payment links, and service updates. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out. Consent is optional and is not a condition of purchase."
+export const SMS_OPT_IN_DISCLOSURE_VERSION = "agency-client-messaging-v3"
+export const SMS_OPT_IN_DISCLOSURE = "I agree to receive service-related SMS messages from the named agency about my client onboarding and services. Messages may include confirmation requests, secure onboarding or payment links, and service updates. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out. Consent is optional and is not a condition of purchase."
 
 const CLAIM_TIMEOUT_MS = 15 * 60 * 1_000
 const PENDING_SALE_STATUSES = [
@@ -71,7 +72,7 @@ export async function getPublicSmsOptInWorkspace(workspaceSlug: string | null) {
         .eq("provider", "twilio_sms")
         .maybeSingle()
     if (!twilio?.enabled || twilio.connection_status !== "connected") return null
-    return workspace
+    return { ...workspace, branding: await loadWorkspacePublicBranding(workspace.id, workspace.name) }
 }
 
 async function activeWorkspaceOptIn(workspaceId: string, phoneE164: string) {
@@ -101,6 +102,7 @@ export async function sendSaleSmsConfirmationIfOptedIn(input: { workspaceId: str
     if (!relationship || relationship.status === "archived" || !workspace) {
         return { ok: true as const, skipped: true as const, sent: false as const }
     }
+    const branding = await loadWorkspacePublicBranding(input.workspaceId, workspace.name)
     const phoneE164 = sale.sms_recipient_e164 || toE164Recipient(relationship.primary_phone || sale.client_phone)
     const optIn = await activeWorkspaceOptIn(input.workspaceId, phoneE164)
     if (!optIn) return { ok: true as const, waitingForOptIn: true as const, sent: false as const }
@@ -178,7 +180,7 @@ export async function sendSaleSmsConfirmationIfOptedIn(input: { workspaceId: str
     if (claim.error) throw new Error(claim.error.message)
     if (!claim.data) return { ok: true as const, inProgress: true as const, sent: false as const }
 
-    const body = `${workspace.name}: You're opted in to receive SMS messages related to your client onboarding. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out. Reply CONFIRM to receive your secure onboarding link.`
+    const body = `${branding.displayName}: You're opted in to receive SMS messages related to your client onboarding. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out. Reply CONFIRM to receive your secure onboarding link.`
     const destination = normalizeProviderAddress("twilio_sms", phoneE164)
     let messageId: string | null = null
     try {
@@ -313,7 +315,7 @@ export async function submitPublicSmsOptIn(_state: SmsOptInActionState, formData
             phone_e164: submittedPhone,
             status: "active",
             disclosure_version: SMS_OPT_IN_DISCLOSURE_VERSION,
-            disclosure_text: disclosureFor(workspace.name),
+            disclosure_text: disclosureFor(workspace.branding.displayName),
             source_url: sourceUrl,
             source_host: sourceHost,
             source_ip: safeRequestIp(requestHeaders.get("x-forwarded-for") ?? requestHeaders.get("x-real-ip")),

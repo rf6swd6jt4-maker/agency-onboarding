@@ -4,6 +4,7 @@ import { resolveCommunicationDestinations, sendCommunicationDeliveries } from "@
 import { platformFailureFingerprint, reportPlatformFailure } from "@/lib/admin/maintenance"
 import { deleteOnboardingUploads } from "@/lib/onboarding/uploads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 import {
     assertSafeOnboardingStorageCleanupPath,
     sanitizeOnboardingOutboxError,
@@ -152,6 +153,7 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         .eq("id", row.workspace_id)
         .maybeSingle()
     if (workspaceError || !workspace) throw new Error(workspaceError?.message ?? "Onboarding delivery workspace was not found")
+    const publicBranding = await loadWorkspacePublicBranding(row.workspace_id, workspace.name)
     if (row.kind === "client_portal_link") {
         if (!row.portal_session_id) throw new Error("Client portal delivery has no portal session")
         const { data: portalSession, error: portalError } = await supabaseAdmin
@@ -165,7 +167,7 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         if (!relationshipId || portalSession.relationship_id !== relationshipId || portalSession.status !== "active" || portalSession.token_revoked_at) throw new Error("Client portal delivery session link is not available")
         return {
             relationshipId,
-            workspaceName: workspace.name,
+            workspaceName: publicBranding.displayName,
             publicUrl: getClientPortalUrl({
                 sessionToken: portalSession.session_token,
                 customDomain: workspace.custom_client_portal_domain,
@@ -190,7 +192,7 @@ async function deliveryContext(row: DeliveryOutboxRow) {
         workspace.custom_onboarding_domain,
         workspace.custom_onboarding_domain_status === "verified"
     )
-    return { relationshipId, workspaceName: workspace.name, publicUrl: onboardingUrl }
+    return { relationshipId, workspaceName: publicBranding.displayName, publicUrl: onboardingUrl }
 }
 
 function deliveryBody(row: DeliveryOutboxRow, publicUrl: string, workspaceName: string, smsConsentConfirmed: boolean) {

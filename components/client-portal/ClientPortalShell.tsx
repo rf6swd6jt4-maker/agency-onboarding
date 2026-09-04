@@ -94,7 +94,7 @@ function PortalSidePanel({ panel, token, workspaceName, onBack }: { panel: Porta
     </>
 }
 
-export function ClientPortalShell({ token, workspaceName, primaryPersonName }: { token: string; workspaceName: string; primaryPersonName: string }) {
+export function ClientPortalShell({ token, workspaceName, primaryPersonName, privacyPolicyUrl, termsOfServiceUrl }: { token: string; workspaceName: string; primaryPersonName: string; privacyPolicyUrl?: string | null; termsOfServiceUrl?: string | null }) {
     const [panel, setPanel] = useState<PortalPanel | null>(null)
     const [greeting, setGreeting] = useState("Welcome")
 
@@ -176,6 +176,11 @@ export function ClientPortalShell({ token, workspaceName, primaryPersonName }: {
                 </div>
             </section>
         </main>
+
+        {privacyPolicyUrl || termsOfServiceUrl ? <footer className="mx-auto flex max-w-6xl items-center justify-center gap-4 px-4 pb-8 text-xs text-[var(--onboarding-muted,#475569)] sm:px-6 lg:px-8">
+            {privacyPolicyUrl ? <a href={privacyPolicyUrl} className="underline decoration-black/20 underline-offset-2 hover:text-[var(--onboarding-text,#0F172A)]">Privacy</a> : null}
+            {termsOfServiceUrl ? <a href={termsOfServiceUrl} className="underline decoration-black/20 underline-offset-2 hover:text-[var(--onboarding-text,#0F172A)]">Terms</a> : null}
+        </footer> : null}
 
         {panel ? <PortalSidePanel panel={panel} token={token} workspaceName={workspaceName} onBack={() => setPanel(null)} /> : null}
     </div>

@@ -1,10 +1,82 @@
 "use server"
 
+import { revalidatePath } from "next/cache"
+
+import { recordAdminActivity } from "@/lib/admin/activity"
 import type { ConfigurationActionResult, OnboardingBrandSwatch, OnboardingThemeSlot } from "@/lib/onboarding/configuration-types"
 import { ONBOARDING_THEME_SLOTS } from "@/lib/onboarding/configuration-types"
 import { configurationRpc, revalidateOnboardingConfiguration, unexpectedConfigurationError } from "@/lib/onboarding/configuration-actions"
 import { normalizeHexColour } from "@/lib/onboarding/theme"
+import type { WorkspaceMutationResult } from "@/lib/workspace-mutations"
 import { requireWorkspace } from "@/lib/workspaces"
+import { supabaseAdmin } from "@/lib/supabase/admin"
+
+function cleanOptionalText(formData: FormData, key: string, maximum: number) {
+    const value = String(formData.get(key) ?? "").trim().replace(/\s+/gu, " ")
+    if (!value) return null
+    if (value.length > maximum || /[\u0000-\u001f\u007f]/u.test(value)) throw new Error("One of the public branding fields is not valid.")
+    return value
+}
+
+function cleanPolicyUrl(formData: FormData, key: string, label: string) {
+    const value = String(formData.get(key) ?? "").trim()
+    if (!value) return null
+    if (value.length > 2_000) throw new Error(`${label} is too long.`)
+    try {
+        const url = new URL(value)
+        if (url.protocol !== "https:" || url.username || url.password) throw new Error()
+        return url.toString()
+    } catch {
+        throw new Error(`${label} must be a public HTTPS URL.`)
+    }
+}
+
+export async function saveAgencyPublicBranding(slug: string, formData: FormData): Promise<WorkspaceMutationResult> {
+    try {
+        const { workspace, user } = await requireWorkspace(slug, "admin")
+        const displayName = cleanOptionalText(formData, "agency_display_name", 100)
+        const metadataTitle = cleanOptionalText(formData, "agency_metadata_title", 100)
+        const metadataDescription = cleanOptionalText(formData, "agency_metadata_description", 300)
+        if (!displayName || displayName.length < 2) return { ok: false, error: "Agency display names must be between 2 and 100 characters." }
+        if (metadataTitle && metadataTitle.length < 2) return { ok: false, error: "Page title names must be between 2 and 100 characters." }
+        if (metadataDescription && metadataDescription.length < 10) return { ok: false, error: "Page descriptions must be at least 10 characters." }
+        const privacyPolicyUrl = cleanPolicyUrl(formData, "agency_privacy_policy_url", "Privacy policy URL")
+        const termsOfServiceUrl = cleanPolicyUrl(formData, "agency_terms_of_service_url", "Terms of service URL")
+
+        const { error } = await supabaseAdmin.from("workspaces").update({
+            agency_display_name: displayName,
+            agency_privacy_policy_url: privacyPolicyUrl,
+            agency_terms_of_service_url: termsOfServiceUrl,
+            agency_metadata_title: metadataTitle,
+            agency_metadata_description: metadataDescription,
+            updated_at: new Date().toISOString(),
+        }).eq("id", workspace.id)
+        if (error) {
+            const schemaMissing = error.code === "42703" || error.code === "PGRST204" || /schema cache|could not find/iu.test(error.message)
+            return { ok: false, error: schemaMissing ? "Deploy the public branding database update before saving these fields." : "Could not save public agency branding." }
+        }
+
+        await recordAdminActivity({
+            workspaceId: workspace.id,
+            category: "onboarding",
+            eventKey: "agency.public_branding.updated",
+            summary: "Public agency branding updated",
+            sourceHref: `/${slug}/settings#agency-branding`,
+            actorUserId: user.id,
+            metadata: {
+                display_name: displayName,
+                privacy_policy_configured: Boolean(privacyPolicyUrl),
+                terms_of_service_configured: Boolean(termsOfServiceUrl),
+                metadata_title_configured: Boolean(metadataTitle),
+                metadata_description_configured: Boolean(metadataDescription),
+            },
+        })
+        revalidatePath(`/${slug}/settings`)
+        return { ok: true }
+    } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Could not save public agency branding." }
+    }
+}
 
 export async function saveAgencyBranding(slug: string, swatches: OnboardingBrandSwatch[], assignments: Record<OnboardingThemeSlot, string>): Promise<ConfigurationActionResult<{ theme_revision_id: string; updated_at: string }>> {
     try {

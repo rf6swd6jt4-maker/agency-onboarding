@@ -9,6 +9,7 @@ import { notifyClientChatMessage } from "@/lib/push/chat-notifications"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { getWorkspaceIdForTwilioNumber, recordWorkspaceConnectionWebhook } from "@/lib/workspace-integrations"
 import { recordSmsOptOut } from "@/lib/client-sales/sms-consent-state"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -194,8 +195,9 @@ export async function POST(request: NextRequest) {
     }
     if (body.toUpperCase() === "HELP") {
         if (optOutType === "HELP") return twimlResponse()
-        const { data: workspace } = await supabaseAdmin.from("workspaces").select("name").eq("id", workspaceId).maybeSingle()
-        return twimlResponse(`${workspace?.name ?? "Betelgeze"}: For help, contact your agency or support@betelgeze.com. Reply STOP to opt out.`)
+        const { data: workspace } = await supabaseAdmin.from("workspaces").select("id, name").eq("id", workspaceId).maybeSingle()
+        const branding = workspace ? await loadWorkspacePublicBranding(workspace.id, workspace.name) : null
+        return twimlResponse(`${branding?.displayName ?? "Your agency"}: For help, contact ${branding?.displayName ?? "your agency"}. Reply STOP to opt out.`)
     }
     const existing = await supabaseAdmin.from("client_messages").select("id").eq("workspace_id", workspaceId).eq("provider", "twilio_sms").eq("provider_message_id", messageSid).maybeSingle()
     if (existing.data) return twimlResponse()

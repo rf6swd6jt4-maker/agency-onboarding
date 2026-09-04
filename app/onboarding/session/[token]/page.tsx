@@ -16,6 +16,7 @@ import { getClientPortalUrlForOnboardingSession } from "@/lib/client-portal/sess
 import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 import { clientFaviconIcons } from "@/lib/client-branding/favicon"
+import { agencyBrandedMetadata, currentPublicPageUrl, loadClientPagePublicBranding, loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 
 export const dynamic = "force-dynamic"
 
@@ -26,10 +27,15 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { token } = await params
+    const [branding, icons, canonicalUrl] = await Promise.all([
+        loadClientPagePublicBranding("onboarding", token),
+        clientFaviconIcons("onboarding", token),
+        currentPublicPageUrl(),
+    ])
     return {
-        title: "Onboarding",
+        ...agencyBrandedMetadata(branding, "onboarding", canonicalUrl),
         robots: { index: false, follow: false },
-        icons: await clientFaviconIcons("onboarding", token),
+        icons,
     }
 }
 
@@ -49,6 +55,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     }
 
     const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds, blockResponses } = resolved
+    const publicBranding = await loadWorkspacePublicBranding(workspace.id, workspace.name)
     if (session.status === "completed") {
         const clientPortalUrl = await getClientPortalUrlForOnboardingSession({
             workspaceId: session.workspace_id,
@@ -70,7 +77,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
             { key: "payment", title: "Payment", complete: false, current: true, href: null },
             ...steps.map((step) => ({ key: step.key, title: step.title, complete: false, current: false, href: null })),
         ]
-        return <OnboardingThemeProvider theme={theme}><OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={workspace.name} help={help}>
+        return <OnboardingThemeProvider theme={theme}><OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={publicBranding.displayName} help={help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl}>
             <OnboardingSessionRenderer
                 step={{ key: "payment", kind: "video", title: header.title, description: header.description, moduleTitle: "Payment", estimatedTime: stepEstimate(paymentStep)?.estimatedTime ?? header.estimatedTime, why: "", blocks: resolvedBlocks, navigation: paymentStep.navigation }}
                 moduleTitles={moduleTitles}
@@ -134,8 +141,10 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                 phone: relationship.primary_phone,
                 isTest: session.is_test,
             }}
-            workspaceName={workspace.name}
+            workspaceName={publicBranding.displayName}
             help={help}
+            privacyPolicyUrl={publicBranding.privacyPolicyUrl}
+            termsOfServiceUrl={publicBranding.termsOfServiceUrl}
             headerActions={
                 session.status === "active" && session.is_test && !isFinalStep ? (
                     <TestClientMenu

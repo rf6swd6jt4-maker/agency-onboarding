@@ -39,8 +39,11 @@ test("the tokenless opt-in form clearly identifies the program and requires affi
     assert.match(optInForm, /Msg &amp; data rates may apply/u)
     assert.match(optInForm, /Reply HELP for help or STOP to opt out/u)
     assert.match(optInForm, /Consent is optional and is not a condition of purchase/u)
-    assert.match(optInPage, /https:\/\/www\.betelgeze\.com\/privacy/u)
-    assert.match(optInPage, /https:\/\/www\.betelgeze\.com\/terms/u)
+    assert.match(optInPage, /href=\{privacyPolicyUrl\}/u)
+    assert.match(optInPage, /href=\{termsOfServiceUrl\}/u)
+    assert.doesNotMatch(optInPage + optInForm, /betelgeze\.com|through Betelgeze/u)
+    assert.match(consent, /agency-client-messaging-v3/u)
+    assert.doesNotMatch(consent, /through Betelgeze/u)
     assert.doesNotMatch(optInPage + optInForm, /token/u)
 })
 

@@ -3,6 +3,7 @@ import { ClientPortalShell } from "@/components/client-portal/ClientPortalShell"
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
 import { loadClientPortalSessionByToken } from "@/lib/client-portal/session"
 import { clientFaviconIcons } from "@/lib/client-branding/favicon"
+import { agencyBrandedMetadata, currentPublicPageUrl, loadClientPagePublicBranding, loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 
 export const dynamic = "force-dynamic"
 
@@ -12,10 +13,15 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { token } = await params
+    const [branding, icons, canonicalUrl] = await Promise.all([
+        loadClientPagePublicBranding("client-portal", token),
+        clientFaviconIcons("client-portal", token),
+        currentPublicPageUrl(),
+    ])
     return {
-        title: "Client portal",
+        ...agencyBrandedMetadata(branding, "client-portal", canonicalUrl),
         robots: { index: false, follow: false },
-        icons: await clientFaviconIcons("client-portal", token),
+        icons,
     }
 }
 
@@ -30,7 +36,8 @@ export default async function ClientPortalSessionPage({ params }: PageProps) {
     }
 
     const { workspace, relationship, theme } = resolved
+    const publicBranding = await loadWorkspacePublicBranding(workspace.id, workspace.name)
     return <OnboardingThemeProvider theme={theme}>
-        <ClientPortalShell token={token} workspaceName={workspace.name} primaryPersonName={relationship.primary_person_name} />
+        <ClientPortalShell token={token} workspaceName={publicBranding.displayName} primaryPersonName={relationship.primary_person_name} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} />
     </OnboardingThemeProvider>
 }

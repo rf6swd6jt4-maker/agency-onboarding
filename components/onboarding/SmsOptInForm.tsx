@@ -7,10 +7,10 @@ const INITIAL_STATE: SmsOptInActionState = { ok: false, message: "" }
 
 export function SmsOptInForm({
     action,
-    workspaceName,
+    agencyName,
 }: {
     action: (state: SmsOptInActionState, formData: FormData) => Promise<SmsOptInActionState>
-    workspaceName: string
+    agencyName: string
 }) {
     const [state, formAction, pending] = useActionState(action, INITIAL_STATE)
 
@@ -57,7 +57,7 @@ export function SmsOptInForm({
             <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
                 <input name="sms_consent" type="checkbox" value="yes" required className="mt-1 h-4 w-4 shrink-0 accent-[#1E3A5F]" />
                 <span>
-                    I agree to receive service-related SMS messages from <strong className="font-semibold text-slate-950">{workspaceName}</strong>{" "}about my client onboarding and services through Betelgeze. Messages may include confirmation requests, secure onboarding or payment links, and service updates. Message frequency varies. Msg &amp; data rates may apply. Reply HELP for help or STOP to opt out. Consent is optional and is not a condition of purchase.
+                    I agree to receive service-related SMS messages from <strong className="font-semibold text-slate-950">{agencyName}</strong>{" "}about my client onboarding and services. Messages may include confirmation requests, secure onboarding or payment links, and service updates. Message frequency varies. Msg &amp; data rates may apply. Reply HELP for help or STOP to opt out. Consent is optional and is not a condition of purchase.
                 </span>
             </label>
 

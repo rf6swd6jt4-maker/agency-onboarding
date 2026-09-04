@@ -9,6 +9,7 @@ import { ManualSettingsForm, SettingsSectionActions } from "@/components/leadgen
 import { SourceSettingsCard } from "@/components/leadgen/SourceSettingsCard"
 import { SettingsSectionNav, type SettingsSectionNavItem } from "@/components/workspace/SettingsSectionNav"
 import { AgencyBrandingEditor } from "@/components/settings/AgencyBrandingEditor"
+import { AgencyPublicBrandingFields } from "@/components/settings/AgencyPublicBrandingFields"
 import { OnboardingSettings } from "@/components/settings/OnboardingSettings"
 import { ServiceCatalogue } from "@/components/settings/ServiceCatalogue"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
@@ -22,9 +23,11 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/lib/workspaces"
 import { loadWorkspaceTeams, loadWorkspaceMemberProfiles } from "@/lib/teams/server"
 import { BASE_INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 import { normalizeWorkspaceCapability, type WorkspaceCapability } from "@/lib/workspace-capabilities"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
+import { saveAgencyPublicBranding } from "./branding-actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa } from "../users/actions"
 import {
     cancelWorkspaceClientPortalDomain,
@@ -56,7 +59,7 @@ const settingsSections = [
     { id: "services", label: "Services", detail: "Catalogue and default pricing" },
     { id: "onboarding", label: "Onboarding", detail: "Domain and session builder" },
     { id: "client-portal", label: "Client Portal", detail: "Access, domain, and experience" },
-    { id: "agency-branding", label: "Agency Branding", detail: "Onboarding and portal colours" },
+    { id: "agency-branding", label: "Agency Branding", detail: "Public identity, policies, and style" },
     { id: "connections", label: "Connections", detail: "Providers and delivery channels" },
     { id: "users", label: "Users", detail: "Access and invitations" },
     { id: "teams", label: "Teams", detail: "People and responsibility routing" },
@@ -100,6 +103,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         integrationResult,
         leadgenSettings,
         onboardingSettings,
+        publicBranding,
         teamResult,
         teamPeople,
         teamConversationResult,
@@ -115,6 +119,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         listWorkspaceConnections(workspace.id),
         loadLeadgenSettingsPageData(workspace.id),
         loadOnboardingSettingsPageData(workspace.id),
+        loadWorkspacePublicBranding(workspace.id, workspace.name),
         loadWorkspaceTeams(workspace.id),
         loadWorkspaceMemberProfiles(workspace.id),
         supabaseAdmin.from("workspace_native_conversations").select("id, team_id").eq("workspace_id", workspace.id).eq("kind", "team"),
@@ -235,9 +240,12 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                         <UnifiedSection
                             id="agency-branding"
                             title="Agency Branding"
-                            description="Manage the shared colours used across onboarding sessions and the client portal."
+                            description="Manage the public identity, policies, metadata, favicon, and colours used across agency-branded pages."
                         >
-                            <AgencyBrandingEditor workspaceSlug={workspace.slug} workspaceName={workspace.name} initialTheme={onboardingSettings.theme} publishedTheme={onboardingSettings.publishedTheme} previewBookend={onboardingSettings.welcome} help={onboardingSettings.help} schemaReady={onboardingSettings.schemaReady} faviconSrc={logoSrc} uploadFavicon={uploadWorkspaceLogo.bind(null, workspace.slug)} />
+                            <div className="space-y-5">
+                                <AgencyPublicBrandingFields branding={publicBranding} saveAction={saveAgencyPublicBranding.bind(null, workspace.slug)} />
+                                <AgencyBrandingEditor workspaceSlug={workspace.slug} workspaceName={publicBranding.displayName} initialTheme={onboardingSettings.theme} publishedTheme={onboardingSettings.publishedTheme} previewBookend={onboardingSettings.welcome} help={onboardingSettings.help} schemaReady={onboardingSettings.schemaReady} faviconSrc={logoSrc} uploadFavicon={uploadWorkspaceLogo.bind(null, workspace.slug)} />
+                            </div>
                         </UnifiedSection>
 
                         <UnifiedSection
