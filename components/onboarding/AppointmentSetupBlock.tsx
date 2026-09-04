@@ -54,7 +54,14 @@ export function AppointmentSetupBlock({
     const savePumpRef = useRef<Promise<void> | null>(null)
     const saveVersionRef = useRef(0)
     const mountedRef = useRef(true)
+    const onSatisfiedRef = useRef(onSatisfied)
+    const onUnsatisfiedRef = useRef(onUnsatisfied)
     const selectedFields = useMemo(() => new Map(fields.map((field) => [field.key, field.required])), [fields])
+
+    useEffect(() => {
+        onSatisfiedRef.current = onSatisfied
+        onUnsatisfiedRef.current = onUnsatisfied
+    }, [onSatisfied, onUnsatisfied])
 
     const flushSaveQueue = useCallback(() => {
         const sessionBlockId = block.sessionBlockId
@@ -103,7 +110,7 @@ export function AppointmentSetupBlock({
                 if (mountedRef.current && !saveQueueRef.current && saveVersionRef.current === pending.version) {
                     setSaveStatus("saved")
                     setError(null)
-                    onSatisfied()
+                    onSatisfiedRef.current()
                 }
             }
         })()
@@ -114,11 +121,11 @@ export function AppointmentSetupBlock({
         }
         void pump.then(release, release)
         return pump
-    }, [block.kind, block.sessionBlockId, locked, onSatisfied, preview, token])
+    }, [block.kind, block.sessionBlockId, locked, preview, token])
 
     const queueSave = useCallback((payload: SetupPayload) => {
         if (locked) return
-        onUnsatisfied()
+        onUnsatisfiedRef.current()
         setError(null)
 
         if (block.kind === "appointment_medium" && "mediums" in payload && payload.mediums.length === 0) {
@@ -131,7 +138,7 @@ export function AppointmentSetupBlock({
 
         if (preview || !block.sessionBlockId) {
             setSaveStatus("saved")
-            onSatisfied()
+            onSatisfiedRef.current()
             return
         }
 
@@ -144,7 +151,7 @@ export function AppointmentSetupBlock({
             saveTimerRef.current = null
             void flushSaveQueue()
         }, 500)
-    }, [block.kind, block.sessionBlockId, flushSaveQueue, locked, onSatisfied, onUnsatisfied, preview])
+    }, [block.kind, block.sessionBlockId, flushSaveQueue, locked, preview])
 
     useEffect(() => {
         mountedRef.current = true

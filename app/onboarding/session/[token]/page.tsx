@@ -118,6 +118,8 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     ])
     const initialResponse = submittedResponse ?? draft?.response
     const videoUrl = storedVideoUrl ?? currentStep.videoUrl ?? ""
+    const visualFormBlock = currentStep.blocks?.find((block) => block.kind === "form")
+    const usesDirectVisualCompletion = Boolean(currentStep.blocks?.length) && (!visualFormBlock || (visualFormBlock.kind === "form" && visualFormBlock.fields.length === 0))
     const migrationNotice = notices.find((notice) => (notice.sessionModuleId === currentStep.sessionModuleId || Boolean(currentStep.sessionStepId && notice.affectedStepIds.includes(currentStep.sessionStepId))) && (
             notice.requiresCompletion ? !notice.moduleCompletedAt : !notice.firstSeenAt
         )) ?? null
@@ -172,7 +174,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                         sections={migrationNotice.sections}
                     />
                 ) : null}
-                action={!isFinalStep && currentStep.kind === "video" && !stepIsLocked && session.status === "active" ? (
+                action={!isFinalStep && (currentStep.kind === "video" || usesDirectVisualCompletion) && !stepIsLocked && session.status === "active" ? (
                     <OnboardingStepSubmit
                         token={token}
                         stepKey={currentStep.key}

@@ -56,7 +56,7 @@ export function OnboardingBlocks({
     const formBlock = blocks.find((block) => block.kind === "form")
     const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "connection" || block.kind === "appointment_medium" || block.kind === "appointment_fields")
     const unsatisfied = requiredBlocks.filter((block) => !satisfied.has(block.sessionBlockId ?? block.id))
-    const form = useMemo(() => formBlock?.kind === "form" ? {
+    const form = useMemo(() => formBlock?.kind === "form" && formBlock.fields.length > 0 ? {
         key: stepKey,
         title: "",
         intro: "",
