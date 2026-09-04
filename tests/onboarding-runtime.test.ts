@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { sanitizeOnboardingOutboxError } from "../lib/onboarding/outbox-safety.ts"
 import {
@@ -38,7 +38,6 @@ const builderInvoiceSessions = readFileSync("supabase/migrations/20260811113000_
 const relationshipArchive = readFileSync("supabase/migrations/20260811143000_archive_relationships.sql", "utf8")
 const relationshipArchiveFix = readFileSync("supabase/migrations/20260811150000_fix_relationship_archive_activity.sql", "utf8")
 const salePaymentGateMigration = readFileSync("supabase/migrations/20260814140000_sale_confirmation_payment_gate.sql", "utf8")
-const testBlockSkipMigration = readFileSync("supabase/migrations/20260903110000_allow_test_onboarding_block_skips.sql", "utf8")
 const environmentExample = readFileSync(".env.example", "utf8")
 const readme = readFileSync("README.md", "utf8")
 const runtimeMode = readFileSync("lib/onboarding/runtime-mode.ts", "utf8")
@@ -301,11 +300,17 @@ test("test clients autofill the frozen current form and advance without legacy f
 })
 
 test("test clients can skip steps with unsatisfied mandatory runtime blocks", () => {
+    const finalBlockRequirementGuard = readdirSync("supabase/migrations")
+        .sort()
+        .map((name) => readFileSync(`supabase/migrations/${name}`, "utf8"))
+        .findLast((migration) => migration.includes("create or replace function public.enforce_onboarding_block_requirements()"))
+
+    assert.ok(finalBlockRequirementGuard)
     assert.match(publicActions, /if \(!session\.is_test\) throw new Error\("Invalid test onboarding session"\)/u)
-    assert.match(testBlockSkipMigration, /join public\.relationship_onboarding_sessions session/u)
-    assert.match(testBlockSkipMigration, /session\.id = block\.session_id/u)
-    assert.match(testBlockSkipMigration, /and not session\.is_test/u)
-    assert.match(testBlockSkipMigration, /Complete the required video or link before continuing\./u)
+    assert.match(finalBlockRequirementGuard, /join public\.relationship_onboarding_sessions session/u)
+    assert.match(finalBlockRequirementGuard, /session\.id = block\.session_id/u)
+    assert.match(finalBlockRequirementGuard, /and not session\.is_test/u)
+    assert.match(finalBlockRequirementGuard, /Complete the required onboarding items before continuing\./u)
 })
 
 test("paid consent queues one idempotent onboarding-link delivery after consent persistence", () => {
