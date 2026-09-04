@@ -59,6 +59,7 @@ test("all public client surfaces use the agency logo and favicon", () => {
     assert.match(smsOptIn, /clientFaviconIcons\("sms-opt-in", workspace\.slug\)/u)
     assert.match(smsOptIn, /clientBrandLogoUrl\("sms-opt-in", workspace\.slug/u)
     assert.match(smsOptIn, /<ClientBrandLogo logoSrc=\{logoSrc\}/u)
+    assert.match(smsOptIn, /className="flex justify-end"/u)
     assert.match(assets, /"onboarding" \| "client-portal" \| "sms-opt-in"/u)
 })
 
