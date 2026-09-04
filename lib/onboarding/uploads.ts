@@ -11,6 +11,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile } from "@/lib/communications/attachments"
 import { convertCommunicationStickerImage } from "@/lib/communications/stickers"
+import { validateClientLogoSvg } from "@/lib/client-branding/svg"
 import { getRequiredEnv } from "@/lib/env"
 import { createCommunicationFileKey, createInboundCommunicationFileKey } from "@/lib/communications/encryption"
 import {
@@ -378,6 +379,53 @@ export async function storeWorkspaceImage(
     const path = `${workspaceId}/workspace/${randomUUID()}-${fileName}`
     const contentType = isPng ? "image/png" : isJpeg ? "image/jpeg" : isGif ? "image/gif" : isWebp ? "image/webp" : isAvif ? "image/avif" : "image/heic"
     await getR2Client().send(new PutObjectCommand({ Bucket: getR2BucketName(), Key: path, Body: bytes, ContentType: contentType }))
+    return path
+}
+
+export async function storeClientBrandLogo(
+    workspaceId: string,
+    file: { name: string; size: number; type: string; bytes: Uint8Array }
+) {
+    const source = validateClientLogoSvg(file.bytes)
+    const metadata = await sharp(Buffer.from(source)).metadata()
+    if (metadata.format !== "svg") throw new Error("Agency logos must be valid SVG files.")
+    const fileName = `${sanitizeFileName(file.name.replace(/\.svg$/iu, "")) || "agency-logo"}.svg`
+    const path = `${workspaceId}/client-branding/logo/${randomUUID()}-${fileName}`
+    await getR2Client().send(new PutObjectCommand({
+        Bucket: getR2BucketName(),
+        Key: path,
+        Body: source,
+        ContentType: "image/svg+xml",
+    }))
+    return path
+}
+
+export async function storeClientBrandFavicon(
+    workspaceId: string,
+    file: { name: string; size: number; type: string; bytes: Uint8Array }
+) {
+    if (!file.size) throw new Error("Choose a non-empty favicon image.")
+    if (file.size > 5 * 1024 * 1024) throw new Error("Agency favicons must be 5MB or smaller.")
+    const metadata = await sharp(file.bytes).metadata()
+    if (!metadata.format || !["png", "jpeg", "webp"].includes(metadata.format)) {
+        throw new Error("Favicons must be PNG, JPEG, or WebP images.")
+    }
+    const image = await sharp(file.bytes)
+        .rotate()
+        .resize(512, 512, {
+            fit: "contain",
+            background: { r: 0, g: 0, b: 0, alpha: 0 },
+            withoutEnlargement: true,
+        })
+        .png()
+        .toBuffer()
+    const path = `${workspaceId}/client-branding/favicon/${randomUUID()}-favicon.png`
+    await getR2Client().send(new PutObjectCommand({
+        Bucket: getR2BucketName(),
+        Key: path,
+        Body: image,
+        ContentType: "image/png",
+    }))
     return path
 }
 

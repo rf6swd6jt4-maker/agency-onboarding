@@ -13,12 +13,14 @@ export function BuilderPreview({
     theme,
     help,
     workspaceName = "Your agency",
+    logoSrc,
 }: {
     module?: OnboardingModuleDefinition | null
     bookend?: OnboardingBookendDefinition | null
     theme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
     workspaceName?: string
+    logoSrc?: string | null
 }) {
     const steps = moduleDefinition?.steps ?? []
     const [selectedIndex, setSelectedIndex] = useState(0)
@@ -52,6 +54,7 @@ export function BuilderPreview({
                 roadmapSteps={roadmapSteps}
                 client={{ name: "Preview client", email: null, phone: null, isTest: true }}
                 workspaceName={workspaceName}
+                logoSrc={logoSrc}
                 help={help}
                 footerText="Preview mode · nothing is saved"
                 onRoadmapSelect={(stepId) => {

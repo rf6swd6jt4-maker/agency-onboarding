@@ -7,6 +7,7 @@ import type { ConfigurationActionResult, OnboardingBrandSwatch, OnboardingThemeS
 import { ONBOARDING_THEME_SLOTS } from "@/lib/onboarding/configuration-types"
 import { configurationRpc, revalidateOnboardingConfiguration, unexpectedConfigurationError } from "@/lib/onboarding/configuration-actions"
 import { normalizeHexColour } from "@/lib/onboarding/theme"
+import { deleteOnboardingUploads, storeClientBrandFavicon, storeClientBrandLogo } from "@/lib/onboarding/uploads"
 import type { WorkspaceMutationResult } from "@/lib/workspace-mutations"
 import { requireWorkspace } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -29,6 +30,50 @@ function cleanPolicyUrl(formData: FormData, key: string, label: string) {
     } catch {
         throw new Error(`${label} must be a public HTTPS URL.`)
     }
+}
+
+async function saveAgencyBrandAsset(input: {
+    slug: string
+    formData: FormData
+    formKey: "agency_logo" | "agency_favicon"
+    column: "agency_logo_path" | "agency_favicon_path"
+    label: "logo" | "favicon"
+}) {
+    const { workspace, user } = await requireWorkspace(input.slug, "admin")
+    const file = input.formData.get(input.formKey)
+    if (!(file instanceof File) || file.size === 0) throw new Error(`Choose an agency ${input.label} to upload.`)
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const storagePath = input.label === "logo"
+        ? await storeClientBrandLogo(workspace.id, { name: file.name, size: file.size, type: file.type, bytes })
+        : await storeClientBrandFavicon(workspace.id, { name: file.name, size: file.size, type: file.type, bytes })
+    const { data: previous, error } = await supabaseAdmin.from("workspaces")
+        .update({ [input.column]: storagePath, updated_at: new Date().toISOString() })
+        .eq("id", workspace.id)
+        .select(input.column)
+        .maybeSingle()
+    if (error || !previous) {
+        await deleteOnboardingUploads([storagePath]).catch(() => undefined)
+        const schemaMissing = error?.code === "42703" || error?.code === "PGRST204" || /schema cache|could not find/iu.test(error?.message ?? "")
+        throw new Error(schemaMissing ? "Deploy the client branding database update before uploading artwork." : `The ${input.label} uploaded, but could not be saved to this workspace.`)
+    }
+    await recordAdminActivity({
+        workspaceId: workspace.id,
+        category: "onboarding",
+        eventKey: `agency.${input.label}.updated`,
+        summary: `Public agency ${input.label} updated`,
+        sourceHref: `/${input.slug}/settings#agency-branding`,
+        actorUserId: user.id,
+        metadata: { storage_path: storagePath },
+    })
+    revalidatePath(`/${input.slug}/settings`)
+}
+
+export async function uploadAgencyLogo(slug: string, formData: FormData) {
+    await saveAgencyBrandAsset({ slug, formData, formKey: "agency_logo", column: "agency_logo_path", label: "logo" })
+}
+
+export async function uploadAgencyFavicon(slug: string, formData: FormData) {
+    await saveAgencyBrandAsset({ slug, formData, formKey: "agency_favicon", column: "agency_favicon_path", label: "favicon" })
 }
 
 export async function saveAgencyPublicBranding(slug: string, formData: FormData): Promise<WorkspaceMutationResult> {

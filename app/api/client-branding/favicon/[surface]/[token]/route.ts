@@ -11,7 +11,7 @@ type RouteProps = {
 
 export async function GET(_request: Request, { params }: RouteProps) {
     const { surface, token } = await params
-    if (surface !== "onboarding" && surface !== "client-portal") return new Response("Not Found", { status: 404 })
+    if (surface !== "onboarding" && surface !== "client-portal" && surface !== "sms-opt-in") return new Response("Not Found", { status: 404 })
 
     const favicon = await resolveClientFavicon(surface as ClientBrandingSurface, token)
     if (!favicon) return new Response("Not Found", { status: 404 })

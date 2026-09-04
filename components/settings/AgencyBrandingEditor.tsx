@@ -21,7 +21,43 @@ function assignedColour(theme: OnboardingThemeDefinition, slot: OnboardingThemeS
     return { name: swatch?.name ?? "Default colour", hex: normalizeHexColour(swatch?.hex) ?? "#000000" }
 }
 
-export function AgencyBrandingEditor({ workspaceSlug, workspaceName, initialTheme, publishedTheme: initialPublishedTheme, previewBookend, help, schemaReady, faviconSrc, uploadFavicon }: { workspaceSlug: string; workspaceName: string; initialTheme: OnboardingThemeDefinition; publishedTheme: OnboardingThemeDefinition; previewBookend: OnboardingBookendDefinition; help: OnboardingHelpSettings; schemaReady: boolean; faviconSrc: string | null; uploadFavicon: (formData: FormData) => Promise<void> }) {
+function BrandAssetCard({
+    title,
+    description,
+    src,
+    imageClassName,
+    inputName,
+    inputLabel,
+    accept,
+    action,
+}: {
+    title: string
+    description: string
+    src: string | null
+    imageClassName: string
+    inputName: "agency_logo" | "agency_favicon"
+    inputLabel: string
+    accept: string
+    action: (formData: FormData) => Promise<void>
+}) {
+    return <div className="flex min-w-0 flex-col rounded-xl border border-neutral-800 bg-black p-4">
+        <div className="flex h-20 items-center justify-center overflow-hidden rounded-lg border border-neutral-800 bg-white p-3">
+            {src ? <>
+                {/* Signed previews are restricted to the current workspace's stored brand assets. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt={`${title} preview`} className={imageClassName} />
+            </> : <span className="text-xs font-medium text-neutral-500">Not uploaded</span>}
+        </div>
+        <h4 className="mt-4 text-sm font-semibold text-white">{title}</h4>
+        <p className="mt-1 min-h-10 text-xs leading-5 text-neutral-500">{description}</p>
+        <form action={action} data-workspace-mutation="background" className="mt-4 flex min-w-0 flex-col gap-2">
+            <input name={inputName} required type="file" accept={accept} aria-label={inputLabel} className="min-w-0 max-w-full text-xs text-neutral-400 file:mr-2 file:max-w-full file:rounded-lg file:border-0 file:bg-neutral-800 file:px-3 file:py-2 file:text-sm file:text-white" />
+            <WorkspaceActionButton pendingLabel="Uploading…" className="h-10 rounded-lg bg-white px-3 text-sm font-medium text-black">{src ? "Replace" : "Upload"}</WorkspaceActionButton>
+        </form>
+    </div>
+}
+
+export function AgencyBrandingEditor({ workspaceSlug, workspaceName, initialTheme, publishedTheme: initialPublishedTheme, previewBookend, help, schemaReady, brandAssetSchemaReady, logoSrc, faviconSrc, uploadLogo, uploadFavicon }: { workspaceSlug: string; workspaceName: string; initialTheme: OnboardingThemeDefinition; publishedTheme: OnboardingThemeDefinition; previewBookend: OnboardingBookendDefinition; help: OnboardingHelpSettings; schemaReady: boolean; brandAssetSchemaReady: boolean; logoSrc: string | null; faviconSrc: string | null; uploadLogo: (formData: FormData) => Promise<void>; uploadFavicon: (formData: FormData) => Promise<void> }) {
     const [theme, setTheme] = useState(initialTheme)
     const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const [error, setError] = useState<string | null>(null)
@@ -133,21 +169,15 @@ export function AgencyBrandingEditor({ workspaceSlug, workspaceName, initialThem
 
     return <div className="min-w-0 max-w-full space-y-5">
             {!schemaReady ? <p className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">Theme controls are read-only until the onboarding configuration schema is deployed.</p> : null}
+            {!brandAssetSchemaReady ? <p className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">Logo and favicon uploads will be available after the client branding database update is deployed.</p> : null}
             <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-                        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-neutral-700 bg-black p-2">
-                            {/* Signed workspace-logo URLs are already resized by the token-scoped favicon endpoint. */}
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={faviconSrc ?? "/icon.svg"} alt="Client browser favicon preview" className="h-full w-full object-contain" />
-                        </div>
-                        <div className="min-w-0"><h3 className="font-semibold">Client-facing favicon</h3><p className="mt-1 max-w-xl text-sm leading-6 text-neutral-500">Your workspace logo appears in browser tabs for onboarding and the client portal. Uploading here also updates the workspace logo.</p></div>
-                    </div>
-                    <form action={uploadFavicon} data-workspace-mutation="background" className="flex min-w-0 max-w-full flex-col items-stretch gap-2 sm:shrink-0 sm:flex-row sm:items-center">
-                        <input name="logo" required type="file" accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Client-facing favicon image" className="min-w-0 max-w-full text-xs text-neutral-400 file:mr-2 file:max-w-full file:rounded-lg file:border-0 file:bg-neutral-800 file:px-3 file:py-2 file:text-sm file:text-white sm:max-w-56" />
-                        <WorkspaceActionButton pendingLabel="Uploading…" className="h-10 shrink-0 rounded-lg bg-white px-3 text-sm font-medium text-black">{faviconSrc ? "Replace" : "Upload"}</WorkspaceActionButton>
-                    </form>
-                </div>
+                <h3 className="font-semibold">Client-facing artwork</h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500">Used consistently across onboarding, the Client Portal, and public SMS opt-in pages. These assets are independent of the internal workspace icon.</p>
+                <fieldset disabled={!brandAssetSchemaReady} className="mt-4 grid gap-3 disabled:opacity-55 lg:grid-cols-2">
+                    <legend className="sr-only">Client-facing artwork uploads</legend>
+                    <BrandAssetCard title="Agency logo" description="A self-contained SVG with a viewBox. Horizontal logo lockups work best." src={logoSrc} imageClassName="max-h-12 max-w-full object-contain" inputName="agency_logo" inputLabel="Agency logo SVG" accept="image/svg+xml,.svg" action={uploadLogo} />
+                    <BrandAssetCard title="Browser favicon" description="A square PNG, JPEG, or WebP. It is normalized for browser tabs automatically." src={faviconSrc} imageClassName="h-12 w-12 object-contain" inputName="agency_favicon" inputLabel="Agency favicon image" accept="image/png,image/jpeg,image/webp" action={uploadFavicon} />
+                </fieldset>
             </section>
             <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-4 sm:p-5">
                 <h3 className="font-semibold">Client colour roles</h3>
@@ -178,7 +208,7 @@ export function AgencyBrandingEditor({ workspaceSlug, workspaceName, initialThem
                 <button type="button" onClick={() => { setPreviewOpen(false); setPublishReviewOpen(false) }} className="pointer-events-auto rounded-full border border-white/20 bg-neutral-700 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(0,0,0,0.24)] transition hover:bg-neutral-600 focus:outline-none focus:ring-2 focus:ring-white/70">Exit preview</button>
                 <button type="button" disabled={!schemaReady || publishPending || !colourChanges.length} onClick={() => { setError(null); setPublishReviewOpen(true) }} className="pointer-events-auto rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-black shadow-[0_8px_24px_rgba(15,23,42,0.30),0_2px_6px_rgba(15,23,42,0.18)] transition hover:bg-neutral-100 disabled:cursor-default disabled:opacity-45">{colourChanges.length ? "Publish" : "Published"}</button>
             </div>
-            <div className="h-full min-h-0"><BuilderPreview bookend={previewBookend} theme={theme} help={help} workspaceName={workspaceName} /></div>
+            <div className="h-full min-h-0"><BuilderPreview bookend={previewBookend} theme={theme} help={help} workspaceName={workspaceName} logoSrc={logoSrc} /></div>
             {publishReviewOpen ? <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !publishPending) setPublishReviewOpen(false) }}>
                 <section role="dialog" aria-modal="true" aria-labelledby="publish-colour-title" className="flex max-h-[min(90dvh,42rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
                     <div className="flex shrink-0 items-start justify-between gap-4 border-b border-neutral-800 p-4 sm:p-5"><div className="min-w-0"><h2 id="publish-colour-title" className="text-lg font-semibold">Review colour changes</h2><p className="mt-1 text-sm leading-5 text-neutral-500">Compare the colours clients see now with the latest saved draft.</p></div><button type="button" disabled={publishPending} aria-label="Close publish review" onClick={() => setPublishReviewOpen(false)} className="flex h-8 w-8 shrink-0 items-center justify-center text-lg text-neutral-500 hover:text-white disabled:opacity-30">×</button></div>

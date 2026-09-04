@@ -4,6 +4,7 @@ import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingTheme
 import { loadClientPortalSessionByToken } from "@/lib/client-portal/session"
 import { clientFaviconIcons } from "@/lib/client-branding/favicon"
 import { agencyBrandedMetadata, currentPublicPageUrl, loadClientPagePublicBranding, loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
+import { clientBrandLogoUrl, loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
 
 export const dynamic = "force-dynamic"
 
@@ -36,8 +37,12 @@ export default async function ClientPortalSessionPage({ params }: PageProps) {
     }
 
     const { workspace, relationship, theme } = resolved
-    const publicBranding = await loadWorkspacePublicBranding(workspace.id, workspace.name)
+    const [publicBranding, brandAssets] = await Promise.all([
+        loadWorkspacePublicBranding(workspace.id, workspace.name),
+        loadWorkspaceClientBrandAssets(workspace.id),
+    ])
+    const logoSrc = clientBrandLogoUrl("client-portal", token, brandAssets.logoPath)
     return <OnboardingThemeProvider theme={theme}>
-        <ClientPortalShell token={token} workspaceName={publicBranding.displayName} primaryPersonName={relationship.primary_person_name} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} />
+        <ClientPortalShell token={token} workspaceName={publicBranding.displayName} logoSrc={logoSrc} primaryPersonName={relationship.primary_person_name} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} />
     </OnboardingThemeProvider>
 }

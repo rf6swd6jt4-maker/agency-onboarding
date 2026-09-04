@@ -24,10 +24,11 @@ import { normalizeWorkspaceRole, requireWorkspace, workspaceRoleLabel } from "@/
 import { loadWorkspaceTeams, loadWorkspaceMemberProfiles } from "@/lib/teams/server"
 import { BASE_INTEGRATION_PROVIDERS, listWorkspaceConnections } from "@/lib/workspace-integrations"
 import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
+import { loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
 import { normalizeWorkspaceCapability, type WorkspaceCapability } from "@/lib/workspace-capabilities"
 import type { ReactNode } from "react"
 import { saveLeadgenSettings } from "../leadgen/settings/actions"
-import { saveAgencyPublicBranding } from "./branding-actions"
+import { saveAgencyPublicBranding, uploadAgencyFavicon, uploadAgencyLogo } from "./branding-actions"
 import { inviteWorkspaceUser, removeWorkspaceUser, resetWorkspaceUserMfa } from "../users/actions"
 import {
     cancelWorkspaceClientPortalDomain,
@@ -104,6 +105,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         leadgenSettings,
         onboardingSettings,
         publicBranding,
+        clientBrandAssets,
         teamResult,
         teamPeople,
         teamConversationResult,
@@ -120,10 +122,15 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
         loadLeadgenSettingsPageData(workspace.id),
         loadOnboardingSettingsPageData(workspace.id),
         loadWorkspacePublicBranding(workspace.id, workspace.name),
+        loadWorkspaceClientBrandAssets(workspace.id),
         loadWorkspaceTeams(workspace.id),
         loadWorkspaceMemberProfiles(workspace.id),
         supabaseAdmin.from("workspace_native_conversations").select("id, team_id").eq("workspace_id", workspace.id).eq("kind", "team"),
         supabaseAdmin.from("workspace_service_capabilities").select("service_id, capability").eq("workspace_id", workspace.id),
+    ])
+    const [agencyLogoSrc, agencyFaviconSrc] = await Promise.all([
+        clientBrandAssets.logoPath ? createUploadSignedUrl(clientBrandAssets.logoPath) : null,
+        clientBrandAssets.faviconPath ? createUploadSignedUrl(clientBrandAssets.faviconPath) : null,
     ])
 
     const users = await Promise.all((membershipsResult.data ?? []).map(async (membership) => ({
@@ -244,7 +251,7 @@ export default async function SettingsPage({ params, searchParams }: PageProps) 
                         >
                             <div className="space-y-5">
                                 <AgencyPublicBrandingFields branding={publicBranding} saveAction={saveAgencyPublicBranding.bind(null, workspace.slug)} />
-                                <AgencyBrandingEditor workspaceSlug={workspace.slug} workspaceName={publicBranding.displayName} initialTheme={onboardingSettings.theme} publishedTheme={onboardingSettings.publishedTheme} previewBookend={onboardingSettings.welcome} help={onboardingSettings.help} schemaReady={onboardingSettings.schemaReady} faviconSrc={logoSrc} uploadFavicon={uploadWorkspaceLogo.bind(null, workspace.slug)} />
+                                <AgencyBrandingEditor workspaceSlug={workspace.slug} workspaceName={publicBranding.displayName} initialTheme={onboardingSettings.theme} publishedTheme={onboardingSettings.publishedTheme} previewBookend={onboardingSettings.welcome} help={onboardingSettings.help} schemaReady={onboardingSettings.schemaReady} brandAssetSchemaReady={clientBrandAssets.schemaReady} logoSrc={agencyLogoSrc} faviconSrc={agencyFaviconSrc} uploadLogo={uploadAgencyLogo.bind(null, workspace.slug)} uploadFavicon={uploadAgencyFavicon.bind(null, workspace.slug)} />
                             </div>
                         </UnifiedSection>
 

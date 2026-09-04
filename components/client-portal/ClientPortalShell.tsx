@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import { ClientPortalChat } from "@/components/client-portal/ClientPortalChat"
+import { ClientBrandLogo } from "@/components/client-branding/ClientBrandLogo"
 
 type PortalPanel = "chat" | "resources"
 
@@ -94,7 +95,7 @@ function PortalSidePanel({ panel, token, workspaceName, onBack }: { panel: Porta
     </>
 }
 
-export function ClientPortalShell({ token, workspaceName, primaryPersonName, privacyPolicyUrl, termsOfServiceUrl }: { token: string; workspaceName: string; primaryPersonName: string; privacyPolicyUrl?: string | null; termsOfServiceUrl?: string | null }) {
+export function ClientPortalShell({ token, workspaceName, logoSrc, primaryPersonName, privacyPolicyUrl, termsOfServiceUrl }: { token: string; workspaceName: string; logoSrc?: string | null; primaryPersonName: string; privacyPolicyUrl?: string | null; termsOfServiceUrl?: string | null }) {
     const [panel, setPanel] = useState<PortalPanel | null>(null)
     const [greeting, setGreeting] = useState("Welcome")
 
@@ -122,7 +123,7 @@ export function ClientPortalShell({ token, workspaceName, primaryPersonName, pri
     return <div data-betelgeze-client-portal-session="valid" className="min-h-screen bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)]">
         <header className="border-b border-black/10 bg-[var(--onboarding-surface,#FFFFFF)]">
             <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-                <p className="min-w-0 truncate text-base font-semibold tracking-tight sm:text-lg">{workspaceName}</p>
+                <ClientBrandLogo logoSrc={logoSrc} workspaceName={workspaceName} className="h-9 max-w-[min(12rem,52vw)]" fallbackClassName="min-w-0 truncate text-base font-semibold tracking-tight sm:text-lg" />
                 <nav aria-label="Client portal" className="flex shrink-0 items-center gap-1 sm:gap-2">
                     <button type="button" onClick={() => setPanel("resources")} className="inline-flex h-11 items-center gap-2 rounded-lg px-2.5 text-sm font-medium text-[var(--onboarding-muted,#475569)] transition hover:bg-black/5 hover:text-[var(--onboarding-text,#0F172A)] sm:px-3"><ResourceIcon /><span className="hidden sm:inline">Resources</span></button>
                     <button type="button" onClick={() => setPanel("chat")} className="inline-flex h-11 items-center gap-2 rounded-lg bg-[var(--onboarding-primary,#1E3A5F)] px-3 text-sm font-semibold text-white shadow-sm transition hover:brightness-95"><ChatIcon /><span>Chat</span></button>

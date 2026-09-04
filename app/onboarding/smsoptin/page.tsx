@@ -4,6 +4,8 @@ import { headers } from "next/headers"
 import { SmsOptInForm } from "@/components/onboarding/SmsOptInForm"
 import { getPublicSmsOptInWorkspace } from "@/lib/client-sales/sms-consent"
 import { agencyBrandedMetadata, currentPublicPageUrl } from "@/lib/client-branding/public-branding"
+import { clientBrandLogoUrl, clientFaviconIcons, loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
+import { ClientBrandLogo } from "@/components/client-branding/ClientBrandLogo"
 import { submitPublicSmsOptIn } from "./actions"
 
 export const dynamic = "force-dynamic"
@@ -11,7 +13,11 @@ export const dynamic = "force-dynamic"
 export async function generateMetadata(): Promise<Metadata> {
     const requestHeaders = await headers()
     const workspace = await getPublicSmsOptInWorkspace(requestHeaders.get("x-betelgeze-workspace-slug"))
-    return agencyBrandedMetadata(workspace?.branding ?? null, "sms-opt-in", await currentPublicPageUrl())
+    const [canonicalUrl, icons] = await Promise.all([
+        currentPublicPageUrl(),
+        workspace ? clientFaviconIcons("sms-opt-in", workspace.slug) : undefined,
+    ])
+    return { ...agencyBrandedMetadata(workspace?.branding ?? null, "sms-opt-in", canonicalUrl), icons }
 }
 
 export default async function SmsOptInPage() {
@@ -20,11 +26,13 @@ export default async function SmsOptInPage() {
     const agencyName = workspace?.branding.displayName
     const privacyPolicyUrl = workspace?.branding.privacyPolicyUrl
     const termsOfServiceUrl = workspace?.branding.termsOfServiceUrl
+    const brandAssets = workspace ? await loadWorkspaceClientBrandAssets(workspace.id) : null
+    const logoSrc = workspace && brandAssets ? clientBrandLogoUrl("sms-opt-in", workspace.slug, brandAssets.logoPath) : null
 
     return (
         <main className="min-h-screen bg-[#F8F7F3] px-5 py-8 text-slate-900 sm:px-6 sm:py-12">
             <article className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-                <p className="text-sm font-semibold text-[#1E3A5F]">{agencyName ?? "SMS opt-in"}</p>
+                <ClientBrandLogo logoSrc={logoSrc} workspaceName={agencyName ?? "SMS opt-in"} className="h-10 max-w-full" fallbackClassName="text-sm font-semibold text-[#1E3A5F]" />
                 <h1 className="mt-5 text-3xl font-semibold tracking-tight">SMS opt-in</h1>
                 {workspace ? (
                     <>

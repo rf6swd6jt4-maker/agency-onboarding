@@ -17,6 +17,7 @@ import { redirect } from "next/navigation"
 import type { Metadata } from "next"
 import { clientFaviconIcons } from "@/lib/client-branding/favicon"
 import { agencyBrandedMetadata, currentPublicPageUrl, loadClientPagePublicBranding, loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
+import { clientBrandLogoUrl, loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
 
 export const dynamic = "force-dynamic"
 
@@ -55,7 +56,11 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     }
 
     const { session, workspace, relationship, steps, completableSteps, completedKeys, moduleTitles, theme, help, notices, satisfiedBlockIds, blockResponses } = resolved
-    const publicBranding = await loadWorkspacePublicBranding(workspace.id, workspace.name)
+    const [publicBranding, brandAssets] = await Promise.all([
+        loadWorkspacePublicBranding(workspace.id, workspace.name),
+        loadWorkspaceClientBrandAssets(workspace.id),
+    ])
+    const logoSrc = clientBrandLogoUrl("onboarding", token, brandAssets.logoPath)
     if (session.status === "completed") {
         const clientPortalUrl = await getClientPortalUrlForOnboardingSession({
             workspaceId: session.workspace_id,
@@ -77,7 +82,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
             { key: "payment", title: "Payment", complete: false, current: true, href: null },
             ...steps.map((step) => ({ key: step.key, title: step.title, complete: false, current: false, href: null })),
         ]
-        return <OnboardingThemeProvider theme={theme}><OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={publicBranding.displayName} help={help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl}>
+        return <OnboardingThemeProvider theme={theme}><OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl}>
             <OnboardingSessionRenderer
                 step={{ key: "payment", kind: "video", title: header.title, description: header.description, moduleTitle: "Payment", estimatedTime: stepEstimate(paymentStep)?.estimatedTime ?? header.estimatedTime, why: "", blocks: resolvedBlocks, navigation: paymentStep.navigation }}
                 moduleTitles={moduleTitles}
@@ -142,6 +147,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                 isTest: session.is_test,
             }}
             workspaceName={publicBranding.displayName}
+            logoSrc={logoSrc}
             help={help}
             privacyPolicyUrl={publicBranding.privacyPolicyUrl}
             termsOfServiceUrl={publicBranding.termsOfServiceUrl}

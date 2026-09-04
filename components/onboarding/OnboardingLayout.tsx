@@ -2,6 +2,7 @@ import { NeedHelpCard } from "./NeedHelpCard"
 import { ProfileMenu } from "./ProfileMenu"
 import { Roadmap } from "./Roadmap"
 import { MobileStepBar } from "./MobileStepBar"
+import { ClientBrandLogo } from "@/components/client-branding/ClientBrandLogo"
 import type { OnboardingHelpSettings } from "@/lib/onboarding/configuration-types"
 
 type RoadmapStep = {
@@ -23,6 +24,7 @@ type OnboardingLayoutProps = {
     }
     headerActions?: React.ReactNode
     workspaceName: string
+    logoSrc?: string | null
     help: OnboardingHelpSettings
     embedded?: boolean
     forceMobile?: boolean
@@ -40,6 +42,7 @@ export function OnboardingLayout({
     client,
     headerActions,
     workspaceName,
+    logoSrc,
     help,
     embedded = false,
     forceMobile = false,
@@ -61,9 +64,7 @@ export function OnboardingLayout({
                 : "flex min-h-screen flex-col bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)] lg:fixed lg:inset-0 lg:h-auto lg:min-h-0 lg:w-full lg:overflow-hidden"}>
             <header className={`h-16 shrink-0 border-b border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-4 ${forceMobile ? "" : "sm:px-6"}`}>
                 <div className="mx-auto flex h-full max-w-7xl items-center justify-between">
-                    <p className="text-xl font-semibold text-[var(--onboarding-primary,#1E3A5F)]">
-                        {workspaceName}
-                    </p>
+                    <ClientBrandLogo logoSrc={logoSrc} workspaceName={workspaceName} className="h-9 max-w-[min(12rem,52vw)]" />
 
                     <div className="flex items-center gap-3">
                         {headerActions}
