@@ -32,9 +32,7 @@ export default async function SmsOptInPage() {
     return (
         <main className="min-h-screen bg-[#F8F7F3] px-5 py-8 text-slate-900 sm:px-6 sm:py-12">
             <article className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-                <div className="flex justify-end">
-                    <ClientBrandLogo logoSrc={logoSrc} workspaceName={agencyName ?? "SMS opt-in"} className="h-10 max-w-full" fallbackClassName="text-sm font-semibold text-[#1E3A5F]" />
-                </div>
+                <ClientBrandLogo logoSrc={logoSrc} workspaceName={agencyName ?? "SMS opt-in"} className="h-10 max-w-full" fallbackClassName="text-sm font-semibold text-[#1E3A5F]" />
                 <h1 className="mt-5 text-3xl font-semibold tracking-tight">SMS opt-in</h1>
                 {workspace ? (
                     <>
