@@ -454,7 +454,8 @@ function whatsappIntegrationVerified(value: unknown) {
     return Boolean(record(integration.config_hint).verified_at)
 }
 
-async function queryRawConfiguration(workspaceId: string) {
+async function queryRawConfiguration(workspaceId: string, includeOperationalData = true) {
+    const omittedRows = Promise.resolve({ data: [] as UnknownRow[], error: null })
     const [workspaceResult, moduleResult, revisionResult, serviceResult, serviceRevisionResult, assignmentResult, configurationResult, configurationAssignmentResult, swatchResult, themeResult, integrationResult, relationshipServiceResult, saleItemResult, saleResult, relationshipResult, workItemResult, sessionModuleResult, activeSessionResult] = await Promise.all([
         supabaseAdmin.from("workspaces").select("slug").eq("id", workspaceId).single(),
         supabaseAdmin.from("onboarding_modules").select("*").eq("workspace_id", workspaceId),
@@ -467,13 +468,13 @@ async function queryRawConfiguration(workspaceId: string) {
         supabaseAdmin.from("onboarding_brand_swatches").select("*").eq("workspace_id", workspaceId),
         supabaseAdmin.from("onboarding_themes").select("*").eq("workspace_id", workspaceId).limit(1),
         supabaseAdmin.from("workspace_integrations").select("provider, enabled, mode, config_hint").eq("workspace_id", workspaceId).eq("provider", "meta_whatsapp").maybeSingle(),
-        supabaseAdmin.from("relationship_services").select("service_id, relationship_id").eq("workspace_id", workspaceId).not("service_id", "is", null),
-        supabaseAdmin.from("client_sale_items").select("service_id, client_sale_id").eq("workspace_id", workspaceId),
-        supabaseAdmin.from("client_sales").select("id, relationship_id, status").eq("workspace_id", workspaceId),
-        supabaseAdmin.from("relationships").select("id, status").eq("workspace_id", workspaceId),
-        supabaseAdmin.from("work_items").select("status, metadata").eq("workspace_id", workspaceId).not("status", "in", "(done,canceled)"),
-        supabaseAdmin.from("relationship_onboarding_session_modules").select("module_id, session_id").eq("workspace_id", workspaceId),
-        supabaseAdmin.from("relationship_onboarding_sessions").select("id").eq("workspace_id", workspaceId).eq("status", "active"),
+        includeOperationalData ? supabaseAdmin.from("relationship_services").select("service_id, relationship_id").eq("workspace_id", workspaceId).not("service_id", "is", null) : omittedRows,
+        includeOperationalData ? supabaseAdmin.from("client_sale_items").select("service_id, client_sale_id").eq("workspace_id", workspaceId) : omittedRows,
+        includeOperationalData ? supabaseAdmin.from("client_sales").select("id, relationship_id, status").eq("workspace_id", workspaceId) : omittedRows,
+        includeOperationalData ? supabaseAdmin.from("relationships").select("id, status").eq("workspace_id", workspaceId) : omittedRows,
+        includeOperationalData ? supabaseAdmin.from("work_items").select("status, metadata").eq("workspace_id", workspaceId).not("status", "in", "(done,canceled)") : omittedRows,
+        includeOperationalData ? supabaseAdmin.from("relationship_onboarding_session_modules").select("module_id, session_id").eq("workspace_id", workspaceId) : omittedRows,
+        includeOperationalData ? supabaseAdmin.from("relationship_onboarding_sessions").select("id").eq("workspace_id", workspaceId).eq("status", "active") : omittedRows,
     ])
     const schemaResults = [moduleResult, revisionResult, serviceResult, serviceRevisionResult, assignmentResult, configurationResult, configurationAssignmentResult, swatchResult, themeResult]
     return {
@@ -494,14 +495,14 @@ async function queryRawConfiguration(workspaceId: string) {
         sales: (saleResult.data ?? []) as UnknownRow[],
         relationships: (relationshipResult.data ?? []) as UnknownRow[],
         openWorkItems: (workItemResult.data ?? []) as UnknownRow[],
-        archiveChecksReady: [relationshipServiceResult, saleItemResult, saleResult, relationshipResult, workItemResult].every((result) => !result.error),
+        archiveChecksReady: includeOperationalData && [relationshipServiceResult, saleItemResult, saleResult, relationshipResult, workItemResult].every((result) => !result.error),
         sessionModules: (sessionModuleResult.data ?? []) as UnknownRow[],
         activeSessions: (activeSessionResult.data ?? []) as UnknownRow[],
     }
 }
 
-async function rawConfiguration(workspaceId: string) {
-    const raw = await queryRawConfiguration(workspaceId)
+async function rawConfiguration(workspaceId: string, includeOperationalData = true) {
+    const raw = await queryRawConfiguration(workspaceId, includeOperationalData)
     if (!raw.schemaReady || raw.workspaceSlug !== "scaylup" || (raw.modules.length > 0 && raw.services.length > 0)) return raw
 
     const seedModules = fallbackModules()
@@ -536,7 +537,7 @@ async function rawConfiguration(workspaceId: string) {
         p_assignments: seedTheme.assignments,
     })
     if (error) return { ...raw, schemaReady: false }
-    return queryRawConfiguration(workspaceId)
+    return queryRawConfiguration(workspaceId, includeOperationalData)
 }
 
 function currentServiceRevision(service: UnknownRow, revisions: UnknownRow[]) {
@@ -917,7 +918,11 @@ export async function loadOnboardingBuilderData(workspaceId: string, selectedMod
 }
 
 export async function loadPublishedOnboardingConfiguration(workspaceId: string): Promise<PublishedOnboardingConfiguration> {
-    const raw = await rawConfiguration(workspaceId)
+    // Published runtime composition does not need archive blockers, live sales,
+    // relationships, work items, or active-session inventories. Keeping those
+    // workspace-wide reads in the settings loader avoids making every detail
+    // page pay for editor-only operational data.
+    const raw = await rawConfiguration(workspaceId, false)
     const useLegacyFallback = !raw.schemaReady || raw.workspaceSlug === "scaylup"
     const baseModules = orderedModuleDefinitions(raw.modules.length
         ? raw.modules.map((row) => mapModule(row, selectRevision(row, raw.revisions, false))).filter((moduleDefinition) => moduleDefinition.status === "published")

@@ -18,7 +18,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin"
 import { loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import { buildRelationshipDealServiceOptions } from "@/lib/onboarding/service-display"
 import { loadOnboardingServiceRevisionDisplays } from "@/lib/onboarding/service-revisions"
-import { currentRelationshipWork, ensureCurrentRelationshipStage } from "@/lib/relationship-workflow"
+import { currentRelationshipWork } from "@/lib/relationship-workflow"
 import { archiveRelationship } from "../actions"
 import { ArchiveRelationshipForm } from "./ArchiveRelationshipForm"
 import { RelationshipDealWorkspace } from "./RelationshipDealWorkspace"
@@ -33,37 +33,11 @@ type PageProps = {
     params: Promise<{ workspaceSlug: string; relationshipId: string }>
 }
 
-async function loadRelationshipPlan(workspaceSlug: string, relationship: RelationshipRecord, userId: string) {
-    let plan = await getRelationshipGanttPlan(workspaceSlug, relationship)
-    const workflowStageExists = plan.items.some((item) => item.workflowRole === "lifecycle_stage" && item.lifecyclePhase === relationship.lifecycle_phase)
-    if (!workflowStageExists && relationship.lifecycle_phase !== "nurturing" && relationship.lifecycle_phase !== "completed_lost") {
-        // New records create workflow work in their mutation path. Repair only
-        // legacy/incomplete records here instead of writing on every page view.
-        await ensureCurrentRelationshipStage({ workspaceId: relationship.workspace_id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: userId })
-        plan = await getRelationshipGanttPlan(workspaceSlug, relationship)
-    }
-    return plan
-}
-
 async function RelationshipPlanFact({ planPromise, kind }: { planPromise: Promise<RelationshipGanttPlan>; kind: "open" | "unscheduled" }) {
     const plan = await planPromise
     if (kind === "open") return plan.items.filter((item) => !["done", "canceled"].includes(item.status)).length
     const ranges = effectiveGanttRanges(plan.items)
     return plan.items.filter((item) => !ranges.has(item.id)).length
-}
-
-function RelationshipWorkspaceFallback() {
-    return <div className="mt-5 space-y-5" aria-label="Loading relationship workspace" aria-busy="true">
-        <section className="overflow-hidden rounded-2xl border border-neutral-800 bg-black">
-            <div className="grid gap-px bg-neutral-900 sm:grid-cols-2 lg:grid-cols-4">
-                {Array.from({ length: 8 }, (_, index) => <div key={index} className="min-h-20 bg-black p-4"><div className="h-3 w-20 animate-pulse rounded bg-neutral-800" /><div className="mt-3 h-5 w-32 max-w-full animate-pulse rounded bg-neutral-900" /></div>)}
-            </div>
-        </section>
-        <section className="min-h-72 rounded-2xl border border-neutral-800 bg-black p-4">
-            <div className="h-5 w-40 animate-pulse rounded bg-neutral-800" />
-            <div className="mt-5 h-44 animate-pulse rounded-xl bg-neutral-900/70" />
-        </section>
-    </div>
 }
 
 async function RelationshipWorkspace({ workspaceId, workspaceSlug, workspaceName, userId, role, relationship, planPromise }: {
@@ -204,15 +178,18 @@ async function RelationshipWorkspace({ workspaceId, workspaceSlug, workspaceName
 
 export default async function RelationshipDetailPage({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
-    const { workspace, user, role } = await requireWorkspacePanel(workspaceSlug, "relationships")
+    const { workspace, user, role, access } = await requireWorkspacePanel(workspaceSlug, "relationships")
     const relationship = await getRelationship(workspace.id, relationshipId)
     if (!relationship) notFound()
-    const planPromise = loadRelationshipPlan(workspace.slug, relationship, user.id)
+    // Detail reads stay pure. Workflow stages are created and repaired by their
+    // mutation/migration paths, so opening a record never writes and refetches
+    // the same Gantt before it can render.
+    const planPromise = getRelationshipGanttPlan(workspace.slug, relationship)
     const isOnboarding = ["onboarding", "onboarding_review"].includes(relationship.lifecycle_phase)
     const isFulfilment = relationship.lifecycle_phase === "fulfilment"
 
     return <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
-        <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
+        <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
         <div className="mx-auto max-w-[92rem]">
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0">
@@ -229,7 +206,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                         updated={formatRelativeTime(relationship.updated_at)}
                     />
 
-                    <Suspense fallback={<RelationshipWorkspaceFallback />}>
+                    <Suspense fallback={null}>
                         <RelationshipWorkspace workspaceId={workspace.id} workspaceSlug={workspace.slug} workspaceName={workspace.name} userId={user.id} role={role} relationship={relationship} planPromise={planPromise} />
                     </Suspense>
 

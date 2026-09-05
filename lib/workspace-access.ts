@@ -43,7 +43,9 @@ export const loadAppointmentSettingServiceIds = cache(async (workspaceId: string
     }
     const serviceIds = (services ?? []).map((service) => service.id).filter(Boolean)
     if (!serviceIds.length) return { ids: new Set<string>(), ready: true }
-
+    // Keep the large JSON definitions scoped to active services. Fetching every
+    // historical service revision in parallel removes a round trip but can cost
+    // substantially more transfer and parsing time in established workspaces.
     const { data: revisions, error: revisionError } = await supabaseAdmin
         .from("onboarding_service_revisions")
         .select("service_id, definition")
@@ -80,11 +82,18 @@ export async function loadWorkspaceAccess(input: {
         }
     }
 
-    const { data: assignments, error: assignmentError } = await supabaseAdmin
-        .from("workspace_member_service_access")
-        .select("service_id")
-        .eq("workspace_id", input.workspaceId)
-        .eq("user_id", input.userId)
+    const [assignmentResult, capabilityResult] = await Promise.all([
+        supabaseAdmin
+            .from("workspace_member_service_access")
+            .select("service_id")
+            .eq("workspace_id", input.workspaceId)
+            .eq("user_id", input.userId),
+        supabaseAdmin
+            .from("workspace_service_capabilities")
+            .select("service_id, capability")
+            .eq("workspace_id", input.workspaceId),
+    ])
+    const { data: assignments, error: assignmentError } = assignmentResult
 
     if (assignmentError) {
         console.error("Workspace service access could not be loaded", {
@@ -100,11 +109,7 @@ export async function loadWorkspaceAccess(input: {
         return { ...input, capabilities: [], allowedServiceIds: [], serviceAccessSchemaReady: appointmentSettingServices.ready }
     }
 
-    const { data: grants, error: capabilityError } = await supabaseAdmin
-        .from("workspace_service_capabilities")
-        .select("capability")
-        .eq("workspace_id", input.workspaceId)
-        .in("service_id", allowedServiceIds)
+    const { data: allGrants, error: capabilityError } = capabilityResult
 
     if (capabilityError) {
         console.error("Workspace service capabilities could not be loaded", {
@@ -115,8 +120,9 @@ export async function loadWorkspaceAccess(input: {
         return { ...input, capabilities: [], allowedServiceIds, serviceAccessSchemaReady: false }
     }
 
+    const allowedServiceIdSet = new Set(allowedServiceIds)
     const assignedAppointmentSettingService = allowedServiceIds.some((serviceId) => appointmentSettingServices.ids.has(serviceId))
-    const capabilities = combineWorkspaceCapabilities((grants ?? []).map((item) => [item.capability])).filter((capability) => (
+    const capabilities = combineWorkspaceCapabilities((allGrants ?? []).filter((grant) => allowedServiceIdSet.has(grant.service_id)).map((item) => [item.capability])).filter((capability) => (
         capability !== APPOINTMENT_SETTING_CAPABILITY || assignedAppointmentSettingService
     ))
 
@@ -157,7 +163,7 @@ export function defaultWorkspaceHref(access: WorkspaceAccess) {
     return panel ? workspacePanelHref(access.workspaceSlug, panel) : `/${access.workspaceSlug}/no-access`
 }
 
-async function loadRelationshipScope(access: WorkspaceAccess): Promise<{
+const loadRelationshipScope = cache(async function loadRelationshipScope(access: WorkspaceAccess): Promise<{
     accessibleIds: Set<string>
     fullyAccessibleIds: Set<string>
 }> {
@@ -185,7 +191,16 @@ async function loadRelationshipScope(access: WorkspaceAccess): Promise<{
         if (serviceIds.size > 0 && [...serviceIds].every((serviceId) => allowedServiceIds.has(serviceId))) fullyAccessibleIds.add(relationshipId)
     }
     return { accessibleIds, fullyAccessibleIds }
-}
+})
+
+const loadWorkItemAccessRows = cache(async function loadWorkItemAccessRows(workspaceId: string) {
+    return Promise.all([
+        supabaseAdmin.from("work_items").select("id, service_id, native_kind, metadata").eq("workspace_id", workspaceId),
+        supabaseAdmin.from("work_item_relationships").select("work_item_id, relationship_id").eq("workspace_id", workspaceId),
+        supabaseAdmin.from("relationship_onboarding_session_modules").select("id, source_kind").eq("workspace_id", workspaceId),
+        supabaseAdmin.from("relationship_onboarding_session_steps").select("id, session_module_id").eq("workspace_id", workspaceId),
+    ])
+})
 
 export async function accessibleRelationshipIds(access: WorkspaceAccess): Promise<Set<string> | null> {
     if (isAdminRole(access.role)) return null
@@ -215,12 +230,7 @@ export async function accessibleWorkItemIds(access: WorkspaceAccess, relationshi
         ? relationshipScope.accessibleIds
         : new Set([...relationshipScope.accessibleIds].filter((id) => relationshipIds?.has(id)))
     const fullyScopedRelationshipIds = new Set([...relationshipScope.fullyAccessibleIds].filter((id) => scopedRelationshipIds.has(id)))
-    const [itemResult, linkResult, moduleResult, stepResult] = await Promise.all([
-        supabaseAdmin.from("work_items").select("id, service_id, native_kind, metadata").eq("workspace_id", access.workspaceId),
-        supabaseAdmin.from("work_item_relationships").select("work_item_id, relationship_id").eq("workspace_id", access.workspaceId),
-        supabaseAdmin.from("relationship_onboarding_session_modules").select("id, source_kind").eq("workspace_id", access.workspaceId),
-        supabaseAdmin.from("relationship_onboarding_session_steps").select("id, session_module_id").eq("workspace_id", access.workspaceId),
-    ])
+    const [itemResult, linkResult, moduleResult, stepResult] = await loadWorkItemAccessRows(access.workspaceId)
     if (itemResult.error || linkResult.error || moduleResult.error || stepResult.error) {
         console.error("Work-item service scope could not be loaded", {
             workspaceId: access.workspaceId,

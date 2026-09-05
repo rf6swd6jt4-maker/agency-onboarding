@@ -11,13 +11,12 @@ import {
     getRelationship,
     listWorkItemRelationships,
     listWorkItemAssets,
-    listRelationshipsForWorkspace,
     assetHref,
 } from "@/lib/relationships"
 import { createUploadSignedUrls } from "@/lib/onboarding/uploads"
-import { listActiveWorkspaceKeyResults, listWorkItemKeyResultLinks } from "@/lib/admin/okrs"
+import { listWorkItemKeyResultLinks } from "@/lib/admin/okrs"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { accessibleRelationshipIds, accessibleWorkItemIds, requireWorkItemAccess, requireWorkspaceAccess, workspaceAccessHasCapability } from "@/lib/workspace-access"
+import { accessibleRelationshipIds, accessibleWorkItemIds, requireWorkspaceAccess, workspaceAccessHasCapability } from "@/lib/workspace-access"
 import { InlineWorkItemFields } from "./InlineWorkItemFields"
 
 export const dynamic = "force-dynamic"
@@ -30,32 +29,32 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
     const { workspaceSlug, id } = await params
     const { workspace, user, role, access } = await requireWorkspaceAccess(workspaceSlug)
     if (!workspaceAccessHasCapability(access, "fulfilment.manage") && !workspaceAccessHasCapability(access, "onboarding.manage")) notFound()
-    await requireWorkItemAccess(access, id)
-    const item = await getWorkItem(workspace.id, id)
+    const [item, allowedRelationshipIds, allowedWorkItemIds] = await Promise.all([
+        getWorkItem(workspace.id, id),
+        accessibleRelationshipIds(access),
+        accessibleWorkItemIds(access),
+    ])
+    if (allowedWorkItemIds && !allowedWorkItemIds.has(id)) notFound()
     if (!item) notFound()
     const status = workItemStatusPresentation(item.status)
     if (item.visibility === "admins_only" && role === "staff") notFound()
     const isAdminItem = item.area === "admin"
     const canSeeOkrs = role !== "staff"
-    const allowedRelationshipIds = await accessibleRelationshipIds(access)
-    const allowedWorkItemIds = await accessibleWorkItemIds(access, allowedRelationshipIds)
-    const [relationships, assets, planning, allRelationshipOptions, keyResultLinks, keyResultOptions] = await Promise.all([
+    const [relationships, assets, planning, keyResultLinks] = await Promise.all([
         isAdminItem ? Promise.resolve([]) : listWorkItemRelationships(workspace.id, item.id),
         isAdminItem ? Promise.resolve([]) : listWorkItemAssets(workspace.id, item.id),
-        getWorkItemPlanningContext(workspace.id, item),
-        isAdminItem ? Promise.resolve([]) : listRelationshipsForWorkspace(workspace.id),
+        getWorkItemPlanningContext(workspace.id, item, { includeAvailableWorkItems: false }),
         canSeeOkrs ? listWorkItemKeyResultLinks(workspace.id, item.id) : Promise.resolve([]),
-        canSeeOkrs ? listActiveWorkspaceKeyResults(workspace.id) : Promise.resolve([]),
     ])
-    const relationshipOptions = allRelationshipOptions.filter((relationship) => !allowedRelationshipIds || allowedRelationshipIds.has(relationship.id))
-    planning.availableWorkItems = planning.availableWorkItems.filter((candidate) => !allowedWorkItemIds || allowedWorkItemIds.has(candidate.id))
     planning.dependencies = planning.dependencies.filter((dependency) => !allowedWorkItemIds || allowedWorkItemIds.has(dependency.work_item_id))
     if (planning.parent && allowedWorkItemIds && !allowedWorkItemIds.has(planning.parent.id)) planning.parent = null
     const scopedRelationships = relationships.filter((relationship) => !allowedRelationshipIds || allowedRelationshipIds.has(relationship.relationship_id))
     const contextRelationshipId = scopedRelationships[0]?.relationship_id
-    const contextRelationship = contextRelationshipId ? await getRelationship(workspace.id, contextRelationshipId) : null
     const waitsForParent = planning.dependencies.some((dependency) => dependency.source === "parent_auto" && dependency.work_item_id === item.parent_work_item_id)
-    const avatarUrls = await createUploadSignedUrls([...planning.members, ...(planning.creator ? [planning.creator] : [])].map((person) => person.avatar_path).filter((path): path is string => Boolean(path)))
+    const [contextRelationship, avatarUrls] = await Promise.all([
+        contextRelationshipId ? getRelationship(workspace.id, contextRelationshipId) : Promise.resolve(null),
+        createUploadSignedUrls([...planning.members, ...(planning.creator ? [planning.creator] : [])].map((person) => person.avatar_path).filter((path): path is string => Boolean(path))),
+    ])
     const personProps = (person: typeof planning.members[number]) => ({
         user_id: person.user_id,
         username: person.username,
@@ -64,7 +63,7 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
 
     return (
         <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
-            <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
+            <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">
@@ -84,12 +83,13 @@ export default async function WorkItemDetailPage({ params }: PageProps) {
                     parent={planning.parent ? { id: planning.parent.id, title: planning.parent.title, status: planning.parent.status } : null} parentId={item.parent_work_item_id ?? null} waitsForParent={waitsForParent}
                     dependencies={planning.dependencies.flatMap((dependency) => dependency.work_item ? [dependency.work_item] : [])}
                     manualDependencyIds={planning.dependencies.filter((dependency) => dependency.source === "manual").map((dependency) => dependency.work_item_id)}
-                    workOptions={planning.availableWorkItems.map((candidate) => ({ id: candidate.id, title: candidate.title, status: candidate.status }))}
+                    workOptions={[]}
                     relationships={scopedRelationships.map((link) => ({ id: link.relationship_id, label: link.relationship?.business_name ?? link.relationship?.primary_person_name ?? "Relationship" }))}
-                    relationshipOptions={relationshipOptions.map((relationship) => ({ id: relationship.id, label: relationship.business_name ?? relationship.primary_person_name }))}
+                    relationshipOptions={[]}
                     relationshipsLocked={isAdminItem || item.native_kind === "onboarding_step"} priorityOverride={item.priority_override ?? null}
                     keyResults={keyResultLinks.map((result) => ({ ...result, code: `KR-${shortId(result.id)}` }))}
-                    keyResultOptions={keyResultOptions.map((result) => ({ ...result, code: `KR-${shortId(result.id)}` }))}
+                    keyResultOptions={[]}
+                    editorOptionsHref={`/api/workspaces/${encodeURIComponent(workspace.slug)}/work-items/${encodeURIComponent(item.id)}/editor-options`}
                     linksLocked={item.native_kind === "onboarding_step"}
                 />
 

@@ -17,7 +17,7 @@ import {
 } from "@/lib/relationships"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { accessibleRelationshipIds, accessibleWorkItemIds, requireAssetAccess, requireWorkspaceAccess, workspaceAccessHasCapability } from "@/lib/workspace-access"
+import { accessibleAssetIds, accessibleRelationshipIds, accessibleWorkItemIds, requireWorkspaceAccess, workspaceAccessHasCapability } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
 
@@ -70,24 +70,31 @@ export default async function AssetDetailPage({ params }: PageProps) {
     const { workspaceSlug, id } = await params
     const { workspace, user, role, access } = await requireWorkspaceAccess(workspaceSlug)
     if (!workspaceAccessHasCapability(access, "fulfilment.manage") && !workspaceAccessHasCapability(access, "onboarding.manage")) notFound()
-    await requireAssetAccess(access, id)
-    const asset = await getAsset(workspace.id, id)
-    if (!asset) notFound()
-    const [relationships, workItems] = await Promise.all([
-        listAssetRelationships(workspace.id, asset.id),
-        listAssetWorkItems(workspace.id, asset.id),
+    const allowedRelationshipIdsPromise = accessibleRelationshipIds(access)
+    const allowedWorkItemIdsPromise = accessibleWorkItemIds(access)
+    const allowedAssetIdsPromise = Promise.all([allowedRelationshipIdsPromise, allowedWorkItemIdsPromise])
+        .then(([relationshipIds, workItemIds]) => accessibleAssetIds(access, relationshipIds, workItemIds))
+    const [asset, relationships, workItems, allowedRelationshipIds, allowedWorkItemIds, allowedAssetIds] = await Promise.all([
+        getAsset(workspace.id, id),
+        listAssetRelationships(workspace.id, id),
+        listAssetWorkItems(workspace.id, id),
+        allowedRelationshipIdsPromise,
+        allowedWorkItemIdsPromise,
+        allowedAssetIdsPromise,
     ])
-    const allowedRelationshipIds = await accessibleRelationshipIds(access)
-    const allowedWorkItemIds = await accessibleWorkItemIds(access, allowedRelationshipIds)
+    if (allowedAssetIds && !allowedAssetIds.has(id)) notFound()
+    if (!asset) notFound()
     const scopedRelationships = relationships.filter((relationship) => !allowedRelationshipIds || allowedRelationshipIds.has(relationship.relationship_id))
     const scopedWorkItems = workItems.filter((item) => !allowedWorkItemIds || allowedWorkItemIds.has(item.work_item_id))
     const contextRelationshipId = scopedRelationships[0]?.relationship_id
-    const contextRelationship = contextRelationshipId ? await getRelationship(workspace.id, contextRelationshipId) : null
-    const previewUrl = asset.storage_path
-        ? asset.source_kind === "message"
-            ? `/api/client-messages/media/${asset.storage_path.split("/").map(encodeURIComponent).join("/")}`
-            : await createUploadSignedUrl(asset.storage_path)
-        : asset.external_url
+    const [contextRelationship, previewUrl] = await Promise.all([
+        contextRelationshipId ? getRelationship(workspace.id, contextRelationshipId) : Promise.resolve(null),
+        asset.storage_path
+            ? asset.source_kind === "message"
+                ? Promise.resolve(`/api/client-messages/media/${asset.storage_path.split("/").map(encodeURIComponent).join("/")}`)
+                : createUploadSignedUrl(asset.storage_path)
+            : Promise.resolve(asset.external_url),
+    ])
     const formEntries = asset.asset_kind === "form_submission" ? responseEntries(asset.metadata) : []
     const onboardingRelationshipId = metadataValue(asset.metadata, "relationship_id") || contextRelationshipId
     const onboardingStepKey = metadataValue(asset.metadata, "step_key")
@@ -97,7 +104,7 @@ export default async function AssetDetailPage({ params }: PageProps) {
 
     return (
         <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
-            <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
+            <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">

@@ -286,7 +286,7 @@ test("only the Scaylup workspace may retain the legacy onboarding seed", () => {
     assert.match(configurationLoader, /raw\.workspaceSlug !== "scaylup"/)
     assert.match(configurationLoader, /useLegacyFallback = !raw\.schemaReady \|\| raw\.workspaceSlug === "scaylup"/)
     assert.match(configurationLoader, /p_mandatory_module_codes: \["general-info"\]/)
-    assert.match(configurationLoader, /return queryRawConfiguration\(workspaceId\)/)
+    assert.match(configurationLoader, /return queryRawConfiguration\(workspaceId, includeOperationalData\)/)
     assert.match(configurationLoader, /definition\.isTest/)
 })
 

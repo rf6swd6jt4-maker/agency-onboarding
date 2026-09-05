@@ -974,8 +974,9 @@ export async function getWorkItem(workspaceId: string, workItemId: string): Prom
     return mapWorkItem(result.data as Record<string, unknown>)
 }
 
-export async function getWorkItemPlanningContext(workspaceId: string, item: RelationshipWorkItem) {
+export async function getWorkItemPlanningContext(workspaceId: string, item: RelationshipWorkItem, options: { includeAvailableWorkItems?: boolean } = {}) {
     const visibility = item.visibility
+    const includeAvailableWorkItems = options.includeAvailableWorkItems !== false
     const [parentResult, dependenciesResult, assigneesResult, membersResult, workItemsResult] = await Promise.all([
         item.parent_work_item_id
             ? supabaseAdmin.from("work_items").select("id, title, status").eq("workspace_id", workspaceId).eq("id", item.parent_work_item_id).maybeSingle()
@@ -987,7 +988,9 @@ export async function getWorkItemPlanningContext(workspaceId: string, item: Rela
         visibility === "admins_only"
             ? supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspaceId).in("role", ["owner", "admin"])
             : supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspaceId),
-        supabaseAdmin.from("work_items").select("id, title, status, parent_work_item_id").eq("workspace_id", workspaceId).eq("visibility", visibility).neq("id", item.id).order("title"),
+        includeAvailableWorkItems
+            ? supabaseAdmin.from("work_items").select("id, title, status, parent_work_item_id").eq("workspace_id", workspaceId).eq("visibility", visibility).neq("id", item.id).order("title")
+            : Promise.resolve({ data: [] as Array<{ id: string; title: string; status: RelationshipWorkItemStatus; parent_work_item_id: string | null }> }),
     ])
 
     const memberIds = [...new Set([
@@ -1030,6 +1033,23 @@ export async function getWorkItemPlanningContext(workspaceId: string, item: Rela
             parent_work_item_id: row.parent_work_item_id,
         })),
     }
+}
+
+export async function listWorkItemEditorCandidates(workspaceId: string, item: RelationshipWorkItem) {
+    const result = await supabaseAdmin
+        .from("work_items")
+        .select("id, title, status, parent_work_item_id")
+        .eq("workspace_id", workspaceId)
+        .eq("visibility", item.visibility)
+        .neq("id", item.id)
+        .order("title")
+    if (isMissingPrimitiveSchema(result.error)) return []
+    return (result.data ?? []).map((row) => ({
+        id: row.id,
+        title: row.title,
+        status: row.status as RelationshipWorkItemStatus,
+        parent_work_item_id: row.parent_work_item_id,
+    }))
 }
 
 export async function listWorkItemRelationships(workspaceId: string, workItemId: string): Promise<AssetRelationshipLink[]> {

@@ -20,7 +20,7 @@ import { getProgressPercentage } from "@/lib/onboarding/progress"
 import { isOnboardingStuck } from "@/lib/onboarding/stuck"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
-import { fullyAccessibleRelationshipIds, requireRelationshipAccess, requireWorkspacePanel } from "@/lib/workspace-access"
+import { accessibleRelationshipIds, fullyAccessibleRelationshipIds, requireWorkspacePanel } from "@/lib/workspace-access"
 import { loadNormalizedSessionSnapshot } from "@/lib/onboarding/session-snapshot"
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
 import { formatCalendarResponse } from "@/lib/onboarding/calendar"
@@ -428,44 +428,102 @@ function AssetRowLink({ asset, workspaceSlug }: { asset: AssetRow; workspaceSlug
 export default async function OnboardingDetailPage({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
     const { workspace, user, role, access } = await requireWorkspacePanel(workspaceSlug, "onboarding")
-    await requireRelationshipAccess(access, relationshipId)
-    const relationship = await getRelationship(workspace.id, relationshipId)
+    const [relationship, allowedRelationshipIds, fullyAllowedRelationshipIds] = await Promise.all([
+        getRelationship(workspace.id, relationshipId),
+        accessibleRelationshipIds(access),
+        fullyAccessibleRelationshipIds(access),
+    ])
+    if (allowedRelationshipIds && !allowedRelationshipIds.has(relationshipId)) notFound()
     if (!relationship) notFound()
-    const fullyAllowedRelationshipIds = await fullyAccessibleRelationshipIds(access)
     const canOpenCompleteClientSession = !fullyAllowedRelationshipIds || fullyAllowedRelationshipIds.has(relationship.id)
+
+    const sessionResultPromise = supabaseAdmin
+        .from("relationship_onboarding_sessions")
+        .select("*")
+        .eq("workspace_id", workspace.id)
+        .eq("relationship_id", relationship.id)
+        .in("status", ["active", "completed"])
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    const modulesResultPromise = supabaseAdmin
+        .from("relationship_onboarding_modules")
+        .select("module_key")
+        .eq("workspace_id", workspace.id)
+        .eq("relationship_id", relationship.id)
+        .order("created_at", { ascending: true })
+    const servicesResultPromise = supabaseAdmin
+        .from("relationship_services")
+        .select("service_key, service_id, service_revision_id, due_date")
+        .eq("workspace_id", workspace.id)
+        .eq("relationship_id", relationship.id)
+        .order("created_at", { ascending: true })
+
+    // Start dependent reads as soon as their own key is available. Previously
+    // service revisions, the session snapshot, and session activity formed
+    // three sequential waves even though most of them are independent.
+    const normalizedSnapshotPromise = Promise.resolve(sessionResultPromise).then(({ data: session }) => session ? loadNormalizedSessionSnapshot(session) : null)
+    const serviceRevisionsPromise = Promise.resolve(servicesResultPromise).then(({ data: services }) => {
+        const scoped = (services ?? []).filter((service) => role !== "staff" || access.allowedServiceIds.includes(service.service_id ?? ""))
+        return loadOnboardingServiceRevisionDisplays(workspace.id, scoped.map((service) => service.service_revision_id))
+    })
+    const workItemsPromise = Promise.resolve(sessionResultPromise).then(async ({ data: session }) => {
+        if (!session) return [] as WorkItemRow[]
+        const { data } = await supabaseAdmin
+            .from("work_items")
+            .select("id, title, description, status, sort_order, metadata, updated_at, created_at")
+            .eq("workspace_id", workspace.id)
+            .eq("native_kind", "onboarding_step")
+            .like("native_key", `${session.id}:%`)
+            .order("sort_order", { ascending: true })
+        return (data ?? []) as WorkItemRow[]
+    })
+    const assetsPromise = Promise.resolve(sessionResultPromise).then(async ({ data: session }) => {
+        if (!session) return [] as AssetRow[]
+        const { data } = await supabaseAdmin
+            .from("assets")
+            .select("id, title, asset_kind, native_kind, metadata, content_type, file_size, updated_at, created_at")
+            .eq("workspace_id", workspace.id)
+            .in("native_kind", ["onboarding_form_submission", "onboarding_upload"])
+            .like("native_key", `${session.id}:%`)
+            .order("updated_at", { ascending: false })
+        return (data ?? []) as AssetRow[]
+    })
+    const editRequestsPromise = Promise.all([Promise.resolve(sessionResultPromise), normalizedSnapshotPromise]).then(async ([{ data: session }, normalizedSnapshot]) => {
+        if (!session || !normalizedSnapshot) return [] as Array<{ session_step_id: string }>
+        const { data } = await supabaseAdmin.from("onboarding_edit_requests").select("session_step_id").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("status", "pending")
+        return (data ?? []) as Array<{ session_step_id: string }>
+    })
+    const calendarRequirementsPromise = Promise.all([Promise.resolve(sessionResultPromise), normalizedSnapshotPromise]).then(async ([{ data: session }, normalizedSnapshot]) => {
+        if (!session || !normalizedSnapshot) return [] as CalendarRequirementRow[]
+        const { data } = await supabaseAdmin.from("onboarding_block_requirements").select("session_step_id, session_block_id, response, satisfied_at").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("requirement_kind", "calendar_scheduled")
+        return (data ?? []) as CalendarRequirementRow[]
+    })
 
     const [
         { data: session },
         { data: modules },
         { data: services },
+        serviceRevisions,
+        normalizedSnapshot,
+        workItems,
+        assets,
+        editRequests,
+        calendarRequirements,
     ] = await Promise.all([
-        supabaseAdmin
-            .from("relationship_onboarding_sessions")
-            .select("*")
-            .eq("workspace_id", workspace.id)
-            .eq("relationship_id", relationship.id)
-            .in("status", ["active", "completed"])
-            .order("updated_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        supabaseAdmin
-            .from("relationship_onboarding_modules")
-            .select("module_key")
-            .eq("workspace_id", workspace.id)
-            .eq("relationship_id", relationship.id)
-            .order("created_at", { ascending: true }),
-        supabaseAdmin
-            .from("relationship_services")
-            .select("service_key, service_id, service_revision_id, due_date")
-            .eq("workspace_id", workspace.id)
-            .eq("relationship_id", relationship.id)
-            .order("created_at", { ascending: true }),
+        sessionResultPromise,
+        modulesResultPromise,
+        servicesResultPromise,
+        serviceRevisionsPromise,
+        normalizedSnapshotPromise,
+        workItemsPromise,
+        assetsPromise,
+        editRequestsPromise,
+        calendarRequirementsPromise,
     ])
 
     const scopedServices = (services ?? []).filter((service) => role !== "staff" || access.allowedServiceIds.includes(service.service_id ?? ""))
     const moduleKeys = (modules ?? []).map((module) => module.module_key).filter((key): key is string => Boolean(key))
-    const serviceRevisions = await loadOnboardingServiceRevisionDisplays(workspace.id, scopedServices.map((service) => service.service_revision_id))
-    const normalizedSnapshot = session ? await loadNormalizedSessionSnapshot(session) : null
     const scopedServiceRevisionIds = new Set(scopedServices.map((service) => service.service_revision_id).filter((id): id is string => Boolean(id)))
     const scopedSnapshotModules = (normalizedSnapshot?.modules ?? []).filter((module) => (
         role !== "staff"
@@ -496,31 +554,6 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
                 : [])),
         }))
         : session ? getOnboardingStepsForModules(moduleKeys) : []
-    const [{ data: workItems }, { data: assets }, { data: editRequests }, { data: calendarRequirements }] = session
-        ? await Promise.all([
-            supabaseAdmin
-                .from("work_items")
-                .select("id, title, description, status, sort_order, metadata, updated_at, created_at")
-                .eq("workspace_id", workspace.id)
-                .eq("native_kind", "onboarding_step")
-                .like("native_key", `${session.id}:%`)
-                .order("sort_order", { ascending: true }),
-            supabaseAdmin
-                .from("assets")
-                .select("id, title, asset_kind, native_kind, metadata, content_type, file_size, updated_at, created_at")
-                .eq("workspace_id", workspace.id)
-                .in("native_kind", ["onboarding_form_submission", "onboarding_upload"])
-                .like("native_key", `${session.id}:%`)
-                .order("updated_at", { ascending: false }),
-            normalizedSnapshot
-                ? supabaseAdmin.from("onboarding_edit_requests").select("session_step_id").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("status", "pending")
-                : Promise.resolve({ data: [] as Array<{ session_step_id: string }> }),
-            normalizedSnapshot
-                ? supabaseAdmin.from("onboarding_block_requirements").select("session_step_id, session_block_id, response, satisfied_at").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("requirement_kind", "calendar_scheduled")
-                : Promise.resolve({ data: [] as CalendarRequirementRow[] }),
-        ])
-        : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }]
-
     const scopedStepIds = new Set(canonicalSteps.map((step) => step.sessionStepId ?? step.key))
     const scopedWorkItems = (workItems ?? []).filter((item) => role !== "staff" || scopedStepIds.has(metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")))
     const scopedAssets = (assets ?? []).filter((asset) => role !== "staff" || scopedStepIds.has(metadataValue(asset.metadata, "session_step_id") || metadataValue(asset.metadata, "step_key")))
@@ -543,7 +576,7 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
 
     return (
         <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
-            <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
+            <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
             <div className="mx-auto max-w-[92rem]">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
                     <div className="min-w-0">

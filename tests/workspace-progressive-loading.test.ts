@@ -49,6 +49,7 @@ test("panel tabs prefetch their exact frame route and detail tabs reuse list ide
     assert.match(bridge, /detailPreview: detailPreview \?\? undefined/)
     assert.match(shell, /<WorkspaceTabOpeningState[^>]*detailPreview=\{activeTab\.detailPreview\}/)
     assert.match(loading, /readWorkspaceDetailPreview\(window\.location\.pathname\)/)
+    assert.doesNotMatch(loading, /animate-pulse/)
 })
 
 test("heavy panel homes stream their useful core before secondary metadata", () => {
@@ -65,17 +66,37 @@ test("heavy panel homes stream their useful core before secondary metadata", () 
     }
 })
 
-test("relationship detail loading is read-scaled and repairs workflow only when missing", () => {
+test("relationship detail loading stays read-only and avoids a duplicate intermediate paint", () => {
     const page = source("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx")
     const gantt = source("lib/relationship-gantt.ts")
+    const configuration = source("lib/onboarding/configuration.ts")
 
-    assert.match(page, /if \(!workflowStageExists/)
-    assert.match(page, /const planPromise = loadRelationshipPlan/)
-    assert.match(page, /<Suspense fallback=\{<RelationshipWorkspaceFallback \/>\}>/)
+    assert.match(page, /const planPromise = getRelationshipGanttPlan/)
+    assert.doesNotMatch(page, /ensureCurrentRelationshipStage/)
+    assert.match(page, /<Suspense fallback=\{null\}>/)
+    assert.match(configuration, /rawConfiguration\(workspaceId, false\)/)
     assert.match(gantt, /\.eq\("relationship_id", relationship\.id\)/)
     assert.match(gantt, /\.in\("work_item_id", batch\)/)
     assert.match(gantt, /\.in\("parent_work_item_id", batch\)/)
     assert.doesNotMatch(gantt, /from\("work_item_assignees"\)\.select\("work_item_id, user_id"\)\.eq\("workspace_id", relationship\.workspace_id\)\s*[,)]/)
+})
+
+test("detail bootstrap queries share access reads and defer editor-only choices", () => {
+    const access = source("lib/workspace-access.ts")
+    const onboarding = source("app/[workspaceSlug]/onboarding/[relationshipId]/page.tsx")
+    const workItem = source("app/[workspaceSlug]/work-items/[id]/page.tsx")
+    const workItemFields = source("app/[workspaceSlug]/work-items/[id]/InlineWorkItemFields.tsx")
+    const editorOptions = source("app/api/workspaces/[workspaceSlug]/work-items/[id]/editor-options/route.ts")
+
+    assert.match(access, /const loadRelationshipScope = cache/)
+    assert.match(access, /const loadWorkItemAccessRows = cache/)
+    assert.match(onboarding, /const normalizedSnapshotPromise/)
+    assert.match(onboarding, /const serviceRevisionsPromise/)
+    assert.match(workItem, /includeAvailableWorkItems: false/)
+    assert.match(workItem, /editorOptionsHref=/)
+    assert.match(workItemFields, /fetch\(props\.editorOptionsHref/)
+    assert.match(editorOptions, /listWorkItemEditorCandidates/)
+    assert.match(editorOptions, /"Cache-Control": "private, no-store"/)
 })
 
 test("panel routes have instant fallbacks and shared lists defer off-screen paint", () => {

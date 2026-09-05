@@ -44,13 +44,14 @@ const loadRequiredWorkspace = cache(async function loadRequiredWorkspace(
     minimumRole: WorkspaceRole = "staff"
 ): Promise<{ user: User; workspace: Workspace; role: WorkspaceRole }> {
     const supabase = await createSupabaseServerClient()
-    const user = await requireAal2User(supabase)
-
-    const workspaceResult = await supabaseAdmin
-        .from("workspaces")
-        .select("id, name, slug, status, banner_path, logo_path, banner_height, banner_position, leadgen_banner_path, leadgen_banner_height, leadgen_banner_position, custom_onboarding_domain, custom_onboarding_domain_status, custom_onboarding_domain_records, custom_onboarding_domain_error, custom_client_portal_domain, custom_client_portal_domain_status, custom_client_portal_domain_records, custom_client_portal_domain_error")
-        .eq("slug", slug)
-        .maybeSingle() as { data: Workspace | null; error: { message: string } | null }
+    const [user, workspaceResult] = await Promise.all([
+        requireAal2User(supabase),
+        supabaseAdmin
+            .from("workspaces")
+            .select("id, name, slug, status, banner_path, logo_path, banner_height, banner_position, leadgen_banner_path, leadgen_banner_height, leadgen_banner_position, custom_onboarding_domain, custom_onboarding_domain_status, custom_onboarding_domain_records, custom_onboarding_domain_error, custom_client_portal_domain, custom_client_portal_domain_status, custom_client_portal_domain_records, custom_client_portal_domain_error")
+            .eq("slug", slug)
+            .maybeSingle() as unknown as Promise<{ data: Workspace | null; error: { message: string } | null }>,
+    ])
 
     let workspace = workspaceResult.data
     if (workspaceResult.error?.message.includes("custom_onboarding_domain") || workspaceResult.error?.message.includes("custom_client_portal_domain") || workspaceResult.error?.message.includes("leadgen_banner")) {

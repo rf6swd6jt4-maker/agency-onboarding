@@ -33,6 +33,11 @@ type KeyResultOption = {
     impact_hypothesis: string | null
 }
 type KeyResultEstimate = { keyResultId: string; expectedMovement: string; impactHypothesis: string }
+type EditorOptions = {
+    workOptions: WorkOption[]
+    relationshipOptions: RelationshipOption[]
+    keyResultOptions: KeyResultOption[]
+}
 
 type Props = {
     workspaceSlug: string
@@ -65,6 +70,7 @@ type Props = {
     relationshipsLocked: boolean
     keyResults: KeyResultOption[]
     keyResultOptions: KeyResultOption[]
+    editorOptionsHref?: string
     linksLocked: boolean
     priorityOverride: number | null
 }
@@ -142,6 +148,12 @@ function PopupFooter({ onSave, onClear, pending }: { onSave: () => void; onClear
     return <div className="flex justify-end gap-1.5 border-t border-neutral-800 p-1.5">{onClear ? <button type="button" disabled={pending} onClick={onClear} className="h-8 px-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50">Clear</button> : null}<button type="button" disabled={pending} onClick={onSave} className="h-8 rounded-md bg-white px-3 text-xs font-medium text-black disabled:opacity-50">{pending ? "Saving…" : "Save"}</button></div>
 }
 
+function EditorOptionsNotice({ state, error, retry }: { state: "idle" | "loading" | "loaded" | "error"; error: string | null; retry: () => void }) {
+    if (state === "idle" || state === "loading") return <p className="border-b border-neutral-800 px-2.5 py-2 text-xs text-neutral-500">Loading choices…</p>
+    if (state === "error") return <div className="flex items-center justify-between gap-3 border-b border-red-500/20 px-2.5 py-2 text-xs text-red-300"><span>{error ?? "Could not load choices"}</span><button type="button" onClick={retry} className="shrink-0 text-white underline decoration-neutral-600 underline-offset-2">Retry</button></div>
+    return null
+}
+
 function MinimalDateTimeInputs({ date, time, onDateChange, onTimeChange, timeLabel }: { date: string; time: string; onDateChange: (value: string) => void; onTimeChange: (value: string) => void; timeLabel: string }) {
     const inputClass = "h-9 min-w-0 w-full rounded-md border border-neutral-700 bg-black px-2 text-sm text-white caret-neutral-300 outline-none placeholder:text-neutral-600 selection:bg-neutral-600 selection:text-white"
     return <div className="grid grid-cols-[1fr_6rem] gap-1.5"><input autoFocus type="text" maxLength={12} value={date} onChange={(event) => onDateChange(event.target.value)} aria-label="Date" placeholder="DD/MM/YYYY" className={inputClass} /><input type="text" maxLength={5} value={time} onChange={(event) => onTimeChange(event.target.value)} aria-label={timeLabel} placeholder="––:––" className={inputClass} /></div>
@@ -171,12 +183,47 @@ export function InlineWorkItemFields(props: Props) {
     const [descriptionBaseline, setDescriptionBaseline] = useState(props.description ?? "")
     const [descriptionSaveState, setDescriptionSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle")
     const [descriptionError, setDescriptionError] = useState<string | null>(null)
+    const [editorOptions, setEditorOptions] = useState<EditorOptions>({
+        workOptions: props.workOptions,
+        relationshipOptions: props.relationshipOptions,
+        keyResultOptions: props.keyResultOptions,
+    })
+    const [editorOptionsState, setEditorOptionsState] = useState<"idle" | "loading" | "loaded" | "error">(props.editorOptionsHref ? "idle" : "loaded")
+    const [editorOptionsError, setEditorOptionsError] = useState<string | null>(null)
     const descriptionRef = useRef<HTMLTextAreaElement>(null)
     const descriptionTimerRef = useRef<number | null>(null)
     const descriptionPromiseRef = useRef<Promise<boolean> | null>(null)
     const descriptionVersionRef = useRef(props.updatedAt)
     const latestDescriptionRef = useRef(description)
     const descriptionBaselineRef = useRef(descriptionBaseline)
+    const editorOptionsPromiseRef = useRef<Promise<void> | null>(null)
+
+    const loadEditorOptions = useCallback(async () => {
+        if (!props.editorOptionsHref || editorOptionsState === "loaded") return
+        if (editorOptionsPromiseRef.current) return editorOptionsPromiseRef.current
+        setEditorOptionsState("loading")
+        setEditorOptionsError(null)
+        const request = fetch(props.editorOptionsHref, { credentials: "same-origin", cache: "no-store" })
+            .then(async (response) => {
+                const payload = await response.json().catch(() => null) as (Partial<EditorOptions> & { error?: string }) | null
+                if (!response.ok) throw new Error(payload?.error ?? "Could not load editing choices")
+                setEditorOptions({
+                    workOptions: Array.isArray(payload?.workOptions) ? payload.workOptions : [],
+                    relationshipOptions: Array.isArray(payload?.relationshipOptions) ? payload.relationshipOptions : [],
+                    keyResultOptions: Array.isArray(payload?.keyResultOptions) ? payload.keyResultOptions : [],
+                })
+                setEditorOptionsState("loaded")
+            })
+            .catch((cause) => {
+                setEditorOptionsState("error")
+                setEditorOptionsError(cause instanceof Error ? cause.message : "Could not load editing choices")
+            })
+            .finally(() => {
+                editorOptionsPromiseRef.current = null
+            })
+        editorOptionsPromiseRef.current = request
+        return request
+    }, [editorOptionsState, props.editorOptionsHref])
 
     useEffect(() => {
         function close(event: MouseEvent) {
@@ -191,6 +238,10 @@ export function InlineWorkItemFields(props: Props) {
             parentDocument?.removeEventListener("mousedown", close)
         }
     }, [])
+
+    useEffect(() => {
+        if (["parent", "dependencies", "links"].includes(open ?? "")) void loadEditorOptions()
+    }, [loadEditorOptions, open])
 
     useEffect(() => {
         const textarea = descriptionRef.current
@@ -325,9 +376,9 @@ export function InlineWorkItemFields(props: Props) {
         save(() => updateWorkItemLinks(props.workspaceSlug, props.workItemId, relationshipIds, keyResultEstimates.map((link) => ({ keyResultId: link.keyResultId, expectedMovement: Number(link.expectedMovement), impactHypothesis: link.impactHypothesis.trim() }))))
     }
     const filteredMembers = useMemo(() => props.members.filter((person) => person.username.toLowerCase().includes(query.toLowerCase())), [props.members, query])
-    const filteredWork = useMemo(() => props.workOptions.filter((item) => item.title.toLowerCase().includes(query.toLowerCase())), [props.workOptions, query])
-    const filteredRelationships = useMemo(() => props.relationshipOptions.filter((relationship) => relationship.label.toLowerCase().includes(query.toLowerCase())), [props.relationshipOptions, query])
-    const filteredKeyResults = useMemo(() => props.keyResultOptions.filter((result) => `${result.code} ${result.name} ${result.objective}`.toLowerCase().includes(query.toLowerCase())), [props.keyResultOptions, query])
+    const filteredWork = useMemo(() => editorOptions.workOptions.filter((item) => item.title.toLowerCase().includes(query.toLowerCase())), [editorOptions.workOptions, query])
+    const filteredRelationships = useMemo(() => editorOptions.relationshipOptions.filter((relationship) => relationship.label.toLowerCase().includes(query.toLowerCase())), [editorOptions.relationshipOptions, query])
+    const filteredKeyResults = useMemo(() => editorOptions.keyResultOptions.filter((result) => `${result.code} ${result.name} ${result.objective}`.toLowerCase().includes(query.toLowerCase())), [editorOptions.keyResultOptions, query])
 
     return (
         <PopupContext.Provider value={{ anchor: popupTrigger, dismiss: () => setOpen(null) }}>
@@ -367,8 +418,8 @@ export function InlineWorkItemFields(props: Props) {
                         <DetailField label="Created by" icon="user" className="lg:col-start-1 lg:row-start-4">{props.creator ? <Assignee userId={props.creator.user_id} name={props.creator.username} avatarSrc={props.creator.avatar_url} /> : <span className="text-neutral-600">System or imported</span>}</DetailField>
                     </div>
                     <div className="contents">
-                        <DetailField label="Parent" icon="parent" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("parent")} className="block max-w-full rounded py-0.5 text-left hover:text-white">{props.parent ? <span className="block truncate">{props.parent.title}</span> : "None"}</button>{open === "parent" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-56 overflow-y-auto p-1"><button type="button" onClick={() => setParentId("")} className="w-full rounded-lg px-1.5 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900">No parent</button>{filteredWork.map((item) => <button type="button" key={item.id} onClick={() => setParentId(item.id)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{parentId === item.id ? "✓" : ""}</span></button>)}</div><label className="flex items-center gap-2 border-t border-neutral-800 px-2.5 py-2 text-xs text-neutral-300"><input type="checkbox" checked={waitForParent} disabled={!parentId} onChange={(event) => setWaitForParent(event.target.checked)} /> Wait for parent</label><PopupFooter pending={pending} onClear={parentId ? () => { setParentId(""); setWaitForParent(false) } : undefined} onSave={() => save(() => updateWorkItemParent(props.workspaceSlug, props.workItemId, parentId || null, Boolean(parentId && waitForParent)))} /></Popup> : null}</div></DetailField>
-                        <DetailField label="Dependencies" icon="dependency" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("dependencies")} className="max-w-full rounded py-0.5 text-left hover:text-white">{props.dependencies.length ? props.dependencies.map((item) => item.title).join(", ") : "None"}</button>{open === "dependencies" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><div className="max-h-64 overflow-y-auto p-1">{filteredWork.map((item) => <button type="button" key={item.id} disabled={item.id === parentId} onClick={() => toggleId(dependencyIds, item.id, setDependencyIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900 disabled:opacity-40"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{dependencyIds.includes(item.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending} onClear={dependencyIds.length ? () => setDependencyIds([]) : undefined} onSave={() => save(() => updateWorkItemDependencies(props.workspaceSlug, props.workItemId, dependencyIds))} /></Popup> : null}</div></DetailField>
+                        <DetailField label="Parent" icon="parent" className="lg:col-start-2 lg:row-start-1 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("parent")} className="block max-w-full rounded py-0.5 text-left hover:text-white">{props.parent ? <span className="block truncate">{props.parent.title}</span> : "None"}</button>{open === "parent" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><EditorOptionsNotice state={editorOptionsState} error={editorOptionsError} retry={() => void loadEditorOptions()} /><div className="max-h-56 overflow-y-auto p-1"><button type="button" onClick={() => setParentId("")} className="w-full rounded-lg px-1.5 py-2 text-left text-sm text-neutral-500 hover:bg-neutral-900">No parent</button>{filteredWork.map((item) => <button type="button" key={item.id} onClick={() => setParentId(item.id)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{parentId === item.id ? "✓" : ""}</span></button>)}</div><label className="flex items-center gap-2 border-t border-neutral-800 px-2.5 py-2 text-xs text-neutral-300"><input type="checkbox" checked={waitForParent} disabled={!parentId} onChange={(event) => setWaitForParent(event.target.checked)} /> Wait for parent</label><PopupFooter pending={pending || editorOptionsState !== "loaded"} onClear={parentId ? () => { setParentId(""); setWaitForParent(false) } : undefined} onSave={() => save(() => updateWorkItemParent(props.workspaceSlug, props.workItemId, parentId || null, Boolean(parentId && waitForParent)))} /></Popup> : null}</div></DetailField>
+                        <DetailField label="Dependencies" icon="dependency" className="lg:col-start-2 lg:row-start-2 lg:border-l lg:border-neutral-900 lg:pl-8"><div className="relative inline-block max-w-full"><button data-work-item-popup-trigger type="button" onClick={() => toggle("dependencies")} className="max-w-full rounded py-0.5 text-left hover:text-white">{props.dependencies.length ? props.dependencies.map((item) => item.title).join(", ") : "None"}</button>{open === "dependencies" ? <Popup className="w-80"><Search value={query} onChange={setQuery} placeholder="Search work items…" /><EditorOptionsNotice state={editorOptionsState} error={editorOptionsError} retry={() => void loadEditorOptions()} /><div className="max-h-64 overflow-y-auto p-1">{filteredWork.map((item) => <button type="button" key={item.id} disabled={item.id === parentId} onClick={() => toggleId(dependencyIds, item.id, setDependencyIds)} className="flex w-full gap-2 rounded-lg px-1.5 py-2 text-left text-sm hover:bg-neutral-900 disabled:opacity-40"><span className="min-w-0 flex-1 truncate">{item.title}</span><span>{dependencyIds.includes(item.id) ? "✓" : ""}</span></button>)}</div><PopupFooter pending={pending || editorOptionsState !== "loaded"} onClear={dependencyIds.length ? () => setDependencyIds([]) : undefined} onSave={() => save(() => updateWorkItemDependencies(props.workspaceSlug, props.workItemId, dependencyIds))} /></Popup> : null}</div></DetailField>
                         <DetailField label="Links" icon="relationship" className="lg:col-start-2 lg:row-start-3 lg:border-l lg:border-neutral-900 lg:pl-8">
                             <div className="relative inline-flex max-w-full flex-wrap gap-1.5">
                                 <button data-work-item-popup-trigger type="button" aria-disabled={props.linksLocked} onClick={() => { if (!props.linksLocked) toggle("links") }} className={`flex max-w-full flex-wrap gap-1.5 rounded p-0 ${props.linksLocked ? "cursor-not-allowed" : "hover:opacity-90"}`}>
@@ -378,6 +429,7 @@ export function InlineWorkItemFields(props: Props) {
                                 </button>
                                 {open === "links" ? <Popup className="w-[30rem] max-w-[calc(100vw-2rem)]">
                                     <Search value={query} onChange={setQuery} placeholder="Search relationships or Key Results…" />
+                                    <EditorOptionsNotice state={editorOptionsState} error={editorOptionsError} retry={() => void loadEditorOptions()} />
                                     <div className="max-h-[28rem] overflow-y-auto p-1">
                                         {!props.relationshipsLocked ? <>
                                             <p className="px-1.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-neutral-600">Relationships</p>
@@ -401,7 +453,7 @@ export function InlineWorkItemFields(props: Props) {
                                         }) : <p className="px-1.5 py-2 text-xs text-neutral-600">No committed Key Results found.</p>}
                                     </div>
                                     {error ? <p className="border-t border-red-500/20 px-2.5 py-2 text-xs text-red-300">{error}</p> : null}
-                                    <PopupFooter pending={pending} onClear={relationshipIds.length || keyResultEstimates.length ? () => { setRelationshipIds([]); setKeyResultEstimates([]) } : undefined} onSave={saveLinks} />
+                                    <PopupFooter pending={pending || editorOptionsState !== "loaded"} onClear={relationshipIds.length || keyResultEstimates.length ? () => { setRelationshipIds([]); setKeyResultEstimates([]) } : undefined} onSave={saveLinks} />
                                 </Popup> : null}
                             </div>
                         </DetailField>

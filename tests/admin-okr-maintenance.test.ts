@@ -233,12 +233,13 @@ test("the OKRs tab is a metric table with popup-only Objective and Key Result de
 })
 
 test("work-item Links combine relationships and committed Key Results", async () => {
-    const [migration, priorityMigration, fields, actions, page] = await Promise.all([
+    const [migration, priorityMigration, fields, actions, page, editorOptions] = await Promise.all([
         readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
         readFile("supabase/migrations/20260809120000_admin_work_priority_queue.sql", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/InlineWorkItemFields.tsx", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/actions.ts", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/page.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/work-items/[id]/editor-options/route.ts", "utf8"),
     ])
     assert.match(migration, /OKR work links must stay inside one workspace/)
     assert.doesNotMatch(migration, /area = 'admin'[\s\S]*visibility = 'admins_only'/)
@@ -255,8 +256,9 @@ test("work-item Links combine relationships and committed Key Results", async ()
     assert.match(fields, /<RoundPill tone="sky">\{result\.code\}<\/RoundPill>/)
     assert.match(actions, /export async function updateWorkItemLinks/)
     assert.match(actions, /Work can only be linked to committed Key Results/)
-    assert.match(page, /listActiveWorkspaceKeyResults/)
-    assert.match(page, /`KR-\$\{shortId\(result\.id\)\}`/)
+    assert.match(page, /editorOptionsHref=/)
+    assert.match(editorOptions, /listActiveWorkspaceKeyResults/)
+    assert.match(editorOptions, /`KR-\$\{shortId\(result\.id\)\}`/)
 })
 
 test("manual work priorities use time-horizon language", () => {
