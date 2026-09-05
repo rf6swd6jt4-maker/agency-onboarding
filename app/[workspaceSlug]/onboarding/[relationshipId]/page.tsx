@@ -1,8 +1,9 @@
 import Link from "next/link"
+import { Suspense } from "react"
 import { notFound } from "next/navigation"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
-import { DetailField, DetailFields, DetailPageHeader } from "@/components/detail"
+import { DetailContentLoading, DetailField, DetailFields, DetailFieldsLoading, DetailLoadingLabel, DetailPageHeader } from "@/components/detail"
 import { CopyOnboardingLink, OnboardingDangerZone, OnboardingLinkControls } from "@/components/onboarding/OnboardingDetailActions"
 import { archiveOnboarding, restartOnboarding, revokeOnboardingToken, rotateOnboardingToken } from "./actions"
 import { getOnboardingForm } from "@/lib/onboarding/forms"
@@ -425,6 +426,304 @@ function AssetRowLink({ asset, workspaceSlug }: { asset: AssetRow; workspaceSlug
     )
 }
 
+type OnboardingRelationship = NonNullable<Awaited<ReturnType<typeof getRelationship>>>
+
+function startOnboardingDetailData(input: {
+    workspaceId: string
+    workspaceSlug: string
+    customOnboardingDomain: string | null
+    customOnboardingDomainVerified: boolean
+    relationship: OnboardingRelationship
+    role: string
+    allowedServiceIds: string[]
+    canOpenCompleteClientSession: boolean
+}) {
+    const sessionResultPromise = Promise.resolve(supabaseAdmin
+        .from("relationship_onboarding_sessions")
+        .select("*")
+        .eq("workspace_id", input.workspaceId)
+        .eq("relationship_id", input.relationship.id)
+        .in("status", ["active", "completed"])
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle())
+    const modulesResultPromise = Promise.resolve(supabaseAdmin
+        .from("relationship_onboarding_modules")
+        .select("module_key")
+        .eq("workspace_id", input.workspaceId)
+        .eq("relationship_id", input.relationship.id)
+        .order("created_at", { ascending: true }))
+    const servicesResultPromise = Promise.resolve(supabaseAdmin
+        .from("relationship_services")
+        .select("service_key, service_id, service_revision_id, due_date")
+        .eq("workspace_id", input.workspaceId)
+        .eq("relationship_id", input.relationship.id)
+        .order("created_at", { ascending: true }))
+
+    const normalizedSnapshotPromise = sessionResultPromise.then(({ data: session }) => session ? loadNormalizedSessionSnapshot(session) : null)
+    const serviceRevisionsPromise = servicesResultPromise.then(({ data: services }) => {
+        const scoped = (services ?? []).filter((service) => input.role !== "staff" || input.allowedServiceIds.includes(service.service_id ?? ""))
+        return loadOnboardingServiceRevisionDisplays(input.workspaceId, scoped.map((service) => service.service_revision_id))
+    })
+    const workItemsPromise = sessionResultPromise.then(async ({ data: session }) => {
+        if (!session) return [] as WorkItemRow[]
+        const { data } = await supabaseAdmin
+            .from("work_items")
+            .select("id, title, description, status, sort_order, metadata, updated_at, created_at")
+            .eq("workspace_id", input.workspaceId)
+            .eq("native_kind", "onboarding_step")
+            .like("native_key", `${session.id}:%`)
+            .order("sort_order", { ascending: true })
+        return (data ?? []) as WorkItemRow[]
+    })
+    const assetsPromise = sessionResultPromise.then(async ({ data: session }) => {
+        if (!session) return [] as AssetRow[]
+        const { data } = await supabaseAdmin
+            .from("assets")
+            .select("id, title, asset_kind, native_kind, metadata, content_type, file_size, updated_at, created_at")
+            .eq("workspace_id", input.workspaceId)
+            .in("native_kind", ["onboarding_form_submission", "onboarding_upload"])
+            .like("native_key", `${session.id}:%`)
+            .order("updated_at", { ascending: false })
+        return (data ?? []) as AssetRow[]
+    })
+    const editRequestsPromise = Promise.all([sessionResultPromise, normalizedSnapshotPromise]).then(async ([{ data: session }, normalizedSnapshot]) => {
+        if (!session || !normalizedSnapshot) return [] as Array<{ session_step_id: string }>
+        const { data } = await supabaseAdmin.from("onboarding_edit_requests").select("session_step_id").eq("workspace_id", input.workspaceId).eq("session_id", session.id).eq("status", "pending")
+        return (data ?? []) as Array<{ session_step_id: string }>
+    })
+    const calendarRequirementsPromise = Promise.all([sessionResultPromise, normalizedSnapshotPromise]).then(async ([{ data: session }, normalizedSnapshot]) => {
+        if (!session || !normalizedSnapshot) return [] as CalendarRequirementRow[]
+        const { data } = await supabaseAdmin.from("onboarding_block_requirements").select("session_step_id, session_block_id, response, satisfied_at").eq("workspace_id", input.workspaceId).eq("session_id", session.id).eq("requirement_kind", "calendar_scheduled")
+        return (data ?? []) as CalendarRequirementRow[]
+    })
+
+    const summaryPromise = Promise.all([
+        sessionResultPromise,
+        modulesResultPromise,
+        servicesResultPromise,
+        serviceRevisionsPromise,
+        normalizedSnapshotPromise,
+    ]).then(([{ data: session }, { data: modules }, { data: services }, serviceRevisions, normalizedSnapshot]) => {
+        const scopedServices = (services ?? []).filter((service) => input.role !== "staff" || input.allowedServiceIds.includes(service.service_id ?? ""))
+        const moduleKeys = (modules ?? []).map((module) => module.module_key).filter((key): key is string => Boolean(key))
+        const scopedServiceRevisionIds = new Set(scopedServices.map((service) => service.service_revision_id).filter((id): id is string => Boolean(id)))
+        const scopedSnapshotModules = (normalizedSnapshot?.modules ?? []).filter((module) => (
+            input.role !== "staff"
+            || module.sourceKind === "mandatory"
+            || Boolean(module.sourceServiceRevisionId && scopedServiceRevisionIds.has(module.sourceServiceRevisionId))
+        ))
+        const scopedSnapshotModuleIds = new Set(scopedSnapshotModules.map((module) => module.id))
+        const scopedSnapshotSteps = (normalizedSnapshot?.actionableSteps ?? []).filter((step) => (
+            input.role !== "staff"
+            || !step.sessionModuleId
+            || scopedSnapshotModuleIds.has(step.sessionModuleId)
+        ))
+        const canonicalSteps: StaffSessionStep[] = normalizedSnapshot
+            ? scopedSnapshotSteps.map((step) => ({
+                key: step.id,
+                sessionStepId: step.id,
+                title: step.title,
+                description: step.description,
+                moduleTitle: step.moduleTitle,
+                estimatedTime: step.estimatedTime,
+                why: step.why,
+                kind: step.kind === "completion" ? "final" : step.kind === "welcome" ? "video" : step.kind,
+                formKey: step.legacyFormKey ?? undefined,
+                videoUrl: step.videoUrl,
+                fieldLabels: Object.fromEntries(step.fields.map((field) => [field.id, field.label])),
+                blockLabels: Object.fromEntries(step.blocks.flatMap((block) => block.kind === "calendar"
+                    ? [[block.sessionBlockId ?? block.id, block.title]]
+                    : [])),
+            }))
+            : session ? getOnboardingStepsForModules(moduleKeys) : []
+
+        return {
+            session,
+            modules: modules ?? [],
+            serviceRevisions,
+            normalizedSnapshot,
+            scopedServices,
+            scopedSnapshotModules,
+            canonicalSteps,
+            sessionCompleted: session?.status === "completed",
+            isTest: Boolean(session?.is_test) || input.relationship.source_metadata.is_test === true,
+            canManage: input.role === "owner" || input.role === "admin",
+            canOpenCompleteClientSession: input.canOpenCompleteClientSession,
+            onboardingUrl: session ? getOnboardingUrl(input.workspaceSlug, session.session_token, input.customOnboardingDomain, input.customOnboardingDomainVerified) : null,
+        }
+    })
+
+    const activityPromise = Promise.all([
+        summaryPromise,
+        workItemsPromise,
+        assetsPromise,
+        editRequestsPromise,
+        calendarRequirementsPromise,
+    ]).then(([summary, workItems, assets, editRequests, calendarRequirements]) => {
+        const scopedStepIds = new Set(summary.canonicalSteps.map((step) => step.sessionStepId ?? step.key))
+        const scopedWorkItems = workItems.filter((item) => input.role !== "staff" || scopedStepIds.has(metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")))
+        const scopedAssets = assets.filter((asset) => input.role !== "staff" || scopedStepIds.has(metadataValue(asset.metadata, "session_step_id") || metadataValue(asset.metadata, "step_key")))
+        const scopedEditRequests = editRequests.filter((request) => input.role !== "staff" || scopedStepIds.has(request.session_step_id))
+        const scopedCalendarRequirements = calendarRequirements.filter((requirement) => input.role !== "staff" || scopedStepIds.has(requirement.session_step_id)) as CalendarRequirementRow[]
+        const steps = buildStepDetails(summary.canonicalSteps, scopedWorkItems, scopedAssets, scopedCalendarRequirements, new Set(scopedEditRequests.map((request) => request.session_step_id)))
+        const percentage = getProgressPercentage(steps.map((step) => ({ key: step.key })), steps.filter((step) => step.status === "submitted" || step.status === "reviewed").map((step) => step.key))
+        const latestActivity = [
+            summary.session?.updated_at,
+            ...scopedWorkItems.map((item) => item.updated_at ?? item.created_at),
+            ...scopedAssets.map((asset) => asset.updated_at ?? asset.created_at),
+            ...scopedCalendarRequirements.map((requirement) => requirement.satisfied_at),
+        ].filter((value): value is string => Boolean(value)).reduce<string | null>((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, null)
+        return {
+            ...summary,
+            assets,
+            scopedAssets,
+            steps,
+            percentage,
+            latestActivity,
+            sessionStuck: summary.session ? isOnboardingStuck({ percentage, createdAt: summary.session.created_at, lastActivityAt: latestActivity }) : false,
+            timeline: computeTimeline(steps, Boolean(summary.session), summary.sessionCompleted),
+        }
+    })
+
+    return { summaryPromise, activityPromise }
+}
+
+type OnboardingDetailData = ReturnType<typeof startOnboardingDetailData>
+
+async function OnboardingProgress({ activityPromise }: { activityPromise: OnboardingDetailData["activityPromise"] }) {
+    const activity = await activityPromise
+    return <>{activity.percentage}%</>
+}
+
+async function OnboardingHeaderLabels({ activityPromise }: { activityPromise: OnboardingDetailData["activityPromise"] }) {
+    const activity = await activityPromise
+    return activity.isTest || activity.sessionStuck ? <>{activity.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}{activity.sessionStuck ? <SquarePill tone="red">Stuck</SquarePill> : null}</> : null
+}
+
+async function OnboardingAssetCount({ activityPromise }: { activityPromise: OnboardingDetailData["activityPromise"] }) {
+    return (await activityPromise).scopedAssets.length
+}
+
+async function OnboardingUpdated({ activityPromise, fallback }: { activityPromise: OnboardingDetailData["activityPromise"]; fallback: string }) {
+    const activity = await activityPromise
+    return formatRelativeTime(activity.latestActivity ?? fallback)
+}
+
+async function OnboardingFields({ data }: { data: OnboardingDetailData }) {
+    const summary = await data.summaryPromise
+    return <DetailFields>
+        <DetailField label="Progress" icon="progress">
+            <Suspense fallback={<DetailLoadingLabel>Calculating</DetailLoadingLabel>}>
+                <OnboardingProgress activityPromise={data.activityPromise} />
+            </Suspense>
+        </DetailField>
+        <DetailField label="Status" icon="status" className="lg:border-l lg:border-neutral-900 lg:pl-8">
+            <Status label={summary.sessionCompleted ? "Completed" : summary.session ? "Active" : "Not started"} tone={summary.sessionCompleted ? "green" : summary.session ? "yellow" : "grey"} />
+        </DetailField>
+        <DetailField label="Services" icon="services" className="lg:col-span-2">
+            <div className="flex flex-wrap gap-1.5">
+                {summary.scopedServices.map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, summary.serviceRevisions)}</RoundPill>)}
+                {!summary.scopedServices.length ? <span className="text-neutral-600">None</span> : null}
+            </div>
+        </DetailField>
+        <DetailField label="Modules" icon="modules" className="lg:col-span-2">
+            <div className="flex flex-wrap gap-1.5">
+                {summary.scopedSnapshotModules.map((snapshotModule) => <RoundPill key={snapshotModule.id} tone="sky">{snapshotModule.title}</RoundPill>)}
+                {!summary.normalizedSnapshot && summary.modules.map((module) => <RoundPill key={module.module_key} tone="sky">{MODULES[module.module_key]?.title ?? module.module_key}</RoundPill>)}
+                {!summary.scopedSnapshotModules.length && (Boolean(summary.normalizedSnapshot) || !summary.modules.length) ? <span className="text-neutral-600">None</span> : null}
+            </div>
+        </DetailField>
+    </DetailFields>
+}
+
+async function OnboardingActivity({ data, workspaceSlug, relationshipId }: { data: OnboardingDetailData; workspaceSlug: string; relationshipId: string }) {
+    const activity = await data.activityPromise
+    return <>
+        <section className="mt-4 overflow-hidden rounded-xl border border-neutral-800 bg-black sm:mt-6">
+                            <div className="border-b border-neutral-900 px-5 py-4">
+                                <div>
+                                    <h2 className="text-lg font-semibold">Onboarding timeline</h2>
+                                    <p className="mt-1 text-sm text-neutral-500">Completed steps jump to the submitted information below.</p>
+                                </div>
+                            </div>
+                            <div className="px-3 py-3 sm:px-4 sm:py-5">
+                                <MobileTimeline steps={activity.steps} />
+                                <div className="hidden overflow-x-auto pb-1 sm:block">
+                                    <div className="relative grid min-w-max items-start gap-3 px-5" style={{ gridTemplateColumns: `repeat(${activity.timeline.length}, minmax(6.5rem, 1fr))` }}>
+                                    <div className="absolute left-[3.25rem] right-[3.25rem] top-5 h-px bg-neutral-800" />
+                                    {activity.timeline.map((item, index) => (
+                                        <TimelineNode key={item.kind === "step" ? item.step.key : `${item.kind}-${index}`} item={item} />
+                                    ))}
+                                    </div>
+                                </div>
+                            </div>
+        </section>
+
+        <section className="mt-6 rounded-xl border border-neutral-800 bg-black p-5">
+                            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+                                <div>
+                                    <h2 className="text-lg font-semibold">Onboarding link</h2>
+                                    <p className="mt-1 text-sm text-neutral-500">The client-facing canonical session link for this relationship.</p>
+                                </div>
+                                {activity.session && activity.canManage ? (
+                                    <OnboardingLinkControls
+                                        initialPath={activity.onboardingUrl}
+                                        revoked={Boolean(activity.session.token_revoked_at)}
+                                        revokeAction={revokeOnboardingToken.bind(null, workspaceSlug, relationshipId)}
+                                        rotateAction={rotateOnboardingToken.bind(null, workspaceSlug, relationshipId)}
+                                    />
+                                ) : activity.onboardingUrl && !activity.session?.token_revoked_at && activity.canOpenCompleteClientSession ? (
+                                    <div className="grid grid-cols-2 gap-2 sm:flex">
+                                        <CopyOnboardingLink path={activity.onboardingUrl} />
+                                        <a href={activity.onboardingUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black">
+                                            Preview session
+                                        </a>
+                                    </div>
+                                ) : (
+                                    <span className="text-sm text-neutral-500">{activity.session && !activity.canOpenCompleteClientSession ? "The complete client session is restricted because this relationship includes other services." : "No active session"}</span>
+                                )}
+                            </div>
+        </section>
+
+        <section className="mt-6 overflow-hidden rounded-xl border border-neutral-800 bg-black">
+                            <div className="border-b border-neutral-900 px-5 py-4">
+                                <h2 className="text-lg font-semibold">Client information</h2>
+                                <p className="mt-1 text-sm text-neutral-500">Information submitted during onboarding stays available here after fulfilment starts.</p>
+                            </div>
+                            {activity.steps.length ? activity.steps.map((step) => (
+                                <StepInformationSection key={step.key} step={step} workspaceSlug={workspaceSlug} />
+                            )) : (
+                                <div className="px-5 py-6">
+                                    <p className="font-medium text-neutral-100">No onboarding steps generated yet.</p>
+                                    <p className="mt-2 text-sm leading-6 text-neutral-500">Start onboarding from the relationship page to generate the client-facing session and step work items.</p>
+                                </div>
+                            )}
+        </section>
+
+        {activity.canManage ? (
+            <OnboardingDangerZone
+                hasSession={Boolean(activity.session)}
+                archiveAction={archiveOnboarding.bind(null, workspaceSlug, relationshipId)}
+                restartAction={restartOnboarding.bind(null, workspaceSlug, relationshipId)}
+            />
+        ) : null}
+    </>
+}
+
+async function OnboardingContext({ data, workspaceSlug, relationship, role }: { data: OnboardingDetailData; workspaceSlug: string; relationship: OnboardingRelationship; role: string }) {
+    const activity = await data.activityPromise
+    return <ClientContextPanel
+        workspaceSlug={workspaceSlug}
+        relationship={relationship}
+        allowedDestinations={role === "staff" ? ["onboarding", "fulfilment"] : undefined}
+        metrics={[
+            { label: "Progress", value: `${activity.percentage}%` },
+            { label: "Assets", value: activity.assets.length },
+        ]}
+    />
+}
+
 export default async function OnboardingDetailPage({ params }: PageProps) {
     const { workspaceSlug, relationshipId } = await params
     const { workspace, user, role, access } = await requireWorkspacePanel(workspaceSlug, "onboarding")
@@ -435,261 +734,43 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
     ])
     if (allowedRelationshipIds && !allowedRelationshipIds.has(relationshipId)) notFound()
     if (!relationship) notFound()
-    const canOpenCompleteClientSession = !fullyAllowedRelationshipIds || fullyAllowedRelationshipIds.has(relationship.id)
-
-    const sessionResultPromise = supabaseAdmin
-        .from("relationship_onboarding_sessions")
-        .select("*")
-        .eq("workspace_id", workspace.id)
-        .eq("relationship_id", relationship.id)
-        .in("status", ["active", "completed"])
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    const modulesResultPromise = supabaseAdmin
-        .from("relationship_onboarding_modules")
-        .select("module_key")
-        .eq("workspace_id", workspace.id)
-        .eq("relationship_id", relationship.id)
-        .order("created_at", { ascending: true })
-    const servicesResultPromise = supabaseAdmin
-        .from("relationship_services")
-        .select("service_key, service_id, service_revision_id, due_date")
-        .eq("workspace_id", workspace.id)
-        .eq("relationship_id", relationship.id)
-        .order("created_at", { ascending: true })
-
-    // Start dependent reads as soon as their own key is available. Previously
-    // service revisions, the session snapshot, and session activity formed
-    // three sequential waves even though most of them are independent.
-    const normalizedSnapshotPromise = Promise.resolve(sessionResultPromise).then(({ data: session }) => session ? loadNormalizedSessionSnapshot(session) : null)
-    const serviceRevisionsPromise = Promise.resolve(servicesResultPromise).then(({ data: services }) => {
-        const scoped = (services ?? []).filter((service) => role !== "staff" || access.allowedServiceIds.includes(service.service_id ?? ""))
-        return loadOnboardingServiceRevisionDisplays(workspace.id, scoped.map((service) => service.service_revision_id))
+    const data = startOnboardingDetailData({
+        workspaceId: workspace.id,
+        workspaceSlug: workspace.slug,
+        customOnboardingDomain: workspace.custom_onboarding_domain,
+        customOnboardingDomainVerified: workspace.custom_onboarding_domain_status === "verified",
+        relationship,
+        role,
+        allowedServiceIds: access.allowedServiceIds,
+        canOpenCompleteClientSession: !fullyAllowedRelationshipIds || fullyAllowedRelationshipIds.has(relationship.id),
     })
-    const workItemsPromise = Promise.resolve(sessionResultPromise).then(async ({ data: session }) => {
-        if (!session) return [] as WorkItemRow[]
-        const { data } = await supabaseAdmin
-            .from("work_items")
-            .select("id, title, description, status, sort_order, metadata, updated_at, created_at")
-            .eq("workspace_id", workspace.id)
-            .eq("native_kind", "onboarding_step")
-            .like("native_key", `${session.id}:%`)
-            .order("sort_order", { ascending: true })
-        return (data ?? []) as WorkItemRow[]
-    })
-    const assetsPromise = Promise.resolve(sessionResultPromise).then(async ({ data: session }) => {
-        if (!session) return [] as AssetRow[]
-        const { data } = await supabaseAdmin
-            .from("assets")
-            .select("id, title, asset_kind, native_kind, metadata, content_type, file_size, updated_at, created_at")
-            .eq("workspace_id", workspace.id)
-            .in("native_kind", ["onboarding_form_submission", "onboarding_upload"])
-            .like("native_key", `${session.id}:%`)
-            .order("updated_at", { ascending: false })
-        return (data ?? []) as AssetRow[]
-    })
-    const editRequestsPromise = Promise.all([Promise.resolve(sessionResultPromise), normalizedSnapshotPromise]).then(async ([{ data: session }, normalizedSnapshot]) => {
-        if (!session || !normalizedSnapshot) return [] as Array<{ session_step_id: string }>
-        const { data } = await supabaseAdmin.from("onboarding_edit_requests").select("session_step_id").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("status", "pending")
-        return (data ?? []) as Array<{ session_step_id: string }>
-    })
-    const calendarRequirementsPromise = Promise.all([Promise.resolve(sessionResultPromise), normalizedSnapshotPromise]).then(async ([{ data: session }, normalizedSnapshot]) => {
-        if (!session || !normalizedSnapshot) return [] as CalendarRequirementRow[]
-        const { data } = await supabaseAdmin.from("onboarding_block_requirements").select("session_step_id, session_block_id, response, satisfied_at").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("requirement_kind", "calendar_scheduled")
-        return (data ?? []) as CalendarRequirementRow[]
-    })
+    const immediateTestLabel = relationship.source_metadata.is_test === true ? <SquarePill tone="yellow">Test</SquarePill> : null
 
-    const [
-        { data: session },
-        { data: modules },
-        { data: services },
-        serviceRevisions,
-        normalizedSnapshot,
-        workItems,
-        assets,
-        editRequests,
-        calendarRequirements,
-    ] = await Promise.all([
-        sessionResultPromise,
-        modulesResultPromise,
-        servicesResultPromise,
-        serviceRevisionsPromise,
-        normalizedSnapshotPromise,
-        workItemsPromise,
-        assetsPromise,
-        editRequestsPromise,
-        calendarRequirementsPromise,
-    ])
-
-    const scopedServices = (services ?? []).filter((service) => role !== "staff" || access.allowedServiceIds.includes(service.service_id ?? ""))
-    const moduleKeys = (modules ?? []).map((module) => module.module_key).filter((key): key is string => Boolean(key))
-    const scopedServiceRevisionIds = new Set(scopedServices.map((service) => service.service_revision_id).filter((id): id is string => Boolean(id)))
-    const scopedSnapshotModules = (normalizedSnapshot?.modules ?? []).filter((module) => (
-        role !== "staff"
-        || module.sourceKind === "mandatory"
-        || Boolean(module.sourceServiceRevisionId && scopedServiceRevisionIds.has(module.sourceServiceRevisionId))
-    ))
-    const scopedSnapshotModuleIds = new Set(scopedSnapshotModules.map((module) => module.id))
-    const scopedSnapshotSteps = (normalizedSnapshot?.actionableSteps ?? []).filter((step) => (
-        role !== "staff"
-        || !step.sessionModuleId
-        || scopedSnapshotModuleIds.has(step.sessionModuleId)
-    ))
-    const canonicalSteps: StaffSessionStep[] = normalizedSnapshot
-        ? scopedSnapshotSteps.map((step) => ({
-            key: step.id,
-            sessionStepId: step.id,
-            title: step.title,
-            description: step.description,
-            moduleTitle: step.moduleTitle,
-            estimatedTime: step.estimatedTime,
-            why: step.why,
-            kind: step.kind === "completion" ? "final" : step.kind === "welcome" ? "video" : step.kind,
-            formKey: step.legacyFormKey ?? undefined,
-            videoUrl: step.videoUrl,
-            fieldLabels: Object.fromEntries(step.fields.map((field) => [field.id, field.label])),
-            blockLabels: Object.fromEntries(step.blocks.flatMap((block) => block.kind === "calendar"
-                ? [[block.sessionBlockId ?? block.id, block.title]]
-                : [])),
-        }))
-        : session ? getOnboardingStepsForModules(moduleKeys) : []
-    const scopedStepIds = new Set(canonicalSteps.map((step) => step.sessionStepId ?? step.key))
-    const scopedWorkItems = (workItems ?? []).filter((item) => role !== "staff" || scopedStepIds.has(metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")))
-    const scopedAssets = (assets ?? []).filter((asset) => role !== "staff" || scopedStepIds.has(metadataValue(asset.metadata, "session_step_id") || metadataValue(asset.metadata, "step_key")))
-    const scopedEditRequests = (editRequests ?? []).filter((request) => role !== "staff" || scopedStepIds.has(request.session_step_id))
-    const scopedCalendarRequirements = (calendarRequirements ?? []).filter((requirement) => role !== "staff" || scopedStepIds.has(requirement.session_step_id)) as CalendarRequirementRow[]
-    const steps = buildStepDetails(canonicalSteps, scopedWorkItems as WorkItemRow[], scopedAssets as AssetRow[], scopedCalendarRequirements, new Set(scopedEditRequests.map((request) => request.session_step_id)))
-    const percentage = getProgressPercentage(steps.map((step) => ({ key: step.key })), steps.filter((step) => step.status === "submitted" || step.status === "reviewed").map((step) => step.key))
-    const latestActivity = [
-        session?.updated_at,
-        ...scopedWorkItems.map((item) => item.updated_at ?? item.created_at),
-        ...scopedAssets.map((asset) => asset.updated_at ?? asset.created_at),
-        ...scopedCalendarRequirements.map((requirement) => requirement.satisfied_at),
-    ].filter((value): value is string => Boolean(value)).reduce<string | null>((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, null)
-    const onboardingUrl = session ? getOnboardingUrl(workspace.slug, session.session_token, workspace.custom_onboarding_domain, workspace.custom_onboarding_domain_status === "verified") : null
-    const canManage = role === "owner" || role === "admin"
-    const sessionCompleted = session?.status === "completed"
-    const sessionStuck = session ? isOnboardingStuck({ percentage, createdAt: session.created_at, lastActivityAt: latestActivity }) : false
-    const isTest = Boolean(session?.is_test) || relationship.source_metadata.is_test === true
-    const timeline = computeTimeline(steps, Boolean(session), sessionCompleted)
-
-    return (
-        <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
-            <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
-            <div className="mx-auto max-w-[92rem]">
-                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
-                    <div className="min-w-0">
-                        <DetailPageHeader
-                            category="Onboarding"
-                            reference={shortId(relationship.id)}
-                            title={relationship.primary_person_name}
-                            subtitle={relationship.business_name ?? "No company saved"}
-                            labels={isTest || sessionStuck ? <>{isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}{sessionStuck ? <SquarePill tone="red">Stuck</SquarePill> : null}</> : null}
-                            facts={[{ label: "assets", value: scopedAssets.length }]}
-                            updated={formatRelativeTime(latestActivity ?? relationship.updated_at)}
-                        />
-
-                        <DetailFields>
-                            <DetailField label="Progress" icon="progress">{percentage}%</DetailField>
-                            <DetailField label="Status" icon="status" className="lg:border-l lg:border-neutral-900 lg:pl-8"><Status label={sessionCompleted ? "Completed" : session ? "Active" : "Not started"} tone={sessionCompleted ? "green" : session ? "yellow" : "grey"} /></DetailField>
-                            <DetailField label="Services" icon="services" className="lg:col-span-2">
-                                <div className="flex flex-wrap gap-1.5">
-                                    {scopedServices.map((service) => <RoundPill key={`${service.service_key}:${service.service_revision_id ?? "legacy"}`} tone="emerald">{relationshipServiceDisplayName(service, serviceRevisions)}</RoundPill>)}
-                                    {!scopedServices.length ? <span className="text-neutral-600">None</span> : null}
-                                </div>
-                            </DetailField>
-                            <DetailField label="Modules" icon="modules" className="lg:col-span-2">
-                                <div className="flex flex-wrap gap-1.5">
-                                    {scopedSnapshotModules.map((snapshotModule) => <RoundPill key={snapshotModule.id} tone="sky">{snapshotModule.title}</RoundPill>)}
-                                    {!normalizedSnapshot && (modules ?? []).map((module) => <RoundPill key={module.module_key} tone="sky">{MODULES[module.module_key]?.title ?? module.module_key}</RoundPill>)}
-                                    {!scopedSnapshotModules.length && (Boolean(normalizedSnapshot) || !modules?.length) ? <span className="text-neutral-600">None</span> : null}
-                                </div>
-                            </DetailField>
-                        </DetailFields>
-
-                        <section className="mt-4 overflow-hidden rounded-xl border border-neutral-800 bg-black sm:mt-6">
-                            <div className="border-b border-neutral-900 px-5 py-4">
-                                <div>
-                                    <h2 className="text-lg font-semibold">Onboarding timeline</h2>
-                                    <p className="mt-1 text-sm text-neutral-500">Completed steps jump to the submitted information below.</p>
-                                </div>
-                            </div>
-                            <div className="px-3 py-3 sm:px-4 sm:py-5">
-                                <MobileTimeline steps={steps} />
-                                <div className="hidden overflow-x-auto pb-1 sm:block">
-                                    <div className="relative grid min-w-max items-start gap-3 px-5" style={{ gridTemplateColumns: `repeat(${timeline.length}, minmax(6.5rem, 1fr))` }}>
-                                    <div className="absolute left-[3.25rem] right-[3.25rem] top-5 h-px bg-neutral-800" />
-                                    {timeline.map((item, index) => (
-                                        <TimelineNode key={item.kind === "step" ? item.step.key : `${item.kind}-${index}`} item={item} />
-                                    ))}
-                                    </div>
-                                </div>
-                            </div>
-                        </section>
-
-                        <section className="mt-6 rounded-xl border border-neutral-800 bg-black p-5">
-                            <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                                <div>
-                                    <h2 className="text-lg font-semibold">Onboarding link</h2>
-                                    <p className="mt-1 text-sm text-neutral-500">The client-facing canonical session link for this relationship.</p>
-                                </div>
-                                {session && canManage ? (
-                                    <OnboardingLinkControls
-                                        initialPath={onboardingUrl}
-                                        revoked={Boolean(session.token_revoked_at)}
-                                        revokeAction={revokeOnboardingToken.bind(null, workspace.slug, relationship.id)}
-                                        rotateAction={rotateOnboardingToken.bind(null, workspace.slug, relationship.id)}
-                                    />
-                                ) : onboardingUrl && !session?.token_revoked_at && canOpenCompleteClientSession ? (
-                                    <div className="grid grid-cols-2 gap-2 sm:flex">
-                                        <CopyOnboardingLink path={onboardingUrl} />
-                                        <a href={onboardingUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-black">
-                                            Preview session
-                                        </a>
-                                    </div>
-                                ) : (
-                                    <span className="text-sm text-neutral-500">{session && !canOpenCompleteClientSession ? "The complete client session is restricted because this relationship includes other services." : "No active session"}</span>
-                                )}
-                            </div>
-                        </section>
-
-                        <section className="mt-6 overflow-hidden rounded-xl border border-neutral-800 bg-black">
-                            <div className="border-b border-neutral-900 px-5 py-4">
-                                <h2 className="text-lg font-semibold">Client information</h2>
-                                <p className="mt-1 text-sm text-neutral-500">Information submitted during onboarding stays available here after fulfilment starts.</p>
-                            </div>
-                            {steps.length ? steps.map((step) => (
-                                <StepInformationSection key={step.key} step={step} workspaceSlug={workspace.slug} />
-                            )) : (
-                                <div className="px-5 py-6">
-                                    <p className="font-medium text-neutral-100">No onboarding steps generated yet.</p>
-                                    <p className="mt-2 text-sm leading-6 text-neutral-500">Start onboarding from the relationship page to generate the client-facing session and step work items.</p>
-                                </div>
-                            )}
-                        </section>
-
-                        {canManage ? (
-                            <OnboardingDangerZone
-                                hasSession={Boolean(session)}
-                                archiveAction={archiveOnboarding.bind(null, workspace.slug, relationship.id)}
-                                restartAction={restartOnboarding.bind(null, workspace.slug, relationship.id)}
-                            />
-                        ) : null}
-
-                    </div>
-
-                    <ClientContextPanel
-                        workspaceSlug={workspace.slug}
-                        relationship={relationship}
-                        allowedDestinations={role === "staff" ? ["onboarding", "fulfilment"] : undefined}
-                        metrics={[
-                            { label: "Progress", value: `${percentage}%` },
-                            { label: "Assets", value: assets?.length ?? 0 },
-                        ]}
+    return <main className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
+        <WorkspaceTopBar userId={user.id} workspace={workspace} workspaceAccess={access} currentProduct="client-work" />
+        <div className="mx-auto max-w-[92rem]">
+            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0">
+                    <DetailPageHeader
+                        category="Onboarding"
+                        reference={shortId(relationship.id)}
+                        title={relationship.primary_person_name}
+                        subtitle={relationship.business_name ?? "No company saved"}
+                        labels={<Suspense fallback={immediateTestLabel}><OnboardingHeaderLabels activityPromise={data.activityPromise} /></Suspense>}
+                        facts={[{ label: "assets", value: <Suspense fallback="—"><OnboardingAssetCount activityPromise={data.activityPromise} /></Suspense> }]}
+                        updated={<Suspense fallback={formatRelativeTime(relationship.updated_at)}><OnboardingUpdated activityPromise={data.activityPromise} fallback={relationship.updated_at} /></Suspense>}
                     />
+                    <Suspense fallback={<DetailFieldsLoading label="Loading onboarding details" rows={4} />}>
+                        <OnboardingFields data={data} />
+                    </Suspense>
+                    <Suspense fallback={<DetailContentLoading label="Loading onboarding activity" className="min-h-56" />}>
+                        <OnboardingActivity data={data} workspaceSlug={workspace.slug} relationshipId={relationship.id} />
+                    </Suspense>
                 </div>
+                <Suspense fallback={null}>
+                    <OnboardingContext data={data} workspaceSlug={workspace.slug} relationship={relationship} role={role} />
+                </Suspense>
             </div>
+        </div>
         </main>
-    )
 }

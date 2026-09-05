@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react"
 
-import { DetailPageHeader } from "@/components/detail"
+import { DetailFieldsLoading, DetailLoadingLabel, DetailPageHeader } from "@/components/detail"
 import { parseWorkspaceDetailPreview, readWorkspaceDetailPreview, serializeWorkspaceDetailPreview, type WorkspaceDetailPreview } from "@/lib/workspace-detail-preview"
 
 const subscribeToStoredPreview = () => () => undefined
@@ -27,7 +27,8 @@ export function DetailRouteLoading({ title, preview: suppliedPreview }: { title:
                 title={storedPreview.title}
                 subtitle={storedPreview.subtitle}
                 updated={storedPreview.updated ?? "just now"}
-            /> : <span className="sr-only">Opening {title}</span>}
+            /> : <header className="border-b border-neutral-800 pb-4"><DetailLoadingLabel>Opening {title}</DetailLoadingLabel></header>}
+            <DetailFieldsLoading label={`Loading ${title} details`} />
         </div>
     </main>
 }

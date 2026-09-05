@@ -303,6 +303,15 @@ A detail page is the canonical destination for one durable record. Relationship,
 
 The record-specific middle remains flexible. The header, fields, and destructive-action anatomy do not.
 
+### Progressive detail loading
+
+- Start independent record queries together. Progressive rendering must not introduce an artificial header-then-fields-then-content request waterfall.
+- During route navigation, retain a known record identity in `DetailPageHeader` when available and place `DetailFieldsLoading` directly beneath it. If no identity is known yet, show the compact opening label rather than a full-page generic skeleton.
+- In the resolved route, keep the real `DetailPageHeader` outside the data boundaries. Give `DetailFields` the first meaningful `Suspense` boundary, followed by a separate boundary for record-specific content.
+- Use `DetailContentLoading` for a heavier section such as a Gantt or onboarding timeline. The fallback identifies the pending section and reserves a modest amount of space; it must not imitate the entire final page or pulse every row.
+- Each boundary reveals once. Do not replace already-resolved fields with a second intermediate state, and do not refetch shared data for a later boundary; create and share one promise instead.
+- Keep `DetailDangerZone` last. A static danger zone does not need an artificial delay merely to make it appear later, but it must never block the header or fields from streaming.
+
 ### DetailPageHeader
 
 ```tsx

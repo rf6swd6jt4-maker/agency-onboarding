@@ -25,7 +25,7 @@ export function DetailPageHeader({
     subtitle?: ReactNode
     labels?: ReactNode
     facts?: DetailHeaderFacts
-    updated: string
+    updated: ReactNode
 }) {
     return <header className="border-b border-neutral-800 pb-4">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">

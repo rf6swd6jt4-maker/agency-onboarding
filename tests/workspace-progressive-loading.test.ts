@@ -49,6 +49,7 @@ test("panel tabs prefetch their exact frame route and detail tabs reuse list ide
     assert.match(bridge, /detailPreview: detailPreview \?\? undefined/)
     assert.match(shell, /<WorkspaceTabOpeningState[^>]*detailPreview=\{activeTab\.detailPreview\}/)
     assert.match(loading, /readWorkspaceDetailPreview\(window\.location\.pathname\)/)
+    assert.match(loading, /<DetailFieldsLoading label=\{`Loading \$\{title\} details`\} \/>/)
     assert.doesNotMatch(loading, /animate-pulse/)
 })
 
@@ -66,14 +67,17 @@ test("heavy panel homes stream their useful core before secondary metadata", () 
     }
 })
 
-test("relationship detail loading stays read-only and avoids a duplicate intermediate paint", () => {
+test("relationship detail streams fields before the independently loaded timeline", () => {
     const page = source("app/[workspaceSlug]/relationships/[relationshipId]/page.tsx")
+    const workspace = source("app/[workspaceSlug]/relationships/[relationshipId]/RelationshipDealWorkspace.tsx")
     const gantt = source("lib/relationship-gantt.ts")
     const configuration = source("lib/onboarding/configuration.ts")
 
     assert.match(page, /const planPromise = getRelationshipGanttPlan/)
     assert.doesNotMatch(page, /ensureCurrentRelationshipStage/)
-    assert.match(page, /<Suspense fallback=\{null\}>/)
+    assert.match(page, /<Suspense fallback=\{<DetailFieldsLoading label="Loading relationship details" rows=\{8\} \/>\}>/)
+    assert.match(workspace, /use\(planPromise\)/)
+    assert.match(workspace, /<DetailContentLoading label="Loading relationship timeline"/)
     assert.match(configuration, /rawConfiguration\(workspaceId, false\)/)
     assert.match(gantt, /\.eq\("relationship_id", relationship\.id\)/)
     assert.match(gantt, /\.in\("work_item_id", batch\)/)
@@ -92,6 +96,10 @@ test("detail bootstrap queries share access reads and defer editor-only choices"
     assert.match(access, /const loadWorkItemAccessRows = cache/)
     assert.match(onboarding, /const normalizedSnapshotPromise/)
     assert.match(onboarding, /const serviceRevisionsPromise/)
+    assert.match(onboarding, /const summaryPromise = Promise\.all/)
+    assert.match(onboarding, /const activityPromise = Promise\.all/)
+    assert.match(onboarding, /<DetailFieldsLoading label="Loading onboarding details"/)
+    assert.match(onboarding, /<DetailContentLoading label="Loading onboarding activity"/)
     assert.match(workItem, /includeAvailableWorkItems: false/)
     assert.match(workItem, /editorOptionsHref=/)
     assert.match(workItemFields, /fetch\(props\.editorOptionsHref/)

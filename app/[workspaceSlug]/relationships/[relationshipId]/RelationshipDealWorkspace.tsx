@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react"
+import { Suspense, use, useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { createPortal } from "react-dom"
 import { useRouter } from "next/navigation"
 import Image from "next/image"
 import { BuilderPreview } from "@/components/onboarding-builder/BuilderPreview"
-import { DetailField, DetailFields } from "@/components/detail"
+import { DetailContentLoading, DetailField, DetailFields } from "@/components/detail"
 import { RoundPill, SquarePill } from "@/components/ui"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import type { OnboardingPaymentDefinitionV2 } from "@/lib/onboarding/block-definition"
@@ -168,6 +168,34 @@ function MissingHint({ message }: { message: string | null }) {
     return message ? <span className="mt-1 block text-[11px] text-amber-300">{message}</span> : null
 }
 
+function RelationshipGanttContent({ workspaceSlug, relationshipId, planPromise, canEdit, currentWork, userId, onInvoiceRequest }: {
+    workspaceSlug: string
+    relationshipId: string
+    planPromise: Promise<RelationshipGanttPlan>
+    canEdit: boolean
+    currentWork: CurrentWork | null
+    userId: string
+    onInvoiceRequest: () => void
+}) {
+    const plan = use(planPromise)
+    const fallbackCurrentWork = plan.items.find((item) => (
+        item.workflowRole === "lifecycle_stage"
+        && !["done", "canceled"].includes(item.status)
+        && item.assignees.some((assignee) => assignee.userId === userId)
+    ))
+    const resolvedCurrentWork = currentWork ?? (fallbackCurrentWork ? {
+        id: fallbackCurrentWork.id,
+        title: fallbackCurrentWork.title,
+        action: fallbackCurrentWork.workflowAction,
+        role: fallbackCurrentWork.workflowRole,
+        status: fallbackCurrentWork.status,
+        unassignedCount: 0,
+        blocked: false,
+    } : null)
+
+    return <RelationshipGantt workspaceSlug={workspaceSlug} relationshipId={relationshipId} plan={plan} canEdit={canEdit} currentWork={resolvedCurrentWork} onInvoiceRequest={onInvoiceRequest} />
+}
+
 export function RelationshipDealWorkspace({
     workspaceSlug,
     workspaceName,
@@ -175,6 +203,7 @@ export function RelationshipDealWorkspace({
     privacyPolicyUrl,
     termsOfServiceUrl,
     relationshipId,
+    userId,
     updatedAt,
     details,
     members,
@@ -188,7 +217,7 @@ export function RelationshipDealWorkspace({
     whatsappVerified,
     twilioVerified,
     commercialLocked,
-    plan,
+    planPromise,
     canEdit,
     currentWork,
 }: {
@@ -198,6 +227,7 @@ export function RelationshipDealWorkspace({
     privacyPolicyUrl?: string | null
     termsOfServiceUrl?: string | null
     relationshipId: string
+    userId: string
     updatedAt: string
     details: RelationshipDetails
     members: Member[]
@@ -211,7 +241,7 @@ export function RelationshipDealWorkspace({
     whatsappVerified: boolean
     twilioVerified: boolean
     commercialLocked: boolean
-    plan: RelationshipGanttPlan
+    planPromise: Promise<RelationshipGanttPlan>
     canEdit: boolean
     currentWork: CurrentWork | null
 }) {
@@ -599,7 +629,9 @@ export function RelationshipDealWorkspace({
 
     return <>
         {detailsPanel}
-        <div className="mt-5"><RelationshipGantt workspaceSlug={workspaceSlug} relationshipId={relationshipId} plan={plan} canEdit={canEdit} currentWork={currentWork} onInvoiceRequest={openInvoiceReview} /></div>
+        <Suspense fallback={<DetailContentLoading label="Loading relationship timeline" className="mt-5 min-h-72" />}>
+            <div className="mt-5"><RelationshipGanttContent workspaceSlug={workspaceSlug} relationshipId={relationshipId} planPromise={planPromise} canEdit={canEdit} currentWork={currentWork} userId={userId} onInvoiceRequest={openInvoiceReview} /></div>
+        </Suspense>
         {modal}
         {preview}
         {notice ? <WorkspaceSuccessNotice label={notice.label} /> : null}

@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { Suspense } from "react"
 import { notFound } from "next/navigation"
-import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailPageHeader } from "@/components/detail"
+import { DetailDangerAction, DetailDangerButton, DetailDangerZone, DetailFieldsLoading, DetailPageHeader } from "@/components/detail"
 import { RelationshipStage, SquarePill } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ClientContextPanel } from "@/components/workspace/ClientContextPanel"
@@ -49,8 +49,7 @@ async function RelationshipWorkspace({ workspaceId, workspaceSlug, workspaceName
     relationship: RelationshipRecord
     planPromise: Promise<RelationshipGanttPlan>
 }) {
-    const [plan, servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult, publicBranding, brandAssets, lookedUpCurrentWork] = await Promise.all([
-        planPromise,
+    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult, publicBranding, brandAssets, currentWork] = await Promise.all([
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspaceId).eq("relationship_id", relationship.id),
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspaceId),
         loadPublishedOnboardingConfiguration(workspaceId),
@@ -93,20 +92,6 @@ async function RelationshipWorkspace({ workspaceId, workspaceSlug, workspaceName
         selected: storedServices,
         revisions: serviceRevisions,
     })
-    const fallbackCurrentWork = plan.items.find((item) => (
-        item.workflowRole === "lifecycle_stage"
-        && !["done", "canceled"].includes(item.status)
-        && item.assignees.some((assignee) => assignee.userId === userId)
-    ))
-    const currentWork = lookedUpCurrentWork ?? (fallbackCurrentWork ? {
-        id: fallbackCurrentWork.id,
-        title: fallbackCurrentWork.title,
-        action: fallbackCurrentWork.workflowAction,
-        role: fallbackCurrentWork.workflowRole,
-        status: fallbackCurrentWork.status,
-        unassignedCount: 0,
-        blocked: false,
-    } : null)
     const dealServices = serviceOptions.map((service) => {
         const configured = onboardingConfiguration.services.find((candidate) => candidate.id === service.serviceId || candidate.code === service.code)
         return {
@@ -142,6 +127,7 @@ async function RelationshipWorkspace({ workspaceId, workspaceSlug, workspaceName
         privacyPolicyUrl={publicBranding.privacyPolicyUrl}
         termsOfServiceUrl={publicBranding.termsOfServiceUrl}
         relationshipId={relationship.id}
+        userId={userId}
         updatedAt={relationship.updated_at}
         details={{
             primaryPersonName: relationship.primary_person_name,
@@ -170,7 +156,7 @@ async function RelationshipWorkspace({ workspaceId, workspaceSlug, workspaceName
         whatsappVerified={onboardingConfiguration.help.whatsappVerified}
         twilioVerified={Boolean(twilioConnectionResult.data?.enabled && twilioConnectionResult.data.connection_status === "connected")}
         commercialLocked={Boolean(currentSaleResult.data)}
-        plan={plan}
+        planPromise={planPromise}
         canEdit={role === "owner" || role === "admin"}
         currentWork={currentWork}
     />
@@ -206,7 +192,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                         updated={formatRelativeTime(relationship.updated_at)}
                     />
 
-                    <Suspense fallback={null}>
+                    <Suspense fallback={<DetailFieldsLoading label="Loading relationship details" rows={8} />}>
                         <RelationshipWorkspace workspaceId={workspace.id} workspaceSlug={workspace.slug} workspaceName={workspace.name} userId={user.id} role={role} relationship={relationship} planPromise={planPromise} />
                     </Suspense>
 
