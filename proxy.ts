@@ -4,7 +4,14 @@ import { migrateLegacyAuthCookies } from "@/lib/supabase/legacy-cookies"
 import { applySessionResponseHeaders, carrySessionResponse, persistentSessionOptions, sessionCookieDomain, sessionCookieOptions } from "@/lib/supabase/session-cookies"
 import { authHostname, authOrigin } from "@/lib/auth/origin"
 import { WORKSPACE_TAB_FRAME_PARAM } from "@/lib/workspace-tabs"
-import { WORKSPACE_SHELL_INTERNAL_PREFIX, WORKSPACE_SHELL_REQUEST_HEADER, workspaceRouteUsesShell, workspaceShellRoute } from "@/lib/workspace-shell"
+import {
+    WORKSPACE_DOCUMENT_REQUEST_HEADER,
+    WORKSPACE_SHELL_INTERNAL_PREFIX,
+    WORKSPACE_SHELL_REQUEST_HEADER,
+    workspaceRouteUsesShell,
+    workspaceShellRoute,
+    workspaceShellRuntime,
+} from "@/lib/workspace-shell"
 
 async function refreshSession(request: NextRequest) {
     const headers = requestHeadersWithCurrentPath(request)
@@ -210,8 +217,11 @@ export async function proxy(request: NextRequest) {
             const headers = requestHeadersWithCurrentPath(request)
             headers.set("x-betelgeze-workspace-slug", workspaceSlug)
             if (!request.nextUrl.searchParams.has(WORKSPACE_TAB_FRAME_PARAM) && workspaceRouteUsesShell(path)) {
-                headers.set(WORKSPACE_SHELL_REQUEST_HEADER, "1")
-                return withSession(withRewrite(request, workspaceShellRoute(workspaceSlug), headers))
+                if (workspaceShellRuntime() === "frames") {
+                    headers.set(WORKSPACE_SHELL_REQUEST_HEADER, "1")
+                    return withSession(withRewrite(request, workspaceShellRoute(workspaceSlug), headers))
+                }
+                headers.set(WORKSPACE_DOCUMENT_REQUEST_HEADER, "1")
             }
             return withSession(withRewrite(request, path, headers))
         }

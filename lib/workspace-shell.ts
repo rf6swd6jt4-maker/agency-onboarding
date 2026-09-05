@@ -1,5 +1,12 @@
 export const WORKSPACE_SHELL_INTERNAL_PREFIX = "/~workspace-shell"
 export const WORKSPACE_SHELL_REQUEST_HEADER = "x-betelgeze-workspace-shell"
+export const WORKSPACE_DOCUMENT_REQUEST_HEADER = "x-betelgeze-workspace-document"
+
+export type WorkspaceShellRuntime = "document" | "frames"
+
+export function workspaceShellRuntime(value = process.env.BETELGEZE_WORKSPACE_SHELL): WorkspaceShellRuntime {
+    return value?.trim().toLowerCase() === "frames" ? "frames" : "document"
+}
 
 const WORKSPACE_SHELL_SECTIONS = new Set([
     "admin",

@@ -172,6 +172,36 @@ test("client and team chats reconcile missed Realtime events without a reload", 
     }
 })
 
+test("one-document shell transfers background unread monitoring without duplicating chat clients", async () => {
+    const [shell, service, hook, clientWorkspace, teamWorkspace, route, migration] = await Promise.all([
+        readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("components/workspace/useWorkspaceCommunicationsService.ts", "utf8"),
+        readFile("components/communications/useReliableCommunicationsRealtime.ts", "utf8"),
+        readFile("components/communications/CommunicationsWorkspace.tsx", "utf8"),
+        readFile("components/communications/TeamCommunicationsWorkspace.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/communications/unread/route.ts", "utf8"),
+        readFile("supabase/migrations/20260905193000_workspace_communications_unread_service.sql", "utf8"),
+    ])
+
+    assert.match(shell, /communicationsTabOpen && !activeTabIsCommunications/)
+    assert.match(shell, /supabase: shellSupabase/)
+    assert.match(service, /await synchronize\(\)\s+await refreshRealtimeAuth\(\)/)
+    assert.match(service, /subscribedChannels === expectedSubscriptions/)
+    assert.match(service, /SAFETY_SYNC_MS = 20_000/)
+    assert.match(service, /client_messages/)
+    assert.match(service, /workspace_native_messages/)
+    assert.doesNotMatch(service, /setMessages|updateConversationMessages|native_typing/)
+    assert.match(hook, /const connectionEnabled = documentRuntime\?\.active \?\? true/)
+    assert.match(hook, /!schemaReady \|\| !connectionEnabled/)
+    assert.match(clientWorkspace, /useLayoutEffect\(\(\) => \{\s+if \(active && workspaceTabActive && documentVisible\) return\s+clearPendingWhatsAppTyping\(\)/)
+    assert.match(teamWorkspace, /useLayoutEffect\(\(\) => \{\s+if \(active && workspaceTabActive && documentVisible\) return\s+stopNativeTyping/)
+    assert.match(route, /requireWorkspacePanel\(workspaceSlug, "communications"\)/)
+    assert.match(route, /workspace_communications_unread_counts/)
+    assert.match(migration, /grant execute on function public\.workspace_communications_unread_counts\(uuid, uuid\) to service_role/)
+    assert.match(migration, /relationship\.status is distinct from 'archived'/)
+    assert.match(migration, /visibility\.cleared_at is null or message\.created_at > visibility\.cleared_at/)
+})
+
 test("direct omnichannel sending is durable and idempotent", async () => {
     const [migration, omnichannelMigration, route, omnichannel, meta, webhook] = await Promise.all([
         readFile("supabase/migrations/20260814200000_communications_workspace.sql", "utf8"),

@@ -1,5 +1,6 @@
 import { WorkspaceTopBarClient } from "@/components/workspace/WorkspaceTopBarClient"
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
+import type { ReactNode } from "react"
 import { createAssetFromModal, createRelationshipFromModal, createWorkItemFromModal } from "@/app/[workspaceSlug]/relationships/actions"
 import { headers } from "next/headers"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -10,6 +11,7 @@ import { createOkrFromModal } from "@/app/[workspaceSlug]/admin/actions"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { accessibleRelationshipIds, accessibleWorkItemIds, loadWorkspaceAccess, type WorkspaceAccess } from "@/lib/workspace-access"
 import { workspaceTabIdFromUrl } from "@/lib/workspace-tabs"
+import { WORKSPACE_DOCUMENT_REQUEST_HEADER } from "@/lib/workspace-shell"
 
 type Product = "client-work" | "leadgen"
 
@@ -19,12 +21,16 @@ type Props = {
     currentProduct: Product
     workspaceAccess?: WorkspaceAccess
     initialWorkspaceUrl?: string
+    documentContent?: ReactNode
+    documentShell?: boolean
 }
 
-export async function WorkspaceTopBar({ userId, workspace, workspaceAccess, initialWorkspaceUrl }: Props) {
-    const currentPath = (await headers()).get("x-betelgeze-current-path")
+export async function WorkspaceTopBar({ userId, workspace, workspaceAccess, initialWorkspaceUrl, documentContent, documentShell = false }: Props) {
+    const requestHeaders = await headers()
+    const currentPath = requestHeaders.get("x-betelgeze-current-path")
     const tabId = workspaceTabIdFromUrl(currentPath)
     if (tabId) return <WorkspaceTabBridge tabId={tabId} workspaceSlug={workspace.slug} />
+    if (requestHeaders.get(WORKSPACE_DOCUMENT_REQUEST_HEADER) === "1" && !documentShell) return null
 
     const [{ data: profile }, { data: authResult }, { data: membership }] = await Promise.all([
         supabaseAdmin.from("user_profiles").select("username, avatar_path").eq("user_id", userId).maybeSingle(),
@@ -67,6 +73,8 @@ export async function WorkspaceTopBar({ userId, workspace, workspaceAccess, init
     return <WorkspaceTopBarClient
         workspace={workspace}
         initialWorkspaceUrl={initialWorkspaceUrl}
+        documentContent={documentContent}
+        runtimeMode={documentShell ? "document" : "frames"}
         currentUserId={userId}
         workspaceLogoSrc={workspaceLogoSrc}
         username={username}

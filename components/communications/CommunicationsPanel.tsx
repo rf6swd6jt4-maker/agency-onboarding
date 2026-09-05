@@ -9,12 +9,14 @@ import type { CommunicationsConnectionState } from "@/components/communications/
 import type { CommunicationsBootstrap } from "@/lib/communications/types"
 import type { NativeCommunicationsBootstrap } from "@/lib/teams/types"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_MESSAGE_SOURCE, type WorkspaceTabFrameMessage } from "@/lib/workspace-tabs"
+import { useWorkspaceDocumentRuntime } from "@/components/workspace/WorkspaceDocumentRuntime"
 
 export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialMode }: {
     clientBootstrap: CommunicationsBootstrap
     nativeBootstrap: NativeCommunicationsBootstrap
     initialMode: "clients" | "team"
 }) {
+    const documentRuntime = useWorkspaceDocumentRuntime()
     const [mode, setModeState] = useState(initialMode)
     const [clientSelectedId, setClientSelectedId] = useState(clientBootstrap.selectedConversationId)
     const [nativeSelectedId, setNativeSelectedId] = useState(nativeBootstrap.requestedConversationId)
@@ -33,8 +35,8 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
     }, [clientBootstrap.workspaceId])
 
     useEffect(() => {
-        const tabId = new URL(window.location.href).searchParams.get(WORKSPACE_TAB_FRAME_PARAM)
-        if (!tabId || window.parent === window) return
+        const tabId = new URL(window.location.href).searchParams.get(WORKSPACE_TAB_FRAME_PARAM) ?? documentRuntime?.tabId
+        if (!tabId) return
         const message: WorkspaceTabFrameMessage = {
             source: WORKSPACE_TAB_MESSAGE_SOURCE,
             target: "host",
@@ -43,7 +45,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             unreadCount,
         }
         window.parent.postMessage(message, window.location.origin)
-    }, [unreadCount])
+    }, [documentRuntime?.tabId, unreadCount])
 
     useEffect(() => {
         const url = new URL(window.location.href)
@@ -55,9 +57,9 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             url.searchParams.delete("dm")
         } else url.searchParams.delete("nativeConversation")
 
-        const tabId = url.searchParams.get(WORKSPACE_TAB_FRAME_PARAM)
+        const tabId = url.searchParams.get(WORKSPACE_TAB_FRAME_PARAM) ?? documentRuntime?.tabId
         window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
-        if (!tabId || window.parent === window) return
+        if (!tabId) return
         const shellUrl = new URL(url)
         shellUrl.searchParams.delete(WORKSPACE_TAB_FRAME_PARAM)
         const message: WorkspaceTabFrameMessage = {
@@ -68,7 +70,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             url: `${shellUrl.pathname}${shellUrl.search}${shellUrl.hash}`,
         }
         window.parent.postMessage(message, window.location.origin)
-    }, [clientSelectedId, mode, nativeSelectedId])
+    }, [clientSelectedId, documentRuntime?.tabId, mode, nativeSelectedId])
 
     const setMode = useCallback((next: "clients" | "team") => {
         setModeState(next)

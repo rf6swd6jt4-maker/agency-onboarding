@@ -3,8 +3,8 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link"
-import { useCallback, useEffect, useId, useRef, useState, useTransition, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
-import { usePathname, useSearchParams } from "next/navigation"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { AccountMenu } from "@/components/account/AccountMenu"
 import { Avatar } from "@/components/account/Avatar"
 import { LoadingOverlay } from "@/components/LoadingOverlay"
@@ -12,9 +12,11 @@ import { UnreadMessageCount } from "@/components/communications/UnreadMessageCou
 import { shortId } from "@/lib/ui/relative-time"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
+import { WorkspaceDocumentRuntimeProvider } from "@/components/workspace/WorkspaceDocumentRuntime"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { WorkspaceMemberProfileModal } from "@/components/workspace/WorkspaceMemberProfileModal"
 import { WorkspaceTabOpeningState } from "@/components/workspace/WorkspaceTabOpeningState"
+import { useWorkspaceCommunicationsService } from "@/components/workspace/useWorkspaceCommunicationsService"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -27,6 +29,7 @@ import { parseWorkspaceDetailPreview, storeWorkspaceDetailPreview, type Workspac
 import { WORKSPACE_COMPOSER_FOCUS_EVENT, type WorkspaceComposerFocusEventDetail } from "@/lib/workspace-composer-viewport"
 import { visibleWorkspacePresence, workspacePresenceRoster, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceRosterMember, type WorkspacePresenceState } from "@/lib/workspace-presence"
 import {
+    flushWorkspaceAutosaves,
     runWorkspaceMutation,
     WORKSPACE_MUTATION_END,
     WORKSPACE_MUTATION_START,
@@ -63,6 +66,7 @@ const WORKSPACE_KEYBOARD_SETTLE_MS = WORKSPACE_KEYBOARD_MOTION_MS + 340
 const MAX_RESIDENT_WORKSPACE_FRAMES = 3
 const WORKSPACE_SOFT_NAVIGATION_FALLBACK_MS = 8_000
 const WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX = 64
+const WORKSPACE_BROWSER_TAB_STATE_KEY = "__betelgezeWorkspaceTab"
 type WorkspacePresenceChannel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>
 
 type WorkspaceTab = {
@@ -78,7 +82,7 @@ type WorkspaceTab = {
 
 type WorkspaceTabsState = {
     activeId: string
-    mode?: "live"
+    mode?: "document" | "live"
     tabs: WorkspaceTab[]
 }
 
@@ -106,6 +110,21 @@ type WorkspaceTabNavigationState = {
     error?: string
 }
 
+type WorkspaceBrowserTabState = {
+    workspaceSlug: string
+    tabId: string
+}
+
+function workspaceBrowserTabState(value: unknown, workspaceSlug: string): WorkspaceBrowserTabState | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null
+    const candidate = (value as Record<string, unknown>)[WORKSPACE_BROWSER_TAB_STATE_KEY]
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null
+    const record = candidate as Record<string, unknown>
+    return record.workspaceSlug === workspaceSlug && typeof record.tabId === "string" && record.tabId
+        ? { workspaceSlug, tabId: record.tabId }
+        : null
+}
+
 type Props = {
     workspace: { id: string; name: string; slug: string }
     initialWorkspaceUrl?: string
@@ -127,6 +146,8 @@ type Props = {
     workspaceMembers: Array<{ id: string; name: string; avatarSrc: string | null }>
     okrPeriodStart: string
     okrPeriodEnd: string
+    runtimeMode?: "document" | "frames"
+    documentContent?: ReactNode
 }
 
 type SearchResult = {
@@ -436,9 +457,12 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
+function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd, runtimeMode = "frames", documentContent }: Props) {
+    const router = useRouter()
     const pathname = usePathname()
     const searchParams = useSearchParams()
+    const shellSupabase = useMemo(() => createSupabaseBrowserClient(), [])
+    const documentMode = runtimeMode === "document"
     const searchMenuId = useId()
     const desktopSearchRef = useRef<HTMLDivElement>(null)
     const desktopSearchInputRef = useRef<HTMLInputElement>(null)
@@ -446,6 +470,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const mobileSearchInputRef = useRef<HTMLInputElement>(null)
     const sidebarTransitionTimeout = useRef<number | null>(null)
     const activeTabIdRef = useRef("")
+    const renderedDocumentTabIdRef = useRef("")
+    const lastCommittedDocumentUrlRef = useRef("")
     const tabsRef = useRef<WorkspaceTab[]>([])
     const tabsBootstrappedRef = useRef(false)
     const shellRootRef = useRef<HTMLDivElement>(null)
@@ -492,6 +518,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const [tabs, setTabs] = useState<WorkspaceTab[]>([])
     const [tabFrameOrder, setTabFrameOrder] = useState<string[]>([])
     const [activeTabId, setActiveTabId] = useState("")
+    const [renderedDocumentTabId, setRenderedDocumentTabId] = useState("")
     const [canAddTab, setCanAddTab] = useState(true)
     const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
     const [tabDragPreview, setTabDragPreview] = useState<WorkspaceTabDragPreview | null>(null)
@@ -530,22 +557,29 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const capabilitySet = new Set(workspaceCapabilities)
     const canOpenWorkspaceUrl = useCallback((value: string) => canAccessWorkspaceUrl(value, workspace.slug, workspaceRole, workspaceCapabilities), [workspace.slug, workspaceRole, workspaceCapabilities])
     const activateWorkspaceTab = useCallback((tabId: string) => {
-        setResidentTabIds((current) => {
-            const next = [tabId, ...current.filter((id) => id !== tabId)].slice(0, MAX_RESIDENT_WORKSPACE_FRAMES)
-            return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next
-        })
+        if (!documentMode) {
+            setResidentTabIds((current) => {
+                const next = [tabId, ...current.filter((id) => id !== tabId)].slice(0, MAX_RESIDENT_WORKSPACE_FRAMES)
+                return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next
+            })
+        }
         setActiveTabId(tabId)
-    }, [])
+    }, [documentMode])
     const warmWorkspaceTab = useCallback((tabId: string) => {
         const activeId = activeTabIdRef.current
         if (!tabId || tabId === activeId || !tabsRef.current.some((tab) => tab.id === tabId)) return
+        if (documentMode) {
+            const tab = tabsRef.current.find((candidate) => candidate.id === tabId)
+            if (tab) router.prefetch(tab.url)
+            return
+        }
         setResidentTabIds((current) => {
             const next = [activeId, tabId, ...current]
                 .filter((id, index, values) => Boolean(id) && values.indexOf(id) === index)
                 .slice(0, MAX_RESIDENT_WORKSPACE_FRAMES)
             return next.length === current.length && next.every((id, index) => id === current[index]) ? current : next
         })
-    }, [])
+    }, [documentMode, router])
     const cancelScheduledTabWarm = useCallback((tabId: string) => {
         if (tabWarmTargetRef.current !== tabId) return
         if (tabWarmTimeoutRef.current) window.clearTimeout(tabWarmTimeoutRef.current)
@@ -564,7 +598,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [residentTabIds, warmWorkspaceTab])
 
     useEffect(() => {
-        if (!tabsHydrated || tabs.length < 2 || !loadedTabIds.has(activeTabId)) return
+        if (documentMode || !tabsHydrated || tabs.length < 2 || !loadedTabIds.has(activeTabId)) return
         const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId)
         if (activeIndex < 0) return
         const candidates = [tabs[activeIndex + 1], tabs[activeIndex - 1]].filter((tab): tab is WorkspaceTab => Boolean(tab))
@@ -578,7 +612,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         }
         const timeout = window.setTimeout(warm, 180)
         return () => window.clearTimeout(timeout)
-    }, [activeTabId, loadedTabIds, residentTabIds, tabs, tabsHydrated, warmWorkspaceTab])
+    }, [activeTabId, documentMode, loadedTabIds, residentTabIds, tabs, tabsHydrated, warmWorkspaceTab])
 
     useEffect(() => {
         const openFromEvent = (event: Event) => {
@@ -615,6 +649,18 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
 
     const normalizeWorkspaceUrl = useCallback((value: string) => {
         return normalizeWorkspaceRoute(value, workspace.slug, window.location.origin)
+    }, [workspace.slug])
+
+    const writeWorkspaceBrowserTabState = useCallback((tabId: string, mode: "push" | "replace" = "replace") => {
+        const currentState = window.history.state && typeof window.history.state === "object"
+            ? window.history.state as Record<string, unknown>
+            : {}
+        const nextState = {
+            ...currentState,
+            [WORKSPACE_BROWSER_TAB_STATE_KEY]: { workspaceSlug: workspace.slug, tabId } satisfies WorkspaceBrowserTabState,
+        }
+        if (mode === "push") window.history.pushState(nextState, "", window.location.href)
+        else window.history.replaceState(nextState, "", window.location.href)
     }, [workspace.slug])
 
     const titleForUrl = useCallback((url: string) => {
@@ -656,8 +702,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [workspace.slug])
 
     const saveTabsState = useCallback((nextTabs: WorkspaceTab[], nextActiveId: string) => {
-        sessionStorage.setItem(tabsStorageKey, JSON.stringify({ mode: "live", tabs: nextTabs, activeId: nextActiveId }))
-    }, [tabsStorageKey])
+        sessionStorage.setItem(tabsStorageKey, JSON.stringify({ mode: documentMode ? "document" : "live", tabs: nextTabs, activeId: nextActiveId }))
+    }, [documentMode, tabsStorageKey])
 
     const showCreationNotice = useCallback((notice: CreationNotice) => {
         if (creationNoticeTimeoutRef.current) window.clearTimeout(creationNoticeTimeoutRef.current)
@@ -729,12 +775,14 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                     return restored
                 })
                 const frame = iframeRefs.current.get(tabId)
-                if (frame?.contentWindow) {
+                if (!documentMode && frame?.contentWindow) {
                     try {
                         frame.contentWindow.location.replace(workspaceTabFrameUrl(fallback.url, tabId, window.location.origin))
                     } catch {
                         frame.src = workspaceTabFrameUrl(fallback.url, tabId, window.location.origin)
                     }
+                } else if (documentMode && tabId === activeTabIdRef.current) {
+                    router.replace(fallback.url, { scroll: false })
                 }
             }
             navigationTimeoutRef.current.delete(tabId)
@@ -745,7 +793,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             }))
         }, 12_000)
         navigationTimeoutRef.current.set(tabId, timeout)
-    }, [saveTabsState])
+    }, [documentMode, router, saveTabsState])
 
     useEffect(() => () => {
         for (const timeout of navigationTimeoutRef.current.values()) window.clearTimeout(timeout)
@@ -792,19 +840,38 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             const activeId = typeof parsed.activeId === "string" && tabsToUse.some((tab) => tab.id === parsed.activeId)
                 ? parsed.activeId
                 : tabsToUse[0].id
-            const migratedTabs = parsed.mode === "live"
+            let migratedTabs = parsed.mode === "live" || parsed.mode === "document"
                 ? tabsToUse
                 : tabsToUse.map((tab) => tab.id === activeId ? { ...tab, url: currentUrl, title: titleForUrl(currentUrl), history: [currentUrl], historyIndex: 0 } : tab)
+
+            let resolvedActiveId = activeId
+            if (documentMode) {
+                const browserTabId = workspaceBrowserTabState(window.history.state, workspace.slug)?.tabId
+                const matchingTab = migratedTabs.find((tab) => tab.id === browserTabId)
+                    ?? migratedTabs.find((tab) => tab.url === currentUrl)
+                if (matchingTab) {
+                    resolvedActiveId = matchingTab.id
+                    if (matchingTab.url !== currentUrl) {
+                        migratedTabs = migratedTabs.map((tab) => tab.id === matchingTab.id
+                            ? { ...tab, url: currentUrl, title: titleForUrl(currentUrl), history: [currentUrl], historyIndex: 0, detailPreview: undefined }
+                            : tab)
+                    }
+                } else {
+                    migratedTabs = migratedTabs.map((tab) => tab.id === activeId
+                        ? { ...tab, url: currentUrl, title: titleForUrl(currentUrl), history: [currentUrl], historyIndex: 0, detailPreview: undefined }
+                        : tab)
+                }
+            }
             return {
-                activeId,
-                mode: "live",
+                activeId: resolvedActiveId,
+                mode: documentMode ? "document" : "live",
                 tabs: migratedTabs,
             }
         } catch {
             const tab = { id: createTabId(), url: currentUrl, title: titleForUrl(currentUrl), history: [currentUrl], historyIndex: 0, seenRevision: 0 }
-            return { activeId: tab.id, mode: "live", tabs: [tab] }
+            return { activeId: tab.id, mode: documentMode ? "document" : "live", tabs: [tab] }
         }
-    }, [canOpenWorkspaceUrl, normalizeWorkspaceUrl, tabsStorageKey, titleForUrl])
+    }, [canOpenWorkspaceUrl, documentMode, normalizeWorkspaceUrl, tabsStorageKey, titleForUrl, workspace.slug])
 
     useEffect(() => {
         if (tabsBootstrappedRef.current) return
@@ -813,12 +880,14 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         const current = normalizeWorkspaceUrl(initialWorkspaceUrl ?? `${pathname}${query ? `?${query}` : ""}`)
         const stored = readTabsState(current)
         activeTabIdRef.current = stored.activeId
+        renderedDocumentTabIdRef.current = stored.activeId
         tabsRef.current = stored.tabs
         tabFrameOrderRef.current = stored.tabs.map((tab) => tab.id)
         mutationRevisionRef.current = Math.max(0, ...stored.tabs.map((tab) => tab.seenRevision))
         saveTabsState(stored.tabs, stored.activeId)
         deferNavigationStateUpdate(() => {
             activateWorkspaceTab(stored.activeId)
+            setRenderedDocumentTabId(stored.activeId)
             setTabs(stored.tabs)
             setTabFrameOrder(stored.tabs.map((tab) => tab.id))
             setTabsHydrated(true)
@@ -845,6 +914,17 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [editingTabId])
 
     const postToTab = useCallback((tabId: string, message: Omit<WorkspaceTabParentMessage, "source" | "target" | "tabId">) => {
+        if (documentMode) {
+            if (tabId !== renderedDocumentTabIdRef.current) return false
+            const payload: WorkspaceTabParentMessage = {
+                source: WORKSPACE_TAB_MESSAGE_SOURCE,
+                target: "frame",
+                tabId,
+                ...message,
+            }
+            window.postMessage(payload, window.location.origin)
+            return true
+        }
         const frame = iframeRefs.current.get(tabId)
         if (!frame?.contentWindow) return false
         const payload: WorkspaceTabParentMessage = {
@@ -855,7 +935,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         }
         frame.contentWindow.postMessage(payload, window.location.origin)
         return true
-    }, [])
+    }, [documentMode])
 
     const assignTabFrameRef = useCallback((tabId: string, node: HTMLIFrameElement | null) => {
         if (node) {
@@ -918,6 +998,15 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [ensureTabFrameLocation])
 
     const requestTabFrameNavigation = useCallback((tabId: string, url: string, mode: "assign" | "replace" = "assign") => {
+        if (documentMode) {
+            window.dispatchEvent(new Event("betelgeze:workspace-navigation-start"))
+            void flushWorkspaceAutosaves().then(() => {
+                if (tabId !== activeTabIdRef.current || pendingNavigationRef.current.get(tabId) !== url) return
+                if (mode === "replace") router.replace(url, { scroll: false })
+                else router.push(url, { scroll: false })
+            })
+            return
+        }
         const messageType = mode === "replace" ? "traverse" : "navigate"
         if (readyTabIdsRef.current.has(tabId) && postToTab(tabId, { type: messageType, url })) {
             readyTabIdsRef.current.delete(tabId)
@@ -931,7 +1020,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         // A loading frame may not have a live message listener. The host owns
         // the desired route, so cancel the stale document load directly.
         ensureTabFrameLocation(tabId, url, mode)
-    }, [ensureTabFrameLocation, postToTab, scheduleSoftNavigationFallback])
+    }, [documentMode, ensureTabFrameLocation, postToTab, router, scheduleSoftNavigationFallback])
 
     const setTabContextOpen = useCallback((tabId: string, open: boolean) => {
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tabId), open ? "true" : "false")
@@ -975,9 +1064,22 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             saveTabsState(nextTabs, restoredTab.id)
             return nextTabs
         })
+        if (documentMode) {
+            const currentUrl = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`)
+            if (currentUrl === restoredTab.url) {
+                renderedDocumentTabIdRef.current = restoredTab.id
+                setRenderedDocumentTabId(restoredTab.id)
+                writeWorkspaceBrowserTabState(restoredTab.id, "push")
+                window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
+            } else {
+                beginTabNavigation(restoredTab.id, restoredTab.url)
+                pendingNavigationRef.current.set(restoredTab.id, restoredTab.url)
+                requestTabFrameNavigation(restoredTab.id, restoredTab.url)
+            }
+        }
         window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
         return true
-    }, [activateWorkspaceTab, postToTab, saveTabsState])
+    }, [activateWorkspaceTab, beginTabNavigation, documentMode, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, writeWorkspaceBrowserTabState])
 
     const openWorkspaceTab = useCallback((href: string, detailPreview?: WorkspaceDetailPreview) => {
         const url = normalizeWorkspaceUrl(href)
@@ -997,6 +1099,18 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             setTabs(nextTabs)
             activateWorkspaceTab(existingTab.id)
             saveTabsState(nextTabs, existingTab.id)
+            if (documentMode) {
+                if (existingTab.url === normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`)) {
+                    renderedDocumentTabIdRef.current = existingTab.id
+                    setRenderedDocumentTabId(existingTab.id)
+                    writeWorkspaceBrowserTabState(existingTab.id, "push")
+                } else {
+                    beginTabNavigation(existingTab.id, existingTab.url)
+                    pendingNavigationRef.current.set(existingTab.id, existingTab.url)
+                    requestTabFrameNavigation(existingTab.id, existingTab.url)
+                }
+                return
+            }
             window.requestAnimationFrame(() => {
                 postToTab(previousTabId, { type: "activate", active: false, refresh: false })
                 postToTab(existingTab.id, { type: "activate", active: true, refresh })
@@ -1035,8 +1149,14 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tab.id), "true")
         setContextOpenByTab((current) => ({ ...current, [tab.id]: true }))
         saveTabsState(nextTabs, tab.id)
+        if (documentMode) {
+            beginTabNavigation(tab.id, tab.url)
+            pendingNavigationRef.current.set(tab.id, tab.url)
+            requestTabFrameNavigation(tab.id, tab.url)
+            return
+        }
         window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
-    }, [activateWorkspaceTab, beginTabNavigation, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [activateWorkspaceTab, beginTabNavigation, documentMode, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug, writeWorkspaceBrowserTabState])
 
     useEffect(() => {
         function openPortalledDetail(event: MouseEvent) {
@@ -1063,8 +1183,12 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             if (event.origin !== window.location.origin) return
             const message = event.data
             if (message?.source !== WORKSPACE_TAB_MESSAGE_SOURCE || message.target !== "host") return
-            const frame = iframeRefs.current.get(message.tabId)
-            if (!frame || event.source !== frame.contentWindow) return
+            if (documentMode) {
+                if (event.source !== window || !tabsRef.current.some((tab) => tab.id === message.tabId)) return
+            } else {
+                const frame = iframeRefs.current.get(message.tabId)
+                if (!frame || event.source !== frame.contentWindow) return
+            }
 
             if (message.type === "location-replace" && message.url) {
                 const url = normalizeWorkspaceUrl(message.url)
@@ -1246,7 +1370,124 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
 
         window.addEventListener("message", receiveFrameMessage)
         return () => window.removeEventListener("message", receiveFrameMessage)
-    }, [beginTabNavigation, completeTabNavigation, markTabFrameReady, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, scheduleSoftNavigationFallback, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [beginTabNavigation, completeTabNavigation, documentMode, markTabFrameReady, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, scheduleSoftNavigationFallback, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+
+    useEffect(() => {
+        if (!documentMode || !tabsHydrated) return
+
+        function restoreBrowserHistoryTab(event: PopStateEvent) {
+            const url = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`)
+            if (!canOpenWorkspaceUrl(url)) return
+            // Popstate cannot be cancelled, but starting registered autosaves
+            // synchronously keeps their requests alive before React replaces
+            // the routed pane.
+            void flushWorkspaceAutosaves()
+            const currentTabs = tabsRef.current
+            const marker = workspaceBrowserTabState(event.state, workspace.slug)
+            const target = currentTabs.find((tab) => tab.id === marker?.tabId)
+                ?? currentTabs.find((tab) => tab.url === url)
+                ?? currentTabs.find((tab) => tab.id === activeTabIdRef.current)
+            if (!target) return
+
+            const existingHistoryIndex = target.history.lastIndexOf(url)
+            const historyState = existingHistoryIndex >= 0
+                ? { history: target.history, historyIndex: existingHistoryIndex }
+                : appendWorkspaceTabHistory(target.history, target.historyIndex, url)
+            const nextTabs = currentTabs.map((tab) => tab.id === target.id
+                ? { ...tab, url, title: titleForUrl(url), detailPreview: tab.url === url ? tab.detailPreview : undefined, ...historyState }
+                : tab)
+
+            for (const timeout of navigationTimeoutRef.current.values()) window.clearTimeout(timeout)
+            navigationTimeoutRef.current.clear()
+            for (const timeout of softNavigationFallbackRef.current.values()) window.clearTimeout(timeout)
+            softNavigationFallbackRef.current.clear()
+            navigationFallbackRef.current.clear()
+            navigationErrorRef.current.clear()
+            pendingNavigationRef.current.clear()
+            setNavigationStateByTab(lastCommittedDocumentUrlRef.current === url
+                ? {}
+                : { [target.id]: { status: "loading", requestedUrl: url } })
+            setRouteLoadingTabId(null)
+
+            tabsRef.current = nextTabs
+            activeTabIdRef.current = target.id
+            setTabs(nextTabs)
+            activateWorkspaceTab(target.id)
+            saveTabsState(nextTabs, target.id)
+            if (lastCommittedDocumentUrlRef.current === url) {
+                renderedDocumentTabIdRef.current = target.id
+                setRenderedDocumentTabId(target.id)
+            }
+            window.requestAnimationFrame(() => window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT)))
+        }
+
+        window.addEventListener("popstate", restoreBrowserHistoryTab)
+        return () => window.removeEventListener("popstate", restoreBrowserHistoryTab)
+    }, [activateWorkspaceTab, canOpenWorkspaceUrl, documentMode, normalizeWorkspaceUrl, saveTabsState, tabsHydrated, titleForUrl, workspace.slug])
+
+    useEffect(() => {
+        if (!documentMode || !tabsHydrated) return
+
+        function commitDocumentLocation() {
+            const params = new URLSearchParams(searchParams.toString())
+            const startedPollId = params.get("pollStarted")
+            params.delete("pollStarted")
+            const query = params.toString()
+            const url = normalizeWorkspaceUrl(`${pathname}${query ? `?${query}` : ""}${window.location.hash}`)
+            const tabId = activeTabIdRef.current
+            if (!tabId) return
+            const pendingUrl = pendingNavigationRef.current.get(tabId)
+            if (pendingUrl && pendingUrl !== url) return
+
+            lastCommittedDocumentUrlRef.current = url
+            writeWorkspaceBrowserTabState(tabId)
+
+            if (startedPollId) {
+                showCreationNotice({ label: "Lead poll started", href: `/${workspace.slug}/leadgen/poll/${startedPollId}` })
+                const cleanUrl = new URL(window.location.href)
+                cleanUrl.searchParams.delete("pollStarted")
+                window.history.replaceState(window.history.state, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`)
+            }
+
+            pendingNavigationRef.current.delete(tabId)
+            completeTabNavigation(tabId)
+            loadedTabIdsRef.current.add(tabId)
+            setLoadedTabIds((current) => current.has(tabId) ? current : new Set([...current, tabId]))
+            renderedDocumentTabIdRef.current = tabId
+            setRenderedDocumentTabId(tabId)
+            setRouteLoadingTabId((current) => current === tabId ? null : current)
+            window.dispatchEvent(new Event("betelgeze:clear-loading"))
+            window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
+
+            setTabs((existingTabs) => {
+                let changed = false
+                const updatedTabs = existingTabs.map((tab) => {
+                    if (tab.id !== tabId) return tab
+                    if (tab.url === url && tab.history[tab.historyIndex] === url) return tab
+                    changed = true
+                    if (tab.history[tab.historyIndex - 1] === url) return { ...tab, url, title: titleForUrl(url), historyIndex: tab.historyIndex - 1 }
+                    if (tab.history[tab.historyIndex + 1] === url) return { ...tab, url, title: titleForUrl(url), historyIndex: tab.historyIndex + 1 }
+                    const nextHistory = tab.history[tab.historyIndex] === url
+                        ? { history: tab.history, historyIndex: tab.historyIndex }
+                        : appendWorkspaceTabHistory(tab.history, tab.historyIndex, url)
+                    return { ...tab, url, title: titleForUrl(url), ...nextHistory }
+                })
+                if (!changed) return existingTabs
+                tabsRef.current = updatedTabs
+                saveTabsState(updatedTabs, tabId)
+                return updatedTabs
+            })
+
+            if (!routeCanShowRelationshipContext(url)) {
+                setTabContextStatus(tabId, { supported: false, relationshipId: null, context: null })
+                setTabContextOpen(tabId, false)
+            }
+        }
+
+        commitDocumentLocation()
+        window.addEventListener("hashchange", commitDocumentLocation)
+        return () => window.removeEventListener("hashchange", commitDocumentLocation)
+    }, [completeTabNavigation, documentMode, normalizeWorkspaceUrl, pathname, routeCanShowRelationshipContext, saveTabsState, searchParams, setTabContextOpen, setTabContextStatus, showCreationNotice, tabsHydrated, titleForUrl, workspace.slug, writeWorkspaceBrowserTabState])
 
     useEffect(() => {
         function start(event: Event) {
@@ -1433,6 +1674,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         const previousStates = hiddenSiblings.map((element) => ({ element, hidden: element.hidden, inert: element.inert, ariaHidden: element.getAttribute("aria-hidden") }))
         document.body.style.overflow = "hidden"
         document.body.dataset.workspaceTabsHosted = "true"
+        if (documentMode) document.body.dataset.workspaceOneDocument = "true"
         root.dataset.workspaceViewportLocked = "true"
         window.addEventListener("resize", holdWorkspaceViewport)
         window.visualViewport?.addEventListener("resize", holdWorkspaceViewport)
@@ -1461,6 +1703,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             if (closeTimer) window.clearTimeout(closeTimer)
             document.body.style.overflow = previousOverflow
             delete document.body.dataset.workspaceTabsHosted
+            delete document.body.dataset.workspaceOneDocument
             delete root.dataset.workspaceViewportLocked
             delete root.dataset.workspaceKeyboardMotion
             root.style.removeProperty("--workspace-visual-viewport-bottom")
@@ -1472,7 +1715,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                 else element.setAttribute("aria-hidden", ariaHidden)
             })
         }
-    }, [tabsHydrated])
+    }, [documentMode, tabsHydrated])
 
     useEffect(() => {
         const close = (event: MouseEvent) => {
@@ -1677,7 +1920,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         setTabs(nextTabs)
         saveTabsState(nextTabs, tabId)
         pendingNavigationRef.current.set(tabId, destination.url)
-        requestTabFrameNavigation(tabId, destination.url, "replace")
+        requestTabFrameNavigation(tabId, destination.url)
     }
 
     function goBack() {
@@ -1689,6 +1932,10 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }
 
     function reloadWorkspace() {
+        if (documentMode) {
+            window.location.reload()
+            return
+        }
         const tabId = activeTabIdRef.current
         const tab = tabsRef.current.find((candidate) => candidate.id === tabId)
         if (!tab) return
@@ -1818,7 +2065,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                 saveTabsState(updatedTabs, tabId)
                 return updatedTabs
             })
-            postToTab(tabId, { type: "activate", active: true, refresh: true })
+            if (documentMode) router.refresh()
+            else postToTab(tabId, { type: "activate", active: true, refresh: true })
 
             showCreationNotice({
                 label: result.notice ?? (target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : target === "asset" ? "Asset added" : "OKR created"),
@@ -1841,12 +2089,12 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if (window.matchMedia("(max-width: 767px)").matches) setSidebarOpen(false)
     }
 
-    function navigateActiveTab(href: string) {
+    const navigateActiveTab = useCallback((href: string) => {
         const tabId = activeTabIdRef.current
         if (!tabId) return
         const url = normalizeWorkspaceUrl(href)
-        const currentTab = tabs.find((candidate) => candidate.id === tabId)
-        const isLoaded = loadedTabIdsRef.current.has(tabId)
+        const currentTab = tabsRef.current.find((candidate) => candidate.id === tabId)
+        const isLoaded = documentMode || loadedTabIdsRef.current.has(tabId)
         const alreadyPending = pendingNavigationRef.current.get(tabId) === url
         if (currentTab?.url === url && isLoaded && !alreadyPending) return
         beginTabNavigation(tabId, url)
@@ -1860,7 +2108,44 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
 
         pendingNavigationRef.current.set(tabId, url)
         requestTabFrameNavigation(tabId, url)
-    }
+    }, [beginTabNavigation, documentMode, normalizeWorkspaceUrl, requestTabFrameNavigation, routeCanShowRelationshipContext, setTabContextOpen, setTabContextStatus, updateTabForShellNavigation])
+
+    useEffect(() => {
+        if (!documentMode) return
+
+        function preserveWorkspaceDocumentNavigation(event: MouseEvent) {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            const target = event.target
+            if (!(target instanceof Element) || !target.closest("[data-workspace-document-pane]")) return
+            const anchor = target.closest("a[href]") as HTMLAnchorElement | null
+            if (!anchor || anchor.hasAttribute("download") || anchor.hasAttribute("data-workspace-instant-filter")) return
+            if (anchor.getAttribute("aria-disabled") === "true") {
+                event.preventDefault()
+                return
+            }
+            const destination = new URL(anchor.href, window.location.href)
+            if (destination.origin !== window.location.origin || anchor.target === "_blank") return
+            const nextUrl = `${destination.pathname}${destination.search}${destination.hash}`
+            const currentUrl = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`)
+            if (normalizeWorkspaceUrl(nextUrl) === currentUrl) return
+
+            event.preventDefault()
+            if (isWorkspaceOnboardingBuilderUrl(nextUrl, workspace.slug, window.location.origin)) {
+                openOnboardingBuilderWindow(nextUrl, workspace.slug)
+                navigateActiveTab(nextUrl)
+                return
+            }
+            if (workspaceRouteIsRecordDetail(nextUrl, workspace.slug, window.location.origin)) {
+                const detailPreview = parseWorkspaceDetailPreview(anchor.closest("[data-workspace-detail-preview]")?.getAttribute("data-workspace-detail-preview"))
+                openWorkspaceTab(nextUrl, detailPreview ?? undefined)
+                return
+            }
+            navigateActiveTab(nextUrl)
+        }
+
+        document.addEventListener("click", preserveWorkspaceDocumentNavigation, true)
+        return () => document.removeEventListener("click", preserveWorkspaceDocumentNavigation, true)
+    }, [documentMode, navigateActiveTab, normalizeWorkspaceUrl, openWorkspaceTab, workspace.slug])
 
     function isStandaloneBuilderHref(href: string) {
         return isWorkspaceOnboardingBuilderUrl(href, workspace.slug, window.location.origin)
@@ -1911,6 +2196,20 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         setTabs(nextTabs)
         activateWorkspaceTab(tab.id)
         saveTabsState(nextTabs, tab.id)
+        if (documentMode) {
+            const currentUrl = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`)
+            if (currentUrl === tab.url) {
+                renderedDocumentTabIdRef.current = tab.id
+                setRenderedDocumentTabId(tab.id)
+                writeWorkspaceBrowserTabState(tab.id, "push")
+                window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
+            } else {
+                beginTabNavigation(tab.id, tab.url)
+                pendingNavigationRef.current.set(tab.id, tab.url)
+                requestTabFrameNavigation(tab.id, tab.url)
+            }
+            return
+        }
         window.requestAnimationFrame(() => {
             postToTab(previousTabId, { type: "activate", active: false, refresh: false })
             postToTab(tab.id, { type: "activate", active: true, refresh })
@@ -1919,7 +2218,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                 beginTabNavigation(tab.id, desiredUrl)
             }
         })
-    }, [activateWorkspaceTab, beginTabNavigation, ensureTabFrameLocation, postToTab, saveTabsState, tabs])
+    }, [activateWorkspaceTab, beginTabNavigation, documentMode, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, tabs, writeWorkspaceBrowserTabState])
 
     useEffect(() => {
         function receiveBuilderReturn(event: MessageEvent<OnboardingBuilderWindowSignal>) {
@@ -2109,6 +2408,12 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tab.id), currentContextOpen ? "true" : "false")
         setContextOpenByTab((current) => ({ ...current, [tab.id]: currentContextOpen }))
         saveTabsState(nextTabs, tab.id)
+        if (documentMode) {
+            renderedDocumentTabIdRef.current = tab.id
+            setRenderedDocumentTabId(tab.id)
+            writeWorkspaceBrowserTabState(tab.id, "push")
+            window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
+        }
     }
 
     function toggleContextPanel() {
@@ -2186,7 +2491,21 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         saveTabsState(nextTabs, nextActiveTab.id)
         if (tabId === activeTabId) {
             const refresh = nextActiveTab.seenRevision < mutationRevisionRef.current
-            window.requestAnimationFrame(() => postToTab(nextActiveTab.id, { type: "activate", active: true, refresh }))
+            if (documentMode) {
+                const currentUrl = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`)
+                if (currentUrl === nextActiveTab.url) {
+                    renderedDocumentTabIdRef.current = nextActiveTab.id
+                    setRenderedDocumentTabId(nextActiveTab.id)
+                    writeWorkspaceBrowserTabState(nextActiveTab.id)
+                    window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
+                } else {
+                    beginTabNavigation(nextActiveTab.id, nextActiveTab.url)
+                    pendingNavigationRef.current.set(nextActiveTab.id, nextActiveTab.url)
+                    requestTabFrameNavigation(nextActiveTab.id, nextActiveTab.url, "replace")
+                }
+            } else {
+                window.requestAnimationFrame(() => postToTab(nextActiveTab.id, { type: "activate", active: true, refresh }))
+            }
         }
     }
 
@@ -2207,7 +2526,9 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrder)
         .filter((tab) => tab.id === activeTabId || residentTabIdSet.has(tab.id))
     const activeTab = visibleTabs.find((tab) => tab.id === activeTabId) ?? visibleTabs[0]
-    const activeTabLoaded = loadedTabIds.has(activeTab.id)
+    const activeTabLoaded = documentMode
+        ? tabsHydrated && renderedDocumentTabId === activeTab.id
+        : loadedTabIds.has(activeTab.id)
     const canGoBack = activeTabLoaded && activeTab.historyIndex > 0
     const canGoForward = activeTabLoaded && activeTab.historyIndex < activeTab.history.length - 1
     const activeContextStatus = contextStatusByTab[activeTab.id]
@@ -2222,10 +2543,21 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const currentPresenceMember = workspaceMembers.find((member) => member.id === currentUserId) ?? { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null }
     const profilePreviewMember = profileUserId ? workspaceMembers.find((member) => member.id === profileUserId) ?? null : null
     const workspacePresenceMembers = workspacePresenceRoster(workspaceMembers, activeWorkspaceUsers, currentUserId)
+    const communicationsTabOpen = tabs.some((tab) => workspaceTabIsCommunications(tab.url, workspace.slug, "http://localhost"))
+    const activeTabIsCommunications = workspaceTabIsCommunications(activeTab.url, workspace.slug, "http://localhost")
+
+    useWorkspaceCommunicationsService({
+        enabled: documentMode && tabsHydrated && communicationsTabOpen && !activeTabIsCommunications,
+        nativeRealtime: workspaceRole === "owner" || workspaceRole === "admin",
+        onUnreadCountChange: setCommunicationsUnreadCount,
+        supabase: shellSupabase,
+        workspaceId: workspace.id,
+        workspaceSlug: workspace.slug,
+    })
 
     useEffect(() => {
         if (!presenceSessionIdRef.current) presenceSessionIdRef.current = crypto.randomUUID()
-        const supabase = createSupabaseBrowserClient()
+        const supabase = shellSupabase
         let disposed = false
         let reconnectTimeout: number | null = null
         let reconnectAttempt = 0
@@ -2348,7 +2680,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             setActiveWorkspaceUsers([])
             if (channel) void supabase.removeChannel(channel)
         }
-    }, [currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, workspace.slug, workspaceMembers])
+    }, [currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, shellSupabase, workspace.slug, workspaceMembers])
 
     useEffect(() => {
         const channel = presenceChannelRef.current
@@ -2654,7 +2986,15 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         </div>
 
         <div data-workspace-tab-panels className={`fixed bottom-0 top-[6.25rem] z-30 overflow-hidden bg-neutral-950 ${sidebarTransitionEnabled ? "transition-[left,width] duration-200 ease-out" : ""}`}>
-            {tabsHydrated && frameTabs.map((tab) => (
+            {documentMode && tabsHydrated ? <WorkspaceDocumentRuntimeProvider
+                tabId={renderedDocumentTabId || activeTab.id}
+                active={(renderedDocumentTabId || activeTab.id) === activeTab.id && activeNavigation?.status !== "loading"}
+            >
+                <div data-workspace-document-pane className="absolute inset-0 overflow-y-auto overscroll-contain bg-neutral-950 [contain:layout_paint]">
+                    {documentContent}
+                </div>
+            </WorkspaceDocumentRuntimeProvider> : null}
+            {!documentMode && tabsHydrated && frameTabs.map((tab) => (
                 <WorkspaceTabFrame
                     key={tab.id}
                     tab={tab}
@@ -2666,7 +3006,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             {tabsHydrated && activeRouteLoading && (
                 <div className="absolute inset-0 z-20 bg-neutral-950" aria-hidden="true" />
             )}
-            {tabsHydrated && !loadedTabIds.has(activeTabId) && !activeRouteLoading && (
+            {!documentMode && tabsHydrated && !loadedTabIds.has(activeTabId) && !activeRouteLoading && (
                 <div className="absolute inset-0 z-10 overflow-y-auto bg-neutral-950">
                     <WorkspaceTabOpeningState url={activeTab.url} workspaceSlug={workspace.slug} detailPreview={activeTab.detailPreview} />
                 </div>

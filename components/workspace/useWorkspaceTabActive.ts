@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useWorkspaceDocumentRuntime } from "@/components/workspace/WorkspaceDocumentRuntime"
 import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_VISIBILITY_EVENT } from "@/lib/workspace-tabs"
 
 export { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/lib/workspace-tabs"
@@ -12,6 +13,7 @@ function readActiveState() {
 }
 
 export function useWorkspaceTabActive() {
+    const documentRuntime = useWorkspaceDocumentRuntime()
     const [active, setActive] = useState(() => typeof window !== "undefined" && readActiveState())
 
     useEffect(() => {
@@ -21,5 +23,5 @@ export function useWorkspaceTabActive() {
         return () => window.removeEventListener(WORKSPACE_TAB_VISIBILITY_EVENT, update)
     }, [])
 
-    return active
+    return documentRuntime?.active ?? active
 }
