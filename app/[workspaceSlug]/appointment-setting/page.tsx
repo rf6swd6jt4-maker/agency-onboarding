@@ -61,7 +61,13 @@ export default async function AppointmentSettingPage({ params }: { params: Promi
                             </ListTrailing>
                         </ListSecondaryRow>
                     </>
-                    return <ListItem key={relationship.id}>
+                    return <ListItem key={relationship.id} detailPreview={{
+                        category: "Appointment Setting",
+                        reference: shortId(relationship.id),
+                        title: relationship.primary_person_name,
+                        subtitle: relationship.business_name ?? "No company saved",
+                        updated: formatRelativeTime(relationship.updated_at),
+                    }}>
                         <MobileListActionSurface actions={actions} label={`Open actions for ${relationshipTitle}`}>{rows}</MobileListActionSurface>
                     </ListItem>
                 }) : <div className="p-6">

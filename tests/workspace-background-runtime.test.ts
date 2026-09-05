@@ -54,7 +54,7 @@ test("workspace navigation keeps recent frame content mounted and reports progre
     assert.match(bridge, /await flushWorkspaceAutosaves\(\)/)
     assert.match(shell, /frameTabs\.map\(\(tab\) =>/)
     assert.match(shell, /hidden=\{!active\}/)
-    assert.match(shell, /MAX_RESIDENT_WORKSPACE_FRAMES = 2/)
+    assert.match(shell, /MAX_RESIDENT_WORKSPACE_FRAMES = 3/)
     assert.match(shell, /residentTabIdSet\.has\(tab\.id\)/)
     assert.match(shell, /scheduleTabWarm\(tab\.id\)/)
     assert.match(shell, /warmWorkspaceTab\(tab\.id\)/)

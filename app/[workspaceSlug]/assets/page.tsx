@@ -8,6 +8,7 @@ import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { assetHref, listWorkspaceAssets, workspaceHref, type RelationshipAsset } from "@/lib/relationships"
 import { createUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
+import { serializeWorkspaceDetailPreview } from "@/lib/workspace-detail-preview"
 import { requireWorkspacePanel } from "@/lib/workspace-access"
 
 export const dynamic = "force-dynamic"
@@ -66,7 +67,18 @@ export default async function AssetsPage({ params }: PageProps) {
                     {previewEntries.length ? (
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                             {previewEntries.map(({ asset, previewUrl }) => (
-                                <Link key={asset.id} href={assetHref(workspace.slug, asset.id)} className="group overflow-hidden rounded-xl border border-neutral-800 bg-black hover:border-neutral-600">
+                                <Link
+                                    key={asset.id}
+                                    href={assetHref(workspace.slug, asset.id)}
+                                    prefetch={false}
+                                    data-workspace-detail-preview={serializeWorkspaceDetailPreview({
+                                        category: "Asset",
+                                        reference: shortId(asset.id),
+                                        title: asset.title,
+                                        updated: formatRelativeTime(asset.updated_at),
+                                    })}
+                                    className="group overflow-hidden rounded-xl border border-neutral-800 bg-black hover:border-neutral-600"
+                                >
                                     <div className="aspect-[4/3] bg-neutral-900">
                                         {previewUrl ? (
                                             <img src={previewUrl} alt={asset.title} className="h-full w-full object-cover transition group-hover:scale-[1.02]" />

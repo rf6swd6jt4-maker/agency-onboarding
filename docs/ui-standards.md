@@ -179,6 +179,7 @@ A list tab must not insert a page-specific summary, capacity note, explanatory p
 - The selected option uses plain white text and a white underline. Unselected options remain neutral and acquire only a restrained hover underline.
 - Counts sit beside labels in subdued tabular text and should reflect the other currently selected filter dimensions.
 - Prefer `FilterRailLink` and URL-backed query parameters so filters survive refresh, back/forward navigation, sharing, and tab restoration.
+- When the complete candidate collection is already present in the page, add `instant` to `FilterRailLink` and render records through `InstantFilterResults`. This keeps the URL authoritative while applying the visible change locally instead of rerunning the server page. Keep paginated, permission-dependent, or data-dependent filters server-backed.
 - Use `FilterRailButton` only for local interactive state that cannot reasonably be URL-backed, such as the live Work Queue's Business/My work view.
 - Rails never wrap. They scroll horizontally on mobile while preserving option order.
 - Do not recreate filter pills, segmented boxes, dropdowns, or page-local category chips when the available choices fit a rail.

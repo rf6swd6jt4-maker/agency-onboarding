@@ -4,6 +4,7 @@ import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { InstantFilterCount, InstantFilterResults } from "@/components/panel/InstantFilterResults"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { QuickStats } from "@/components/panel/QuickStats"
 import { Assignee, SquarePill, Status } from "@/components/ui"
@@ -40,8 +41,6 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
     const selectedState = query.state === "resolved" ? "resolved" : "open"
     const openItems = items.filter((item) => !["done", "canceled"].includes(item.status))
     const resolvedItems = items.filter((item) => ["done", "canceled"].includes(item.status))
-    const stateItems = selectedState === "resolved" ? resolvedItems : openItems
-    const visibleItems = selectedCategory ? stateItems.filter((item) => item.maintenance_category === selectedCategory) : stateItems
     const criticalItems = openItems.filter((item) => item.severity === "critical")
     const occurrences = items.reduce((total, item) => total + item.occurrence_count, 0)
     const filterHref = (category: MaintenanceCategory | null, state = selectedState) => {
@@ -49,6 +48,15 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
         if (category) params.set("category", category)
         return `/${workspace.slug}/admin/maintenance?${params}`
     }
+    const filterDefinitions = [{ param: "state", defaultValue: "open" }, { param: "category" }]
+    const filterValues = items.map((item) => ({
+        id: item.id,
+        values: {
+            state: ["done", "canceled"].includes(item.status) ? "resolved" : "open",
+            category: item.maintenance_category,
+        },
+    }))
+    const filterValuesById = new Map(filterValues.map((item) => [item.id, item.values]))
 
     return <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
         <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
@@ -66,16 +74,16 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
                 { label: "Critical", value: criticalItems.length },
             ]} />
             <FilterRail ariaLabel="Filter maintenance by state">
-                <FilterRailLink href={filterHref(selectedCategory, "open")} selected={selectedState === "open"}>Open <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailLink>
-                <FilterRailLink href={filterHref(selectedCategory, "resolved")} selected={selectedState === "resolved"}>Resolved <FilterRailCount>{resolvedItems.length}</FilterRailCount></FilterRailLink>
+                <FilterRailLink href={filterHref(selectedCategory, "open")} selected={selectedState === "open"} instant={{ param: "state", value: "open", defaultValue: "open" }}>Open <FilterRailCount><InstantFilterCount filters={filterDefinitions} items={filterValues} target={{ param: "state", value: "open" }} /></FilterRailCount></FilterRailLink>
+                <FilterRailLink href={filterHref(selectedCategory, "resolved")} selected={selectedState === "resolved"} instant={{ param: "state", value: "resolved", defaultValue: "open" }}>Resolved <FilterRailCount><InstantFilterCount filters={filterDefinitions} items={filterValues} target={{ param: "state", value: "resolved" }} /></FilterRailCount></FilterRailLink>
             </FilterRail>
             <FilterRail ariaLabel="Filter maintenance by category" spacing="tight">
-                <FilterRailLink href={filterHref(null)} selected={!selectedCategory}>All categories <FilterRailCount>{stateItems.length}</FilterRailCount></FilterRailLink>
-                {MAINTENANCE_CATEGORIES.map((category) => <FilterRailLink key={category} href={filterHref(category)} selected={selectedCategory === category}>{maintenanceCategoryLabel(category)} <FilterRailCount>{stateItems.filter((item) => item.maintenance_category === category).length}</FilterRailCount></FilterRailLink>)}
+                <FilterRailLink href={filterHref(null)} selected={!selectedCategory} instant={{ param: "category", value: null }}>All categories <FilterRailCount><InstantFilterCount filters={filterDefinitions} items={filterValues} target={{ param: "category", value: null }} /></FilterRailCount></FilterRailLink>
+                {MAINTENANCE_CATEGORIES.map((category) => <FilterRailLink key={category} href={filterHref(category)} selected={selectedCategory === category} instant={{ param: "category", value: category }}>{maintenanceCategoryLabel(category)} <FilterRailCount><InstantFilterCount filters={filterDefinitions} items={filterValues} target={{ param: "category", value: category }} /></FilterRailCount></FilterRailLink>)}
             </FilterRail>
 
             <List ariaLabel="Maintenance queue">
-                {visibleItems.length ? visibleItems.map((item) => {
+                <InstantFilterResults filters={filterDefinitions} items={items.map((item) => {
                     const href = `/${workspace.slug}/work-items/${item.id}`
                     const status = workItemStatusPresentation(item.status)
                     const assignees = item.assignee_ids.map((id) => ({ id, ...(people.get(id) ?? { name: "Admin", avatarSrc: null }) }))
@@ -84,7 +92,12 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
                         item.native_href ? { label: "Open source", href: item.native_href } : null,
                         { label: "Copy item ID", copyText: item.id },
                     ]
-                    return <ListItem key={item.id} className={item.severity === "critical" ? "bg-red-950/[0.08]" : ""}>
+                    return { id: item.id, values: filterValuesById.get(item.id)!, content: <ListItem className={item.severity === "critical" ? "bg-red-950/[0.08]" : ""} detailPreview={{
+                        category: "Work item",
+                        reference: shortId(item.id),
+                        title: item.title,
+                        updated: formatRelativeTime(item.last_occurred_at),
+                    }}>
                         <MobileListActionSurface actions={actions} label={`Open actions for ${item.title}`}>
                             <ListPrimaryRow>
                                 <ListTitle href={href} className="flex-1">{item.title}</ListTitle>
@@ -109,11 +122,11 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
                                 </ListTrailing>
                             </ListSecondaryRow>
                         </MobileListActionSurface>
-                    </ListItem>
-                }) : <div className="p-6">
-                    <p className="text-lg font-semibold">No {selectedState} maintenance items.</p>
+                    </ListItem> }
+                })} empty={<div className="p-6">
+                    <p className="text-lg font-semibold">No maintenance items match these filters.</p>
                     <p className="mt-2 text-sm text-neutral-400">Choose another state or category to broaden this queue.</p>
-                </div>}
+                </div>} />
             </List>
         </div>
     </main>

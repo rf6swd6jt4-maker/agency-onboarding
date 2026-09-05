@@ -105,7 +105,13 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
                         { label: "Copy lead details", copyText: copyLine },
                         { label: "Remove", action: removeLeadgenCompany.bind(null, workspace.slug, company.id), danger: true },
                     ]
-                    return <ListItem key={company.id}>
+                    return <ListItem key={company.id} detailPreview={relationshipId ? {
+                        category: "Relationship",
+                        reference: shortId(relationshipId),
+                        title: ownerName,
+                        subtitle: company.display_name,
+                        updated: formatRelativeTime(company.created_at),
+                    } : undefined}>
                         <MobileListActionSurface actions={leadActions} label={`Open actions for ${titleLine}`}>
                         <ListPrimaryRow>
                             <ListTitle href={leadHref} external={!relationshipId && Boolean(sourceUrl)} className="flex-1">{titleLine}</ListTitle>

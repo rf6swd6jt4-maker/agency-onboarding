@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react"
 
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow } from "@/components/list/List"
+import { DetailRouteLoading } from "@/components/workspace/DetailRouteLoading"
 
 export type PanelLoadingVariant =
     | "admin"
@@ -189,16 +190,6 @@ function SettingsLoading() {
     </main>
 }
 
-function DetailLoading({ title }: { title: string }) {
-    return <main aria-label={`Loading ${title}`} aria-busy="true" className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
-        <div className="mx-auto max-w-[92rem]">
-            <header className="border-b border-neutral-800 pb-4"><Pulse className="h-3 w-28" /><Pulse className="mt-2 h-7 w-64 max-w-[70vw]" /><Pulse className="mt-2 h-4 w-40" /></header>
-            <div className="mt-5 grid overflow-hidden rounded-2xl border border-neutral-800 bg-black sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="min-h-20 border-b border-r border-neutral-900 p-4"><Pulse className="h-3 w-20" /><Pulse className="mt-3 h-5 w-32 max-w-full bg-neutral-900" /></div>)}</div>
-            <div className="mt-5 min-h-72 animate-pulse rounded-2xl border border-neutral-800 bg-black" />
-        </div>
-    </main>
-}
-
 export function PanelRouteLoading({ variant, title }: { variant: PanelLoadingVariant; title?: string }) {
     if (variant === "communications") return <CommunicationsLoading />
     if (variant === "settings") return <SettingsLoading />
@@ -213,5 +204,5 @@ export function PanelRouteLoading({ variant, title }: { variant: PanelLoadingVar
     if (variant === "admin-activity") return <AdminLoading section="activity" />
     if (variant === "admin-maintenance") return <AdminLoading section="maintenance" />
     if (variant === "admin") return <AdminLoading />
-    return <DetailLoading title={title ?? "record"} />
+    return <DetailRouteLoading title={title ?? "record"} />
 }

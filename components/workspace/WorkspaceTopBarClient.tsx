@@ -14,6 +14,7 @@ import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relations
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
 import { WorkspaceMemberProfileModal } from "@/components/workspace/WorkspaceMemberProfileModal"
+import { WorkspaceTabOpeningState } from "@/components/workspace/WorkspaceTabOpeningState"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser"
@@ -22,6 +23,7 @@ import { canAccessPrivateWorkspacePanels, canAccessWorkspacePanel, canAccessWork
 import type { WorkspaceCapability } from "@/lib/workspace-capabilities"
 import type { WorkspaceRole } from "@/lib/workspaces"
 import { WORKSPACE_MEMBER_PROFILE_EVENT, WORKSPACE_MEMBER_PROFILE_MESSAGE_SOURCE } from "@/lib/workspace-member-profile"
+import { parseWorkspaceDetailPreview, storeWorkspaceDetailPreview, type WorkspaceDetailPreview } from "@/lib/workspace-detail-preview"
 import { WORKSPACE_COMPOSER_FOCUS_EVENT, type WorkspaceComposerFocusEventDetail } from "@/lib/workspace-composer-viewport"
 import { visibleWorkspacePresence, workspacePresenceRoster, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceRosterMember, type WorkspacePresenceState } from "@/lib/workspace-presence"
 import {
@@ -58,7 +60,7 @@ const WORKSPACE_KEYBOARD_MOTION_MS = 300
 // Mobile Safari continues resizing its browser chrome after the keyboard itself
 // has finished. Keep the known resting edge until that secondary resize settles.
 const WORKSPACE_KEYBOARD_SETTLE_MS = WORKSPACE_KEYBOARD_MOTION_MS + 340
-const MAX_RESIDENT_WORKSPACE_FRAMES = 2
+const MAX_RESIDENT_WORKSPACE_FRAMES = 3
 const WORKSPACE_SOFT_NAVIGATION_FALLBACK_MS = 8_000
 const WORKSPACE_KEYBOARD_MINIMUM_SHIFT_PX = 64
 type WorkspacePresenceChannel = ReturnType<ReturnType<typeof createSupabaseBrowserClient>["channel"]>
@@ -71,6 +73,7 @@ type WorkspaceTab = {
     history: string[]
     historyIndex: number
     seenRevision: number
+    detailPreview?: WorkspaceDetailPreview
 }
 
 type WorkspaceTabsState = {
@@ -557,8 +560,25 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             tabWarmTimeoutRef.current = null
             tabWarmTargetRef.current = ""
             warmWorkspaceTab(tabId)
-        }, 120)
+        }, 60)
     }, [residentTabIds, warmWorkspaceTab])
+
+    useEffect(() => {
+        if (!tabsHydrated || tabs.length < 2 || !loadedTabIds.has(activeTabId)) return
+        const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId)
+        if (activeIndex < 0) return
+        const candidates = [tabs[activeIndex + 1], tabs[activeIndex - 1]].filter((tab): tab is WorkspaceTab => Boolean(tab))
+        const candidate = candidates.find((tab) => !residentTabIds.includes(tab.id))
+        if (!candidate) return
+        const warm = () => warmWorkspaceTab(candidate.id)
+        const requestIdle = window.requestIdleCallback
+        if (typeof requestIdle === "function") {
+            const idleId = requestIdle(warm, { timeout: 900 })
+            return () => window.cancelIdleCallback(idleId)
+        }
+        const timeout = window.setTimeout(warm, 180)
+        return () => window.clearTimeout(timeout)
+    }, [activeTabId, loadedTabIds, residentTabIds, tabs, tabsHydrated, warmWorkspaceTab])
 
     useEffect(() => {
         const openFromEvent = (event: Event) => {
@@ -652,17 +672,17 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if (creationNoticeTimeoutRef.current) window.clearTimeout(creationNoticeTimeoutRef.current)
     }, [])
 
-    const updateTabForShellNavigation = useCallback((tabId: string, url: string) => {
+    const updateTabForShellNavigation = useCallback((tabId: string, url: string, detailPreview?: WorkspaceDetailPreview) => {
         setTabs((existingTabs) => {
             let changed = false
             const updatedTabs = existingTabs.map((tab) => {
                 if (tab.id !== tabId) return tab
-                if (tab.url === url && tab.history[tab.historyIndex] === url) return tab
+                if (tab.url === url && tab.history[tab.historyIndex] === url && (!detailPreview || tab.detailPreview === detailPreview)) return tab
                 const nextHistory = tab.history[tab.historyIndex] === url
                     ? { history: tab.history, historyIndex: tab.historyIndex }
                     : appendWorkspaceTabHistory(tab.history, tab.historyIndex, url)
                 changed = true
-                return { ...tab, url, title: titleForUrl(url), ...nextHistory }
+                return { ...tab, url, title: titleForUrl(url), detailPreview: detailPreview ?? (tab.url === url ? tab.detailPreview : undefined), ...nextHistory }
             })
             if (changed) saveTabsState(updatedTabs, activeTabIdRef.current || tabId)
             return changed ? updatedTabs : existingTabs
@@ -758,6 +778,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                         history,
                         historyIndex,
                         seenRevision: typeof candidate.seenRevision === "number" && Number.isFinite(candidate.seenRevision) ? candidate.seenRevision : 0,
+                        detailPreview: parseWorkspaceDetailPreview(candidate.detailPreview) ?? undefined,
                     }
                 }).filter((tab) => canOpenWorkspaceUrl(tab.url)).map((tab) => {
                     const allowedHistory = tab.history.filter(canOpenWorkspaceUrl)
@@ -958,8 +979,9 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         return true
     }, [activateWorkspaceTab, postToTab, saveTabsState])
 
-    const openWorkspaceTab = useCallback((href: string) => {
+    const openWorkspaceTab = useCallback((href: string, detailPreview?: WorkspaceDetailPreview) => {
         const url = normalizeWorkspaceUrl(href)
+        if (detailPreview) storeWorkspaceDetailPreview(url, detailPreview)
         const currentTabs = tabsRef.current
         const existingTab = currentTabs.find((tab) => tab.url === url)
         const previousTabId = activeTabIdRef.current
@@ -967,8 +989,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if (existingTab) {
             if (existingTab.id === previousTabId) return
             const refresh = existingTab.seenRevision < mutationRevisionRef.current
-            const nextTabs = currentTabs.map((tab) => tab.id === existingTab.id && refresh
-                ? { ...tab, seenRevision: mutationRevisionRef.current }
+            const nextTabs = currentTabs.map((tab) => tab.id === existingTab.id
+                ? { ...tab, seenRevision: refresh ? mutationRevisionRef.current : tab.seenRevision, detailPreview: detailPreview ?? tab.detailPreview }
                 : tab)
             tabsRef.current = nextTabs
             activeTabIdRef.current = existingTab.id
@@ -988,7 +1010,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             const tabId = activeTabIdRef.current
             if (!tabId) return
             beginTabNavigation(tabId, url)
-            updateTabForShellNavigation(tabId, url)
+            updateTabForShellNavigation(tabId, url, detailPreview)
             pendingNavigationRef.current.set(tabId, url)
             requestTabFrameNavigation(tabId, url)
             return
@@ -1001,6 +1023,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             history: [url],
             historyIndex: 0,
             seenRevision: mutationRevisionRef.current,
+            detailPreview,
         }
         const nextTabs = [...currentTabs, tab]
         tabFrameOrderRef.current.push(tab.id)
@@ -1014,6 +1037,27 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         saveTabsState(nextTabs, tab.id)
         window.requestAnimationFrame(() => postToTab(previousTabId, { type: "activate", active: false, refresh: false }))
     }, [activateWorkspaceTab, beginTabNavigation, ensureTabFrameLocation, normalizeWorkspaceUrl, postToTab, requestTabFrameNavigation, saveTabsState, titleForUrl, updateTabForShellNavigation, workspace.slug])
+
+    useEffect(() => {
+        function openPortalledDetail(event: MouseEvent) {
+            if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+            const target = event.target
+            if (!(target instanceof Element)) return
+            const anchor = target.closest("a[data-workspace-detail-preview]") as HTMLAnchorElement | null
+            if (!anchor || anchor.target === "_blank" || anchor.hasAttribute("download")) return
+            const destination = new URL(anchor.href, window.location.href)
+            if (destination.origin !== window.location.origin) return
+            const nextUrl = `${destination.pathname}${destination.search}${destination.hash}`
+            if (!workspaceRouteIsRecordDetail(nextUrl, workspace.slug, window.location.origin)) return
+            const detailPreview = parseWorkspaceDetailPreview(anchor.getAttribute("data-workspace-detail-preview"))
+            event.preventDefault()
+            event.stopPropagation()
+            openWorkspaceTab(nextUrl, detailPreview ?? undefined)
+        }
+
+        document.addEventListener("click", openPortalledDetail, true)
+        return () => document.removeEventListener("click", openPortalledDetail, true)
+    }, [openWorkspaceTab, workspace.slug])
 
     useEffect(() => {
         function receiveFrameMessage(event: MessageEvent<WorkspaceTabFrameMessage>) {
@@ -1168,7 +1212,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             }
 
             if (message.type === "open-tab" && message.url) {
-                openWorkspaceTab(message.url)
+                openWorkspaceTab(message.url, message.detailPreview)
             }
 
             if (message.type === "reopen-closed-tab") {
@@ -2159,7 +2203,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const canCreateOkr = canAccessPrivateWorkspacePanels(workspaceRole)
     const canCreateRelationship = canAccessWorkspacePanel(WORKSPACE_PANELS[0], workspaceRole, workspaceCapabilities)
     const canCreateLibraryItem = canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities)
-    const visibleTabs = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
+    const visibleTabs: WorkspaceTab[] = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
     const residentTabIdSet = new Set(residentTabIds)
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrder)
         .filter((tab) => tab.id === activeTabId || residentTabIdSet.has(tab.id))
@@ -2564,7 +2608,10 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                                     onPointerEnter={() => scheduleTabWarm(tab.id)}
                                     onPointerLeave={() => cancelScheduledTabWarm(tab.id)}
                                     onFocus={() => warmWorkspaceTab(tab.id)}
-                                    onPointerDown={(event) => beginTabDrag(event, tab.id)}
+                                    onPointerDown={(event) => {
+                                        warmWorkspaceTab(tab.id)
+                                        beginTabDrag(event, tab.id)
+                                    }}
                                     onPointerUp={(event) => handleTabTouchTap(event, tab)}
                                     onDoubleClick={(event) => {
                                         event.preventDefault()
@@ -2621,7 +2668,9 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                 <div className="absolute inset-0 z-20 bg-neutral-950" aria-hidden="true" />
             )}
             {tabsHydrated && !loadedTabIds.has(activeTabId) && !activeRouteLoading && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center bg-neutral-950 text-sm text-neutral-500">Opening tab…</div>
+                <div className="absolute inset-0 z-10 overflow-y-auto bg-neutral-950">
+                    <WorkspaceTabOpeningState url={activeTab.url} workspaceSlug={workspace.slug} detailPreview={activeTab.detailPreview} />
+                </div>
             )}
             {tabsHydrated && activeNavigation?.status === "error" ? <div role="alert" className="absolute right-4 top-4 z-20 flex items-center gap-3 rounded-lg border border-red-500/30 bg-neutral-950/95 px-3 py-2 text-xs text-red-200 shadow-xl"><span>{activeNavigation.error}</span><button type="button" onClick={retryActiveNavigation} className="font-medium text-white underline decoration-neutral-600 underline-offset-2">Retry</button></div> : null}
         </div>

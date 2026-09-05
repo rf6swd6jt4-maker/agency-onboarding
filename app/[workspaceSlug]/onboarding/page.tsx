@@ -6,6 +6,7 @@ import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { MobileAssignedServices } from "@/components/list/MobileAssignedServices"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { InstantFilterResults } from "@/components/panel/InstantFilterResults"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { QuickStats } from "@/components/panel/QuickStats"
 import { RoundPill, SquarePill, Status } from "@/components/ui"
@@ -222,7 +223,13 @@ function OnboardingRow({ row, detailsPromise, workspaceSlug, customDomain, custo
         { label: "Open onboarding", href: onboardingHref },
         ...(canCopyLink ? [{ label: "Copy onboarding link", copyText: getOnboardingUrl({ workspaceSlug, sessionToken: row.session.session_token, customDomain, customDomainVerified }) }] : []),
     ]
-    return <ListItem>
+    return <ListItem detailPreview={{
+        category: "Onboarding",
+        reference: shortId(row.relationship.id),
+        title: row.relationship.primary_person_name,
+        subtitle: row.relationship.business_name ?? "No company saved",
+        updated: formatRelativeTime(row.session.updated_at),
+    }}>
         <MobileListActionSurface actions={actions} label={`Open actions for ${row.relationship.primary_person_name}`}>
             <ListPrimaryRow>
                 <ListTitle href={onboardingHref} className="flex-1">{title}</ListTitle>
@@ -261,8 +268,8 @@ async function OnboardingPanel({ workspaceId, workspaceSlug, customDomain, custo
     const detailsPromise = loadOnboardingDetails({ workspaceId, rows, staffMode, allowedServiceIds })
     const activeRows = rows.filter((row) => row.session.status === "active")
     const completedRows = rows.filter((row) => row.session.status === "completed")
-    const normalVisibleRows = selectedState === "active" ? activeRows : selectedState === "completed" ? completedRows : rows
     const filterHref = (state: string | null) => workspaceHref(workspaceSlug, `onboarding${state ? `?state=${state}` : ""}`)
+    const instantFiltersAvailable = selectedState !== "stuck"
     const renderRow = (row: OnboardingCoreRow) => <OnboardingRow
         key={row.relationship.id}
         row={row}
@@ -281,13 +288,17 @@ async function OnboardingPanel({ workspaceId, workspaceSlug, customDomain, custo
             { label: "Stuck", value: <Suspense fallback="—"><StuckCount detailsPromise={detailsPromise} /></Suspense> },
         ]} />
         <FilterRail ariaLabel="Filter onboarding by state">
-            <FilterRailLink href={filterHref(null)} selected={!selectedState}>All <FilterRailCount>{rows.length}</FilterRailCount></FilterRailLink>
-            <FilterRailLink href={filterHref("active")} selected={selectedState === "active"}>Active <FilterRailCount>{activeRows.length}</FilterRailCount></FilterRailLink>
-            <FilterRailLink href={filterHref("completed")} selected={selectedState === "completed"}>Complete <FilterRailCount>{completedRows.length}</FilterRailCount></FilterRailLink>
+            <FilterRailLink href={filterHref(null)} selected={!selectedState} instant={instantFiltersAvailable ? { param: "state", value: null } : undefined}>All <FilterRailCount>{rows.length}</FilterRailCount></FilterRailLink>
+            <FilterRailLink href={filterHref("active")} selected={selectedState === "active"} instant={instantFiltersAvailable ? { param: "state", value: "active" } : undefined}>Active <FilterRailCount>{activeRows.length}</FilterRailCount></FilterRailLink>
+            <FilterRailLink href={filterHref("completed")} selected={selectedState === "completed"} instant={instantFiltersAvailable ? { param: "state", value: "completed" } : undefined}>Complete <FilterRailCount>{completedRows.length}</FilterRailCount></FilterRailLink>
             <FilterRailLink href={filterHref("stuck")} selected={selectedState === "stuck"}>Stuck <FilterRailCount><Suspense fallback="—"><StuckCount detailsPromise={detailsPromise} /></Suspense></FilterRailCount></FilterRailLink>
         </FilterRail>
         <List ariaLabel="Relationship onboarding">
-            {selectedState === "stuck" ? <Suspense fallback={Array.from({ length: Math.min(4, rows.length || 1) }, (_, index) => <OnboardingListItemFallback key={index} />)}><StuckOnboardingRows rows={rows} detailsPromise={detailsPromise} renderRow={renderRow} allHref={filterHref(null)} /></Suspense> : normalVisibleRows.length ? normalVisibleRows.map(renderRow) : <EmptyOnboarding selectedState={selectedState} allHref={filterHref(null)} />}
+            {selectedState === "stuck" ? <Suspense fallback={Array.from({ length: Math.min(4, rows.length || 1) }, (_, index) => <OnboardingListItemFallback key={index} />)}><StuckOnboardingRows rows={rows} detailsPromise={detailsPromise} renderRow={renderRow} allHref={filterHref(null)} /></Suspense> : <InstantFilterResults
+                filters={[{ param: "state" }]}
+                items={rows.map((row) => ({ id: row.relationship.id, values: { state: row.session.status }, content: renderRow(row) }))}
+                empty={<EmptyOnboarding selectedState={null} allHref={filterHref(null)} />}
+            />}
         </List>
     </>
 }

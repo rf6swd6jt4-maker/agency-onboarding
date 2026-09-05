@@ -12,10 +12,43 @@ test("workspace tabs warm likely destinations and reveal streamed frames at the 
     const bridge = source("components/workspace/WorkspaceTabBridge.tsx")
 
     assert.match(shell, /tabWarmTimeoutRef/)
-    assert.match(shell, /setTimeout\(\(\) => \{[\s\S]*warmWorkspaceTab\(tabId\)[\s\S]*\}, 120\)/)
+    assert.match(shell, /setTimeout\(\(\) => \{[\s\S]*warmWorkspaceTab\(tabId\)[\s\S]*\}, 60\)/)
     assert.match(shell, /message\.type === "location"[\s\S]*markTabFrameReady\(message\.tabId\)/)
     assert.match(bridge, /startRefreshTransition\(\(\) => router\.refresh\(\)\)/)
     assert.doesNotMatch(bridge, /window\.location\.reload\(\)/)
+})
+
+test("complete in-memory lists filter through native history without a server navigation", () => {
+    const rail = source("components/panel/FilterRail.tsx")
+    const results = source("components/panel/InstantFilterResults.tsx")
+    const bridge = source("components/workspace/WorkspaceTabBridge.tsx")
+
+    assert.match(rail, /window\.history\.pushState/)
+    assert.match(rail, /data-workspace-instant-filter/)
+    assert.match(results, /useSearchParams\(\)/)
+    assert.match(bridge, /hasAttribute\("data-workspace-instant-filter"\)\) return/)
+    for (const path of [
+        "app/[workspaceSlug]/relationships/page.tsx",
+        "app/[workspaceSlug]/work-items/page.tsx",
+        "app/[workspaceSlug]/work/page.tsx",
+        "app/[workspaceSlug]/admin/maintenance/page.tsx",
+        "app/[workspaceSlug]/onboarding/page.tsx",
+    ]) assert.match(source(path), /<InstantFilterResults/, path)
+})
+
+test("panel tabs prefetch their exact frame route and detail tabs reuse list identity while loading", () => {
+    const tabs = source("components/panel/PanelTabs.tsx")
+    const list = source("components/list/List.tsx")
+    const bridge = source("components/workspace/WorkspaceTabBridge.tsx")
+    const shell = source("components/workspace/WorkspaceTopBarClient.tsx")
+    const loading = source("components/workspace/DetailRouteLoading.tsx")
+
+    assert.match(tabs, /workspaceTabFrameUrl\(item\.href, tabId/)
+    assert.match(tabs, /router\.prefetch\(item\.navigationHref\)/)
+    assert.match(list, /data-workspace-detail-preview/)
+    assert.match(bridge, /detailPreview: detailPreview \?\? undefined/)
+    assert.match(shell, /<WorkspaceTabOpeningState[^>]*detailPreview=\{activeTab\.detailPreview\}/)
+    assert.match(loading, /readWorkspaceDetailPreview\(window\.location\.pathname\)/)
 })
 
 test("heavy panel homes stream their useful core before secondary metadata", () => {

@@ -6,6 +6,7 @@ import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTraili
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { MobileAssignedServices } from "@/components/list/MobileAssignedServices"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { InstantFilterResults } from "@/components/panel/InstantFilterResults"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { RelationshipStage, RoundPill, SquarePill, Status } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
@@ -177,7 +178,13 @@ function RelationshipRow({ relationship, openWorkCountsPromise, enrichmentPromis
         : relationship.primary_person_name
     const isKnownTest = Boolean(relationship.source_metadata.is_test)
 
-    return <ListItem>
+    return <ListItem detailPreview={{
+        category: "Relationship",
+        reference: shortId(relationship.id),
+        title: relationship.primary_person_name,
+        subtitle: relationship.business_name ?? "No company saved",
+        updated: formatRelativeTime(relationship.updated_at),
+    }}>
         <MobileListActionSurface actions={relationshipActions(relationship, relationshipHref)} label={`Open actions for ${relationshipTitle}`}>
             <ListPrimaryRow>
                 <ListTitle href={relationshipHref} className="flex-1">{relationshipTitle}</ListTitle>
@@ -200,33 +207,34 @@ async function RelationshipsPanel({ workspaceId, workspaceSlug, selectedPhase, r
     for (const relationship of activeRelationships) {
         phaseCounts.set(relationship.lifecycle_phase, (phaseCounts.get(relationship.lifecycle_phase) ?? 0) + 1)
     }
-    const visibleRelationships = selectedPhase
-        ? activeRelationships.filter((relationship) => relationship.lifecycle_phase === selectedPhase)
-        : activeRelationships
-
     return <>
         <FilterRail ariaLabel="Filter relationships by lifecycle stage">
-            <FilterRailLink href={workspaceHref(workspaceSlug, "relationships")} selected={!selectedPhase}>
+            <FilterRailLink href={workspaceHref(workspaceSlug, "relationships")} selected={!selectedPhase} instant={{ param: "phase", value: null }}>
                 All <FilterRailCount>{activeRelationships.length}</FilterRailCount>
             </FilterRailLink>
-            {RELATIONSHIP_PHASES.map((phase) => <FilterRailLink key={phase.key} href={workspaceHref(workspaceSlug, `relationships?phase=${phase.key}`)} selected={selectedPhase === phase.key}>
+            {RELATIONSHIP_PHASES.map((phase) => <FilterRailLink key={phase.key} href={workspaceHref(workspaceSlug, `relationships?phase=${phase.key}`)} selected={selectedPhase === phase.key} instant={{ param: "phase", value: phase.key }}>
                 {phase.label} <FilterRailCount>{phaseCounts.get(phase.key) ?? 0}</FilterRailCount>
             </FilterRailLink>)}
         </FilterRail>
 
         <List ariaLabel="Relationships">
-            {visibleRelationships.length ? visibleRelationships.map((relationship) => <RelationshipRow
-                key={relationship.id}
-                relationship={relationship}
-                workspaceSlug={workspaceSlug}
-                openWorkCountsPromise={openWorkCountsPromise}
-                enrichmentPromise={enrichmentPromise}
-            />) : <div className="p-6">
-                <p className="text-lg font-semibold">{selectedPhase ? `No ${RELATIONSHIP_PHASES.find((phase) => phase.key === selectedPhase)?.label.toLowerCase()} relationships.` : "No relationships yet."}</p>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">
-                    {selectedPhase ? <>Choose another lifecycle stage or <Link href={workspaceHref(workspaceSlug, "relationships")} className="text-neutral-200 underline decoration-neutral-600 underline-offset-4 hover:text-white">show all relationships</Link>.</> : "Promote a qualified lead or start a relationship manually. From here it can move into nurturing, sales, onboarding, fulfilment, and retention without changing record type."}
-                </p>
-            </div>}
+            <InstantFilterResults
+                filters={[{ param: "phase" }]}
+                items={activeRelationships.map((relationship) => ({
+                    id: relationship.id,
+                    values: { phase: relationship.lifecycle_phase },
+                    content: <RelationshipRow
+                        relationship={relationship}
+                        workspaceSlug={workspaceSlug}
+                        openWorkCountsPromise={openWorkCountsPromise}
+                        enrichmentPromise={enrichmentPromise}
+                    />,
+                }))}
+                empty={<div className="p-6">
+                    <p className="text-lg font-semibold">No relationships match this lifecycle stage.</p>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">Choose another lifecycle stage above to broaden the list.</p>
+                </div>}
+            />
         </List>
     </>
 }

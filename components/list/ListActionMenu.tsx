@@ -23,6 +23,7 @@ export function ListActionMenu({ actions, label = "Open item actions", className
     const [pendingAction, setPendingAction] = useState<string | null>(null)
     const [actionError, setActionError] = useState<string | null>(null)
     const menuId = useId()
+    const inheritedDetailPreview = anchor?.closest("[data-workspace-detail-preview]")?.getAttribute("data-workspace-detail-preview") ?? undefined
     const visibleActions = actions.filter((action): action is ListAction => {
         if (!action) return false
         return Boolean(action.label && (action.href || action.action || action.copyText))
@@ -77,7 +78,7 @@ export function ListActionMenu({ actions, label = "Open item actions", className
                             {item.label}
                         </a>
                     }
-                    return <Link key={item.label} href={item.href} target={item.external ? "_blank" : undefined} rel={item.external ? "noreferrer" : undefined} className={className} role="menuitem" onClick={() => setOpen(false)}>
+                    return <Link key={item.label} href={item.href} prefetch={false} target={item.external ? "_blank" : undefined} rel={item.external ? "noreferrer" : undefined} data-workspace-detail-preview={inheritedDetailPreview} className={className} role="menuitem" onClick={() => setOpen(false)}>
                         {item.label}
                     </Link>
                 }

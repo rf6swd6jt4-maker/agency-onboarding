@@ -188,7 +188,13 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
                         live ? { label: "Cancel", action: cancelLeadgenPoll.bind(null, workspace.slug, poll.id), danger: true, confirmMessage: "Cancel this running poll?" } : {},
                         { label: "Remove", action: removeLeadgenPoll.bind(null, workspace.slug, poll.id), danger: true },
                     ]
-                    return <ListItem key={poll.id} className={poll.status === "failed" ? "bg-red-950/[0.08]" : ""}>
+                    return <ListItem key={poll.id} className={poll.status === "failed" ? "bg-red-950/[0.08]" : ""} detailPreview={{
+                        category: "Poll",
+                        reference: shortId(poll.id),
+                        title: `${sourceNames(poll.source_snapshot, poll.source_count)} poll`,
+                        subtitle: live ? "Live view refreshes automatically while the poll is active." : undefined,
+                        updated: formatRelativeTime(poll.completed_at ?? poll.started_at ?? poll.created_at),
+                    }}>
                         <MobileListActionSurface actions={pollActions} label={`Open actions for ${sourceNames(poll.source_snapshot, poll.source_count)} poll`}>
                         <ListPrimaryRow>
                             <ListTitle href={pollHref} className="flex-1">{sourceNames(poll.source_snapshot, poll.source_count)} poll</ListTitle>

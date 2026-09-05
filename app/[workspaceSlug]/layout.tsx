@@ -1,7 +1,8 @@
 import { Suspense, type ReactNode } from "react"
 import { headers } from "next/headers"
 
-import { WorkspaceBanner, WorkspaceBannerPending } from "@/components/admin/WorkspaceBanner"
+import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
+import { WorkspaceBannerPending } from "@/components/admin/WorkspaceBannerPending"
 import { WorkspacePanelChrome } from "@/components/workspace/WorkspacePanelChrome"
 import { requireWorkspace } from "@/lib/workspaces"
 import { workspaceTabIdFromUrl } from "@/lib/workspace-tabs"

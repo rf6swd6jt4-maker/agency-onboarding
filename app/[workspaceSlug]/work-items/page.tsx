@@ -6,6 +6,7 @@ import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { InstantFilterResults } from "@/components/panel/InstantFilterResults"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { QuickStats } from "@/components/panel/QuickStats"
 import { RelationshipStage, SquarePill, Status } from "@/components/ui"
@@ -33,13 +34,6 @@ export default async function WorkItemsPage({ params, searchParams }: PageProps)
     const blockedItems = items.filter((item) => item.status === "blocked")
     const dueCount = openItems.filter((item) => item.due_date && new Date(item.due_date) <= new Date()).length
     const selectedState = ["open", "blocked", "completed"].includes(query.state ?? "") ? query.state : null
-    const visibleItems = selectedState === "open"
-        ? openItems
-        : selectedState === "blocked"
-            ? blockedItems
-            : selectedState === "completed"
-                ? completedItems
-                : items
     const creatorIds = [...new Set(items.map((item) => item.created_by).filter((id): id is string => Boolean(id)))]
     const creatorsResult = creatorIds.length
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", creatorIds)
@@ -66,21 +60,31 @@ export default async function WorkItemsPage({ params, searchParams }: PageProps)
                 ]} />
 
                 <FilterRail ariaLabel="Filter work items by state">
-                    <FilterRailLink href={filterHref(null)} selected={!selectedState}>All <FilterRailCount>{items.length}</FilterRailCount></FilterRailLink>
-                    <FilterRailLink href={filterHref("open")} selected={selectedState === "open"}>Open <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailLink>
-                    <FilterRailLink href={filterHref("blocked")} selected={selectedState === "blocked"}>Blocked <FilterRailCount>{blockedItems.length}</FilterRailCount></FilterRailLink>
-                    <FilterRailLink href={filterHref("completed")} selected={selectedState === "completed"}>Completed <FilterRailCount>{completedItems.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref(null)} selected={!selectedState} instant={{ param: "state", value: null }}>All <FilterRailCount>{items.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("open")} selected={selectedState === "open"} instant={{ param: "state", value: "open" }}>Open <FilterRailCount>{openItems.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("blocked")} selected={selectedState === "blocked"} instant={{ param: "state", value: "blocked" }}>Blocked <FilterRailCount>{blockedItems.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("completed")} selected={selectedState === "completed"} instant={{ param: "state", value: "completed" }}>Completed <FilterRailCount>{completedItems.length}</FilterRailCount></FilterRailLink>
                 </FilterRail>
 
                 <List ariaLabel="Work items">
-                    {visibleItems.length ? visibleItems.map((item) => {
+                    <InstantFilterResults filters={[{ param: "state" }]} items={items.map((item) => {
                         const href = workItemHref(workspace.slug, item.id)
                         const status = workItemStatusPresentation(item.status)
                         const date = item.due_date ?? item.planned_start_date ?? item.actual_start_at ?? item.updated_at
                         const creator = item.created_by ? creatorById.get(item.created_by) : null
                         const creatorAvatarSrc = creator?.avatar_path && creator.username ? profileAvatarUrl(creator.username, creator.avatar_path) : null
                         const actions = [{ label: "Open work item", href }]
-                        return <ListItem key={item.id}>
+                        const filterStates = [
+                            !["done", "canceled"].includes(item.status) ? "open" : null,
+                            item.status === "blocked" ? "blocked" : null,
+                            ["done", "canceled"].includes(item.status) ? "completed" : null,
+                        ].filter((value): value is string => Boolean(value))
+                        return { id: item.id, values: { state: filterStates }, content: <ListItem detailPreview={{
+                            category: "Work item",
+                            reference: shortId(item.id),
+                            title: item.title,
+                            updated: formatRelativeTime(item.updated_at),
+                        }}>
                             <MobileListActionSurface actions={actions} label={`Open actions for ${item.title}`}>
                                 <ListPrimaryRow>
                                     <ListTitle href={href} className="flex-1">{item.title}</ListTitle>
@@ -99,11 +103,11 @@ export default async function WorkItemsPage({ params, searchParams }: PageProps)
                                     </ListTrailing>
                                 </ListSecondaryRow>
                             </MobileListActionSurface>
-                        </ListItem>
-                    }) : <div className="p-6">
-                        <p className="text-lg font-semibold">{selectedState ? `No ${selectedState} work items.` : "No work items yet."}</p>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">{selectedState ? <>Choose another state or <Link href={filterHref(null)} className="text-neutral-200 underline decoration-neutral-600 underline-offset-4 hover:text-white">show all work items</Link>.</> : "Create a task from here or attach work from a relationship page."}</p>
-                    </div>}
+                        </ListItem> }
+                    })} empty={<div className="p-6">
+                        <p className="text-lg font-semibold">No work items match this state.</p>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">Choose another state above to broaden the list.</p>
+                    </div>} />
                 </List>
             </div>
         </main>

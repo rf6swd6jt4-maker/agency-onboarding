@@ -122,7 +122,13 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
                         event.source_href ? { label: "Open source", href: event.source_href, external: sourceIsExternal } : null,
                         { label: "Copy event ID", copyText: event.id },
                     ]
-                    return <ListItem key={event.id} className={event.level === "error" ? "bg-red-950/[0.08]" : ""}>
+                    return <ListItem key={event.id} className={event.level === "error" ? "bg-red-950/[0.08]" : ""} detailPreview={{
+                        category: "Activity event",
+                        reference: shortId(event.id),
+                        title: event.summary,
+                        subtitle: event.event_key,
+                        updated: formatRelativeTime(event.occurred_at),
+                    }}>
                         <MobileListActionSurface actions={actions} label={`Open actions for ${event.summary}`}>
                             <ListPrimaryRow>
                                 <ListTitle href={detailHref} className="flex-1">{event.summary}</ListTitle>

@@ -1,10 +1,10 @@
-import Link from "next/link"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { workItemStatusPresentation } from "@/components/list/work-item-presentation"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
+import { InstantFilterResults } from "@/components/panel/InstantFilterResults"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { QuickStats } from "@/components/panel/QuickStats"
 import { SquarePill, Status } from "@/components/ui"
@@ -36,7 +36,6 @@ export default async function FulfilmentPage({ params, searchParams }: PageProps
     const blockedItems = items.filter((item) => item.status === "blocked")
     const dueItems = items.filter((item) => item.due_date && new Date(item.due_date) <= new Date())
     const selectedState = query.state === "blocked" || query.state === "due" ? query.state : null
-    const visibleItems = selectedState === "blocked" ? blockedItems : selectedState === "due" ? dueItems : items
     const creatorIds = [...new Set(items.map((item) => item.created_by).filter((id): id is string => Boolean(id)))]
     const creatorsResult = creatorIds.length
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", creatorIds)
@@ -61,13 +60,13 @@ export default async function FulfilmentPage({ params, searchParams }: PageProps
                 ]} />
 
                 <FilterRail ariaLabel="Filter fulfilment work">
-                    <FilterRailLink href={filterHref(null)} selected={!selectedState}>All work <FilterRailCount>{items.length}</FilterRailCount></FilterRailLink>
-                    <FilterRailLink href={filterHref("blocked")} selected={selectedState === "blocked"}>Blocked <FilterRailCount>{blockedItems.length}</FilterRailCount></FilterRailLink>
-                    <FilterRailLink href={filterHref("due")} selected={selectedState === "due"}>Due/ready <FilterRailCount>{dueItems.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref(null)} selected={!selectedState} instant={{ param: "state", value: null }}>All work <FilterRailCount>{items.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("blocked")} selected={selectedState === "blocked"} instant={{ param: "state", value: "blocked" }}>Blocked <FilterRailCount>{blockedItems.length}</FilterRailCount></FilterRailLink>
+                    <FilterRailLink href={filterHref("due")} selected={selectedState === "due"} instant={{ param: "state", value: "due" }}>Due/ready <FilterRailCount>{dueItems.length}</FilterRailCount></FilterRailLink>
                 </FilterRail>
 
                 <List ariaLabel="Fulfilment work">
-                    {visibleItems.length ? visibleItems.map((item) => {
+                    <InstantFilterResults filters={[{ param: "state" }]} items={items.map((item) => {
                         const href = nativeItemHref(workspace.slug, item)
                         const status = workItemStatusPresentation(item.status)
                         const date = item.due_date ?? item.planned_start_date ?? item.actual_start_at ?? item.created_at
@@ -79,7 +78,19 @@ export default async function FulfilmentPage({ params, searchParams }: PageProps
                                 : item.relationship.primary_person_name
                             : "Workspace work"
                         const actions = [{ label: "Open work item", href }]
-                        return <ListItem key={item.id}>
+                        const opensRelationship = href.includes(`/${workspace.slug}/relationships/`)
+                        const opensFulfilment = href.includes(`/${workspace.slug}/work/`)
+                        const filterStates = [
+                            item.status === "blocked" ? "blocked" : null,
+                            item.due_date && new Date(item.due_date) <= new Date() ? "due" : null,
+                        ].filter((value): value is string => Boolean(value))
+                        return { id: item.id, values: { state: filterStates }, content: <ListItem detailPreview={{
+                            category: opensFulfilment ? "Fulfilment" : opensRelationship ? "Relationship" : "Work item",
+                            reference: shortId(opensFulfilment || opensRelationship ? item.relationship_id ?? item.id : item.id),
+                            title: opensFulfilment || opensRelationship ? item.relationship?.primary_person_name ?? item.title : item.title,
+                            subtitle: opensFulfilment || opensRelationship ? item.relationship?.business_name ?? "No company saved" : null,
+                            updated: formatRelativeTime(item.updated_at),
+                        }}>
                             <MobileListActionSurface actions={actions} label={`Open actions for ${item.title}`}>
                                 <ListPrimaryRow>
                                     <ListTitle href={href} className="flex-1">{item.title}</ListTitle>
@@ -97,11 +108,11 @@ export default async function FulfilmentPage({ params, searchParams }: PageProps
                                     </ListTrailing>
                                 </ListSecondaryRow>
                             </MobileListActionSurface>
-                        </ListItem>
-                    }) : <div className="p-6">
-                        <p className="text-lg font-semibold">{selectedState ? `No ${selectedState === "due" ? "due or ready" : selectedState} fulfilment work.` : "No fulfilment work yet."}</p>
-                        <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">{selectedState ? <>Choose another state or <Link href={filterHref(null)} className="text-neutral-200 underline decoration-neutral-600 underline-offset-4 hover:text-white">show all fulfilment work</Link>.</> : "Move a relationship into fulfilment or add fulfilment-stage tasks from a relationship page."}</p>
-                    </div>}
+                        </ListItem> }
+                    })} empty={<div className="p-6">
+                        <p className="text-lg font-semibold">No fulfilment work matches this state.</p>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">Choose another state above to broaden the list.</p>
+                    </div>} />
                 </List>
             </div>
         </main>

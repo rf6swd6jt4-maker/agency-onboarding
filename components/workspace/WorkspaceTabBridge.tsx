@@ -15,6 +15,7 @@ import {
 } from "@/lib/workspace-tabs"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { openOnboardingBuilderWindow } from "@/lib/onboarding-builder-window"
+import { parseWorkspaceDetailPreview, storeWorkspaceDetailPreview } from "@/lib/workspace-detail-preview"
 import {
     flushWorkspaceAutosaves,
     WORKSPACE_MUTATION_END,
@@ -143,6 +144,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             }
             const destination = new URL(anchor.href, window.location.href)
             if (destination.origin !== window.location.origin || destination.searchParams.has(WORKSPACE_TAB_FRAME_PARAM)) return
+            if (anchor.hasAttribute("data-workspace-instant-filter")) return
             const nextUrl = `${destination.pathname}${destination.search}${destination.hash}`
             if (isWorkspaceOnboardingBuilderUrl(nextUrl, workspaceSlug, window.location.origin)) {
                 event.preventDefault()
@@ -158,12 +160,15 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             if (normalizeWorkspaceUrl(nextUrl, workspaceSlug, window.location.origin) === currentUrl) return
             if (workspaceRouteIsRecordDetail(nextUrl, workspaceSlug, window.location.origin)) {
                 event.preventDefault()
+                const detailPreview = parseWorkspaceDetailPreview(anchor.closest("[data-workspace-detail-preview]")?.getAttribute("data-workspace-detail-preview"))
+                if (detailPreview) storeWorkspaceDetailPreview(nextUrl, detailPreview)
                 const message: WorkspaceTabFrameMessage = {
                     source: WORKSPACE_TAB_MESSAGE_SOURCE,
                     target: "host",
                     tabId,
                     type: "open-tab",
                     url: nextUrl,
+                    detailPreview: detailPreview ?? undefined,
                 }
                 window.parent.postMessage(message, window.location.origin)
                 return
