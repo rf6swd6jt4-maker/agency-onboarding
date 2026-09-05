@@ -32,6 +32,7 @@ export function BuilderPreview({
     client = { name: "Preview client", email: null, phone: null, isTest: true },
     privacyPolicyUrl,
     termsOfServiceUrl,
+    fullWindow = false,
 }: {
     module?: OnboardingModuleDefinition | null
     modules?: OnboardingModuleDefinition[]
@@ -44,6 +45,7 @@ export function BuilderPreview({
     client?: PreviewClient
     privacyPolicyUrl?: string | null
     termsOfServiceUrl?: string | null
+    fullWindow?: boolean
 }) {
     const previewModules = useMemo(
         () => modules ?? (moduleDefinition ? [moduleDefinition] : []),
@@ -93,7 +95,8 @@ export function BuilderPreview({
     return (
         <OnboardingThemeProvider theme={theme} className="h-full min-h-0">
             <OnboardingLayout
-                embedded
+                embedded={!fullWindow}
+                fullWindowPreview={fullWindow}
                 roadmapSteps={roadmapSteps}
                 client={client}
                 workspaceName={workspaceName}

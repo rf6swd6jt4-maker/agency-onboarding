@@ -590,7 +590,12 @@ export function RelationshipDealWorkspace({
         </section>
     </div>, parentDocument.body) : null
 
-    const preview = onboardingPreviewOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[150] flex flex-col bg-black text-white"><header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-800 bg-black px-4"><div><p className="text-sm font-medium">Onboarding preview</p><p className="text-[11px] text-neutral-500">{assignedModules.length} modules in client order · nothing is saved</p></div><button type="button" onClick={() => setOnboardingPreviewOpen(false)} className="h-9 rounded-lg border border-neutral-700 px-3 text-xs">Back to sale review</button></header><div className="min-h-0 flex-1"><BuilderPreview modules={assignedModules} payment={payment} theme={theme} help={help} workspaceName={workspaceName} logoSrc={logoSrc} client={{ name: draft.primaryPersonName || "Preview client", email: draft.primaryEmail || null, phone: draft.primaryPhone || draft.whatsappPhone || null, isTest: false }} privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} /></div></div>, parentDocument.body) : null
+    const preview = onboardingPreviewOpen && parentDocument ? createPortal(<div data-pos-onboarding-preview className="fixed inset-0 z-[2147483646] overflow-hidden bg-neutral-100 text-white">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start p-3 sm:p-4">
+            <button type="button" onClick={() => setOnboardingPreviewOpen(false)} className="pointer-events-auto rounded-full border border-white/20 bg-neutral-700 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(0,0,0,0.24)] transition hover:bg-neutral-600 focus:outline-none focus:ring-2 focus:ring-white/70">Exit preview</button>
+        </div>
+        <div className="h-full min-h-0"><BuilderPreview fullWindow modules={assignedModules} payment={payment} theme={theme} help={help} workspaceName={workspaceName} logoSrc={logoSrc} client={{ name: draft.primaryPersonName || "Preview client", email: draft.primaryEmail || null, phone: draft.primaryPhone || draft.whatsappPhone || null, isTest: false }} privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} /></div>
+    </div>, parentDocument.body) : null
 
     return <>
         {detailsPanel}

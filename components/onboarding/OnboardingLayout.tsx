@@ -27,6 +27,7 @@ type OnboardingLayoutProps = {
     logoSrc?: string | null
     help: OnboardingHelpSettings
     embedded?: boolean
+    fullWindowPreview?: boolean
     forceMobile?: boolean
     footerText?: string
     privacyPolicyUrl?: string | null
@@ -46,6 +47,7 @@ export function OnboardingLayout({
     logoSrc,
     help,
     embedded = false,
+    fullWindowPreview = false,
     forceMobile = false,
     footerText = "Progress saved automatically",
     privacyPolicyUrl,
@@ -57,7 +59,9 @@ export function OnboardingLayout({
 }: OnboardingLayoutProps) {
     const helpCard = (id: string) => <div id={id} data-onboarding-help-card data-builder-help-block={onHelpSelect ? "true" : undefined} onClick={onHelpSelect} className={`rounded-2xl outline-offset-4 transition ${onHelpSelect ? "cursor-pointer hover:outline hover:outline-1 hover:outline-black/15" : ""} ${helpSelected ? "outline-2 outline-[var(--onboarding-accent,#F0B429)]" : ""}`}><NeedHelpCard help={help} /></div>
     return (
-        <main className={forceMobile
+        <main data-onboarding-full-window-preview={fullWindowPreview ? "true" : undefined} className={fullWindowPreview
+            ? "relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)]"
+            : forceMobile
             ? embedded
                 ? "relative flex h-full min-h-[34rem] flex-col overflow-hidden rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)] shadow-2xl shadow-black/30"
                 : "relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)]"
@@ -83,6 +87,8 @@ export function OnboardingLayout({
 
             <div className={forceMobile
                 ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-44 pt-4"
+                : fullWindowPreview
+                    ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-44 pt-4 sm:px-6 lg:grid-cols-[260px_minmax(0,1fr)_260px] lg:overflow-hidden lg:py-6"
                 : `mx-auto grid w-full max-w-7xl gap-6 px-4 pb-44 pt-4 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:py-6 ${embedded ? "lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]" : "lg:grid-cols-[260px_minmax(0,1fr)_260px]"}`}>
                 <aside className={forceMobile ? "hidden" : "hidden lg:min-h-0 lg:overflow-hidden lg:block"}>
                     <Roadmap steps={roadmapSteps} onSelect={onRoadmapSelect} allowAllSteps={allowRoadmapNavigation} />
