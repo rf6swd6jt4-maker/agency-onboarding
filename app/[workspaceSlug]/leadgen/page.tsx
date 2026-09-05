@@ -1,4 +1,3 @@
-import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { LeadgenTabs } from "@/components/leadgen/LeadgenTabs"
 import { NewPollButton } from "@/components/leadgen/NewPollButton"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
@@ -67,11 +66,10 @@ export default async function LeadgenWorkspacePage({ params, searchParams }: Pag
         return place || "Location unknown"
     }
 
-    return <main className="min-h-screen bg-neutral-950 px-4 py-5 text-white sm:px-6 sm:py-6">
+    return <main className="min-h-screen bg-neutral-950 px-4 pb-5 text-white sm:px-6 sm:pb-6">
         <ListAutoRefresh />
         <div className="mx-auto max-w-7xl">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="leadgen" />
-            <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
             <PanelTabHeader
                 title="Leads"
                 description={`Qualified owner-phone leads from the latest poll. Research candidates and rejected evidence remain on the poll detail page. Signed in as ${workspaceRoleLabel(role)}.`}

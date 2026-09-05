@@ -1,7 +1,6 @@
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { AdminWorkQueue } from "@/components/admin/AdminWorkQueue"
 import { OkrWorkspace } from "@/components/admin/OkrWorkspace"
-import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { listWorkspaceOkrs } from "@/lib/admin/okrs"
@@ -63,8 +62,7 @@ export default async function AdminPage({ params, searchParams }: PageProps) {
     return (
         <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-            <div className="mx-auto max-w-7xl pt-5">
-                <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
+            <div className="mx-auto max-w-7xl">
                 <PanelTabHeader
                     title={view === "work" ? "Work Queue" : "OKRs"}
                     description={view === "work" ? "Ranked Admin work ordered by timing, dependencies, expected impact, ownership, and available capacity." : "Objectives and measurable Key Results for private workspace administration."}

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation"
+import { cache } from "react"
 import type { User } from "@supabase/supabase-js"
 import { getAal2User, requireAal2User } from "@/lib/auth/aal"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
@@ -38,7 +39,7 @@ export async function getCurrentUser() {
     return getAal2User(supabase)
 }
 
-export async function requireWorkspace(
+const loadRequiredWorkspace = cache(async function loadRequiredWorkspace(
     slug: string,
     minimumRole: WorkspaceRole = "staff"
 ): Promise<{ user: User; workspace: Workspace; role: WorkspaceRole }> {
@@ -84,6 +85,10 @@ export async function requireWorkspace(
     }
 
     return { user, workspace, role }
+})
+
+export function requireWorkspace(slug: string, minimumRole: WorkspaceRole = "staff") {
+    return loadRequiredWorkspace(slug, minimumRole)
 }
 
 export async function getWorkspaceForPublicOnboarding(slug: string) {

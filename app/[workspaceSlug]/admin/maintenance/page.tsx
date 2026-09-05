@@ -1,5 +1,4 @@
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
-import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
@@ -53,8 +52,7 @@ export default async function MaintenancePage({ params, searchParams }: PageProp
 
     return <main className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
         <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-        <div className="mx-auto max-w-7xl pt-5">
-            <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
+        <div className="mx-auto max-w-7xl">
             <PanelTabHeader
                 title="Maintenance Queue"
                 description="Actionable automation failures deduplicated into accountable Work Items. Repeated fingerprints update the open item; recurrence after resolution creates a new one."

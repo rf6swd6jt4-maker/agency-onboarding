@@ -1,6 +1,5 @@
 import Link from "next/link"
 import { Suspense } from "react"
-import { WorkspaceBanner, WorkspaceBannerFallback } from "@/components/admin/WorkspaceBanner"
 import { ListActionMenu, type ListAction } from "@/components/list/ListActionMenu"
 import { ListCreatorBadge } from "@/components/list/ListCreatorBadge"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
@@ -262,10 +261,7 @@ export default async function RelationshipsPage({ params, searchParams }: PagePr
 
     return <main className="min-h-screen bg-neutral-950 px-4 pb-7 text-white sm:px-6">
         <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-        <div className="mx-auto max-w-7xl pt-5">
-            <Suspense fallback={<WorkspaceBannerFallback bannerPath={workspace.banner_path} logoPath={workspace.logo_path} height={workspace.banner_height} />}>
-                <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
-            </Suspense>
+        <div className="mx-auto max-w-7xl">
             <PanelTabHeader
                 title="Relationships"
                 description="People and businesses moving through lead, sales, onboarding, fulfilment, and retention."

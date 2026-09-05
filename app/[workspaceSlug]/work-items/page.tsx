@@ -1,5 +1,4 @@
 import Link from "next/link"
-import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { LibraryTabs } from "@/components/library/LibraryTabs"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
 import { ListActionMenu } from "@/components/list/ListActionMenu"
@@ -51,8 +50,7 @@ export default async function WorkItemsPage({ params, searchParams }: PageProps)
     return (
         <main className="min-h-screen bg-neutral-950 px-4 pb-7 text-white sm:px-6">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="client-work" />
-            <div className="mx-auto max-w-7xl pt-5">
-                <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
+            <div className="mx-auto max-w-7xl">
                 <PanelTabHeader
                     title="Work Items"
                     description="Workspace tasks ordered by their most recent update."

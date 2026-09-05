@@ -1,4 +1,3 @@
-import { WorkspaceBanner } from "@/components/admin/WorkspaceBanner"
 import { LeadgenTabs } from "@/components/leadgen/LeadgenTabs"
 import { NewPollButton } from "@/components/leadgen/NewPollButton"
 import { PollDuration } from "@/components/leadgen/PollDuration"
@@ -148,11 +147,10 @@ export default async function LeadgenPollsPage({ params }: PageProps) {
     const latestTaskStats = latestPoll ? pollTaskStats(tasksByPoll[latestPoll.id] ?? []) : null
     const latestInvestigationStats = latestPoll ? investigationStats(investigationsByPoll[latestPoll.id] ?? [], claimsByPoll[latestPoll.id] ?? []) : null
 
-    return <main className="min-h-screen bg-neutral-950 px-4 py-5 text-white sm:px-6 sm:py-6">
+    return <main className="min-h-screen bg-neutral-950 px-4 pb-5 text-white sm:px-6 sm:pb-6">
         <PollsAutoRefresh enabled intervalMs={5000} processUrl={`/api/leadgen/polls/process?workspace=${encodeURIComponent(workspace.slug)}`} />
         <div className="mx-auto max-w-7xl">
             <WorkspaceTopBar userId={user.id} workspace={workspace} currentProduct="leadgen" />
-            <WorkspaceBanner bannerPath={workspace.banner_path} logoPath={workspace.logo_path} name={workspace.name} height={workspace.banner_height} position={workspace.banner_position} />
             <PanelTabHeader
                 title="Polls"
                 description={`Poll runs, queue state, durations, and pipeline results. Signed in as ${workspaceRoleLabel(role)}.`}
