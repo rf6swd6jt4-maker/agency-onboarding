@@ -395,7 +395,7 @@ test("upload acceptance is strict, document-aware, and rejects empty or oversize
     assert.throws(() => validateOnboardingUploadFile(anyField, { name: "empty.txt", size: 0, type: "text/plain" }), /valid file/u)
     assert.throws(() => validateOnboardingUploadFile(anyField, { name: "large.bin", size: MAX_ONBOARDING_UPLOAD_SIZE + 1, type: "application/octet-stream" }), /500MB/u)
     assert.equal(getFileAcceptValue("image"), "image/*")
-    assert.match(publicActions, /validateOnboardingUploadFile\(field, file\)/u)
+    assert.match(publicActions, /validateOnboardingUploadFile\(field, candidate\.file\)/u)
     assert.match(canonical, /if \(!field\.multiple && uploads\.length > 1\)/u)
 })
 
@@ -406,5 +406,5 @@ test("draft autosave serializes requests, collapses to the latest response, and 
     assert.match(onboardingForm, /while \(draftQueueRef\.current\)/u)
     assert.match(onboardingForm, /draftVersionRef\.current === pending\.version/u)
     assert.match(onboardingForm, /window\.addEventListener\("online", retry\)/u)
-    assert.ok(onboardingForm.indexOf("await draftPumpRef.current") < onboardingForm.indexOf("const formData = new FormData(event.currentTarget)"))
+    assert.ok(onboardingForm.indexOf("await draftPumpRef.current") < onboardingForm.indexOf("await waitForCurrentUploads()", onboardingForm.indexOf("async function handleSubmit")))
 })

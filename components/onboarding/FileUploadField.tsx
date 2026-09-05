@@ -16,6 +16,13 @@ type FileUploadFieldProps = {
     required?: boolean
     existingFiles?: StoredUpload[]
     files: File[]
+    disabled?: boolean
+    uploadStates?: Array<{
+        status: "preparing" | "uploading" | "uploaded" | "error"
+        progress: number
+        error?: string
+    }>
+    onRetry?: (index: number) => void
     onFilesChange: (files: File[]) => void
 }
 
@@ -26,6 +33,9 @@ export function FileUploadField({
     required,
     existingFiles = [],
     files,
+    disabled = false,
+    uploadStates = [],
+    onRetry,
     onFilesChange,
 }: FileUploadFieldProps) {
     const [inputKey, setInputKey] = useState(0)
@@ -89,19 +99,20 @@ export function FileUploadField({
 
     return (
         <div>
-            <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-8 text-center transition hover:border-[var(--onboarding-primary,#1E3A5F)]">
+            <label className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-8 text-center transition ${disabled ? "cursor-wait opacity-70" : "cursor-pointer hover:border-[var(--onboarding-primary,#1E3A5F)]"}`}>
                 <span className="text-base font-semibold text-[var(--onboarding-text,#0F172A)]">
                     Tap to choose {multiple ? "files" : "a file"}
                 </span>
                 <span className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">
-                    Images preview before you submit. Videos upload directly
-                    and show progress.
+                    Uploads begin immediately in the background. You can keep
+                    completing the rest of the step.
                 </span>
                 <input
                     key={`${name}-${inputKey}`}
                     type="file"
                     accept={getFileAcceptValue(accept)}
                     multiple={multiple}
+                    disabled={disabled}
                     required={
                         required &&
                         existingFiles.length === 0 &&
@@ -131,6 +142,7 @@ export function FileUploadField({
                                 return (
                                     <button
                                         type="button"
+                                        disabled={disabled}
                                         onClick={() => removeFile(index)}
                                         aria-label={`Remove ${file.name}`}
                                         className={`absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center text-3xl font-medium leading-none focus:outline-none ${
@@ -171,6 +183,19 @@ export function FileUploadField({
                                 <p className="mt-1 text-xs text-[var(--onboarding-muted,#475569)]">
                                     {(file.size / 1024 / 1024).toFixed(1)} MB
                                 </p>
+                                {(() => {
+                                    const upload = uploadStates[index]
+                                    if (!upload) return null
+                                    if (upload.status === "error") {
+                                        return <div className="mt-2"><p className="text-xs text-red-700">Upload paused.</p>{onRetry ? <button type="button" disabled={disabled} onClick={() => onRetry(index)} className="mt-1 text-xs font-semibold text-[var(--onboarding-primary,#1E3A5F)] underline underline-offset-2 disabled:opacity-60">Retry upload</button> : null}</div>
+                                    }
+                                    const label = upload.status === "uploaded"
+                                        ? "Ready"
+                                        : upload.status === "preparing"
+                                            ? "Preparing…"
+                                            : `Uploading ${upload.progress}%`
+                                    return <div className="mt-2"><p className="text-xs font-medium text-[var(--onboarding-muted,#475569)]">{label}</p>{upload.status !== "uploaded" ? <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-black/10"><div className="h-full rounded-full bg-[var(--onboarding-primary,#1E3A5F)] transition-[width]" style={{ width: `${upload.progress}%` }} /></div> : null}</div>
+                                })()}
                             </div>
                         </div>
                     ))}

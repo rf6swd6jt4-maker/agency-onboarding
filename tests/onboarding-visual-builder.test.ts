@@ -159,7 +159,7 @@ test("appointment-setting blocks autosave without local save buttons and step su
     assert.match(runtimePage, /<OnboardingStepSubmit/)
     assert.match(onboardingStepSubmit, /completePreparedStep/)
     assert.match(onboardingStepSubmit, /role="alert"/)
-    assert.match(publicSessionActions, /nextPath: outcome\.clientPortalUrl \?\? await getPublicOnboardingPath\(token\)/)
+    assert.match(publicSessionActions, /nextPath: outcome\.clientPortalUrl \?\? await onboardingPathForStep\(token, outcome\.nextStepKey\)/)
 })
 
 test("Builder defaults expose bookends and mandatory modules with expanded modules and collapsed steps", () => {

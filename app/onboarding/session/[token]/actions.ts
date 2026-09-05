@@ -34,6 +34,11 @@ async function getPublicSession(token: string) {
     return session
 }
 
+async function onboardingPathForStep(token: string, stepKey: string | null) {
+    const path = await getPublicOnboardingPath(token)
+    return stepKey ? `${path}?step=${encodeURIComponent(stepKey)}` : path
+}
+
 export async function completeStep(token: string, stepKey: string) {
     const outcome = await completeCanonicalStep(token, stepKey)
     if (outcome.clientPortalUrl) redirect(outcome.clientPortalUrl)
@@ -45,7 +50,7 @@ export async function completePreparedStep(token: string, stepKey: string) {
         return {
             ok: true as const,
             clientPortalUrl: outcome.clientPortalUrl,
-            nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token),
+            nextPath: outcome.clientPortalUrl ?? await onboardingPathForStep(token, outcome.nextStepKey),
         }
     } catch (error) {
         return {
@@ -57,8 +62,6 @@ export async function completePreparedStep(token: string, stepKey: string) {
 
 export async function satisfyBlockRequirement(token: string, sessionBlockId: string, kind: "button_opened" | "video_finished") {
     try {
-        const resolved = await getPublicSession(token)
-        if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
         const { data, error } = await supabaseAdmin.rpc("satisfy_onboarding_block_requirement", {
             p_token: token,
             p_session_block_id: sessionBlockId,
@@ -78,8 +81,6 @@ export async function configureAppointmentSettingBlock(
     input: { mediums?: AppointmentMedium[]; fields?: Array<{ key: AppointmentFieldKey; required: boolean }> },
 ) {
     try {
-        const resolved = await getPublicSession(token)
-        if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
         let configuration: { mediums: AppointmentMedium[] } | { fields: Array<{ key: AppointmentFieldKey; required: boolean }> }
         if (kind === "appointment_medium") {
             const mediums = normalizeAppointmentMediums(input.mediums)
@@ -107,8 +108,6 @@ export async function saveCalendarBlockResponse(
 ) {
     try {
         const selection = validateCalendarSelection(input)
-        const resolved = await getPublicSession(token)
-        if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
         const { data, error } = await supabaseAdmin.rpc("submit_onboarding_calendar_block", {
             p_token: token,
             p_session_block_id: sessionBlockId,
@@ -127,35 +126,49 @@ export async function saveCalendarBlockResponse(
     }
 }
 
-export async function prepareDirectUpload(
+export async function prepareDirectUploads(
     token: string,
     stepKey: string,
-    fieldName: string,
-    file: {
-        name: string
-        size: number
-        type: string
-    }
+    files: Array<{
+        clientId: string
+        fieldName: string
+        file: { name: string; size: number; type: string }
+    }>
 ) {
+    if (files.length === 0) return []
+    if (files.length > 25) throw new Error("Choose no more than 25 files at once.")
     const resolved = await getPublicSession(token)
     if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
     const stepIndex = resolved.completableSteps.findIndex((candidate) => candidate.key === stepKey)
     const step = resolved.completableSteps[stepIndex]
     const form = step?.form ?? getOnboardingForm(step?.formKey)
-    const field = form?.fields.find((candidate) => candidate.name === fieldName)
     if (!step && resolved.usesSnapshot) throw new Error(ONBOARDING_SESSION_UPDATED_MESSAGE)
-    if (!step || step.kind !== "form" || !field || field.type !== "file") throw new Error("Unknown upload field")
+    if (!step || step.kind !== "form" || !form) throw new Error("Unknown upload field")
     if (resolved.completedKeys.has(step.key)) throw new Error("Submitted steps are locked")
     const firstIncompleteIndex = resolved.completableSteps.findIndex((candidate) => !resolved.completedKeys.has(candidate.key))
     if (stepIndex !== firstIncompleteIndex) throw new Error("Complete the earlier onboarding step first.")
-    validateOnboardingUploadFile(field, file)
-    return createSignedRelationshipOnboardingUpload(
-        resolved.session.workspace_id,
-        resolved.session.relationship_id,
-        resolved.session.id,
-        stepKey,
-        file
-    )
+
+    const countsByField = new Map<string, number>()
+    const validated = files.map((candidate) => {
+        const field = form.fields.find((item) => item.name === candidate.fieldName)
+        if (!field || field.type !== "file") throw new Error("Unknown upload field")
+        const count = (countsByField.get(field.name) ?? 0) + 1
+        countsByField.set(field.name, count)
+        if (!field.multiple && count > 1) throw new Error(`${field.label} accepts one file.`)
+        validateOnboardingUploadFile(field, candidate.file)
+        return candidate
+    })
+
+    return Promise.all(validated.map(async (candidate) => ({
+        clientId: candidate.clientId,
+        ...(await createSignedRelationshipOnboardingUpload(
+            resolved.session.workspace_id,
+            resolved.session.relationship_id,
+            resolved.session.id,
+            stepKey,
+            candidate.file
+        )),
+    })))
 }
 
 export async function submitPreparedFormStep(
@@ -165,7 +178,11 @@ export async function submitPreparedFormStep(
 ) {
     try {
         const outcome = await submitCanonicalFormStep(token, stepKey, response)
-        return { ok: true as const, clientPortalUrl: outcome.clientPortalUrl }
+        return {
+            ok: true as const,
+            clientPortalUrl: outcome.clientPortalUrl,
+            nextPath: outcome.clientPortalUrl ?? await onboardingPathForStep(token, outcome.nextStepKey),
+        }
     } catch (error) {
         return {
             ok: false as const,
@@ -174,8 +191,30 @@ export async function submitPreparedFormStep(
     }
 }
 
-export async function saveStepDraft(token: string, stepKey: string, response: FormResponse) {
+export async function saveStepDraft(
+    token: string,
+    stepKey: string,
+    response: FormResponse,
+    sessionStepId?: string | null,
+) {
     try {
+        if (sessionStepId) {
+            const { data, error } = await supabaseAdmin.rpc("save_onboarding_step_draft", {
+                p_token: token,
+                p_session_step_id: sessionStepId,
+                p_response: response,
+            })
+            if (!error) {
+                return {
+                    ok: true as const,
+                    saved: true as const,
+                    lockVersion: Number(data && typeof data === "object" && "lock_version" in data
+                        ? (data as { lock_version?: unknown }).lock_version
+                        : 1) || 1,
+                }
+            }
+            if (error.code !== "42883" && error.code !== "PGRST202") throw new Error(error.message)
+        }
         return { ok: true as const, ...(await saveCanonicalStepDraft(token, stepKey, response)) }
     } catch (error) {
         return { ok: false as const, error: error instanceof Error ? error.message : "Could not save this draft." }
@@ -216,12 +255,12 @@ export async function skipTestStep(
                 const outcome = await submitCanonicalFormStep(token, stepKey, response, {
                     allowMissingRequiredFilesForTest: true,
                 })
-                return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token) }
+                return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await onboardingPathForStep(token, outcome.nextStepKey) }
             }
         }
 
         const outcome = await completeCanonicalStep(token, stepKey)
-        return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token) }
+        return { ok: true as const, nextPath: outcome.clientPortalUrl ?? await onboardingPathForStep(token, outcome.nextStepKey) }
     } catch (error) {
         return {
             ok: false as const,

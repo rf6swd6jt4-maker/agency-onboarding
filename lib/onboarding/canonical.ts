@@ -909,8 +909,9 @@ export async function completeCanonicalStep(
     token: string,
     stepKey: string,
     submission?: { form: OnboardingFormDefinition; response: FormResponse },
+    resolvedSession?: PublicOnboardingSession,
 ) {
-    const resolved = await getCanonicalSessionByToken(token)
+    const resolved = resolvedSession ?? await getCanonicalSessionByToken(token)
     if (!resolved) throw new Error("Invalid onboarding session")
     const stepIndex = resolved.completableSteps.findIndex((step) => step.key === stepKey)
     const step = resolved.completableSteps[stepIndex]
@@ -922,16 +923,21 @@ export async function completeCanonicalStep(
         if (!everyStepIsComplete) throw new Error("Submitted steps are locked")
         const clientPortalUrl = await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
         revalidateOnboarding(resolved.workspace.slug, resolved.session.relationship_id, token)
-        return { clientPortalUrl }
+        return { clientPortalUrl, nextStepKey: null }
     }
     const firstIncompleteIndex = resolved.completableSteps.findIndex((candidate) => !resolved.completedKeys.has(candidate.key))
     if (stepIndex !== firstIncompleteIndex) throw new Error("Complete the earlier onboarding step first.")
     const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)
     if (!workItem?.parent_work_item_id) throw new Error("Invalid onboarding step")
+    const nextStepKey = resolved.completableSteps[stepIndex + 1]?.key ?? null
     let now = new Date().toISOString()
     let completedWithRpc = false
     const stepCompletionIdempotencyKey = `onboarding.step.completed:${resolved.session.id}:${stepIdentifier(step)}`
-    if (step.sessionStepId) {
+    // The atomic step RPC predates actionable visual completion bookends and
+    // intentionally accepts only form/video/welcome rows. Completion bookends
+    // use the guarded fallback below, whose work-item update still enforces all
+    // required visual blocks before finalizing the session.
+    if (step.sessionStepId && step.bookendKind !== "completion") {
         const uploads = submission
             ? extractUploadsFromResponse(submission.response).map((upload) => ({
                 field_name: upload.fieldName,
@@ -1086,9 +1092,11 @@ export async function completeCanonicalStep(
             }
         }
     }
-    const clientPortalUrl = await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
+    const clientPortalUrl = nextStepKey
+        ? null
+        : await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
     revalidateOnboarding(resolved.workspace.slug, resolved.session.relationship_id, token)
-    return { clientPortalUrl }
+    return { clientPortalUrl, nextStepKey }
 }
 
 export async function submitCanonicalFormStep(
@@ -1111,7 +1119,7 @@ export async function submitCanonicalFormStep(
     })
     const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)
     if (!workItem) throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding step")
-    return completeCanonicalStep(token, stepKey, { form, response })
+    return completeCanonicalStep(token, stepKey, { form, response }, resolved)
 }
 
 function draftResponseForForm(form: OnboardingFormDefinition, response: FormResponse) {

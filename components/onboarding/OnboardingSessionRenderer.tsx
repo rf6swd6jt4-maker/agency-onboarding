@@ -9,6 +9,7 @@ import { onboardingBlockLayoutClasses } from "@/lib/onboarding/block-layout"
 
 export type OnboardingRenderStep = {
     key: string
+    sessionStepId?: string | null
     kind: "form" | "video" | "final"
     title: string
     description: string
@@ -104,9 +105,12 @@ export function OnboardingSessionRenderer({
                     </div>
                 ) : null}
                 <OnboardingBlocks
+                    key={step.key}
                     blocks={step.blocks}
                     token={token}
                     stepKey={step.key}
+                    sessionStepId={step.sessionStepId}
+                    stepForm={step.form}
                     initialResponse={initialResponse}
                     locked={locked}
                     preview={preview}
@@ -173,6 +177,7 @@ export function OnboardingSessionRenderer({
                     key={step.key}
                     token={token}
                     stepKey={step.key}
+                    sessionStepId={step.sessionStepId}
                     form={step.form}
                     initialResponse={initialResponse}
                     locked={locked}

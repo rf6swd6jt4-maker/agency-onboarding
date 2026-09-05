@@ -12,6 +12,7 @@ import {
     type AppointmentRequestedField,
 } from "@/lib/appointment-setting"
 import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
+import { useOnboardingSaveTask } from "@/components/onboarding/OnboardingSaveCoordinator"
 import { RequestHelpLink } from "@/components/onboarding/RequestHelpLink"
 
 type SetupBlock = Extract<OnboardingBlock, { kind: "appointment_medium" | "appointment_fields" }>
@@ -102,6 +103,7 @@ export function AppointmentSetupBlock({
                         if (mountedRef.current) {
                             setSaveStatus("error")
                             setError(outcome.error)
+                            onUnsatisfiedRef.current()
                         }
                         return
                     }
@@ -124,12 +126,29 @@ export function AppointmentSetupBlock({
         return pump
     }, [block.kind, block.sessionBlockId, locked, preview, token])
 
+    const flushPendingSave = useCallback(async () => {
+        if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current)
+            saveTimerRef.current = null
+        }
+        await flushSaveQueue()
+        if (saveQueueRef.current && navigator.onLine) await flushSaveQueue()
+        if (saveQueueRef.current) {
+            throw new Error("Your appointment preferences have not saved yet. Check your connection and try again.")
+        }
+    }, [flushSaveQueue])
+
+    useOnboardingSaveTask(
+        `appointment:${block.sessionBlockId ?? block.id}`,
+        flushPendingSave,
+    )
+
     const queueSave = useCallback((payload: SetupPayload) => {
         if (locked) return
-        onUnsatisfiedRef.current()
         setError(null)
 
         if (block.kind === "appointment_medium" && "mediums" in payload && payload.mediums.length === 0) {
+            onUnsatisfiedRef.current()
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
             saveQueueRef.current = null
             setSaveStatus("idle")
@@ -137,9 +156,13 @@ export function AppointmentSetupBlock({
             return
         }
 
+        // Required-block gating is optimistic. Continue performs an authoritative
+        // flush before completing the step, so clients never have to wait for a
+        // debounce merely to press the button.
+        onSatisfiedRef.current()
+
         if (preview || !block.sessionBlockId) {
             setSaveStatus("saved")
-            onSatisfiedRef.current()
             return
         }
 

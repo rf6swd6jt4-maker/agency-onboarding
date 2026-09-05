@@ -5,42 +5,23 @@ import { satisfyBlockRequirement } from "@/app/onboarding/session/[token]/action
 import { OnboardingForm } from "@/components/onboarding/OnboardingForm"
 import { AppointmentSetupBlock } from "@/components/onboarding/AppointmentSetupBlock"
 import { CalendarDateTimeBlock } from "@/components/onboarding/CalendarDateTimeBlock"
+import { OnboardingSaveCoordinator } from "@/components/onboarding/OnboardingSaveCoordinator"
 import { RequestHelpLink } from "@/components/onboarding/RequestHelpLink"
 import { StripePaymentButtonLabel } from "@/components/onboarding/StripePaymentButtonLabel"
 import { WhyWeAskCard } from "@/components/onboarding/WhyWeAskCard"
 import { ONBOARDING_PAYMENT_BUTTON_ID, type OnboardingBlock } from "@/lib/onboarding/block-definition"
 import { onboardingBlockLayoutClasses } from "@/lib/onboarding/block-layout"
-import type { FormResponse } from "@/lib/onboarding/forms"
+import type { FormResponse, OnboardingFormDefinition } from "@/lib/onboarding/forms"
 
 type RuntimeBlock = OnboardingBlock & { sessionBlockId?: string; sourceBlockId?: string }
 
-function BlockFrame({ block, children }: { block: RuntimeBlock; children: ReactNode }) {
-    return <div className={onboardingBlockLayoutClasses(block.layout)}>{children}</div>
-}
-
-export function OnboardingBlocks({
-    blocks,
-    token,
-    stepKey,
-    initialResponse,
-    locked,
-    preview,
-    previewNextHref,
-    onPreviewSubmit,
-    onPreviewBack,
-    allowEditRequest,
-    initiallySatisfied = [],
-    initialBlockResponses = {},
-    continueAction,
-    continueLabel,
-    backLabel,
-    backHref,
-    moduleTitles,
-}: {
+type OnboardingBlocksProps = {
     blocks: RuntimeBlock[]
     token: string
     stepKey: string
+    sessionStepId?: string | null
     initialResponse?: FormResponse
+    stepForm?: OnboardingFormDefinition | null
     locked: boolean
     preview: boolean
     previewNextHref?: string | null
@@ -54,13 +35,40 @@ export function OnboardingBlocks({
     backLabel: string
     backHref?: string | null
     moduleTitles?: string[]
-}) {
+}
+
+function BlockFrame({ block, children }: { block: RuntimeBlock; children: ReactNode }) {
+    return <div className={onboardingBlockLayoutClasses(block.layout)}>{children}</div>
+}
+
+function OnboardingBlocksContent({
+    blocks,
+    token,
+    stepKey,
+    sessionStepId,
+    initialResponse,
+    stepForm,
+    locked,
+    preview,
+    previewNextHref,
+    onPreviewSubmit,
+    onPreviewBack,
+    allowEditRequest,
+    initiallySatisfied = [],
+    initialBlockResponses = {},
+    continueAction,
+    continueLabel,
+    backLabel,
+    backHref,
+    moduleTitles,
+}: OnboardingBlocksProps) {
     const [satisfied, setSatisfied] = useState(() => new Set(initiallySatisfied))
     const [requirementError, setRequirementError] = useState<string | null>(null)
+    const [formSubmitting, setFormSubmitting] = useState(false)
     const formBlock = blocks.find((block) => block.kind === "form")
     const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "calendar" || block.kind === "connection" || block.kind === "appointment_medium" || block.kind === "appointment_fields")
     const unsatisfied = requiredBlocks.filter((block) => !satisfied.has(block.sessionBlockId ?? block.id))
-    const form = useMemo(() => formBlock?.kind === "form" && formBlock.fields.length > 0 ? {
+    const form = useMemo(() => formBlock?.kind === "form" && formBlock.fields.length > 0 ? stepForm ?? {
         key: stepKey,
         title: "",
         intro: "",
@@ -74,7 +82,7 @@ export function OnboardingBlocks({
             accept: field.accept,
             multiple: field.multiple,
         })),
-    } : null, [formBlock, stepKey])
+    } : null, [formBlock, stepForm, stepKey])
     const formId = `onboarding-form-${stepKey.replace(/[^a-zA-Z0-9_-]/g, "")}`
 
     async function satisfy(block: RuntimeBlock, kind: "button_opened" | "video_finished" | "meta_ads_connected") {
@@ -104,6 +112,7 @@ export function OnboardingBlocks({
                     <OnboardingForm
                         token={token}
                         stepKey={stepKey}
+                        sessionStepId={sessionStepId}
                         form={form}
                         initialResponse={initialResponse}
                         locked={locked}
@@ -116,6 +125,7 @@ export function OnboardingBlocks({
                         showIntro={false}
                         formId={formId}
                         hideSubmit
+                        onSubmittingChange={setFormSubmitting}
                     />
                     {block.whyWeAsk ? <div className="mt-6"><WhyWeAskCard>{block.whyWeAsk}</WhyWeAskCard></div> : null}
                 </BlockFrame>
@@ -166,8 +176,16 @@ export function OnboardingBlocks({
                 {block.required && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">{satisfied.has(requirementId) ? "✓ Opened" : "Open this link to continue."}</p> : null}
             </BlockFrame>
         })}
-        {(!locked && form) || continueAction ? <div className={`mt-8 grid items-start gap-3 ${backHref || onPreviewBack ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{onPreviewBack ? <button type="button" onClick={onPreviewBack} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</button> : backHref ? <a href={backHref} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</a> : null}{form && !locked ? <button type="submit" form={formId} disabled={unsatisfied.length > 0} className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60">{continueLabel}</button> : <fieldset disabled={unsatisfied.length > 0} className="contents">{continueAction}</fieldset>}</div> : null}
+        {(!locked && form) || continueAction ? <div className={`mt-8 grid items-start gap-3 ${backHref || onPreviewBack ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{onPreviewBack ? <button type="button" onClick={onPreviewBack} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</button> : backHref ? <a href={backHref} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</a> : null}{form && !locked ? <button type="submit" form={formId} disabled={unsatisfied.length > 0 || formSubmitting} className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60">{formSubmitting ? "Saving…" : continueLabel}</button> : <fieldset disabled={unsatisfied.length > 0} className="contents">{continueAction}</fieldset>}</div> : null}
         {unsatisfied.length > 0 && !locked ? <p className="mt-3 text-center text-xs text-[var(--onboarding-muted)]">Complete {unsatisfied.length === 1 ? "the required item" : `${unsatisfied.length} required items`} above to continue.</p> : null}
         {requirementError ? <p role="alert" className="mt-3 text-left text-sm text-red-700">{requirementError} <RequestHelpLink />.</p> : null}
     </>
+}
+
+export function OnboardingBlocks(props: OnboardingBlocksProps) {
+    return (
+        <OnboardingSaveCoordinator>
+            <OnboardingBlocksContent {...props} />
+        </OnboardingSaveCoordinator>
+    )
 }

@@ -115,6 +115,7 @@ export function GlobalLoadingOverlay() {
                 init?.headers ?? (input instanceof Request ? input.headers : undefined)
             )
             const isServerAction = headers.has("Next-Action")
+            const clientOnboardingAction = isServerAction && Boolean(document.querySelector('[data-client-onboarding-session="true"]'))
             const embedded = window.self !== window.top
             const workspaceFrame = isWorkspaceFrame()
             const workspaceShell = Boolean(document.querySelector("[data-workspace-shell-root]"))
@@ -135,7 +136,7 @@ export function GlobalLoadingOverlay() {
                 window.dispatchEvent(new CustomEvent<WorkspaceMutationEventDetail>(WORKSPACE_MUTATION_START, {
                     detail: { mutationId: requestId, failed: false },
                 }))
-            } else if (isServerAction && !backgroundMutation) {
+            } else if (isServerAction && !backgroundMutation && !clientOnboardingAction) {
                 if (embedded) window.dispatchEvent(new Event("betelgeze:workspace-action-start"))
                 else setLoadingRouteKey(currentRouteKey)
             }
@@ -181,7 +182,7 @@ export function GlobalLoadingOverlay() {
                 }
                 throw error
             } finally {
-                if (isServerAction && !backgroundMutation) {
+                if (isServerAction && !backgroundMutation && !clientOnboardingAction) {
                     if (embedded) window.dispatchEvent(new Event("betelgeze:workspace-action-end"))
                     else setLoadingRouteKey(null)
                 }

@@ -82,7 +82,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
             { key: "payment", title: "Payment", complete: false, current: true, href: null },
             ...steps.map((step) => ({ key: step.key, title: step.title, complete: false, current: false, href: null })),
         ]
-        return <OnboardingThemeProvider theme={theme}><OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl}>
+        return <OnboardingThemeProvider theme={theme}><OnboardingLayout clientSession roadmapSteps={roadmapSteps} client={{ name: relationship.primary_person_name, email: relationship.primary_email, phone: relationship.primary_phone, isTest: session.is_test }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl}>
             <OnboardingSessionRenderer
                 step={{ key: "payment", kind: "video", title: header.title, description: header.description, moduleTitle: "Payment", estimatedTime: stepEstimate(paymentStep)?.estimatedTime ?? header.estimatedTime, why: "", blocks: resolvedBlocks, navigation: paymentStep.navigation }}
                 moduleTitles={moduleTitles}
@@ -143,6 +143,7 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
     return (
         <OnboardingThemeProvider theme={theme}>
         <OnboardingLayout
+            clientSession
             roadmapSteps={roadmapSteps}
             client={{
                 name: relationship.primary_person_name,

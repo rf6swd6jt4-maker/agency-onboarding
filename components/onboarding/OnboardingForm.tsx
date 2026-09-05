@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-    prepareDirectUpload,
+    prepareDirectUploads,
     requestStepEdit,
     saveStepDraft,
     submitPreparedFormStep,
@@ -15,12 +15,13 @@ import {
     StoredUpload,
 } from "@/lib/onboarding/forms"
 import { FileUploadField } from "@/components/onboarding/FileUploadField"
-import { LoadingOverlay } from "@/components/LoadingOverlay"
+import { useOnboardingSaveCoordinator, useOnboardingSaveTask } from "@/components/onboarding/OnboardingSaveCoordinator"
 import { RequestHelpLink } from "@/components/onboarding/RequestHelpLink"
 
 type OnboardingFormProps = {
     token: string
     stepKey: string
+    sessionStepId?: string | null
     form: OnboardingFormDefinition
     initialResponse?: FormResponse
     locked?: boolean
@@ -33,6 +34,22 @@ type OnboardingFormProps = {
     showIntro?: boolean
     formId?: string
     hideSubmit?: boolean
+    onSubmittingChange?: (submitting: boolean) => void
+}
+
+type UploadTask = {
+    id: string
+    fieldName: string
+    file: File
+    status: "preparing" | "uploading" | "uploaded" | "error"
+    progress: number
+    storedUpload?: StoredUpload
+    error?: string
+    promise?: Promise<void>
+}
+
+function uploadId(fieldName: string, file: File) {
+    return `${fieldName}:${file.name}:${file.size}:${file.lastModified}`
 }
 
 function getStringValue(response: FormResponse | undefined, name: string) {
@@ -87,6 +104,7 @@ function uploadFileToSignedUrl(
 export function OnboardingForm({
     token,
     stepKey,
+    sessionStepId,
     form,
     initialResponse,
     locked = false,
@@ -99,18 +117,26 @@ export function OnboardingForm({
     showIntro = true,
     formId,
     hideSubmit = false,
+    onSubmittingChange,
 }: OnboardingFormProps) {
     const router = useRouter()
+    const { flushAll } = useOnboardingSaveCoordinator()
     const formRef = useRef<HTMLFormElement>(null)
     const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const draftQueueRef = useRef<{ version: number; response: FormResponse } | null>(null)
     const draftPumpRef = useRef<Promise<void> | null>(null)
     const draftVersionRef = useRef(0)
     const mountedRef = useRef(true)
+    const submittingRef = useRef(false)
+    const selectedFilesRef = useRef<Record<string, File[]>>({})
+    const uploadTasksRef = useRef(new Map<string, UploadTask>())
     const [error, setError] = useState<string | null>(null)
-    const [uploadLabel, setUploadLabel] = useState<string | null>(null)
-    const [uploadProgress, setUploadProgress] = useState(0)
     const [saving, setSaving] = useState(false)
+    const [uploadStateById, setUploadStateById] = useState<Record<string, {
+        status: UploadTask["status"]
+        progress: number
+        error?: string
+    }>>({})
     const [draftStatus, setDraftStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const [editRequestStatus, setEditRequestStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
     const [selectedFilesByField, setSelectedFilesByField] = useState<
@@ -133,7 +159,14 @@ export function OnboardingForm({
         const formData = new FormData(formElement)
         for (const field of form.fields) {
             if (field.type === "file") {
-                response[field.name] = getStoredFiles(initialResponse, field.name)
+                const uploadedFiles = (selectedFilesRef.current[field.name] ?? []).flatMap((file) => {
+                    const storedUpload = uploadTasksRef.current.get(uploadId(field.name, file))?.storedUpload
+                    return storedUpload ? [storedUpload] : []
+                })
+                response[field.name] = [
+                    ...getStoredFiles(initialResponse, field.name),
+                    ...uploadedFiles,
+                ]
             } else {
                 response[field.name] = String(formData.get(field.name) ?? "")
             }
@@ -145,7 +178,11 @@ export function OnboardingForm({
         const version = draftVersionRef.current + 1
         draftVersionRef.current = version
         draftQueueRef.current = { version, response }
-        window.localStorage.setItem(localDraftKey, JSON.stringify(response))
+        try {
+            window.localStorage.setItem(localDraftKey, JSON.stringify(response))
+        } catch {
+            // Server autosave remains authoritative when local storage is unavailable.
+        }
         setDraftStatus("saving")
     }, [localDraftKey])
 
@@ -166,8 +203,8 @@ export function OnboardingForm({
 
                 let succeeded = false
                 try {
-                    const outcome = await saveStepDraft(token, stepKey, pending.response)
-                    succeeded = outcome.ok
+                    const outcome = await saveStepDraft(token, stepKey, pending.response, sessionStepId)
+                    succeeded = outcome.ok && outcome.saved
                 } catch {
                     succeeded = false
                 }
@@ -200,7 +237,7 @@ export function OnboardingForm({
         }
         void pump.then(release, release)
         return pump
-    }, [locked, preview, stepKey, token])
+    }, [locked, preview, sessionStepId, stepKey, token])
 
     useEffect(() => {
         if (locked || preview || !formRef.current) return
@@ -222,8 +259,8 @@ export function OnboardingForm({
         return () => window.removeEventListener("online", retry)
     }, [flushDraftQueue, form.fields, localDraftKey, locked, preview, queueDraft, responseFromForm])
 
-    function scheduleDraftSave() {
-        if (locked) return
+    const scheduleDraftSave = useCallback((immediate = false) => {
+        if (locked || submittingRef.current) return
         const response = responseFromForm()
         if (preview) {
             setDraftStatus("saved")
@@ -231,20 +268,143 @@ export function OnboardingForm({
         }
         queueDraft(response)
         if (draftTimerRef.current) clearTimeout(draftTimerRef.current)
-        draftTimerRef.current = setTimeout(() => void flushDraftQueue(), 800)
-    }
+        if (immediate) {
+            void flushDraftQueue()
+            return
+        }
+        draftTimerRef.current = setTimeout(() => {
+            draftTimerRef.current = null
+            void flushDraftQueue()
+        }, 500)
+    }, [flushDraftQueue, locked, preview, queueDraft, responseFromForm])
 
-    function updateSelectedFiles(fieldName: string, files: File[]) {
-        setSelectedFilesByField((current) => ({
-            ...current,
-            [fieldName]: files,
-        }))
-    }
+    const publishUploadState = useCallback(() => {
+        if (!mountedRef.current) return
+        setUploadStateById(Object.fromEntries([...uploadTasksRef.current].map(([id, task]) => [id, {
+            status: task.status,
+            progress: task.progress,
+            error: task.error,
+        }])))
+    }, [])
+
+    const startBackgroundUploads = useCallback((fieldName: string, files: File[]) => {
+        if (locked || preview || files.length === 0) return
+        const freshTasks = files.flatMap((file) => {
+            const id = uploadId(fieldName, file)
+            const existing = uploadTasksRef.current.get(id)
+            if (existing && existing.status !== "error") return []
+            const task: UploadTask = {
+                id,
+                fieldName,
+                file,
+                status: "preparing",
+                progress: 0,
+            }
+            uploadTasksRef.current.set(id, task)
+            return [task]
+        })
+        if (freshTasks.length === 0) return
+        publishUploadState()
+
+        const batch = (async () => {
+            let prepared: Awaited<ReturnType<typeof prepareDirectUploads>>
+            try {
+                prepared = await prepareDirectUploads(token, stepKey, freshTasks.map((task) => ({
+                    clientId: task.id,
+                    fieldName: task.fieldName,
+                    file: {
+                        name: task.file.name,
+                        size: task.file.size,
+                        type: task.file.type,
+                    },
+                })))
+            } catch (caughtError) {
+                const message = caughtError instanceof Error ? caughtError.message : "Could not prepare this upload."
+                for (const task of freshTasks) {
+                    task.status = "error"
+                    task.error = message
+                    task.promise = undefined
+                }
+                publishUploadState()
+                return
+            }
+
+            await Promise.all(prepared.map(async (upload) => {
+                const task = uploadTasksRef.current.get(upload.clientId)
+                if (!task) return
+                task.status = "uploading"
+                publishUploadState()
+                try {
+                    await uploadFileToSignedUrl(upload.uploadUrl, task.file, (progress) => {
+                        if (task.progress === progress) return
+                        task.progress = progress
+                        publishUploadState()
+                    })
+                    task.status = "uploaded"
+                    task.progress = 100
+                    task.storedUpload = upload.storedUpload
+                    task.error = undefined
+                } catch (caughtError) {
+                    task.status = "error"
+                    task.error = caughtError instanceof Error ? caughtError.message : "Upload failed. Please try again."
+                }
+                publishUploadState()
+            }))
+
+            for (const task of freshTasks) task.promise = undefined
+            if (freshTasks.some((task) => task.status === "uploaded")) scheduleDraftSave(true)
+            publishUploadState()
+        })()
+
+        for (const task of freshTasks) task.promise = batch
+    }, [locked, preview, publishUploadState, scheduleDraftSave, stepKey, token])
+
+    const updateSelectedFiles = useCallback((fieldName: string, files: File[]) => {
+        const next = { ...selectedFilesRef.current, [fieldName]: files }
+        selectedFilesRef.current = next
+        setSelectedFilesByField(next)
+        startBackgroundUploads(fieldName, files)
+        scheduleDraftSave()
+    }, [scheduleDraftSave, startBackgroundUploads])
+
+    const waitForCurrentUploads = useCallback(async () => {
+        for (const [fieldName, files] of Object.entries(selectedFilesRef.current)) {
+            const retryable = files.filter((file) => {
+                const task = uploadTasksRef.current.get(uploadId(fieldName, file))
+                return !task || task.status === "error"
+            })
+            startBackgroundUploads(fieldName, retryable)
+        }
+
+        const currentTasks = Object.entries(selectedFilesRef.current).flatMap(([fieldName, files]) =>
+            files.flatMap((file) => {
+                const task = uploadTasksRef.current.get(uploadId(fieldName, file))
+                return task ? [task] : []
+            }))
+        await Promise.all([...new Set(currentTasks.flatMap((task) => task.promise ? [task.promise] : []))])
+        const failed = currentTasks.find((task) => task.status !== "uploaded")
+        if (failed) throw new Error(failed.error ?? `${failed.file.name} has not finished uploading.`)
+    }, [startBackgroundUploads])
+
+    const flushCurrentDraft = useCallback(async () => {
+        if (locked || preview || submittingRef.current) return
+        await waitForCurrentUploads()
+        if (draftTimerRef.current) {
+            clearTimeout(draftTimerRef.current)
+            draftTimerRef.current = null
+        }
+        queueDraft(responseFromForm())
+        await flushDraftQueue()
+        if (draftQueueRef.current && navigator.onLine) await flushDraftQueue()
+        if (draftQueueRef.current) throw new Error("Your latest changes have not saved yet. Check your connection and try again.")
+    }, [flushDraftQueue, locked, preview, queueDraft, responseFromForm, waitForCurrentUploads])
+
+    useOnboardingSaveTask(`form:${sessionStepId ?? stepKey}`, flushCurrentDraft)
 
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault()
+        if (submittingRef.current) return
         setError(null)
-        setUploadProgress(0)
         if (preview) {
             setDraftStatus("saved")
             onPreviewSubmit?.()
@@ -252,68 +412,27 @@ export function OnboardingForm({
             return
         }
 
+        submittingRef.current = true
+        setSaving(true)
+        onSubmittingChange?.(true)
+
         if (draftTimerRef.current) {
             clearTimeout(draftTimerRef.current)
             draftTimerRef.current = null
         }
-        draftQueueRef.current = null
         await draftPumpRef.current
         draftQueueRef.current = null
 
-        const formData = new FormData(event.currentTarget)
-        const response: FormResponse = {}
-
         try {
+            await flushAll()
+            await waitForCurrentUploads()
+            const response = responseFromForm()
             for (const field of form.fields) {
-                if (field.type === "file") {
-                    const existingFiles = getStoredFiles(
-                        initialResponse,
-                        field.name
-                    )
-                    const files =
-                        selectedFilesByField[field.name]?.filter(
-                            (file) => file.size > 0 && Boolean(file.name)
-                        ) ?? []
-
-                    const uploadedFiles: StoredUpload[] = []
-
-                    for (const [index, file] of files.entries()) {
-                        setUploadLabel(
-                            `Uploading ${file.name} (${index + 1} of ${files.length})`
-                        )
-                        setUploadProgress(0)
-
-                        const prepared = await prepareDirectUpload(
-                            token,
-                            stepKey,
-                            field.name,
-                            {
-                                name: file.name,
-                                size: file.size,
-                                type: file.type,
-                            }
-                        )
-
-                        await uploadFileToSignedUrl(
-                            prepared.uploadUrl,
-                            file,
-                            setUploadProgress
-                        )
-
-                        uploadedFiles.push(prepared.storedUpload)
-                    }
-
-                    response[field.name] = [...existingFiles, ...uploadedFiles]
-                    continue
+                const value = response[field.name]
+                if (field.type !== "file" && typeof value === "string") {
+                    response[field.name] = value.trim()
                 }
-
-                response[field.name] = String(
-                    formData.get(field.name) ?? ""
-                ).trim()
             }
-
-            setUploadLabel("Saving your answers...")
-            setSaving(true)
 
             const outcome = await submitPreparedFormStep(token, stepKey, response)
             if (!outcome.ok) throw new Error(outcome.error)
@@ -322,15 +441,13 @@ export function OnboardingForm({
                 window.location.assign(outcome.clientPortalUrl)
                 return
             }
-            setUploadLabel(null)
-            setUploadProgress(0)
-            setSaving(false)
             setSelectedFilesByField({})
-            router.refresh()
+            selectedFilesRef.current = {}
+            router.replace(outcome.nextPath)
         } catch (caughtError) {
-            setUploadLabel(null)
-            setUploadProgress(0)
+            submittingRef.current = false
             setSaving(false)
+            onSubmittingChange?.(false)
             setError(
                 caughtError instanceof Error
                     ? caughtError.message
@@ -339,19 +456,18 @@ export function OnboardingForm({
         }
     }
 
-    const submitting = saving || Boolean(uploadLabel)
+    const submitting = saving
 
     return (
         <form
             id={formId}
             ref={formRef}
             onSubmit={handleSubmit}
-            onInput={scheduleDraftSave}
+            onInput={() => scheduleDraftSave()}
             data-global-loading="false"
+            aria-busy={submitting}
             className="mt-8 space-y-6"
         >
-            {submitting && <LoadingOverlay label="Saving your answers..." />}
-
             {showIntro ? <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-5">
                 <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">{form.title}</p>
                 <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">
@@ -383,7 +499,7 @@ export function OnboardingForm({
                                 field.name
                             )}
                             placeholder={field.placeholder}
-                            readOnly={locked}
+                            readOnly={locked || submitting}
                             className="mt-3 min-h-32 w-full rounded-2xl border border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 text-base text-[var(--onboarding-text,#0F172A)] outline-none transition focus:border-[var(--onboarding-primary,#1E3A5F)] focus:ring-4 focus:ring-black/5"
                         />
                     ) : field.type === "file" ? locked ? (
@@ -402,6 +518,15 @@ export function OnboardingForm({
                                     field.name
                                 )}
                                 files={selectedFilesByField[field.name] ?? []}
+                                disabled={submitting}
+                                uploadStates={(selectedFilesByField[field.name] ?? []).map((file) => {
+                                    return uploadStateById[uploadId(field.name, file)]
+                                        ?? { status: "preparing" as const, progress: 0 }
+                                })}
+                                onRetry={(index) => {
+                                    const file = selectedFilesRef.current[field.name]?.[index]
+                                    if (file) startBackgroundUploads(field.name, [file])
+                                }}
                                 onFilesChange={(files) =>
                                     updateSelectedFiles(field.name, files)
                                 }
@@ -417,7 +542,7 @@ export function OnboardingForm({
                                 field.name
                             )}
                             placeholder={field.placeholder}
-                            readOnly={locked}
+                            readOnly={locked || submitting}
                             className="mt-3 w-full rounded-2xl border border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 text-base text-[var(--onboarding-text,#0F172A)] outline-none transition focus:border-[var(--onboarding-primary,#1E3A5F)] focus:ring-4 focus:ring-black/5"
                         />
                     )}
@@ -431,24 +556,6 @@ export function OnboardingForm({
                     )}
                 </div>
             ))}
-
-            {uploadLabel && (
-                <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-4">
-                    <div className="flex items-center justify-between gap-4 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">
-                        <span>{uploadLabel}</span>
-                        <span>{uploadProgress}%</span>
-                    </div>
-                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--onboarding-surface,#FFFFFF)]">
-                        <div
-                            className="h-full rounded-full bg-[var(--onboarding-primary,#1E3A5F)] transition-all"
-                            style={{ width: `${uploadProgress}%` }}
-                        />
-                    </div>
-                    <p className="mt-3 text-sm text-[var(--onboarding-muted,#475569)]">
-                        Please keep this page open while your file uploads.
-                    </p>
-                </div>
-            )}
 
             {error ? <p role="alert" className="text-left text-sm text-red-700">{error} <RequestHelpLink />.</p> : null}
 
@@ -471,18 +578,18 @@ export function OnboardingForm({
                 <p className="text-center text-sm text-[var(--onboarding-muted,#475569)]">This submitted step is read-only.</p>
             ) : hideSubmit ? (
                 <p aria-live="polite" className="text-center text-xs text-[var(--onboarding-muted,#475569)]">
-                    {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft will retry when you reconnect" : ""}
+                    {draftStatus === "saving" ? "Saving changes…" : draftStatus === "saved" ? "All changes saved" : draftStatus === "error" ? "Changes will retry when you reconnect" : ""}
                 </p>
             ) : (
                 <>
                     <p aria-live="polite" className="text-center text-xs text-[var(--onboarding-muted,#475569)]">
-                        {draftStatus === "saving" ? "Saving draft…" : draftStatus === "saved" ? "Draft saved" : draftStatus === "error" ? "Draft will retry when you reconnect" : ""}
+                        {draftStatus === "saving" ? "Saving changes…" : draftStatus === "saved" ? "All changes saved" : draftStatus === "error" ? "Changes will retry when you reconnect" : ""}
                     </p>
                     <button
                         disabled={submitting || submitDisabled}
                         className="w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                        {submitting ? "Uploading..." : submitLabel}
+                        {submitting ? "Saving…" : submitLabel}
                     </button>
                 </>
             )}

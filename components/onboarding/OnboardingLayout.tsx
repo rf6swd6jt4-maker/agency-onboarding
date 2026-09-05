@@ -34,6 +34,7 @@ type OnboardingLayoutProps = {
     termsOfServiceUrl?: string | null
     onRoadmapSelect?: (stepKey: string) => void
     allowRoadmapNavigation?: boolean
+    clientSession?: boolean
     helpSelected?: boolean
     onHelpSelect?: () => void
 }
@@ -54,12 +55,13 @@ export function OnboardingLayout({
     termsOfServiceUrl,
     onRoadmapSelect,
     allowRoadmapNavigation = false,
+    clientSession = false,
     helpSelected = false,
     onHelpSelect,
 }: OnboardingLayoutProps) {
     const helpCard = (id: string) => <div id={id} data-onboarding-help-card data-builder-help-block={onHelpSelect ? "true" : undefined} onClick={onHelpSelect} className={`rounded-2xl outline-offset-4 transition ${onHelpSelect ? "cursor-pointer hover:outline hover:outline-1 hover:outline-black/15" : ""} ${helpSelected ? "outline-2 outline-[var(--onboarding-accent,#F0B429)]" : ""}`}><NeedHelpCard help={help} /></div>
     return (
-        <main data-onboarding-full-window-preview={fullWindowPreview ? "true" : undefined} className={fullWindowPreview
+        <main data-client-onboarding-session={clientSession ? "true" : undefined} data-onboarding-full-window-preview={fullWindowPreview ? "true" : undefined} className={fullWindowPreview
             ? "relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)]"
             : forceMobile
             ? embedded
