@@ -426,8 +426,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }, [bootstrap.currentUser.id, sendRealtimeBroadcast])
 
     useLayoutEffect(() => {
-        if (!(active && workspaceTabActive && documentVisible)) stopNativeTyping(sentTypingConversationRef.current)
-        return () => stopNativeTyping(sentTypingConversationRef.current)
+        if (active && workspaceTabActive && documentVisible) return
+        stopNativeTyping(sentTypingConversationRef.current)
     }, [active, documentVisible, stopNativeTyping, workspaceTabActive])
 
     function handleDraftChange(value: string) {

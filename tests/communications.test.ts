@@ -183,7 +183,7 @@ test("one-document shell transfers background unread monitoring without duplicat
         readFile("supabase/migrations/20260905193000_workspace_communications_unread_service.sql", "utf8"),
     ])
 
-    assert.match(shell, /communicationsTabOpen && !\(activeTabIsCommunications && activeDocumentRouteAligned\)/)
+    assert.match(shell, /communicationsTabOpen && !activeTabIsCommunications/)
     assert.match(shell, /supabase: shellSupabase/)
     assert.match(service, /await synchronize\(\)\s+await refreshRealtimeAuth\(\)/)
     assert.match(service, /subscribedChannels === expectedSubscriptions/)
@@ -193,8 +193,8 @@ test("one-document shell transfers background unread monitoring without duplicat
     assert.doesNotMatch(service, /setMessages|updateConversationMessages|native_typing/)
     assert.match(hook, /const connectionEnabled = documentRuntime\?\.active \?\? true/)
     assert.match(hook, /!schemaReady \|\| !connectionEnabled/)
-    assert.match(clientWorkspace, /useLayoutEffect\(\(\) => \{[\s\S]{0,180}return clearPendingWhatsAppTyping/)
-    assert.match(teamWorkspace, /useLayoutEffect\(\(\) => \{[\s\S]{0,220}return \(\) => stopNativeTyping/)
+    assert.match(clientWorkspace, /useLayoutEffect\(\(\) => \{\s+if \(active && workspaceTabActive && documentVisible\) return\s+clearPendingWhatsAppTyping\(\)/)
+    assert.match(teamWorkspace, /useLayoutEffect\(\(\) => \{\s+if \(active && workspaceTabActive && documentVisible\) return\s+stopNativeTyping/)
     assert.match(route, /requireWorkspacePanel\(workspaceSlug, "communications"\)/)
     assert.match(route, /workspace_communications_unread_counts/)
     assert.match(migration, /grant execute on function public\.workspace_communications_unread_counts\(uuid, uuid\) to service_role/)
