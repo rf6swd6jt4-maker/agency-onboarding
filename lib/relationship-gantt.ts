@@ -77,32 +77,68 @@ type RawItem = {
 
 type RawDependency = { work_item_id: string; depends_on_work_item_id: string; source: "manual" | "parent_auto" }
 
+const RAW_ITEM_SELECT = "id, title, status, lifecycle_phase, workflow_role, workflow_action, parent_work_item_id, planned_start_date, planned_start_time, due_date, due_time, actual_start_at, actual_start_has_time, actual_completed_at, actual_completed_has_time, sort_order, created_at, updated_at, native_key, native_kind"
+const QUERY_BATCH_SIZE = 100
+
+function queryBatches<T>(values: T[], size = QUERY_BATCH_SIZE) {
+    const batches: T[][] = []
+    for (let index = 0; index < values.length; index += size) batches.push(values.slice(index, index + size))
+    return batches
+}
+
+async function loadRawItemsByIds(workspaceId: string, ids: string[]) {
+    if (!ids.length) return [] as RawItem[]
+    const results = await Promise.all(queryBatches(ids).map((batch) => supabaseAdmin
+        .from("work_items")
+        .select(RAW_ITEM_SELECT)
+        .eq("workspace_id", workspaceId)
+        .in("id", batch)))
+    return results.flatMap((result) => result.data ?? []) as RawItem[]
+}
+
+async function loadRawItemChildren(workspaceId: string, parentIds: string[]) {
+    if (!parentIds.length) return [] as RawItem[]
+    const results = await Promise.all(queryBatches(parentIds).map((batch) => supabaseAdmin
+        .from("work_items")
+        .select(RAW_ITEM_SELECT)
+        .eq("workspace_id", workspaceId)
+        .in("parent_work_item_id", batch)))
+    return results.flatMap((result) => result.data ?? []) as RawItem[]
+}
+
 export async function getRelationshipGanttPlan(_workspaceSlug: string, relationship: RelationshipRecord): Promise<RelationshipGanttPlan> {
-    const [itemsResult, linksResult, dependenciesResult, assigneesResult, sessionsResult] = await Promise.all([
-        supabaseAdmin.from("work_items").select("id, title, status, lifecycle_phase, workflow_role, workflow_action, parent_work_item_id, planned_start_date, planned_start_time, due_date, due_time, actual_start_at, actual_start_has_time, actual_completed_at, actual_completed_has_time, sort_order, created_at, updated_at, native_key, native_kind").eq("workspace_id", relationship.workspace_id),
-        supabaseAdmin.from("work_item_relationships").select("work_item_id, relationship_id, link_source, inherited_from_work_item_id").eq("workspace_id", relationship.workspace_id),
-        supabaseAdmin.from("work_item_dependencies").select("work_item_id, depends_on_work_item_id, source").eq("workspace_id", relationship.workspace_id),
-        supabaseAdmin.from("work_item_assignees").select("work_item_id, user_id").eq("workspace_id", relationship.workspace_id),
+    const [relationshipLinksResult, sessionsResult, stageItemsResult] = await Promise.all([
+        supabaseAdmin.from("work_item_relationships").select("work_item_id, relationship_id, link_source, inherited_from_work_item_id").eq("workspace_id", relationship.workspace_id).eq("relationship_id", relationship.id),
         supabaseAdmin.from("relationship_onboarding_sessions").select("id, status, created_at, completed_at").eq("workspace_id", relationship.workspace_id).eq("relationship_id", relationship.id).order("created_at"),
+        supabaseAdmin.from("work_items").select(RAW_ITEM_SELECT).eq("workspace_id", relationship.workspace_id).in("native_key", [`${relationship.id}:potential_client`, `${relationship.id}:fulfilment`]),
     ])
 
-    const rawItems = (itemsResult.data ?? []) as RawItem[]
-    const rawById = new Map(rawItems.map((item) => [item.id, item]))
-    const links = (linksResult.data ?? []) as Array<{ work_item_id: string; relationship_id: string; link_source: "explicit" | "inherited"; inherited_from_work_item_id: string | null }>
-    const linksByItem = new Map<string, typeof links>()
-    for (const link of links) linksByItem.set(link.work_item_id, [...(linksByItem.get(link.work_item_id) ?? []), link])
-    const linkedIds = new Set(links.filter((link) => link.relationship_id === relationship.id).map((link) => link.work_item_id))
+    type RawLink = { work_item_id: string; relationship_id: string; link_source: "explicit" | "inherited"; inherited_from_work_item_id: string | null }
+    const relationshipLinks = (relationshipLinksResult.data ?? []) as RawLink[]
+    const linkedIds = new Set(relationshipLinks.map((link) => link.work_item_id))
+    const rawById = new Map((await loadRawItemsByIds(relationship.workspace_id, [...linkedIds])).map((item) => [item.id, item]))
 
     // Include descendants of linked roots for compatibility with work created before inheritance provenance.
-    let expanded = true
-    while (expanded) {
-        expanded = false
-        for (const item of rawItems) {
-            if (item.parent_work_item_id && linkedIds.has(item.parent_work_item_id) && !linkedIds.has(item.id)) {
+    let descendantFrontier = [...linkedIds]
+    while (descendantFrontier.length) {
+        const children = await loadRawItemChildren(relationship.workspace_id, descendantFrontier)
+        descendantFrontier = []
+        for (const item of children) {
+            rawById.set(item.id, item)
+            if (!linkedIds.has(item.id)) {
                 linkedIds.add(item.id)
-                expanded = true
+                descendantFrontier.push(item.id)
             }
         }
+    }
+
+    // Ancestors are only needed to classify linked work as relationship-only
+    // or shared. Fetch that narrow chain instead of the workspace work table.
+    let ancestorFrontier = [...new Set([...linkedIds].map((id) => rawById.get(id)?.parent_work_item_id).filter((id): id is string => typeof id === "string" && !rawById.has(id)))]
+    while (ancestorFrontier.length) {
+        const ancestors = await loadRawItemsByIds(relationship.workspace_id, ancestorFrontier)
+        for (const item of ancestors) rawById.set(item.id, item)
+        ancestorFrontier = [...new Set(ancestors.map((item) => item.parent_work_item_id).filter((id): id is string => typeof id === "string" && !rawById.has(id)))]
     }
 
     const rootFor = (item: RawItem) => {
@@ -117,12 +153,27 @@ export async function getRelationshipGanttPlan(_workspaceSlug: string, relations
         return current
     }
 
+    const linkedItems = [...linkedIds].flatMap((id) => {
+        const item = rawById.get(id)
+        return item ? [item] : []
+    })
+    const rootIds = [...new Set(linkedItems.map((item) => rootFor(item).id))]
+    const [rootLinksResults, dependenciesResults] = await Promise.all([
+        Promise.all(queryBatches(rootIds).map((batch) => supabaseAdmin.from("work_item_relationships").select("work_item_id, relationship_id, link_source, inherited_from_work_item_id").eq("workspace_id", relationship.workspace_id).in("work_item_id", batch))),
+        Promise.all(queryBatches([...linkedIds]).map((batch) => supabaseAdmin.from("work_item_dependencies").select("work_item_id, depends_on_work_item_id, source").eq("workspace_id", relationship.workspace_id).in("work_item_id", batch))),
+    ])
+    const rootLinks = rootLinksResults.flatMap((result) => result.data ?? []) as RawLink[]
+    const linksByItem = new Map<string, RawLink[]>()
+    for (const link of rootLinks) linksByItem.set(link.work_item_id, [...(linksByItem.get(link.work_item_id) ?? []), link])
+    const relevantDependencies = dependenciesResults.flatMap((result) => result.data ?? []) as RawDependency[]
     const includedIds = new Set(linkedIds)
-    const relevantDependencies = ((dependenciesResult.data ?? []) as RawDependency[]).filter((edge) => linkedIds.has(edge.work_item_id))
     const externalIds = new Set(relevantDependencies.map((edge) => edge.depends_on_work_item_id).filter((id) => !linkedIds.has(id)))
     for (const id of externalIds) includedIds.add(id)
+    const externalRawItems = await loadRawItemsByIds(relationship.workspace_id, [...externalIds])
+    for (const item of externalRawItems) rawById.set(item.id, item)
 
-    const relevantAssignees = (assigneesResult.data ?? []).filter((row) => includedIds.has(row.work_item_id))
+    const assigneesResults = await Promise.all(queryBatches([...includedIds]).map((batch) => supabaseAdmin.from("work_item_assignees").select("work_item_id, user_id").eq("workspace_id", relationship.workspace_id).in("work_item_id", batch)))
+    const relevantAssignees = assigneesResults.flatMap((result) => result.data ?? [])
     const userIds = [...new Set(relevantAssignees.map((row) => row.user_id))]
     const profilesResult = userIds.length
         ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", userIds)
@@ -165,22 +216,23 @@ export async function getRelationshipGanttPlan(_workspaceSlug: string, relations
         assignees: peopleByItem.get(item.id) ?? [],
     })
 
-    const items = rawItems.filter((item) => linkedIds.has(item.id)).map((item) => {
+    const items = linkedItems.map((item) => {
         const root = rootFor(item)
         const rootRelationshipIds = new Set((linksByItem.get(root.id) ?? []).map((link) => link.relationship_id))
         return mapItem(item, rootRelationshipIds.size === 1 && rootRelationshipIds.has(relationship.id) ? "relationship" : "shared")
     })
-    const externalItems = rawItems.filter((item) => externalIds.has(item.id)).map((item) => mapItem(item, "shared"))
+    const externalItems = externalRawItems.map((item) => mapItem(item, "shared"))
 
     const milestones: RelationshipGanttMilestone[] = [
         { id: `relationship-started-${relationship.id}`, title: "Relationship Started", occurredAt: relationship.created_at, kind: "relationship_started", href: null },
     ]
-    const soldStage = rawItems.find((item) => item.native_key === `${relationship.id}:potential_client` && item.actual_completed_at)
+    const stageItems = (stageItemsResult.data ?? []) as RawItem[]
+    const soldStage = stageItems.find((item) => item.native_key === `${relationship.id}:potential_client` && item.actual_completed_at)
     if (soldStage?.actual_completed_at) milestones.push({ id: `client-sold-${relationship.id}`, title: "Client Sold", occurredAt: soldStage.actual_completed_at, kind: "client_invoiced", href: null })
     for (const session of sessionsResult.data ?? []) {
         if (session.status === "completed" && session.completed_at) milestones.push({ id: `onboarding-complete-${session.id}`, title: "Onboarding Completed", occurredAt: session.completed_at, kind: "onboarding_completed", href: null })
     }
-    const fulfilmentStage = rawItems.find((item) => item.native_key === `${relationship.id}:fulfilment` && item.actual_completed_at)
+    const fulfilmentStage = stageItems.find((item) => item.native_key === `${relationship.id}:fulfilment` && item.actual_completed_at)
     if (fulfilmentStage?.actual_completed_at) milestones.push({ id: `client-fulfilled-${relationship.id}`, title: "Client Fulfilled", occurredAt: fulfilmentStage.actual_completed_at, kind: "client_fulfilled", href: null })
 
     return {

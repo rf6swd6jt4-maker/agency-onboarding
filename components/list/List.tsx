@@ -6,7 +6,7 @@ export function List({ children, ariaLabel, className = "" }: { children: ReactN
 }
 
 export function ListItem({ children, className = "" }: { children: ReactNode; className?: string }) {
-    return <article role="listitem" className={`border-b border-neutral-800 transition-colors last:border-0 hover:bg-neutral-900/50 ${className}`}>{children}</article>
+    return <article role="listitem" className={`border-b border-neutral-800 transition-colors last:border-0 hover:bg-neutral-900/50 [contain-intrinsic-size:auto_88px] [content-visibility:auto] ${className}`}>{children}</article>
 }
 
 export function ListPrimaryRow({ children, className = "" }: { children: ReactNode; className?: string }) {

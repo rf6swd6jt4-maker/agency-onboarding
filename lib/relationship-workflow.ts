@@ -220,14 +220,14 @@ export async function ensureCurrentRelationshipStage(input: {
     assigneeId?: string | null
 }) {
     if (input.phase === "nurturing" || input.phase === "completed_lost") return null
-    const [{ data: links }, { data: items }] = await Promise.all([
-        supabaseAdmin.from("work_item_relationships").select("work_item_id")
-            .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId),
-        supabaseAdmin.from("work_items").select("id, lifecycle_phase, workflow_role")
-            .eq("workspace_id", input.workspaceId).eq("workflow_role", "lifecycle_stage"),
-    ])
-    const linkedIds = new Set((links ?? []).map((link) => link.work_item_id))
-    const existing = (items ?? []).find((item) => linkedIds.has(item.id) && item.lifecycle_phase === input.phase)
+    const { data: links } = await supabaseAdmin.from("work_item_relationships").select("work_item_id")
+        .eq("workspace_id", input.workspaceId).eq("relationship_id", input.relationshipId)
+    const linkedIds = [...new Set((links ?? []).map((link) => link.work_item_id))]
+    const { data: items } = linkedIds.length
+        ? await supabaseAdmin.from("work_items").select("id, lifecycle_phase, workflow_role")
+            .eq("workspace_id", input.workspaceId).in("id", linkedIds).eq("workflow_role", "lifecycle_stage").eq("lifecycle_phase", input.phase)
+        : { data: [] }
+    const existing = (items ?? [])[0]
     if (existing) {
         await ensureNextLifecycleStage({ workspaceId: input.workspaceId, relationshipId: input.relationshipId, phase: input.phase, stageId: existing.id })
         await repairRelationshipWorkflowTimings(input.workspaceId, input.relationshipId)

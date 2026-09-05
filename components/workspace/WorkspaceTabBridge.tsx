@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useTransition } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
     isWorkspaceOnboardingBuilderUrl,
@@ -32,6 +32,31 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
     const router = useRouter()
     const searchParams = useSearchParams()
     const startedPollNoticeRef = useRef("")
+    const refreshStartedRef = useRef(false)
+    const [refreshPending, startRefreshTransition] = useTransition()
+
+    useEffect(() => {
+        if (refreshPending) {
+            refreshStartedRef.current = true
+            const message: WorkspaceTabFrameMessage = {
+                source: WORKSPACE_TAB_MESSAGE_SOURCE,
+                target: "host",
+                tabId,
+                type: "refresh-start",
+            }
+            window.parent.postMessage(message, window.location.origin)
+            return
+        }
+        if (!refreshStartedRef.current) return
+        refreshStartedRef.current = false
+        const message: WorkspaceTabFrameMessage = {
+            source: WORKSPACE_TAB_MESSAGE_SOURCE,
+            target: "host",
+            tabId,
+            type: "refresh-end",
+        }
+        window.parent.postMessage(message, window.location.origin)
+    }, [refreshPending, tabId])
 
     useEffect(() => {
         function reportLocation() {
@@ -179,7 +204,9 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
                 document.body.dataset.workspaceTabActive = message.active ? "true" : "false"
                 window.dispatchEvent(new Event(WORKSPACE_TAB_VISIBILITY_EVENT))
                 if (!message.active) await flushWorkspaceAutosaves()
-                if (message.active && message.refresh) window.location.reload()
+                if (message.active && message.refresh) {
+                    startRefreshTransition(() => router.refresh())
+                }
             }
         }
 
@@ -269,7 +296,7 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             reportContextObstruction(false)
             delete document.body.dataset.workspaceTabActive
         }
-    }, [router, tabId, workspaceSlug])
+    }, [router, startRefreshTransition, tabId, workspaceSlug])
 
     return null
 }
