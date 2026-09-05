@@ -14,6 +14,7 @@ function panelLoadingForUrl(value: string, workspaceSlug: string): { variant: Pa
     if (panel === "admin") {
         if (nested === "activity") return { variant: "admin-activity" as const }
         if (nested === "maintenance") return { variant: "admin-maintenance" as const }
+        if (nested === "okrs") return { variant: "admin-okrs" as const }
         if (!nested && url.searchParams.get("view") === "okrs") return { variant: "admin-okrs" as const }
         return { variant: "admin" as const }
     }

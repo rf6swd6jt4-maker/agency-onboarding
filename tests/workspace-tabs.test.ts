@@ -126,6 +126,7 @@ test("record details open as switchable workspace tabs while hubs and actions st
         "/scaylup/settings?service=service-1#services",
         "/scaylup/leadgen/polls",
         "/scaylup/admin/activity",
+        "/scaylup/admin/okrs",
         "/another/relationships/client-1",
         "https://example.com/scaylup/work-items/item-1",
     ]) assert.equal(workspaceRouteIsRecordDetail(path, "scaylup", origin), false, path)

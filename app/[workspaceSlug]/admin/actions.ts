@@ -39,7 +39,13 @@ function adminPath(slug: string, suffix = "") {
 }
 
 function okrsHref(slug: string, anchor = "") {
-    return `/${slug}/admin?view=okrs${anchor ? `#${anchor}` : ""}`
+    return `/${slug}/admin/okrs${anchor ? `#${anchor}` : ""}`
+}
+
+function revalidateAdminOkrPaths(slug: string, okrId?: string) {
+    revalidatePath(adminPath(slug))
+    revalidatePath(okrsHref(slug))
+    if (okrId) revalidatePath(adminPath(slug, `/okrs/${okrId}`))
 }
 
 async function requireAdminUser(workspaceId: string, userId: string) {
@@ -67,7 +73,7 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
     const periodEnd = value(formData, "period_end")
     const ownerUserId = value(formData, "owner_user_id") || user.id
     const isTest = value(formData, "is_test") === "true"
-    const sourceHref = `/${workspace.slug}/admin?view=okrs`
+    const sourceHref = okrsHref(workspace.slug)
     if (!objective || !/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd) || periodEnd < periodStart) {
         await recordAdminActivity({ workspaceId: workspace.id, category: "system", level: "warning", eventKey: "okr.create.validation_failed", summary: "An administrator could not create an OKR because its objective period was invalid", sourceHref, actorUserId: user.id })
         return { ok: false, error: "Add an objective, a valid start date, and a valid deadline." }
@@ -107,14 +113,14 @@ export async function createOkrFromModal(slug: string, formData: FormData): Prom
     }
     const displayTitle = okrDisplayTitle({ objectiveType: null, objective, deadline: periodEnd })
     await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.created", summary: `OKR draft created: ${displayTitle}`, entityType: "okr", entityId: okr.id, sourceHref: okrsHref(workspace.slug, `okr-${okr.id}`), actorUserId: user.id, metadata: { objective_type: null, is_test: isTest, status: "draft", period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId } })
-    revalidatePath(adminPath(slug))
+    revalidateAdminOkrPaths(slug)
     return { ok: true, href: okrsHref(slug, `okr-${okr.id}`) }
 }
 
 export async function createOkr(slug: string, formData: FormData) {
     const result = await createOkrFromModal(slug, formData)
-    if (!result.ok) redirect(adminPath(slug, `?view=okrs&error=${encodeURIComponent(result.error ?? "create-failed")}`))
-    redirect(result.href ?? adminPath(slug, "?view=okrs"))
+    if (!result.ok) redirect(`${okrsHref(slug)}?error=${encodeURIComponent(result.error ?? "create-failed")}`)
+    redirect(result.href ?? okrsHref(slug))
 }
 
 export async function updateOkr(slug: string, okrId: string, formData: FormData) {
@@ -128,7 +134,7 @@ export async function updateOkr(slug: string, okrId: string, formData: FormData)
     await requireAdminUser(workspace.id, ownerUserId)
     const { error } = await supabaseAdmin.from("workspace_okrs").update({ objective, description: value(formData, "description") || null, period_start: periodStart, period_end: periodEnd, owner_user_id: ownerUserId }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "draft")
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function updateActiveOkrDetails(slug: string, okrId: string, formData: FormData) {
@@ -138,7 +144,7 @@ export async function updateActiveOkrDetails(slug: string, okrId: string, formDa
     await requireAdminUser(workspace.id, ownerUserId)
     const { error } = await supabaseAdmin.from("workspace_okrs").update({ owner_user_id: ownerUserId, description: value(formData, "description") || null }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "active")
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function commitOkr(slug: string, okrId: string) {
@@ -150,7 +156,7 @@ export async function commitOkr(slug: string, okrId: string) {
     const { error } = await supabaseAdmin.from("workspace_okrs").update({ status: "active", objective_type: "committed" }).eq("workspace_id", workspace.id).eq("id", okrId).eq("status", "draft")
     if (error) throw new Error(error.message)
     await recordAdminActivity({ workspaceId: workspace.id, category: "system", eventKey: "okr.committed", summary: "An OKR was committed and its definition locked", entityType: "okr", entityId: okrId, sourceHref: okrsHref(workspace.slug, `okr-${okrId}`), actorUserId: user.id, metadata: { objective_type: "committed", status: "active" } })
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function deleteOkr(slug: string, okrId: string) {
@@ -158,8 +164,8 @@ export async function deleteOkr(slug: string, okrId: string) {
     await requireDraftOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okrs").delete().eq("workspace_id", workspace.id).eq("id", okrId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug))
-    redirect(adminPath(slug, "?view=okrs"))
+    revalidateAdminOkrPaths(slug)
+    redirect(okrsHref(slug))
 }
 
 export async function setOkrStatus(slug: string, okrId: string, status: "draft" | "active" | "completed" | "cancelled", formData?: FormData) {
@@ -170,7 +176,7 @@ export async function setOkrStatus(slug: string, okrId: string, status: "draft" 
     if (status === "completed" && !outcomeNote) throw new Error("Record an outcome note before completing the OKR")
     const { error } = await supabaseAdmin.from("workspace_okrs").update({ status, outcome_note: status === "completed" || status === "cancelled" ? outcomeNote || null : null }).eq("workspace_id", workspace.id).eq("id", okrId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function addOkrKeyResult(slug: string, okrId: string, formData: FormData) {
@@ -195,7 +201,7 @@ export async function addOkrKeyResult(slug: string, okrId: string, formData: For
         sort_order: count ?? 0,
     })
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function deleteOkrKeyResult(slug: string, okrId: string, keyResultId: string) {
@@ -203,7 +209,7 @@ export async function deleteOkrKeyResult(slug: string, okrId: string, keyResultI
     await requireDraftOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okr_key_results").delete().eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function updateOkrKeyResult(slug: string, okrId: string, keyResultId: string, formData: FormData) {
@@ -224,7 +230,7 @@ export async function updateOkrKeyResult(slug: string, okrId: string, keyResultI
         reporting_cadence: reportingCadence(formData),
     }).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function updateDraftOkrKeyResultMetric(slug: string, okrId: string, keyResultId: string, metric: "baseline_value" | "target_value", formData: FormData) {
@@ -236,7 +242,7 @@ export async function updateDraftOkrKeyResultMetric(slug: string, okrId: string,
     const update = metric === "baseline_value" ? { baseline_value: metricValue } : { target_value: metricValue }
     const { error } = await supabaseAdmin.from("workspace_okr_key_results").update(update).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function updateActiveOkrKeyResultDescription(slug: string, okrId: string, keyResultId: string, formData: FormData) {
@@ -244,7 +250,7 @@ export async function updateActiveOkrKeyResultDescription(slug: string, okrId: s
     await requireCommittedOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okr_key_results").update({ description: value(formData, "description") || null }).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function setOkrKeyResultCadence(slug: string, okrId: string, keyResultId: string, formData: FormData) {
@@ -255,7 +261,7 @@ export async function setOkrKeyResultCadence(slug: string, okrId: string, keyRes
     if (keyResult.reporting_cadence) throw new Error("Reporting cadence was already set")
     const { data: updated, error } = await supabaseAdmin.from("workspace_okr_key_results").update({ reporting_cadence: reportingCadence(formData) }).eq("workspace_id", workspace.id).eq("okr_id", okrId).eq("id", keyResultId).is("reporting_cadence", null).select("id").maybeSingle()
     if (error || !updated) throw new Error(error?.message ?? "Reporting cadence was already set")
-    revalidatePath(adminPath(slug))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function addOkrMeasurement(slug: string, okrId: string, keyResultId: string, formData: FormData) {
@@ -268,7 +274,7 @@ export async function addOkrMeasurement(slug: string, okrId: string, keyResultId
     if (!keyResult) throw new Error("Key Result not found")
     const { error } = await supabaseAdmin.from("workspace_okr_measurements").insert({ workspace_id: workspace.id, key_result_id: keyResultId, value: numericValue(formData, "value"), reported_on: reportedOn, measured_at: new Date().toISOString(), note: value(formData, "note") || null, provenance: "manual", recorded_by: user.id })
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function createOkrAction(slug: string, okrId: string, keyResultId: string, formData: FormData) {
@@ -294,7 +300,7 @@ export async function createOkrAction(slug: string, okrId: string, keyResultId: 
         await supabaseAdmin.from("work_items").delete().eq("workspace_id", workspace.id).eq("id", item.id)
         throw new Error(assigneeError.message)
     }
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function linkOkrAction(slug: string, okrId: string, keyResultId: string, formData: FormData) {
@@ -310,7 +316,7 @@ export async function linkOkrAction(slug: string, okrId: string, keyResultId: st
     if (!item.execution_owner_id) throw new Error("Choose an execution owner for this work item before linking it to a Key Result")
     const { error } = await supabaseAdmin.from("workspace_okr_work_items").upsert({ workspace_id: workspace.id, key_result_id: keyResultId, work_item_id: workItemId, expected_movement: expectedMovement, impact_hypothesis: impactHypothesis, linked_by: user.id })
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }
 
 export async function unlinkOkrAction(slug: string, okrId: string, keyResultId: string, workItemId: string) {
@@ -318,5 +324,5 @@ export async function unlinkOkrAction(slug: string, okrId: string, keyResultId: 
     await requireCommittedOkr(workspace.id, okrId)
     const { error } = await supabaseAdmin.from("workspace_okr_work_items").delete().eq("workspace_id", workspace.id).eq("key_result_id", keyResultId).eq("work_item_id", workItemId)
     if (error) throw new Error(error.message)
-    revalidatePath(adminPath(slug)); revalidatePath(adminPath(slug, `/okrs/${okrId}`))
+    revalidateAdminOkrPaths(slug, okrId)
 }

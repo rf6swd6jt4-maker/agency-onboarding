@@ -127,6 +127,7 @@ test("workspace panel homes share one persistent banner inside their tab frame",
 
     for (const pathname of [
         "/agency/admin",
+        "/agency/admin/okrs",
         "/agency/admin/activity/event-id",
         "/agency/admin/maintenance",
         "/agency/appointment-setting",
@@ -180,7 +181,8 @@ test("route loading UI reflects each panel's real composition", () => {
     assert.match(loading, /variant === "admin-okrs"[\s\S]*?<AdminLoading section="okrs"/)
     assert.match(currentLoading, /searchParams\.get\("view"\) === "okrs"[\s\S]*?"admin-okrs"/)
     assert.match(currentLoading, /searchParams\.get\("mode"\) === "team"[\s\S]*?"communications-team"/)
-    assert.match(opening, /url\.searchParams\.get\("view"\) === "okrs"[\s\S]*?"admin-okrs"/)
+    assert.match(opening, /nested === "okrs"[\s\S]*?"admin-okrs"/)
+    assert.match(source("components/admin/AdminPanelNav.tsx"), /admin\/okrs/)
 
     const variants = {
         admin: "admin",
@@ -201,6 +203,7 @@ test("route loading UI reflects each panel's real composition", () => {
     const nestedVariants = {
         "admin/activity": "admin-activity",
         "admin/maintenance": "admin-maintenance",
+        "admin/okrs": "admin-okrs",
         "leadgen/polls": "leadgen-polls",
         "admin/activity/[eventId]": "detail",
         "admin/okrs/[okrId]": "detail",

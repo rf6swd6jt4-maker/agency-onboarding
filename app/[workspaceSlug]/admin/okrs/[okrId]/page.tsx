@@ -11,5 +11,5 @@ export default async function OkrDetailPage({ params }: PageProps) {
     const { workspace } = await requireWorkspace(workspaceSlug, "admin")
     const okr = await getWorkspaceOkr(workspace.id, okrId)
     if (!okr) notFound()
-    redirect(`/${workspace.slug}/admin?view=okrs#okr-${okr.id}`)
+    redirect(`/${workspace.slug}/admin/okrs#okr-${okr.id}`)
 }

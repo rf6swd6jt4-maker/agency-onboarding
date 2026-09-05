@@ -103,7 +103,7 @@ test("OKRs are editable drafts until Commit classifies and selectively locks the
     assert.match(topBar, />Deadline<input name="period_end"/)
     assert.doesNotMatch(topBar, /name="objective_type"/)
     assert.doesNotMatch(topBar, /name="status" defaultValue="draft"/)
-    assert.match(detail, /redirect\(`\/\$\{workspace\.slug\}\/admin\?view=okrs#okr-\$\{okr\.id\}`\)/)
+    assert.match(detail, /redirect\(`\/\$\{workspace\.slug\}\/admin\/okrs#okr-\$\{okr\.id\}`\)/)
     assert.match(workspace, /commitOkr/)
     assert.match(workspace, /No Key Results/)
     assert.match(workspace, /ProgressRing/)
@@ -137,16 +137,16 @@ test("KR cadence is explicit, locked at commit, and available once for legacy ac
 })
 
 test("the OKRs tab is a metric table with popup-only Objective and Key Result details", async () => {
-    const [adminPage, workspace, trendChart, search, actions] = await Promise.all([
-        readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+    const [okrPage, workspace, trendChart, search, actions] = await Promise.all([
+        readFile("app/[workspaceSlug]/admin/okrs/page.tsx", "utf8"),
         readFile("components/admin/OkrWorkspace.tsx", "utf8"),
         readFile("components/ui/TrendChart.tsx", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/search/route.ts", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
     ])
-    assert.match(adminPage, /<OkrWorkspace/)
-    assert.match(adminPage, /objective_type !== "aspirational"/)
-    assert.doesNotMatch(adminPage, /href=\{`\/\$\{workspace\.slug\}\/admin\/okrs/)
+    assert.match(okrPage, /<OkrWorkspace/)
+    assert.match(okrPage, /objective_type !== "aspirational"/)
+    assert.doesNotMatch(okrPage, /href=\{`\/\$\{workspace\.slug\}\/admin\/okrs/)
     assert.match(workspace, /OkrMetricTable/)
     assert.match(workspace, /role="table"/)
     assert.match(workspace, />Key Result</)
@@ -227,8 +227,8 @@ test("the OKRs tab is a metric table with popup-only Objective and Key Result de
     assert.match(workspace, /Add Key Result/)
     assert.match(workspace, /Added \{formatRelativeTime\(action\.created_at\)\}/)
     assert.doesNotMatch(workspace, />Draft<\/SquarePill>/)
-    assert.match(search, /admin\?view=okrs#okr-/)
-    assert.match(search, /admin\?view=okrs#key-result-/)
+    assert.match(search, /admin\/okrs#okr-/)
+    assert.match(search, /admin\/okrs#key-result-/)
     assert.match(actions, /return \{ ok: true, href: okrsHref\(slug, `okr-\$\{okr\.id\}`\) \}/)
 })
 
@@ -360,8 +360,9 @@ test("maintenance errors use stable catalogue codes with specific and broad fall
 })
 
 test("Admin Work and Maintenance keep compact list rows while OKRs use the unified workspace", async () => {
-    const [adminPage, workQueue, navigation, maintenancePage, detail, actions] = await Promise.all([
+    const [adminPage, okrPage, workQueue, navigation, maintenancePage, detail, actions] = await Promise.all([
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
+        readFile("app/[workspaceSlug]/admin/okrs/page.tsx", "utf8"),
         readFile("components/admin/AdminWorkQueue.tsx", "utf8"),
         readFile("components/admin/AdminPanelNav.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/maintenance/page.tsx", "utf8"),
@@ -369,10 +370,13 @@ test("Admin Work and Maintenance keep compact list rows while OKRs use the unifi
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
     ])
     assert.match(navigation, /key: "work", label: "Work"/)
+    assert.match(navigation, /key: "okrs", label: "OKRs", href: `\/\$\{workspaceSlug\}\/admin\/okrs`/)
     assert.doesNotMatch(navigation, /Overview/)
+    assert.match(adminPage, /query\.view === "okrs"[\s\S]*nextQuery\.append\(key, entry\)/)
+    assert.match(adminPage, /redirect\(`\/\$\{workspaceSlug\}\/admin\/okrs/)
     assert.match(adminPage, /listAdminWorkItems/)
-    assert.match(adminPage, /OkrWorkspace/)
-    assert.match(adminPage, /okrAttention/)
+    assert.match(okrPage, /OkrWorkspace/)
+    assert.match(okrPage, /okrAttention/)
     assert.match(workQueue, /Work queue/)
     assert.match(workQueue, /<List ariaLabel="Work queue">/)
     assert.match(workQueue, /<ListPrimaryRow>/)
