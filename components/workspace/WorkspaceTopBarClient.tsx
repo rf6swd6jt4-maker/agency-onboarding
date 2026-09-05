@@ -1051,7 +1051,6 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             if (!workspaceRouteIsRecordDetail(nextUrl, workspace.slug, window.location.origin)) return
             const detailPreview = parseWorkspaceDetailPreview(anchor.getAttribute("data-workspace-detail-preview"))
             event.preventDefault()
-            event.stopPropagation()
             openWorkspaceTab(nextUrl, detailPreview ?? undefined)
         }
 

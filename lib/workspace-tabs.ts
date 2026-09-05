@@ -3,6 +3,7 @@ import type { WorkspaceDetailPreview } from "@/lib/workspace-detail-preview"
 export const WORKSPACE_TAB_FRAME_PARAM = "__betelgeze_tab"
 export const WORKSPACE_TAB_FRAME_NAME_PREFIX = "betelgeze-tab:"
 export const WORKSPACE_TAB_MESSAGE_SOURCE = "betelgeze-workspace-tabs"
+export const WORKSPACE_TAB_VISIBILITY_EVENT = "betelgeze:workspace-tab-visibility"
 
 export type WorkspaceTabParentMessage = {
     source: typeof WORKSPACE_TAB_MESSAGE_SOURCE

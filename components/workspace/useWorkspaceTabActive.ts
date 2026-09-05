@@ -1,9 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { WORKSPACE_TAB_FRAME_PARAM } from "@/lib/workspace-tabs"
+import { WORKSPACE_TAB_FRAME_PARAM, WORKSPACE_TAB_VISIBILITY_EVENT } from "@/lib/workspace-tabs"
 
-export const WORKSPACE_TAB_VISIBILITY_EVENT = "betelgeze:workspace-tab-visibility"
+export { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/lib/workspace-tabs"
 
 function readActiveState() {
     const embedded = new URLSearchParams(window.location.search).has(WORKSPACE_TAB_FRAME_PARAM)

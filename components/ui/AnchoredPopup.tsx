@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/lib/workspace-tabs"
 import { anchoredPopupPosition } from "./anchored-popup-position"
 
 type PopupPosition = {
@@ -95,6 +96,10 @@ export function AnchoredPopup({
         const escape = (event: KeyboardEvent) => {
             if (event.key === "Escape") onDismiss?.()
         }
+        const dismissWhenOwnerBecomesInactive = () => {
+            if (sourceDocument.body.dataset.workspaceTabActive === "false") onDismiss?.()
+        }
+        const dismissForOwnerNavigation = () => onDismiss?.()
 
         for (const document of documents) {
             document.addEventListener("mousedown", dismiss)
@@ -102,6 +107,9 @@ export function AnchoredPopup({
         }
         sourceWindow?.addEventListener("scroll", updatePosition, true)
         sourceWindow?.addEventListener("resize", updatePosition)
+        sourceWindow?.addEventListener(WORKSPACE_TAB_VISIBILITY_EVENT, dismissWhenOwnerBecomesInactive)
+        sourceWindow?.addEventListener("betelgeze:workspace-navigation-start", dismissForOwnerNavigation)
+        sourceWindow?.addEventListener("pagehide", dismissForOwnerNavigation)
         if (host.window !== sourceWindow) {
             host.window.addEventListener("scroll", updatePosition, true)
             host.window.addEventListener("resize", updatePosition)
@@ -115,6 +123,9 @@ export function AnchoredPopup({
             }
             sourceWindow?.removeEventListener("scroll", updatePosition, true)
             sourceWindow?.removeEventListener("resize", updatePosition)
+            sourceWindow?.removeEventListener(WORKSPACE_TAB_VISIBILITY_EVENT, dismissWhenOwnerBecomesInactive)
+            sourceWindow?.removeEventListener("betelgeze:workspace-navigation-start", dismissForOwnerNavigation)
+            sourceWindow?.removeEventListener("pagehide", dismissForOwnerNavigation)
             if (host.window !== sourceWindow) {
                 host.window.removeEventListener("scroll", updatePosition, true)
                 host.window.removeEventListener("resize", updatePosition)

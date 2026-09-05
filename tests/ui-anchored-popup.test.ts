@@ -47,8 +47,22 @@ test("field and list menus share the parent-aware anchored popup primitive", asy
     assert.match(popup, /visualViewport/)
     assert.match(popup, /ResizeObserver/)
     assert.match(popup, /z-\[2147483646\]/)
+    assert.match(popup, /WORKSPACE_TAB_VISIBILITY_EVENT/)
+    assert.match(popup, /workspaceTabActive === "false"/)
+    assert.match(popup, /betelgeze:workspace-navigation-start/)
+    assert.match(popup, /pagehide/)
     assert.match(listMenu, /<AnchoredPopup/)
     assert.match(mobileSurface, /<AnchoredPopup/)
     assert.match(fields, /<AnchoredPopup/)
     assert.match(standards, /open directly above/)
+})
+
+test("portal detail navigation preserves the popup owner's close handler", async () => {
+    const shell = await readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
+    const start = shell.indexOf("function openPortalledDetail")
+    const end = shell.indexOf("document.addEventListener", start)
+    const handler = shell.slice(start, end)
+
+    assert.match(handler, /event\.preventDefault\(\)/)
+    assert.doesNotMatch(handler, /event\.stopPropagation\(\)/)
 })
