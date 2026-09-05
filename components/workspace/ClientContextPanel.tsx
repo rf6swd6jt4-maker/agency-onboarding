@@ -4,7 +4,6 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { shortId } from "@/lib/ui/relative-time"
-import { useWorkspaceDocumentRuntime } from "@/components/workspace/WorkspaceDocumentRuntime"
 import {
     WORKSPACE_TAB_FRAME_PARAM,
     WORKSPACE_TAB_MESSAGE_SOURCE,
@@ -67,8 +66,7 @@ function displayValue(value: string | null | undefined, fallback = "Not saved") 
 
 export function ClientContextPanel({ workspaceSlug, relationship, metrics = [], allowedDestinations = ["relationships", "onboarding", "fulfilment"] }: Props) {
     const searchParams = useSearchParams()
-    const documentRuntime = useWorkspaceDocumentRuntime()
-    const tabId = searchParams.get(WORKSPACE_TAB_FRAME_PARAM) ?? documentRuntime?.tabId ?? "standalone"
+    const tabId = searchParams.get(WORKSPACE_TAB_FRAME_PARAM) ?? "standalone"
     const storageKey = useMemo(() => workspaceTabContextStorageKey(workspaceSlug, tabId), [tabId, workspaceSlug])
     const [open, setOpen] = useState(() => typeof window === "undefined" ? true : sessionStorage.getItem(storageKey) !== "false")
     const relationshipId = relationship?.id ?? null
@@ -94,7 +92,7 @@ export function ClientContextPanel({ workspaceSlug, relationship, metrics = [], 
     }, [tabId])
 
     useEffect(() => {
-        if (!relationshipId || !contextPayload || tabId === "standalone" || typeof window === "undefined") return
+        if (!relationshipId || !contextPayload || tabId === "standalone" || typeof window === "undefined" || window.parent === window) return
 
         const postContextStatus = (contextSupported: boolean) => {
             const message: WorkspaceTabFrameMessage = {

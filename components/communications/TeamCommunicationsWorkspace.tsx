@@ -1,7 +1,7 @@
 "use client"
 
 import Image from "next/image"
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Avatar } from "@/components/account/Avatar"
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
@@ -424,11 +424,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         lastTypingBroadcastAtRef.current = 0
         void sendRealtimeBroadcast(NATIVE_TYPING_EVENT, { conversationId, userId: bootstrap.currentUser.id, typing: false })
     }, [bootstrap.currentUser.id, sendRealtimeBroadcast])
-
-    useLayoutEffect(() => {
-        if (active && workspaceTabActive && documentVisible) return
-        stopNativeTyping(sentTypingConversationRef.current)
-    }, [active, documentVisible, stopNativeTyping, workspaceTabActive])
 
     function handleDraftChange(value: string) {
         setDraft(value)

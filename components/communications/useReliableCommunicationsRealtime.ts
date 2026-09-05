@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { RealtimeChannel, SupabaseClient } from "@supabase/supabase-js"
 
-import { useWorkspaceDocumentRuntime } from "@/components/workspace/WorkspaceDocumentRuntime"
 import { useWorkspaceTabActive, WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 
 export type CommunicationsConnectionState = "connecting" | "syncing" | "live" | "reconnecting" | "offline" | "error"
@@ -29,8 +28,6 @@ export function useReliableCommunicationsRealtime({
     synchronize: () => Promise<void>
     topic: string
 }) {
-    const documentRuntime = useWorkspaceDocumentRuntime()
-    const connectionEnabled = documentRuntime?.active ?? true
     const workspaceTabActive = useWorkspaceTabActive()
     const activeRef = useRef(active)
     const workspaceTabActiveRef = useRef(workspaceTabActive)
@@ -70,12 +67,9 @@ export function useReliableCommunicationsRealtime({
     }, [updateState])
 
     useEffect(() => {
-        if (!schemaReady || !connectionEnabled) {
-            if (!schemaReady) {
-                const timer = window.setTimeout(() => updateState("offline", "Communications database updates are unavailable."), 0)
-                return () => window.clearTimeout(timer)
-            }
-            return
+        if (!schemaReady) {
+            const timer = window.setTimeout(() => updateState("offline", "Communications database updates are unavailable."), 0)
+            return () => window.clearTimeout(timer)
         }
 
         let disposed = false
@@ -226,7 +220,7 @@ export function useReliableCommunicationsRealtime({
                 void supabase.removeChannel(channel)
             }
         }
-    }, [connectionEnabled, privateChannel, schemaReady, supabase, topic, updateState])
+    }, [privateChannel, schemaReady, supabase, topic, updateState])
 
     return { state, error, workspaceTabActive, sendBroadcast }
 }

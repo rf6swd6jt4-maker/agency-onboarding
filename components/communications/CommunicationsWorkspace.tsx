@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import Image from "next/image"
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
@@ -785,11 +785,6 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         window.clearTimeout(whatsAppTypingTimerRef.current)
         whatsAppTypingTimerRef.current = null
     }, [])
-
-    useLayoutEffect(() => {
-        if (active && workspaceTabActive && documentVisible) return
-        clearPendingWhatsAppTyping()
-    }, [active, clearPendingWhatsAppTyping, documentVisible, workspaceTabActive])
 
     function handleClientDraftChange(value: string) {
         draftRef.current = value
