@@ -99,7 +99,7 @@ export function FileUploadField({
 
     return (
         <div>
-            <label className={`flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-8 text-center transition ${disabled ? "cursor-wait opacity-70" : "cursor-pointer hover:border-[var(--onboarding-primary,#1E3A5F)]"}`}>
+            <label className={`flex min-h-32 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-3 py-6 text-center transition sm:min-h-0 sm:px-4 sm:py-8 ${disabled ? "cursor-wait opacity-70" : "cursor-pointer hover:border-[var(--onboarding-primary,#1E3A5F)]"}`}>
                 <span className="text-base font-semibold text-[var(--onboarding-text,#0F172A)]">
                     Tap to choose {multiple ? "files" : "a file"}
                 </span>
@@ -145,7 +145,7 @@ export function FileUploadField({
                                         disabled={disabled}
                                         onClick={() => removeFile(index)}
                                         aria-label={`Remove ${file.name}`}
-                                        className={`absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center text-3xl font-medium leading-none focus:outline-none ${
+                                        className={`absolute right-0 top-0 z-20 flex h-11 w-11 items-center justify-center text-3xl font-medium leading-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.65)] focus:outline-none ${
                                             removeIconTone === "light"
                                                 ? "text-white"
                                                 : "text-black"
@@ -166,7 +166,7 @@ export function FileUploadField({
                                             event.currentTarget
                                         )
                                     }
-                                    className="h-36 w-full object-cover"
+                                    className="h-32 w-full object-cover sm:h-36"
                                 />
                             ) : (
                                 <div className="flex h-24 items-center justify-center bg-[var(--onboarding-page,#F8F7F3)] px-4 text-center text-sm font-medium text-[var(--onboarding-muted,#475569)]">
@@ -177,7 +177,7 @@ export function FileUploadField({
                             )}
 
                             <div className="p-3">
-                                <p className="truncate text-sm font-medium text-[var(--onboarding-text,#0F172A)]">
+                                <p className="truncate pr-6 text-sm font-medium text-[var(--onboarding-text,#0F172A)]">
                                     {file.name}
                                 </p>
                                 <p className="mt-1 text-xs text-[var(--onboarding-muted,#475569)]">

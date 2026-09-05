@@ -115,7 +115,7 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
         }))
         return (
             <OnboardingThemeProvider theme={snapshot.theme}>
-                <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={snapshot.help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} allowRoadmapNavigation headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Frozen preview · nothing is saved</span>}>
+                <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={snapshot.help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} allowRoadmapNavigation headerActions={<span className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950"><span className="sm:hidden">Preview</span><span className="hidden sm:inline">Frozen preview · nothing is saved</span></span>}>
                     <OnboardingSessionRenderer
                         step={renderStep}
                         moduleTitles={snapshot.modules.filter((module) => module.code !== "system-welcome" && module.code !== "system-completion").map((module) => module.name)}
@@ -164,8 +164,8 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
 
     return (
         <OnboardingThemeProvider theme={runtime.theme}>
-            <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={runtime.help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} allowRoadmapNavigation headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Preview · nothing is saved</span>}>
-                <OnboardingSessionRenderer step={renderStep} moduleTitles={[moduleDefinition.name]} token={token} preview previewNextHref={nextHref} backHref={selectedIndex > 0 ? `/onboarding/preview/${token}?step=${moduleDefinition.steps[selectedIndex - 1].id}` : null} action={configuredStep.kind === "video" && nextHref ? <Link href={nextHref} className="mt-8 block w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 text-center font-medium text-white">Complete and continue</Link> : null} />
+            <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={runtime.help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} allowRoadmapNavigation headerActions={<span className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950"><span className="sm:hidden">Preview</span><span className="hidden sm:inline">Preview · nothing is saved</span></span>}>
+                <OnboardingSessionRenderer step={renderStep} moduleTitles={[moduleDefinition.name]} token={token} preview previewNextHref={nextHref} backHref={selectedIndex > 0 ? `/onboarding/preview/${token}?step=${moduleDefinition.steps[selectedIndex - 1].id}` : null} action={configuredStep.kind === "video" && nextHref ? <Link href={nextHref} className="block w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 text-center font-medium text-white">Complete and continue</Link> : null} />
             </OnboardingLayout>
         </OnboardingThemeProvider>
     )

@@ -466,9 +466,9 @@ export function OnboardingForm({
             onInput={() => scheduleDraftSave()}
             data-global-loading="false"
             aria-busy={submitting}
-            className="mt-8 space-y-6"
+            className="mt-6 space-y-5 sm:mt-8 sm:space-y-6"
         >
-            {showIntro ? <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-5">
+            {showIntro ? <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] p-4 sm:p-5">
                 <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">{form.title}</p>
                 <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">
                     {form.intro}
@@ -500,7 +500,7 @@ export function OnboardingForm({
                             )}
                             placeholder={field.placeholder}
                             readOnly={locked || submitting}
-                            className="mt-3 min-h-32 w-full rounded-2xl border border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 text-base text-[var(--onboarding-text,#0F172A)] outline-none transition focus:border-[var(--onboarding-primary,#1E3A5F)] focus:ring-4 focus:ring-black/5"
+                            className="mt-3 min-h-28 w-full rounded-xl border border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-3.5 py-3 text-base text-[var(--onboarding-text,#0F172A)] outline-none transition focus:border-[var(--onboarding-primary,#1E3A5F)] focus:ring-4 focus:ring-black/5 sm:min-h-32 sm:rounded-2xl sm:px-4"
                         />
                     ) : field.type === "file" ? locked ? (
                         <div className="mt-3 rounded-xl bg-[var(--onboarding-page,#F8F7F3)] p-3 text-sm text-[var(--onboarding-muted,#475569)]">
@@ -520,6 +520,7 @@ export function OnboardingForm({
                                 files={selectedFilesByField[field.name] ?? []}
                                 disabled={submitting}
                                 uploadStates={(selectedFilesByField[field.name] ?? []).map((file) => {
+                                    if (preview) return { status: "uploaded" as const, progress: 100 }
                                     return uploadStateById[uploadId(field.name, file)]
                                         ?? { status: "preparing" as const, progress: 0 }
                                 })}
@@ -543,7 +544,7 @@ export function OnboardingForm({
                             )}
                             placeholder={field.placeholder}
                             readOnly={locked || submitting}
-                            className="mt-3 w-full rounded-2xl border border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-4 py-3 text-base text-[var(--onboarding-text,#0F172A)] outline-none transition focus:border-[var(--onboarding-primary,#1E3A5F)] focus:ring-4 focus:ring-black/5"
+                            className="mt-3 min-h-12 w-full rounded-xl border border-black/20 bg-[var(--onboarding-surface,#FFFFFF)] px-3.5 py-3 text-base text-[var(--onboarding-text,#0F172A)] outline-none transition focus:border-[var(--onboarding-primary,#1E3A5F)] focus:ring-4 focus:ring-black/5 sm:rounded-2xl sm:px-4"
                         />
                     )}
 
@@ -568,7 +569,7 @@ export function OnboardingForm({
                             setEditRequestStatus("saving")
                             void requestStepEdit(token, stepKey).then((outcome) => setEditRequestStatus(outcome.ok ? "saved" : "error"))
                         }}
-                        className="w-full rounded-xl border border-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium text-[var(--onboarding-primary,#1E3A5F)] disabled:opacity-60"
+                        className="min-h-14 w-full rounded-xl border border-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium leading-6 text-[var(--onboarding-primary,#1E3A5F)] disabled:opacity-60"
                     >
                         {editRequestStatus === "saved" ? "Edit request recorded" : editRequestStatus === "saving" ? "Recording request…" : "Request to edit"}
                     </button>
@@ -587,7 +588,7 @@ export function OnboardingForm({
                     </p>
                     <button
                         disabled={submitting || submitDisabled}
-                        className="w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium leading-6 text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                         {submitting ? "Saving…" : submitLabel}
                     </button>

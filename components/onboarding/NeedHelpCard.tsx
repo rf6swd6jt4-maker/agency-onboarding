@@ -5,7 +5,7 @@ export function NeedHelpCard({ help }: { help: OnboardingHelpSettings }) {
         ? help.whatsappNumber?.replace(/\D/g, "")
         : null
     return (
-        <div className="rounded-2xl bg-[var(--onboarding-primary,#1E3A5F)] p-5 text-white">
+        <div className="rounded-2xl bg-[var(--onboarding-primary,#1E3A5F)] p-4 text-white sm:p-5">
             <p className="text-sm font-semibold uppercase tracking-wide text-white/80">
                 Need help?
             </p>

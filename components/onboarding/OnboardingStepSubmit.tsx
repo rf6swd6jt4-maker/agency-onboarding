@@ -47,7 +47,7 @@ export function OnboardingStepSubmit({
     }
 
     return <form onSubmit={submit} data-global-loading="false" className="contents">
-        <button type="submit" disabled={pending} className="w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-wait disabled:opacity-60">
+        <button type="submit" disabled={pending} className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 font-medium leading-6 text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-wait disabled:opacity-60">
             {pending ? (label.toLowerCase().includes("finish") ? "Finishing onboarding…" : "Saving…") : label}
         </button>
         {error ? <p role="alert" className="col-span-full text-left text-sm text-red-700">{error} <RequestHelpLink />.</p> : null}

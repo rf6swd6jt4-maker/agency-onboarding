@@ -213,22 +213,22 @@ export function CalendarDateTimeBlock({
 
     return (
         <div className="overflow-hidden rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)]">
-            <div className="border-b border-black/10 px-5 py-4">
+            <div className="border-b border-black/10 px-4 py-3.5 sm:px-5 sm:py-4">
                 <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">{block.title}</p>
                 {block.description ? <p className="mt-1.5 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">{block.description}</p> : null}
             </div>
 
-            <div className="grid gap-5 p-4 sm:p-5 md:grid-cols-[minmax(0,1fr)_15rem]">
-                <div className="min-w-0 rounded-xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-3 sm:p-4">
-                    <div className="flex items-center justify-between gap-3">
-                        <button type="button" disabled={locked} aria-label="Previous month" onClick={() => setSelectedMonth(adjacentMonth(visibleMonth, -1))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-xl text-[var(--onboarding-muted,#475569)] transition hover:bg-black/5 disabled:opacity-40">‹</button>
-                        <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">{monthLabel}</p>
-                        <button type="button" disabled={locked} aria-label="Next month" onClick={() => setSelectedMonth(adjacentMonth(visibleMonth, 1))} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-xl text-[var(--onboarding-muted,#475569)] transition hover:bg-black/5 disabled:opacity-40">›</button>
+            <div className="grid gap-4 p-3 sm:gap-5 sm:p-5 md:grid-cols-[minmax(0,1fr)_15rem]">
+                <div className="min-w-0 rounded-xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-2.5 sm:p-4">
+                    <div className="flex items-center justify-between gap-1.5 sm:gap-3">
+                        <button type="button" disabled={locked} aria-label="Previous month" onClick={() => setSelectedMonth(adjacentMonth(visibleMonth, -1))} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl text-[var(--onboarding-muted,#475569)] transition hover:bg-black/5 disabled:opacity-40">‹</button>
+                        <p className="min-w-0 text-center text-sm font-semibold leading-5 text-[var(--onboarding-text,#0F172A)] sm:text-base">{monthLabel}</p>
+                        <button type="button" disabled={locked} aria-label="Next month" onClick={() => setSelectedMonth(adjacentMonth(visibleMonth, 1))} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl text-[var(--onboarding-muted,#475569)] transition hover:bg-black/5 disabled:opacity-40">›</button>
                     </div>
                     <div className="mt-3 grid grid-cols-7 text-center text-[11px] font-medium text-[var(--onboarding-muted,#475569)]">
                         {WEEKDAYS.map((weekday) => <span key={weekday} className="py-1">{weekday}</span>)}
                     </div>
-                    <div className="mt-1 grid grid-cols-7 gap-1">
+                    <div className="mt-1 grid grid-cols-7 gap-0.5 sm:gap-1">
                         {days.map((day, index) => day ? (
                             <button
                                 key={day.key}
@@ -239,7 +239,7 @@ export function CalendarDateTimeBlock({
                                     setSelectedDate(day.key)
                                     queueSave(day.key, selectedTime)
                                 }}
-                                className={`aspect-square min-h-9 rounded-lg text-sm font-medium transition ${selectedDate === day.key ? "bg-[var(--onboarding-primary,#1E3A5F)] text-white" : day.key === today ? "border border-[var(--onboarding-primary,#1E3A5F)] text-[var(--onboarding-primary,#1E3A5F)]" : "text-[var(--onboarding-text,#0F172A)] hover:bg-black/5"} disabled:cursor-not-allowed disabled:opacity-30`}
+                                className={`aspect-square min-h-10 rounded-lg text-sm font-medium transition ${selectedDate === day.key ? "bg-[var(--onboarding-primary,#1E3A5F)] text-white" : day.key === today ? "border border-[var(--onboarding-primary,#1E3A5F)] text-[var(--onboarding-primary,#1E3A5F)]" : "text-[var(--onboarding-text,#0F172A)] hover:bg-black/5"} disabled:cursor-not-allowed disabled:opacity-30`}
                             >
                                 {day.day}
                             </button>

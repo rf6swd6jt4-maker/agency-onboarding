@@ -54,8 +54,8 @@ export function SmsOptInForm({
                 </span>
             </label>
 
-            <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-                <input name="sms_consent" type="checkbox" value="yes" required className="mt-1 h-4 w-4 shrink-0 accent-[#1E3A5F]" />
+            <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm leading-6 text-slate-700 sm:p-4">
+                <input name="sms_consent" type="checkbox" value="yes" required className="mt-0.5 h-5 w-5 shrink-0 accent-[#1E3A5F]" />
                 <span>
                     I agree to receive service-related SMS messages from <strong className="font-semibold text-slate-950">{agencyName}</strong>{" "}about my client onboarding and services. Messages may include confirmation requests, secure onboarding or payment links, and service updates. Message frequency varies. Msg &amp; data rates may apply. Reply HELP for help or STOP to opt out. Consent is optional and is not a condition of purchase.
                 </span>
@@ -63,7 +63,7 @@ export function SmsOptInForm({
 
             {state.message ? <p role="alert" className="text-sm leading-6 text-red-700">{state.message}</p> : null}
 
-            <button type="submit" disabled={pending} className="h-12 w-full rounded-lg bg-[#1E3A5F] px-5 text-sm font-semibold text-white transition hover:bg-[#162D4A] disabled:cursor-wait disabled:opacity-60">
+            <button type="submit" disabled={pending} className="h-12 w-full rounded-lg bg-[#1E3A5F] px-5 text-base font-semibold text-white transition hover:bg-[#162D4A] disabled:cursor-wait disabled:opacity-60 sm:text-sm">
                 {pending ? "Opting in…" : "Opt in to SMS"}
             </button>
         </form>

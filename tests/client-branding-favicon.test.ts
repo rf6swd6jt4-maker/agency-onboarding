@@ -52,7 +52,7 @@ test("all public client surfaces use the agency logo and favicon", () => {
     assert.match(onboarding, /clientFaviconIcons\("onboarding", token\)/u)
     assert.match(onboarding, /clientBrandLogoUrl\("onboarding", token/u)
     assert.match(onboarding, /logoSrc=\{logoSrc\}/u)
-    assert.match(onboardingLayout, /<ClientBrandLogo logoSrc=\{logoSrc\}/u)
+    assert.match(onboardingLayout, /<ClientBrandLogo\s+logoSrc=\{logoSrc\}/u)
     assert.match(portal, /clientFaviconIcons\("client-portal", token\)/u)
     assert.match(portal, /clientBrandLogoUrl\("client-portal", token/u)
     assert.match(portalShell, /<ClientBrandLogo logoSrc=\{logoSrc\}/u)

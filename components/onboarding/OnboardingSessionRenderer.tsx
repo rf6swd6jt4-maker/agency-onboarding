@@ -90,16 +90,16 @@ export function OnboardingSessionRenderer({
 
     if (visualHeader?.kind === "header" && step.blocks?.length) {
         return (
-            <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
+            <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
                 <div className={onboardingBlockLayoutClasses(visualHeader.layout)}>
                     <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">{step.moduleTitle}</p>
-                    <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--onboarding-text,#0F172A)]">{visualHeader.title}</h1>
-                    {visualHeader.description ? <p className="mt-4 text-lg leading-7 text-[var(--onboarding-muted,#475569)]">{visualHeader.description}</p> : null}
+                    <h1 className="mt-2.5 text-2xl font-semibold leading-8 tracking-tight text-[var(--onboarding-text,#0F172A)] sm:mt-3 sm:text-3xl sm:leading-9">{visualHeader.title}</h1>
+                    {visualHeader.description ? <p className="mt-3 text-base leading-7 text-[var(--onboarding-muted,#475569)] sm:mt-4 sm:text-lg">{visualHeader.description}</p> : null}
                 </div>
-                {visualEstimate?.kind === "estimate" && visualEstimate.estimatedTime ? <div className={onboardingBlockLayoutClasses(visualEstimate.layout)}><div className="inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualEstimate.estimatedTime}</div></div> : visualHeader.estimatedTime ? <div className="mt-5 inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualHeader.estimatedTime}</div> : null}
+                {visualEstimate?.kind === "estimate" && visualEstimate.estimatedTime ? <div className={onboardingBlockLayoutClasses(visualEstimate.layout)}><div className="inline-flex max-w-full rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium leading-5 text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualEstimate.estimatedTime}</div></div> : visualHeader.estimatedTime ? <div className="mt-5 inline-flex max-w-full rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium leading-5 text-[var(--onboarding-primary,#1E3A5F)]">Estimated time: {visualHeader.estimatedTime}</div> : null}
                 {notice}
                 {visualHeader.showComposedModuleSummary && showModuleSummary ? (
-                    <div className="mt-8 rounded-2xl bg-[var(--onboarding-page,#F8F7F3)] p-5">
+                    <div className="mt-6 rounded-2xl bg-[var(--onboarding-page,#F8F7F3)] p-4 sm:mt-8 sm:p-5">
                         <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">Your onboarding includes:</p>
                         <div className="mt-4 flex flex-wrap gap-2">{moduleTitles.length ? moduleTitles.map((moduleTitle) => <span key={moduleTitle} className="rounded-full bg-[color-mix(in_srgb,var(--onboarding-primary,#1E3A5F)_9%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">✓ {moduleTitle}</span>) : <span className="text-sm text-[var(--onboarding-muted,#475569)]">No onboarding modules assigned yet.</span>}</div>
                     </div>
@@ -131,23 +131,23 @@ export function OnboardingSessionRenderer({
     }
 
     return (
-        <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-6 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
+        <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 shadow-sm ${forceMobile ? "" : "sm:p-8"}`}>
             <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary,#1E3A5F)]">
                 {step.moduleTitle}
             </p>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--onboarding-text,#0F172A)]">
+            <h1 className="mt-2.5 text-2xl font-semibold leading-8 tracking-tight text-[var(--onboarding-text,#0F172A)] sm:mt-3 sm:text-3xl sm:leading-9">
                 {step.title}
             </h1>
-            <p className="mt-4 text-lg leading-7 text-[var(--onboarding-muted,#475569)]">
+            <p className="mt-3 text-base leading-7 text-[var(--onboarding-muted,#475569)] sm:mt-4 sm:text-lg">
                 {step.description}
             </p>
             {notice}
-            <div className="mt-5 inline-flex rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium text-[var(--onboarding-primary,#1E3A5F)]">
+            <div className="mt-5 inline-flex max-w-full rounded-full bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_14%,var(--onboarding-surface,#FFFFFF))] px-3 py-1 text-sm font-medium leading-5 text-[var(--onboarding-primary,#1E3A5F)]">
                 Estimated time: {step.estimatedTime}
             </div>
 
             {showModuleSummary ? (
-                <div className="mt-8 rounded-2xl bg-[var(--onboarding-page,#F8F7F3)] p-5">
+                <div className="mt-6 rounded-2xl bg-[var(--onboarding-page,#F8F7F3)] p-4 sm:mt-8 sm:p-5">
                     <p className="font-semibold text-[var(--onboarding-text,#0F172A)]">Your onboarding includes:</p>
                     <div className="mt-4 flex flex-wrap gap-2">
                         {moduleTitles.length ? moduleTitles.map((moduleTitle) => (
@@ -163,7 +163,7 @@ export function OnboardingSessionRenderer({
             ) : null}
 
             {(step.kind === "video" || isFinalStep) && step.videoUrl ? (
-                <div className="mt-8 aspect-video overflow-hidden rounded-2xl bg-[var(--onboarding-primary,#1E3A5F)]">
+                <div className="mt-6 aspect-video overflow-hidden rounded-2xl bg-[var(--onboarding-primary,#1E3A5F)] sm:mt-8">
                     {videoEmbedUrl ? (
                         <iframe src={videoEmbedUrl} title={step.title} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen className="h-full w-full" />
                     ) : (
@@ -187,13 +187,13 @@ export function OnboardingSessionRenderer({
                     onPreviewSubmit={onPreviewSubmit}
                 />
             ) : (
-                <div className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900">
+                <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-900 sm:mt-8 sm:p-5">
                     This form has not been configured yet.
                 </div>
             ) : null}
 
-            {!isFinalStep ? <div className="mt-8"><WhyWeAskCard>{step.why}</WhyWeAskCard></div> : (
-                <div className="mt-8 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-900">
+            {!isFinalStep ? <div className="mt-6 sm:mt-8"><WhyWeAskCard>{step.why}</WhyWeAskCard></div> : (
+                <div className="mt-6 rounded-2xl border border-green-200 bg-green-50 p-4 text-green-900 sm:mt-8 sm:p-5">
                     <p className="font-semibold">What happens next?</p>
                     <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6">
                         <li>Our team reviews your information.</li>
@@ -203,7 +203,7 @@ export function OnboardingSessionRenderer({
                     <p className="mt-4 text-sm leading-6">{action ? "Finish onboarding below to open your client portal." : "You can close this page now. There is nothing else you need to do at this stage."}</p>
                 </div>
             )}
-            {action ? <div className={`mt-8 grid items-start gap-3 ${onPreviewBack ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{onPreviewBack ? <button type="button" onClick={onPreviewBack} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{step.navigation?.backLabel || "Back"}</button> : null}{action}</div> : null}
+            {action ? <div className={`mt-6 grid items-start gap-3 sm:mt-8 ${onPreviewBack || backHref ? "grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{onPreviewBack ? <button type="button" onClick={onPreviewBack} className="inline-flex min-h-14 w-full items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 text-center font-medium text-[var(--onboarding-primary)] sm:w-auto">{step.navigation?.backLabel || "Back"}</button> : backHref ? <a href={backHref} className="inline-flex min-h-14 w-full items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 text-center font-medium text-[var(--onboarding-primary)] sm:w-auto">{step.navigation?.backLabel || "Back"}</a> : null}{action}</div> : null}
         </div>
     )
 }

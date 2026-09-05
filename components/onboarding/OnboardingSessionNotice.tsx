@@ -17,7 +17,7 @@ export function OnboardingSessionNotice({ token, noticeId, explanation, requires
     }, [noticeId, token])
 
     return (
-        <div className="mt-6 rounded-2xl border border-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_55%,transparent)] bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_12%,var(--onboarding-surface,#FFFFFF))] p-5 text-[var(--onboarding-text,#0F172A)]">
+        <div className="mt-5 rounded-2xl border border-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_55%,transparent)] bg-[color-mix(in_srgb,var(--onboarding-accent,#F0B429)_12%,var(--onboarding-surface,#FFFFFF))] p-4 text-[var(--onboarding-text,#0F172A)] sm:mt-6 sm:p-5">
             <p className="font-semibold">Your onboarding was updated</p>
             <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted,#475569)]">{explanation}</p>
             {sections.length ? <p className="mt-2 text-xs font-medium text-[var(--onboarding-primary,#1E3A5F)]">Affected sections: {sections.join(", ")}</p> : null}

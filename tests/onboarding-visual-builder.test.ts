@@ -203,7 +203,7 @@ test("Builder mobile simulation forces the client layout and Preview fills the v
     assert.match(visualCanvas, /embedded=\{!fullScreen\}/)
     assert.match(visualCanvas, /h-dvh w-full overflow-hidden/)
     assert.match(onboardingLayout, /forceMobile/)
-    assert.match(onboardingLayout, /overflow-y-auto px-4 pb-44 pt-4/)
+    assert.match(onboardingLayout, /overflow-y-auto px-3 pb-36 pt-3/)
     assert.match(onboardingLayout, /embedded \|\| forceMobile/)
     assert.match(mobileStepBar, /forceVisible/)
     assert.match(builderUi, /data-builder-fullscreen-preview/)
@@ -217,7 +217,7 @@ test("Builder mobile simulation forces the client layout and Preview fills the v
 
 test("Builder chrome keeps mobile status, rail resizing, and header icons aligned", () => {
     assert.match(mobileStepBar, /data-mobile-preview-footer/)
-    assert.match(mobileStepBar, /border-t border-black\/10 px-6 py-3 text-center text-sm font-medium/)
+    assert.match(mobileStepBar, /border-t border-black\/10 px-3 py-2 pb-\[max\(0\.75rem,env\(safe-area-inset-bottom\)\)\] text-center text-xs font-medium leading-4/)
     assert.match(builderUi, /xl:grid-cols-\[3rem_minmax\(0,1fr\)_18rem\]/)
     assert.match(builderUi, /xl:grid-cols-\[3rem_minmax\(0,1fr\)_3rem\]/)
     assert.match(builderUi, /data-builder-left-rail-header/)

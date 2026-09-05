@@ -217,22 +217,22 @@ export function AppointmentSetupBlock({
         queueSave({ fields: next })
     }
 
-    return <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page)] p-5">
+    return <div className="rounded-2xl border border-black/10 bg-[var(--onboarding-page)] p-4 sm:p-5">
         <h2 className="font-semibold text-[var(--onboarding-text)]">{block.title}</h2>
         {block.description ? <p className="mt-2 text-sm leading-6 text-[var(--onboarding-muted)]">{block.description}</p> : null}
 
-        {block.kind === "appointment_medium" ? <fieldset disabled={locked} className="mt-5 grid gap-3 sm:grid-cols-3">
+        {block.kind === "appointment_medium" ? <fieldset disabled={locked} className="mt-4 grid gap-3 sm:mt-5 sm:grid-cols-3">
             <legend className="sr-only">Appointment options</legend>
             {APPOINTMENT_MEDIUM_OPTIONS.filter((option) => block.options.includes(option.key)).map((option) => {
                 const checked = mediums.includes(option.key)
-                return <label key={option.key} className={`flex cursor-pointer gap-3 rounded-xl border p-4 transition ${checked ? "border-[var(--onboarding-primary)] bg-[var(--onboarding-surface)]" : "border-black/10 bg-[var(--onboarding-surface)]"}`}><input type="checkbox" checked={checked} onChange={() => toggleMedium(option.key)} className="mt-1 h-4 w-4 accent-[var(--onboarding-primary)]" /><span><span className="block text-sm font-semibold text-[var(--onboarding-text)]">{option.label}</span><span className="mt-1 block text-xs leading-5 text-[var(--onboarding-muted)]">{option.description}</span></span></label>
+                return <label key={option.key} className={`flex cursor-pointer gap-3 rounded-xl border p-3.5 transition sm:p-4 ${checked ? "border-[var(--onboarding-primary)] bg-[var(--onboarding-surface)]" : "border-black/10 bg-[var(--onboarding-surface)]"}`}><input type="checkbox" checked={checked} onChange={() => toggleMedium(option.key)} className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--onboarding-primary)]" /><span><span className="block text-sm font-semibold text-[var(--onboarding-text)]">{option.label}</span><span className="mt-1 block text-xs leading-5 text-[var(--onboarding-muted)]">{option.description}</span></span></label>
             })}
-        </fieldset> : <fieldset disabled={locked} className="mt-5 space-y-2">
+        </fieldset> : <fieldset disabled={locked} className="mt-4 space-y-2 sm:mt-5">
             <legend className="sr-only">Extra appointment information</legend>
-            <div className="rounded-xl border border-black/10 bg-[var(--onboarding-surface)] px-4 py-3 text-sm text-[var(--onboarding-text)]"><span className="font-semibold">Always included:</span> Lead name, appointment date, and appointment time</div>
+            <div className="rounded-xl border border-black/10 bg-[var(--onboarding-surface)] px-3.5 py-3 text-sm leading-5 text-[var(--onboarding-text)] sm:px-4"><span className="font-semibold">Always included:</span> Lead name, appointment date, and appointment time</div>
             {APPOINTMENT_FIELD_OPTIONS.filter((option) => block.options.includes(option.key)).map((option) => {
                 const selected = selectedFields.get(option.key)
-                return <label key={option.key} className="grid gap-2 rounded-xl border border-black/10 bg-[var(--onboarding-surface)] px-4 py-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center"><span><span className="block text-sm font-semibold text-[var(--onboarding-text)]">{option.label}</span><span className="mt-1 block text-xs leading-5 text-[var(--onboarding-muted)]">{option.description}</span></span><select aria-label={`${option.label} requirement`} value={selected === undefined ? "off" : selected ? "required" : "optional"} onChange={(event) => setField(option.key, event.target.value as "off" | "optional" | "required")} className="h-10 rounded-lg border border-black/15 bg-[var(--onboarding-page)] px-3 text-sm text-[var(--onboarding-text)]"><option value="off">Not included</option><option value="optional">Optional</option><option value="required">Required</option></select></label>
+                return <label key={option.key} className="grid gap-3 rounded-xl border border-black/10 bg-[var(--onboarding-surface)] px-3.5 py-3 sm:grid-cols-[minmax(0,1fr)_9rem] sm:items-center sm:gap-2 sm:px-4"><span><span className="block text-sm font-semibold text-[var(--onboarding-text)]">{option.label}</span><span className="mt-1 block text-xs leading-5 text-[var(--onboarding-muted)]">{option.description}</span></span><select aria-label={`${option.label} requirement`} value={selected === undefined ? "off" : selected ? "required" : "optional"} onChange={(event) => setField(option.key, event.target.value as "off" | "optional" | "required")} className="h-12 w-full rounded-lg border border-black/15 bg-[var(--onboarding-page)] px-3 text-base text-[var(--onboarding-text)] sm:h-10 sm:text-sm"><option value="off">Not included</option><option value="optional">Optional</option><option value="required">Required</option></select></label>
             })}
             <p className="pt-1 text-xs text-[var(--onboarding-muted)]">Choose up to {block.maximumFields} extra fields.</p>
         </fieldset>}

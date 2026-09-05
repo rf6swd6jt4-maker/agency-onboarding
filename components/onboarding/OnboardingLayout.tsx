@@ -69,12 +69,17 @@ export function OnboardingLayout({
                 : "relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)]"
             : embedded
                 ? "relative flex h-full min-h-[34rem] flex-col overflow-hidden rounded-2xl border border-black/10 bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)] shadow-2xl shadow-black/30"
-                : "flex min-h-screen flex-col bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)] lg:fixed lg:inset-0 lg:h-auto lg:min-h-0 lg:w-full lg:overflow-hidden"}>
-            <header className={`h-16 shrink-0 border-b border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-4 ${forceMobile ? "" : "sm:px-6"}`}>
+                : "flex min-h-[100svh] flex-col bg-[var(--onboarding-page,#F8F7F3)] text-[var(--onboarding-text,#0F172A)] lg:fixed lg:inset-0 lg:h-auto lg:min-h-0 lg:w-full lg:overflow-hidden"}>
+            <header className={`h-14 shrink-0 border-b border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-3 ${forceMobile ? "" : "sm:h-16 sm:px-6"}`}>
                 <div className="mx-auto flex h-full max-w-7xl items-center justify-between">
-                    <ClientBrandLogo logoSrc={logoSrc} workspaceName={workspaceName} className="h-9 max-w-[min(12rem,52vw)]" />
+                    <ClientBrandLogo
+                        logoSrc={logoSrc}
+                        workspaceName={workspaceName}
+                        className={`h-8 ${headerActions ? "max-w-[calc(100vw-10rem)]" : "max-w-[min(12rem,calc(100vw-5.5rem))]"} ${forceMobile ? "" : "sm:h-9 sm:max-w-[min(12rem,52vw)]"}`}
+                        fallbackClassName={`min-w-0 truncate text-base font-semibold text-[var(--onboarding-primary,#1E3A5F)] ${headerActions ? "max-w-[calc(100vw-10rem)]" : "max-w-[min(12rem,calc(100vw-5.5rem))]"} ${forceMobile ? "" : "sm:max-w-[min(20rem,55vw)] sm:text-xl"}`}
+                    />
 
-                    <div className="flex items-center gap-3">
+                    <div className="ml-2 flex shrink-0 items-center gap-2 sm:gap-3">
                         {headerActions}
 
                         <ProfileMenu
@@ -88,10 +93,10 @@ export function OnboardingLayout({
             </header>
 
             <div className={forceMobile
-                ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-44 pt-4"
+                ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-5 overflow-y-auto px-3 pb-36 pt-3"
                 : fullWindowPreview
-                    ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-44 pt-4 sm:px-6 lg:grid-cols-[260px_minmax(0,1fr)_260px] lg:overflow-hidden lg:py-6"
-                : `mx-auto grid w-full max-w-7xl gap-6 px-4 pb-44 pt-4 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:py-6 ${embedded ? "lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]" : "lg:grid-cols-[260px_minmax(0,1fr)_260px]"}`}>
+                    ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-5 overflow-y-auto px-3 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-3 sm:gap-6 sm:px-6 sm:pt-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:overflow-hidden lg:py-6 xl:grid-cols-[260px_minmax(0,1fr)_260px]"
+                : `mx-auto grid w-full max-w-7xl gap-5 px-3 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-3 sm:gap-6 sm:px-6 sm:pt-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[220px_minmax(0,1fr)] lg:overflow-hidden lg:py-6 ${embedded ? "xl:grid-cols-[220px_minmax(0,1fr)_220px]" : "xl:grid-cols-[260px_minmax(0,1fr)_260px]"}`}>
                 <aside className={forceMobile ? "hidden" : "hidden lg:min-h-0 lg:overflow-hidden lg:block"}>
                     <Roadmap steps={roadmapSteps} onSelect={onRoadmapSelect} allowAllSteps={allowRoadmapNavigation} />
                 </aside>
@@ -102,12 +107,12 @@ export function OnboardingLayout({
                 >
                     {children}
 
-                    <div className={forceMobile ? "mt-6" : `mt-6 ${embedded ? "xl:hidden" : "lg:hidden"}`}>
+                    <div className={forceMobile ? "mt-5" : "mt-5 sm:mt-6 xl:hidden"}>
                         {helpCard("onboarding-help-inline")}
                     </div>
                 </section>
 
-                <aside className={forceMobile ? "hidden" : `${embedded ? "hidden xl:block" : "hidden lg:block"} min-h-0 overflow-hidden`}>
+                <aside className={forceMobile ? "hidden" : "hidden min-h-0 overflow-hidden xl:block"}>
                     {helpCard("onboarding-help-sidebar")}
                 </aside>
             </div>

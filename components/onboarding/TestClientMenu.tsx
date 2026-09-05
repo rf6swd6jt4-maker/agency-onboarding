@@ -37,11 +37,12 @@ export function TestClientMenu({
 
     return (
         <details className="relative">
-            <summary className="flex h-10 cursor-pointer list-none items-center rounded-full border border-amber-200 bg-amber-50 px-3 text-sm font-semibold text-amber-950 transition hover:border-amber-400">
-                Test menu
+            <summary className="flex h-11 cursor-pointer list-none items-center whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-3 text-sm font-semibold text-amber-950 transition hover:border-amber-400 sm:h-10">
+                <span className="sm:hidden">Test</span>
+                <span className="hidden sm:inline">Test menu</span>
             </summary>
 
-            <div className="absolute right-0 top-12 z-40 w-72 rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
+            <div className="absolute right-0 top-12 z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                     Test client
                 </p>
