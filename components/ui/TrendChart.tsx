@@ -44,6 +44,7 @@ type Props = {
     bands?: TrendChartBand[]
     labels?: TrendChartLabel[]
     emptyLabel?: string
+    reveal?: boolean
     tone?: "neutral" | "red"
 }
 
@@ -59,6 +60,7 @@ export function TrendChart({
     labels = [],
     emptyLabel = "No data in this period",
     tone = "neutral",
+    reveal = false,
 }: Props) {
     const [activeId, setActiveId] = useState<string | null>(null)
     const instanceId = useId().replace(/:/g, "")
@@ -84,7 +86,7 @@ export function TrendChart({
             {ticks.map((tick) => <g key={tick.id}><line x1={plotLeft} x2={plotRight} y1={y(tick.value)} y2={y(tick.value)} stroke={tick.emphasized ? "rgb(82 82 82)" : "rgb(38 38 38)"} strokeWidth="1" strokeDasharray={tick.emphasized ? "4 5" : undefined} /><line x1={plotRight} x2={plotRight + 5} y1={y(tick.value)} y2={y(tick.value)} stroke="rgb(82 82 82)" /><text x={plotRight + 10} y={y(tick.value) + 4} fill={tick.emphasized ? "rgb(212 212 212)" : "rgb(115 115 115)"} className="text-[12px] sm:text-[9px]">{tick.label}</text></g>)}
             <line x1={plotRight} x2={plotRight} y1={plotTop} y2={plotBottom} stroke="rgb(38 38 38)" />
             {bands.map((band) => <rect key={band.id} x={x(band.start)} y={plotTop} width={Math.max(3, x(band.end) - x(band.start))} height={plotBottom - plotTop} fill={band.tone === "red" ? "rgb(127 29 29)" : undefined} opacity="0.1" />)}
-            {points.length ? <><polygon points={`${x(series[0].position)},${plotBottom} ${series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} ${x(series.at(-1)!.position)},${plotBottom}`} fill={`url(#${gradientId})`} /><polyline points={series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} fill="none" stroke={lineColour} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></> : null}
+            {points.length ? <g className={reveal ? "trend-chart-reveal" : undefined}><polygon points={`${x(series[0].position)},${plotBottom} ${series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} ${x(series.at(-1)!.position)},${plotBottom}`} fill={`url(#${gradientId})`} /><polyline points={series.map((point) => `${x(point.position)},${y(point.value)}`).join(" ")} fill="none" stroke={lineColour} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></g> : null}
             {points.filter((point) => point.unchanged).map((point) => <line key={`same-${point.id}`} x1={x(point.position) - 4} x2={x(point.position) + 4} y1={y(point.value)} y2={y(point.value)} stroke="rgb(163 163 163)" strokeWidth="4" strokeLinecap="round" />)}
             {points.map((point) => <rect key={`hit-${point.id}`} x={x(point.position) - 5} y={plotTop} width="10" height={plotBottom - plotTop} fill="transparent" tabIndex={0} className="outline-none" aria-label={point.ariaLabel} onPointerEnter={() => setActiveId(point.id)} onPointerDown={() => setActiveId(point.id)} onFocus={() => setActiveId(point.id)} onBlur={() => setActiveId(null)} />)}
             {activePoint ? <g pointerEvents="none"><circle cx={x(activePoint.position)} cy={y(activePoint.value)} r="4" fill={lineColour} stroke="black" strokeWidth="2" /><rect x={tooltipX} y={tooltipY} width="168" height="44" rx="7" fill="rgb(23 23 23)" stroke="rgb(82 82 82)" /><text x={tooltipX + 9} y={tooltipY + 17} fill="rgb(163 163 163)" className="text-[12px] sm:text-[9px]">{activePoint.tooltipLabel}</text><text x={tooltipX + 9} y={tooltipY + 35} fill={lineColour} fontWeight="600" className="text-[14px] sm:text-[10px]">{activePoint.tooltipValue}</text></g> : null}

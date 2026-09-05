@@ -217,3 +217,13 @@ html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true
     font-size: 16px;
   }
 }
+
+/* Reveal the line and its area together, keeping axes steady. */
+@keyframes trend-chart-reveal {
+  0%, 12% { clip-path: inset(0 100% 0 0); }
+  100% { clip-path: inset(0 0 0 0); }
+}
+.trend-chart-reveal { animation: trend-chart-reveal 750ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .trend-chart-reveal { animation: none; }
+}

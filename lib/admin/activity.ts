@@ -248,18 +248,19 @@ export async function listCorrelatedAdminActivity(workspaceId: string, correlati
     return error ? [] : (data ?? []) as AdminActivityEvent[]
 }
 
-export async function listAdminActivitySince(workspaceId: string, since: string): Promise<AdminActivityEvent[]> {
+export async function listAdminActivitySince(workspaceId: string, since: string, until = new Date().toISOString()): Promise<AdminActivityEvent[]> {
     const pageSize = 1000
     const events: AdminActivityEvent[] = []
     for (let from = 0; ; from += pageSize) {
         const { data, error } = await supabaseAdmin.from("workspace_admin_activity")
-            .select(ACTIVITY_SELECT)
+            .select("id, occurred_at, event_key, metric_classification, outcome, level, metadata")
             .eq("workspace_id", workspaceId)
             .gte("occurred_at", since)
+            .lte("occurred_at", until)
             .order("occurred_at", { ascending: false })
             .order("id", { ascending: false })
             .range(from, from + pageSize - 1)
-        if (error) return events
+        if (error) throw new Error("Unable to load activity metrics", { cause: error })
         const page = (data ?? []) as AdminActivityEvent[]
         events.push(...page)
         if (page.length < pageSize) return events

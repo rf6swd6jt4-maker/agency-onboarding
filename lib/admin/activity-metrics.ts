@@ -17,7 +17,17 @@ export type AdminActivityMetric = {
     unit: "count" | "percentage"
 }
 
-const TREND_HOURS = 24
+export const ACTIVITY_RANGES = {
+    "30d": { label: "Last 30 days", hours: 720, buckets: 30, bucketLabel: "Daily" },
+    "7d": { label: "Last 7 days", hours: 168, buckets: 168, bucketLabel: "Hourly" },
+    "24h": { label: "Last 24h", hours: 24, buckets: 24, bucketLabel: "Hourly" },
+    "1h": { label: "Last hour", hours: 1, buckets: 60, bucketLabel: "Minute" },
+} as const
+export type AdminActivityRange = keyof typeof ACTIVITY_RANGES
+
+export function formatActivityCount(value: number) {
+    return new Intl.NumberFormat("en-IE", { notation: "compact", maximumFractionDigits: 1 }).format(value).toLowerCase()
+}
 
 function metricClassification(event: AdminActivityEvent) {
     if (event.metric_classification) return event.metric_classification
@@ -27,17 +37,12 @@ function metricClassification(event: AdminActivityEvent) {
     return "audit" as const
 }
 
-function startOfHour(value: Date) {
-    const result = new Date(value)
-    result.setUTCMinutes(0, 0, 0)
-    return result
-}
-
-export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = new Date()): AdminActivityMetric[] {
-    const currentHour = startOfHour(now)
-    const firstHour = new Date(currentHour.getTime() - (TREND_HOURS - 1) * 60 * 60 * 1000)
-    const buckets = Array.from({ length: TREND_HOURS }, (_, index) => ({
-        startsAt: new Date(firstHour.getTime() + index * 60 * 60 * 1000).toISOString(),
+export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = new Date(), range: AdminActivityRange = "24h"): AdminActivityMetric[] {
+    const config = ACTIVITY_RANGES[range]
+    const firstTime = now.getTime() - config.hours * 60 * 60 * 1000
+    const bucketMs = config.hours * 60 * 60 * 1000 / config.buckets
+    const buckets = Array.from({ length: config.buckets }, (_, index) => ({
+        startsAt: new Date(firstTime + index * bucketMs).toISOString(),
         requests: 0,
         internalCalls: 0,
         externalCalls: 0,
@@ -46,8 +51,8 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
 
     for (const event of events) {
         const occurredAt = new Date(event.occurred_at).getTime()
-        if (!Number.isFinite(occurredAt)) continue
-        const bucketIndex = Math.floor((occurredAt - firstHour.getTime()) / (60 * 60 * 1000))
+        if (!Number.isFinite(occurredAt) || occurredAt < firstTime || occurredAt > now.getTime()) continue
+        const bucketIndex = Math.min(buckets.length - 1, Math.floor((occurredAt - firstTime) / bucketMs))
         if (bucketIndex < 0 || bucketIndex >= buckets.length) continue
         const bucket = buckets[bucketIndex]
         const classification = metricClassification(event)
@@ -61,6 +66,8 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
         if (event.outcome === "failed" || event.level === "error") bucket.errors += 1
     }
 
+    const totals = buckets.reduce((total, bucket) => ({ startsAt: "", requests: total.requests + bucket.requests, internalCalls: total.internalCalls + bucket.internalCalls, externalCalls: total.externalCalls + bucket.externalCalls, errors: total.errors + bucket.errors }), { startsAt: "", requests: 0, internalCalls: 0, externalCalls: 0, errors: 0 })
+
     const metric = (
         key: AdminActivityMetricKey,
         title: string,
@@ -70,7 +77,7 @@ export function buildAdminActivityMetrics(events: AdminActivityEvent[], now = ne
         value: (bucket: (typeof buckets)[number]) => number,
     ): AdminActivityMetric => {
         const points = buckets.map((bucket) => ({ startsAt: bucket.startsAt, value: value(bucket) }))
-        return { key, title, description, tone, unit, points, currentValue: points.at(-1)?.value ?? 0 }
+        return { key, title, description, tone, unit, points, currentValue: value(totals) }
     }
 
     return [

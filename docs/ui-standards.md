@@ -413,3 +413,5 @@ Use the neutral white line for ordinary measurements and activity volume. Use `t
     max={100}
 />
 ```
+
+Pass `reveal` to animate the trend line and gradient together from left to right on mount. Key the chart by the selected period to replay this on range changes. Axes remain steady; reduced-motion preferences disable the animation.

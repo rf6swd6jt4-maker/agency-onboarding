@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildAdminActivityMetrics } from "../lib/admin/activity-metrics.ts"
+import { ACTIVITY_RANGES, formatActivityCount, buildAdminActivityMetrics } from "../lib/admin/activity-metrics.ts"
 import { sanitizeAdminActivityPayload } from "../lib/admin/activity-sanitizer.ts"
 import type { AdminActivityEvent } from "../lib/admin/activity.ts"
 
@@ -22,7 +22,7 @@ function event(id: string, occurredAt: string, overrides: Partial<AdminActivityE
     }
 }
 
-test("Activity graphs use rolling hourly buckets and the current hour updates from the log", () => {
+test("Activity graphs use rolling hourly buckets and totals for the entire period", () => {
     const metrics = buildAdminActivityMetrics([
         event("request", "2026-08-09T12:05:00.000Z", { event_key: "workspace.mutation.completed", metric_classification: "operational" }),
         event("outbound", "2026-08-09T12:10:00.000Z", { category: "billing", metric_classification: "internal_call" }),
@@ -38,9 +38,9 @@ test("Activity graphs use rolling hourly buckets and the current hour updates fr
     assert.ok(metrics.every((metric) => metric.points.length === 24))
     assert.equal(metrics.find((metric) => metric.key === "requests")?.currentValue, 2)
     assert.equal(metrics.find((metric) => metric.key === "internal_calls")?.currentValue, 1)
-    assert.equal(metrics.find((metric) => metric.key === "external_calls")?.currentValue, 1)
+    assert.equal(metrics.find((metric) => metric.key === "external_calls")?.currentValue, 2)
     assert.equal(metrics.find((metric) => metric.key === "external_calls")?.points.at(-2)?.value, 1)
-    assert.equal(metrics.find((metric) => metric.key === "error_rate")?.currentValue, 25)
+    assert.equal(metrics.find((metric) => metric.key === "error_rate")?.currentValue, 20)
     assert.equal(metrics.find((metric) => metric.key === "error_rate")?.tone, "red")
 })
 
@@ -59,4 +59,28 @@ test("Activity diagnostics redact credentials and client contact data while reta
     assert.equal(sanitized.composition_hash, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     assert.doesNotMatch(encoded, /top-secret|private answer|secret-value|person@example|353 89|hunter2|never-store/u)
     assert.match(encoded, /REDACTED/u)
+})
+
+
+test("Every range includes its exact start and now, excludes older and future events, and weights error rates", () => {
+    const now = new Date("2026-09-06T12:30:00Z")
+    for (const range of Object.keys(ACTIVITY_RANGES) as (keyof typeof ACTIVITY_RANGES)[]) {
+        const config = ACTIVITY_RANGES[range]
+        const start = now.getTime() - config.hours * 3600000
+        const call = (id: string, time: number, failed = false) => event(id, new Date(time).toISOString(), { metric_classification: "internal_call", outcome: failed ? "failed" : "succeeded" })
+        const metrics = buildAdminActivityMetrics([call("start", start, true), call("now", now.getTime()), call("recent", now.getTime() - 1), call("old", start - 1), call("future", now.getTime() + 1)], now, range)
+        assert.equal(metrics[1].points.length, config.buckets)
+        assert.equal(metrics[1].currentValue, 3)
+        assert.equal(metrics[1].points[0].value, 1)
+        assert.equal(metrics[1].points.at(-1)?.value, 2)
+        assert.equal(metrics[3].currentValue, (1 / 3) * 100)
+        assert.equal(buildAdminActivityMetrics([], now, range)[3].currentValue, 0)
+    }
+})
+
+test("Activity counts use compact notation", () => {
+    assert.equal(formatActivityCount(14235), "14.2k")
+    assert.equal(formatActivityCount(1234567), "1.2m")
+    assert.equal(formatActivityCount(0), "0")
+    assert.equal(formatActivityCount(999), "999")
 })
