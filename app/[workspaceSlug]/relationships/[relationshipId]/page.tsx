@@ -21,6 +21,9 @@ import { archiveRelationship } from "../actions"
 import { ArchiveRelationshipForm } from "./ArchiveRelationshipForm"
 import { RelationshipDealWorkspace } from "./RelationshipDealWorkspace"
 import { loadWorkspaceTeams } from "@/lib/teams/server"
+import { loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
+import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 
 export const dynamic = "force-dynamic"
 
@@ -36,7 +39,7 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
     await ensureCurrentRelationshipStage({ workspaceId: workspace.id, relationshipId: relationship.id, phase: relationship.lifecycle_phase, assigneeId: user.id })
     const plan = await getRelationshipGanttPlan(workspace.slug, relationship)
     const planRanges = effectiveGanttRanges(plan.items)
-    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult] = await Promise.all([
+    const [servicesResult, membershipsResult, onboardingConfiguration, currentSaleResult, teamResult, twilioConnectionResult, publicBranding, brandAssets] = await Promise.all([
         supabaseAdmin.from("relationship_services").select("service_key, service_id, service_revision_id, upfront_price_cents, recurring_price_cents, currency, assignee_user_id").eq("workspace_id", workspace.id).eq("relationship_id", relationship.id),
         supabaseAdmin.from("workspace_memberships").select("user_id").eq("workspace_id", workspace.id),
         loadPublishedOnboardingConfiguration(workspace.id),
@@ -50,6 +53,21 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
             .maybeSingle(),
         loadWorkspaceTeams(workspace.id),
         supabaseAdmin.from("workspace_integrations").select("enabled, connection_status").eq("workspace_id", workspace.id).eq("provider", "twilio_sms").maybeSingle(),
+        loadWorkspacePublicBranding(workspace.id, workspace.name),
+        loadWorkspaceClientBrandAssets(workspace.id),
+    ])
+    const [agencyLogoSrc, previewModules] = await Promise.all([
+        brandAssets.logoPath ? createPrivateUploadSignedUrl(brandAssets.logoPath) : null,
+        Promise.all(onboardingConfiguration.modules.map(async (module) => ({
+            ...module,
+            steps: await Promise.all(module.steps.map(async (step) => ({
+                ...step,
+                resolvedVideoUrl: step.videoPath ? await createPrivateUploadSignedUrl(step.videoPath) : step.videoUrl,
+                blocks: step.blocks ? await Promise.all(step.blocks.map(async (block) => block.kind === "video" && block.upload?.path
+                    ? { ...block, upload: { ...block.upload, resolvedUrl: await createPrivateUploadSignedUrl(block.upload.path) } }
+                    : block)) : undefined,
+            }))),
+        }))),
     ])
     const memberIds = (membershipsResult.data ?? []).map((member) => member.user_id)
     const profilesResult = memberIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, display_name").in("user_id", memberIds).order("username") : { data: [] }
@@ -133,7 +151,10 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
 
                         <RelationshipDealWorkspace
                                 workspaceSlug={workspace.slug}
-                                workspaceName={workspace.name}
+                                workspaceName={publicBranding.displayName}
+                                logoSrc={agencyLogoSrc}
+                                privacyPolicyUrl={publicBranding.privacyPolicyUrl}
+                                termsOfServiceUrl={publicBranding.termsOfServiceUrl}
                                 relationshipId={relationship.id}
                                 updatedAt={relationship.updated_at}
                                 details={{
@@ -155,7 +176,8 @@ export default async function RelationshipDetailPage({ params }: PageProps) {
                                 members={members.map((member) => ({ id: member.user_id, name: member.display_name?.trim() || member.username }))}
                                 fulfilmentTeams={teamResult.teams.filter((team) => team.kind === "custom" && !team.archivedAt).map((team) => ({ id: team.id, name: team.name, responsibilities: team.responsibilities.map((responsibility) => ({ serviceId: responsibility.serviceId, userId: responsibility.userId })) }))}
                                 services={dealServices}
-                                modules={onboardingConfiguration.modules}
+                                modules={previewModules}
+                                payment={onboardingConfiguration.payment}
                                 theme={onboardingConfiguration.theme}
                                 help={onboardingConfiguration.help}
                                 schemaReady={onboardingConfiguration.schemaReady}

@@ -3,7 +3,9 @@ import Link from "next/link"
 import { OnboardingLayout } from "@/components/onboarding/OnboardingLayout"
 import { OnboardingSessionRenderer, type OnboardingRenderStep } from "@/components/onboarding/OnboardingSessionRenderer"
 import { OnboardingThemeProvider } from "@/components/onboarding/OnboardingThemeProvider"
-import type { OnboardingBlock, OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2, OnboardingStepV2 } from "@/lib/onboarding/block-definition"
+import { loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
+import type { OnboardingBlock, OnboardingBookendDefinitionV2, OnboardingModuleDefinitionV2, OnboardingPaymentDefinitionV2, OnboardingStepV2 } from "@/lib/onboarding/block-definition"
 import { loadOnboardingBuilderData, loadPublishedOnboardingConfiguration } from "@/lib/onboarding/configuration"
 import type { OnboardingHelpSettings, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import { configuredStepToRenderStep } from "@/lib/onboarding/render-model"
@@ -24,6 +26,7 @@ type VisualPreviewSnapshot = {
     modules: OnboardingModuleDefinitionV2[]
     welcome: OnboardingBookendDefinitionV2
     completion: OnboardingBookendDefinitionV2
+    payment?: OnboardingPaymentDefinitionV2
     theme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
 }
@@ -75,15 +78,21 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
 
     const { data: visualPreview } = await supabaseAdmin
         .from("onboarding_visual_preview_tokens")
-        .select("snapshot")
+        .select("workspace_id, snapshot")
         .eq("token_hash", tokenHash)
         .is("revoked_at", null)
         .gt("expires_at", "now")
         .maybeSingle()
     if (visualPreview && isVisualPreviewSnapshot(visualPreview.snapshot)) {
         const snapshot = visualPreview.snapshot
+        const [publicBranding, brandAssets] = await Promise.all([
+            loadWorkspacePublicBranding(visualPreview.workspace_id, snapshot.workspaceName),
+            loadWorkspaceClientBrandAssets(visualPreview.workspace_id),
+        ])
+        const logoSrc = brandAssets.logoPath ? await createPrivateUploadSignedUrl(brandAssets.logoPath) : null
         const migrated = snapshot.modules.some((module) => module.code === "system-welcome") && snapshot.modules.some((module) => module.code === "system-completion")
         const flatSteps: PreviewStep[] = [
+            ...(snapshot.payment?.steps ?? []).map((step) => ({ groupTitle: "Payment", step })),
             ...(migrated ? [] : snapshot.welcome.steps.map((step) => ({ groupTitle: "Welcome", step }))),
             ...snapshot.modules.flatMap((module) => module.steps.map((step) => ({ groupTitle: module.name, step }))),
             ...(migrated ? [] : snapshot.completion.steps.map((step) => ({ groupTitle: "Completion", step }))),
@@ -106,7 +115,7 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
         }))
         return (
             <OnboardingThemeProvider theme={snapshot.theme}>
-                <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={snapshot.workspaceName} help={snapshot.help} headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Frozen preview · nothing is saved</span>}>
+                <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={snapshot.help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} allowRoadmapNavigation headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Frozen preview · nothing is saved</span>}>
                     <OnboardingSessionRenderer
                         step={renderStep}
                         moduleTitles={snapshot.modules.filter((module) => module.code !== "system-welcome" && module.code !== "system-completion").map((module) => module.name)}
@@ -116,7 +125,7 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
                         locked={finished}
                         previewNextHref={nextHref}
                         backHref={selectedIndex > 0 ? `/onboarding/preview/${token}?step=${flatSteps[selectedIndex - 1].step.id}` : null}
-                        action={!renderStep.blocks?.some((block) => block.kind === "form") ? <Link href={nextHref} className="block w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 text-center font-medium text-white">{selected.step.navigation.continueLabel}</Link> : null}
+                        action={selected.groupTitle !== "Payment" && !renderStep.blocks?.some((block) => block.kind === "form") ? <Link href={nextHref} className="block w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 text-center font-medium text-white">{selected.step.navigation.continueLabel}</Link> : null}
                     />
                     {finished ? <p className="mt-5 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">Preview complete. No client or onboarding data was created.</p> : null}
                 </OnboardingLayout>
@@ -147,10 +156,15 @@ export default async function OnboardingPreviewPage({ params, searchParams }: Pa
     const renderStep = configuredStepToRenderStep(moduleDefinition, configuredStep, videoUrl)
     const nextHref = nextStep ? `/onboarding/preview/${token}?step=${nextStep.id}` : null
     const roadmapSteps = moduleDefinition.steps.map((candidate, index) => ({ key: candidate.id, title: candidate.title, complete: index < selectedIndex, current: candidate.id === configuredStep.id, href: index <= selectedIndex ? `/onboarding/preview/${token}?step=${candidate.id}` : null }))
+    const [publicBranding, brandAssets] = await Promise.all([
+        loadWorkspacePublicBranding(preview.workspace_id, workspaceResult.data?.name ?? "Your agency"),
+        loadWorkspaceClientBrandAssets(preview.workspace_id),
+    ])
+    const logoSrc = brandAssets.logoPath ? await createPrivateUploadSignedUrl(brandAssets.logoPath) : null
 
     return (
         <OnboardingThemeProvider theme={runtime.theme}>
-            <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceResult.data?.name ?? "Your agency"} help={runtime.help} headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Preview · nothing is saved</span>}>
+            <OnboardingLayout roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={publicBranding.displayName} logoSrc={logoSrc} help={runtime.help} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} allowRoadmapNavigation headerActions={<span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-950">Preview · nothing is saved</span>}>
                 <OnboardingSessionRenderer step={renderStep} moduleTitles={[moduleDefinition.name]} token={token} preview previewNextHref={nextHref} backHref={selectedIndex > 0 ? `/onboarding/preview/${token}?step=${moduleDefinition.steps[selectedIndex - 1].id}` : null} action={configuredStep.kind === "video" && nextHref ? <Link href={nextHref} className="mt-8 block w-full rounded-xl bg-[var(--onboarding-primary,#1E3A5F)] px-5 py-4 text-center font-medium text-white">Complete and continue</Link> : null} />
             </OnboardingLayout>
         </OnboardingThemeProvider>

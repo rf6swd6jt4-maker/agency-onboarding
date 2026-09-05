@@ -4,6 +4,7 @@ import type {
     OnboardingBookendDefinition,
     OnboardingModuleDefinition,
 } from "@/lib/onboarding/configuration-types"
+import type { OnboardingStepV2 } from "@/lib/onboarding/block-definition"
 
 export function configuredStepToRenderStep(
     moduleDefinition: OnboardingModuleDefinition,
@@ -34,6 +35,28 @@ export function configuredStepToRenderStep(
                 multiple: field.multiple,
             })),
         } : null,
+        blocks: step.blocks,
+        navigation: step.navigation,
+    }
+}
+
+export function visualStepToRenderStep(
+    groupTitle: string,
+    step: OnboardingStepV2,
+): OnboardingRenderStep {
+    const header = step.blocks.find((block) => block.kind === "header")
+    const estimate = step.blocks.find((block) => block.kind === "estimate")
+    const form = step.blocks.find((block) => block.kind === "form")
+    return {
+        key: step.id,
+        kind: form?.kind === "form" ? "form" : "video",
+        title: header?.kind === "header" ? header.title : "Untitled step",
+        description: header?.kind === "header" ? header.description : "",
+        moduleTitle: groupTitle,
+        estimatedTime: estimate?.kind === "estimate" ? estimate.estimatedTime : header?.kind === "header" ? header.estimatedTime : "",
+        why: "",
+        blocks: step.blocks,
+        navigation: step.navigation,
     }
 }
 

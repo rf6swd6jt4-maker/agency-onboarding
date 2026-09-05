@@ -31,6 +31,7 @@ export type OnboardingSessionRenderModel = {
     preview?: boolean
     previewNextHref?: string | null
     onPreviewSubmit?: () => void
+    onPreviewBack?: () => void
     notice?: React.ReactNode
     allowEditRequest?: boolean
     action?: React.ReactNode
@@ -72,6 +73,7 @@ export function OnboardingSessionRenderer({
     preview = false,
     previewNextHref,
     onPreviewSubmit,
+    onPreviewBack,
     notice,
     allowEditRequest = false,
     action,
@@ -110,6 +112,7 @@ export function OnboardingSessionRenderer({
                     preview={preview}
                     previewNextHref={previewNextHref}
                     onPreviewSubmit={onPreviewSubmit}
+                    onPreviewBack={onPreviewBack}
                     allowEditRequest={allowEditRequest}
                     initiallySatisfied={satisfiedBlockIds}
                     initialBlockResponses={blockResponses}
@@ -195,7 +198,7 @@ export function OnboardingSessionRenderer({
                     <p className="mt-4 text-sm leading-6">{action ? "Finish onboarding below to open your client portal." : "You can close this page now. There is nothing else you need to do at this stage."}</p>
                 </div>
             )}
-            {action ? <div className="mt-8 grid grid-cols-1">{action}</div> : null}
+            {action ? <div className={`mt-8 grid items-start gap-3 ${onPreviewBack ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{onPreviewBack ? <button type="button" onClick={onPreviewBack} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{step.navigation?.backLabel || "Back"}</button> : null}{action}</div> : null}
         </div>
     )
 }

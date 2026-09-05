@@ -108,6 +108,9 @@ function AppointmentSetupPreview({ block, update }: { block: Extract<OnboardingB
 export function VisualBuilderCanvas({
     workspaceSlug,
     workspaceName,
+    logoSrc,
+    privacyPolicyUrl,
+    termsOfServiceUrl,
     groupKey,
     target,
     step,
@@ -131,6 +134,9 @@ export function VisualBuilderCanvas({
 }: {
     workspaceSlug: string
     workspaceName: string
+    logoSrc?: string | null
+    privacyPolicyUrl?: string | null
+    termsOfServiceUrl?: string | null
     groupKey: string
     target: DefinitionTarget
     step: OnboardingStepV2
@@ -196,6 +202,9 @@ export function VisualBuilderCanvas({
     const collaboratorColoursFor = (blockId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}`).map((presence) => presence.color)
     const collaboratorColoursForField = (blockId: string, fieldId: string) => collaboratorSelections.filter((presence) => presence.selection === `${groupKey}:${step.id}:${blockId}:${fieldId}`).map((presence) => presence.color)
     const sectionTitle = target.kind === "module" ? target.definition.name : target.kind === "payment" || !("kind" in target.definition) ? "Payment" : target.definition.kind
+    const currentRoadmapIndex = roadmapSteps.findIndex((roadmapStep) => roadmapStep.current)
+    const previousRoadmapStep = currentRoadmapIndex > 0 ? roadmapSteps[currentRoadmapIndex - 1] : null
+    const nextRoadmapStep = currentRoadmapIndex >= 0 ? roadmapSteps[currentRoadmapIndex + 1] : null
 
     if (readOnly) {
         const hasForm = step.blocks.some((block) => block.kind === "form")
@@ -204,17 +213,17 @@ export function VisualBuilderCanvas({
             : `mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`
         return <div className={frameClassName}>
             <OnboardingThemeProvider theme={theme} className="h-full">
-                <OnboardingLayout embedded={!fullScreen} forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} footerText="Preview · nothing is saved" onRoadmapSelect={selectRoadmapStep}>
+                <OnboardingLayout embedded={!fullScreen} forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} logoSrc={logoSrc} help={help} footerText="Preview · nothing is saved" privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} onRoadmapSelect={selectRoadmapStep} allowRoadmapNavigation>
                     <OnboardingSessionRenderer
                         step={{ key: step.id, kind: "video", title: header.title, description: header.description, moduleTitle: sectionTitle, estimatedTime: stepEstimate(step)?.estimatedTime ?? header.estimatedTime, why: "", blocks: step.blocks, navigation: step.navigation }}
                         moduleTitles={moduleTitles}
                         showModuleSummary
                         preview
                         previewNextHref="#"
-                        backHref="#"
                         forceMobile={viewport === "mobile"}
-                        onPreviewSubmit={() => undefined}
-                        action={!hasForm ? <button type="button" className="block w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 text-center font-medium text-white">{step.navigation.continueLabel}</button> : null}
+                        onPreviewSubmit={() => { if (nextRoadmapStep) selectRoadmapStep(nextRoadmapStep.key) }}
+                        onPreviewBack={previousRoadmapStep ? () => selectRoadmapStep(previousRoadmapStep.key) : undefined}
+                        action={!hasForm && groupKey !== "payment" ? <button type="button" onClick={() => { if (nextRoadmapStep) selectRoadmapStep(nextRoadmapStep.key) }} className="block w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 text-center font-medium text-white">{step.navigation.continueLabel}</button> : null}
                     />
                 </OnboardingLayout>
             </OnboardingThemeProvider>
@@ -223,7 +232,7 @@ export function VisualBuilderCanvas({
 
     return <div className={`mx-auto h-full transition-[max-width] duration-200 ${viewport === "mobile" ? "max-w-[430px]" : "max-w-[1180px]"}`}>
         <OnboardingThemeProvider theme={theme} className="h-full">
-            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} help={help} helpSelected={helpSelected} onHelpSelect={selectHelp} footerText="Builder preview · changes are drafts" onRoadmapSelect={selectRoadmapStep} headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
+            <OnboardingLayout embedded forceMobile={viewport === "mobile"} roadmapSteps={roadmapSteps} client={{ name: "Preview client", email: null, phone: null, isTest: true }} workspaceName={workspaceName} logoSrc={logoSrc} help={help} helpSelected={helpSelected} onHelpSelect={selectHelp} footerText="Builder preview · changes are drafts" privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} onRoadmapSelect={selectRoadmapStep} allowRoadmapNavigation headerActions={<span className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs font-medium">Draft</span>}>
                 <div className={`rounded-2xl border border-black/10 bg-[var(--onboarding-surface)] p-6 shadow-sm ${viewport === "mobile" ? "" : "sm:p-8"}`} onClick={() => selectBlock(null)}>
                     <AuthorFrame block={header} selected={selectedBlockId === header.id} collaboratorColours={collaboratorColoursFor(header.id)} select={() => selectBlock(header.id)} onDragStart={() => undefined} onDrop={() => undefined}>
                         <p className="text-sm font-semibold uppercase tracking-wide text-[var(--onboarding-primary)]">{sectionTitle}</p>

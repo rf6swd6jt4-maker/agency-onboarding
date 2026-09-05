@@ -32,6 +32,7 @@ type OnboardingLayoutProps = {
     privacyPolicyUrl?: string | null
     termsOfServiceUrl?: string | null
     onRoadmapSelect?: (stepKey: string) => void
+    allowRoadmapNavigation?: boolean
     helpSelected?: boolean
     onHelpSelect?: () => void
 }
@@ -50,6 +51,7 @@ export function OnboardingLayout({
     privacyPolicyUrl,
     termsOfServiceUrl,
     onRoadmapSelect,
+    allowRoadmapNavigation = false,
     helpSelected = false,
     onHelpSelect,
 }: OnboardingLayoutProps) {
@@ -83,7 +85,7 @@ export function OnboardingLayout({
                 ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-44 pt-4"
                 : `mx-auto grid w-full max-w-7xl gap-6 px-4 pb-44 pt-4 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:py-6 ${embedded ? "lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]" : "lg:grid-cols-[260px_minmax(0,1fr)_260px]"}`}>
                 <aside className={forceMobile ? "hidden" : "hidden lg:min-h-0 lg:overflow-hidden lg:block"}>
-                    <Roadmap steps={roadmapSteps} onSelect={onRoadmapSelect} />
+                    <Roadmap steps={roadmapSteps} onSelect={onRoadmapSelect} allowAllSteps={allowRoadmapNavigation} />
                 </aside>
 
                 <section
@@ -110,7 +112,7 @@ export function OnboardingLayout({
                 </div>
             </div>
 
-            <MobileStepBar steps={roadmapSteps} embedded={embedded || forceMobile} forceVisible={forceMobile} footerText={footerText} privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} onSelect={onRoadmapSelect} />
+            <MobileStepBar steps={roadmapSteps} embedded={embedded || forceMobile} forceVisible={forceMobile} footerText={footerText} privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} onSelect={onRoadmapSelect} allowAllSteps={allowRoadmapNavigation} />
         </main>
     )
 }

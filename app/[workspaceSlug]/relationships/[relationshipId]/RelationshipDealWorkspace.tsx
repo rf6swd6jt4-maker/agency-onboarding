@@ -8,6 +8,7 @@ import { BuilderPreview } from "@/components/onboarding-builder/BuilderPreview"
 import { DetailField, DetailFields } from "@/components/detail"
 import { RoundPill, SquarePill } from "@/components/ui"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
+import type { OnboardingPaymentDefinitionV2 } from "@/lib/onboarding/block-definition"
 import type { OnboardingHelpSettings, OnboardingModuleDefinition, OnboardingThemeDefinition } from "@/lib/onboarding/configuration-types"
 import type { RelationshipPhase } from "@/lib/relationship-phases"
 import type { RelationshipGanttPlan } from "@/lib/relationship-gantt"
@@ -170,6 +171,9 @@ function MissingHint({ message }: { message: string | null }) {
 export function RelationshipDealWorkspace({
     workspaceSlug,
     workspaceName,
+    logoSrc,
+    privacyPolicyUrl,
+    termsOfServiceUrl,
     relationshipId,
     updatedAt,
     details,
@@ -177,6 +181,7 @@ export function RelationshipDealWorkspace({
     fulfilmentTeams,
     services,
     modules,
+    payment,
     theme,
     help,
     schemaReady,
@@ -189,6 +194,9 @@ export function RelationshipDealWorkspace({
 }: {
     workspaceSlug: string
     workspaceName: string
+    logoSrc?: string | null
+    privacyPolicyUrl?: string | null
+    termsOfServiceUrl?: string | null
     relationshipId: string
     updatedAt: string
     details: RelationshipDetails
@@ -196,6 +204,7 @@ export function RelationshipDealWorkspace({
     fulfilmentTeams: FulfilmentTeam[]
     services: DealService[]
     modules: OnboardingModuleDefinition[]
+    payment: OnboardingPaymentDefinitionV2
     theme: OnboardingThemeDefinition
     help: OnboardingHelpSettings
     schemaReady: boolean
@@ -212,7 +221,7 @@ export function RelationshipDealWorkspace({
     const [servicesOpen, setServicesOpen] = useState(false)
     const [invoiceOpen, setInvoiceOpen] = useState(false)
     const [invoiceStep, setInvoiceStep] = useState(0)
-    const [previewModule, setPreviewModule] = useState<OnboardingModuleDefinition | null>(null)
+    const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [notice, setNotice] = useState<{ label: string } | null>(null)
     const [autosaveState, setAutosaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle")
@@ -232,7 +241,9 @@ export function RelationshipDealWorkspace({
         ...modules.filter((module) => module.mandatory).map((module) => module.id),
         ...selectedServices.flatMap((service) => service.moduleIds),
     ])
-    const assignedModules = modules.filter((module) => selectedModuleIds.has(module.id)).sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0))
+    // Published configuration is already in canonical composition order. Filtering
+    // it preserves the same module sequence that a newly created session receives.
+    const assignedModules = modules.filter((module) => selectedModuleIds.has(module.id))
     const primaryMessagingProvider = resolvePrimaryMessagingProvider({
         requestedProvider: draft.communicationPrimaryProvider,
         smsPhone: draft.primaryPhone,
@@ -548,7 +559,14 @@ export function RelationshipDealWorkspace({
                     <div className="sm:col-span-2"><p className="text-xs text-neutral-500">Services</p><div className="mt-1.5 grid gap-1.5 rounded-lg border border-neutral-800 bg-black p-2 sm:grid-cols-2">{services.map((service) => <label key={service.code} className="flex items-start gap-2 rounded-md px-2 py-2 hover:bg-neutral-900"><input type="checkbox" checked={draft.selectedCodes.includes(service.code)} onChange={() => toggleService(service.code)} className="mt-0.5" /><span className="min-w-0"><span className="flex items-center gap-1.5 text-sm text-neutral-200">{service.name}{service.isTest ? <SquarePill tone="yellow">Test</SquarePill> : null}</span><span className="mt-0.5 block text-[11px] text-neutral-600">{service.description || `Service ${service.code}`}</span></span></label>)}</div><MissingHint message={draft.selectedCodes.length ? null : "Select at least one service"} /></div>
                     <label className="text-xs text-neutral-500 sm:col-span-2">Description<textarea value={draft.description} onChange={(event) => update("description", event.target.value)} rows={3} placeholder="Optional relationship context" className="mt-1.5 min-h-20 w-full resize-none rounded-lg border border-neutral-700 bg-black px-3 py-2 text-sm leading-6 text-white" /></label>
                 </div> : null}
-                {invoiceStep === 1 ? <div className="space-y-3">{onboardingIssues.length ? <div className="rounded-lg border border-amber-500/25 bg-amber-950/15 px-3 py-2.5 text-xs leading-5 text-amber-200">{onboardingIssues.map((issue) => <p key={issue}>{issue}</p>)}</div> : null}<div className="flex flex-wrap gap-1.5">{assignedModules.map((module) => <RoundPill key={module.id} tone="sky">{module.name}</RoundPill>)}</div><div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{assignedModules.map((module) => <div key={module.id} className="flex items-center gap-3 px-3 py-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-neutral-100">{module.name}</p><p className="mt-1 text-xs text-neutral-600">{module.steps.length} step{module.steps.length === 1 ? "" : "s"}{module.mandatory ? " · mandatory" : " · selected service"}</p></div><button type="button" onClick={() => setPreviewModule(module)} className="h-8 rounded-md border border-neutral-700 px-3 text-xs text-neutral-200 hover:border-neutral-500">Preview</button></div>)}</div></div> : null}
+                {invoiceStep === 1 ? <div className="space-y-3">
+                    {onboardingIssues.length ? <div className="rounded-lg border border-amber-500/25 bg-amber-950/15 px-3 py-2.5 text-xs leading-5 text-amber-200">{onboardingIssues.map((issue) => <p key={issue}>{issue}</p>)}</div> : null}
+                    <div className="flex items-center justify-between gap-3">
+                        <div><p className="text-sm font-medium text-neutral-200">Client onboarding</p><p className="mt-0.5 text-xs text-neutral-600">{assignedModules.length} module{assignedModules.length === 1 ? "" : "s"} · {assignedModules.reduce((count, module) => count + module.steps.length, 0)} onboarding steps</p></div>
+                        <button type="button" disabled={!assignedModules.length} onClick={() => setOnboardingPreviewOpen(true)} className="h-9 shrink-0 rounded-lg border border-neutral-700 px-3 text-xs font-medium text-neutral-100 hover:border-neutral-500 disabled:cursor-not-allowed disabled:opacity-40">Preview onboarding</button>
+                    </div>
+                    <div className="divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-800 bg-black">{assignedModules.map((module, index) => <div key={module.id} className="flex items-center gap-3 px-3 py-3"><span className="w-5 shrink-0 text-center text-xs tabular-nums text-neutral-600">{index + 1}</span><div className="min-w-0 flex-1"><RoundPill tone="sky">{module.name}</RoundPill><p className="mt-1.5 text-xs text-neutral-600">{module.steps.length} step{module.steps.length === 1 ? "" : "s"}{module.mandatory ? " · mandatory" : " · selected service"}</p></div></div>)}</div>
+                </div> : null}
                 {invoiceStep === 2 ? <div className="space-y-4">
                     <div className="flex flex-col justify-between gap-3 rounded-xl border border-neutral-800 bg-black p-3 sm:flex-row sm:items-end">
                         <label className="text-xs text-neutral-500">Currency<input value={draft.currency} onChange={(event) => update("currency", event.target.value.toUpperCase().slice(0, 3))} maxLength={3} className="mt-1.5 h-9 w-24 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-sm uppercase text-white" /></label>
@@ -572,7 +590,7 @@ export function RelationshipDealWorkspace({
         </section>
     </div>, parentDocument.body) : null
 
-    const preview = previewModule && parentDocument ? createPortal(<div className="fixed inset-0 z-[150] flex flex-col bg-black text-white"><header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-800 bg-black px-4"><div><p className="text-sm font-medium">{previewModule.name}</p><p className="text-[11px] text-neutral-500">Client preview · nothing is saved</p></div><button type="button" onClick={() => setPreviewModule(null)} className="h-9 rounded-lg border border-neutral-700 px-3 text-xs">Back to sale review</button></header><div className="min-h-0 flex-1"><BuilderPreview module={previewModule} theme={theme} help={help} workspaceName={workspaceName} /></div></div>, parentDocument.body) : null
+    const preview = onboardingPreviewOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[150] flex flex-col bg-black text-white"><header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-800 bg-black px-4"><div><p className="text-sm font-medium">Onboarding preview</p><p className="text-[11px] text-neutral-500">{assignedModules.length} modules in client order · nothing is saved</p></div><button type="button" onClick={() => setOnboardingPreviewOpen(false)} className="h-9 rounded-lg border border-neutral-700 px-3 text-xs">Back to sale review</button></header><div className="min-h-0 flex-1"><BuilderPreview modules={assignedModules} payment={payment} theme={theme} help={help} workspaceName={workspaceName} logoSrc={logoSrc} client={{ name: draft.primaryPersonName || "Preview client", email: draft.primaryEmail || null, phone: draft.primaryPhone || draft.whatsappPhone || null, isTest: false }} privacyPolicyUrl={privacyPolicyUrl} termsOfServiceUrl={termsOfServiceUrl} /></div></div>, parentDocument.body) : null
 
     return <>
         {detailsPanel}

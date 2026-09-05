@@ -15,9 +15,10 @@ type RoadmapStep = {
 type RoadmapProps = {
     steps: RoadmapStep[]
     onSelect?: (stepKey: string) => void
+    allowAllSteps?: boolean
 }
 
-export function Roadmap({ steps, onSelect }: RoadmapProps) {
+export function Roadmap({ steps, onSelect, allowAllSteps = false }: RoadmapProps) {
     const currentStepRef = useRef<HTMLElement>(null)
 
     useEffect(() => {
@@ -57,7 +58,7 @@ export function Roadmap({ steps, onSelect }: RoadmapProps) {
                             {step.title}
                         </span>
                     </>
-                    return onSelect && (step.complete || step.current) ? (
+                    return onSelect && (allowAllSteps || step.complete || step.current) ? (
                         <button key={step.key} ref={step.current ? currentStepRef as Ref<HTMLButtonElement> : undefined} type="button" onClick={() => onSelect(step.key)} className={`w-full text-left ${className}`}>{content}</button>
                     ) : step.href ? (
                         <Link key={step.key} ref={step.current ? currentStepRef as Ref<HTMLAnchorElement> : undefined} href={step.href} className={className}>{content}</Link>

@@ -27,6 +27,7 @@ export function OnboardingBlocks({
     preview,
     previewNextHref,
     onPreviewSubmit,
+    onPreviewBack,
     allowEditRequest,
     initiallySatisfied = [],
     initialBlockResponses = {},
@@ -44,6 +45,7 @@ export function OnboardingBlocks({
     preview: boolean
     previewNextHref?: string | null
     onPreviewSubmit?: () => void
+    onPreviewBack?: () => void
     allowEditRequest: boolean
     initiallySatisfied?: string[]
     initialBlockResponses?: Record<string, unknown>
@@ -160,11 +162,11 @@ export function OnboardingBlocks({
             const requirementId = block.sessionBlockId ?? block.id
             const paymentButton = block.id === ONBOARDING_PAYMENT_BUTTON_ID
             return <BlockFrame key={block.id} block={block}>
-                <a href={block.url} target={block.openInSameTab ? undefined : "_blank"} rel={block.openInSameTab ? undefined : "noopener noreferrer"} onClick={() => void satisfy(block, "button_opened")} className={paymentButton ? "inline-flex min-h-12 items-center justify-center rounded-xl bg-[#635bff] px-5 py-3 font-medium text-white shadow-sm transition hover:bg-[#5851e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#635bff]/40 focus-visible:ring-offset-2" : block.appearance === "secondary" ? "inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 py-3 font-medium text-[var(--onboarding-primary)]" : "inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white"}>{paymentButton ? <StripePaymentButtonLabel /> : block.label}</a>
+                <a href={preview ? undefined : block.url} target={preview || block.openInSameTab ? undefined : "_blank"} rel={preview || block.openInSameTab ? undefined : "noopener noreferrer"} onClick={(event) => { if (preview) event.preventDefault(); void satisfy(block, "button_opened") }} className={paymentButton ? "inline-flex min-h-12 items-center justify-center rounded-xl bg-[#635bff] px-5 py-3 font-medium text-white shadow-sm transition hover:bg-[#5851e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#635bff]/40 focus-visible:ring-offset-2" : block.appearance === "secondary" ? "inline-flex min-h-12 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 py-3 font-medium text-[var(--onboarding-primary)]" : "inline-flex min-h-12 items-center justify-center rounded-xl bg-[var(--onboarding-primary)] px-5 py-3 font-medium text-white"}>{paymentButton ? <StripePaymentButtonLabel /> : block.label}</a>
                 {block.required && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">{satisfied.has(requirementId) ? "✓ Opened" : "Open this link to continue."}</p> : null}
             </BlockFrame>
         })}
-        {(!locked && form) || continueAction ? <div className={`mt-8 grid items-start gap-3 ${backHref ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{backHref ? <a href={backHref} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</a> : null}{form && !locked ? <button type="submit" form={formId} disabled={unsatisfied.length > 0} className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60">{continueLabel}</button> : <fieldset disabled={unsatisfied.length > 0} className="contents">{continueAction}</fieldset>}</div> : null}
+        {(!locked && form) || continueAction ? <div className={`mt-8 grid items-start gap-3 ${backHref || onPreviewBack ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{onPreviewBack ? <button type="button" onClick={onPreviewBack} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</button> : backHref ? <a href={backHref} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</a> : null}{form && !locked ? <button type="submit" form={formId} disabled={unsatisfied.length > 0} className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60">{continueLabel}</button> : <fieldset disabled={unsatisfied.length > 0} className="contents">{continueAction}</fieldset>}</div> : null}
         {unsatisfied.length > 0 && !locked ? <p className="mt-3 text-center text-xs text-[var(--onboarding-muted)]">Complete {unsatisfied.length === 1 ? "the required item" : `${unsatisfied.length} required items`} above to continue.</p> : null}
         {requirementError ? <p role="alert" className="mt-3 text-left text-sm text-red-700">{requirementError} <RequestHelpLink />.</p> : null}
     </>

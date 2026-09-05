@@ -2,7 +2,10 @@ import { OnboardingBuilderWorkspace } from "@/components/onboarding-builder/Onbo
 import { DesktopBuilderGate } from "@/components/onboarding-builder/DesktopBuilderGate"
 import { OnboardingBuilderLauncher, OnboardingBuilderWindowBridge } from "@/components/onboarding-builder/OnboardingBuilderWindowControls"
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
+import { loadWorkspaceClientBrandAssets } from "@/lib/client-branding/assets"
+import { loadWorkspacePublicBranding } from "@/lib/client-branding/public-branding"
 import { loadOnboardingBuilderData } from "@/lib/onboarding/configuration"
+import { createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
 import { WORKSPACE_TAB_FRAME_PARAM } from "@/lib/workspace-tabs"
 import { requireWorkspace } from "@/lib/workspaces"
 
@@ -35,7 +38,12 @@ export default async function OnboardingBuilderPage({ params, searchParams }: Pa
             </main>
         )
     }
-    const data = await loadOnboardingBuilderData(workspace.id, query.module, user.id)
+    const [data, publicBranding, brandAssets] = await Promise.all([
+        loadOnboardingBuilderData(workspace.id, query.module, user.id),
+        loadWorkspacePublicBranding(workspace.id, workspace.name),
+        loadWorkspaceClientBrandAssets(workspace.id),
+    ])
+    const agencyLogoSrc = brandAssets.logoPath ? await createPrivateUploadSignedUrl(brandAssets.logoPath) : null
     const initialBookend = query.bookend === "welcome" || query.bookend === "completion" ? query.bookend : null
 
     if (!data.collaboration.visualEnabled) return <><OnboardingBuilderWindowBridge workspaceSlug={workspace.slug} /><main className="flex min-h-screen items-center justify-center bg-neutral-950 p-6 text-white"><section className="max-w-lg rounded-2xl border border-neutral-800 bg-black p-6"><h1 className="text-lg font-semibold">Visual Onboarding Builder is not enabled</h1><p className="mt-2 text-sm leading-6 text-neutral-400">This workspace remains on the compatibility Builder while its version-two composition is being shadow-checked.</p></section></main></>
@@ -44,7 +52,7 @@ export default async function OnboardingBuilderPage({ params, searchParams }: Pa
         <OnboardingBuilderWindowBridge workspaceSlug={workspace.slug} />
         <DesktopBuilderGate workspaceSlug={workspace.slug} backHref={`/${workspace.slug}/settings#onboarding`}>
             <main className="h-dvh min-h-[42rem] overflow-hidden bg-neutral-950 text-white">
-                <OnboardingBuilderWorkspace key={`${query.module ?? ""}:${initialBookend ?? ""}:${data.selectedModule?.revisionId ?? "empty"}:${data.selectedModule?.lastEditedAt ?? ""}`} workspaceSlug={workspace.slug} workspaceName={workspace.name} data={data} initialBookend={initialBookend} />
+                <OnboardingBuilderWorkspace key={`${query.module ?? ""}:${initialBookend ?? ""}:${data.selectedModule?.revisionId ?? "empty"}:${data.selectedModule?.lastEditedAt ?? ""}`} workspaceSlug={workspace.slug} workspaceName={publicBranding.displayName} logoSrc={agencyLogoSrc} privacyPolicyUrl={publicBranding.privacyPolicyUrl} termsOfServiceUrl={publicBranding.termsOfServiceUrl} data={data} initialBookend={initialBookend} />
             </main>
         </DesktopBuilderGate>
     </>

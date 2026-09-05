@@ -14,9 +14,10 @@ type MobileStepBarProps = {
     privacyPolicyUrl?: string | null
     termsOfServiceUrl?: string | null
     onSelect?: (stepKey: string) => void
+    allowAllSteps?: boolean
 }
 
-export function MobileStepBar({ steps, embedded = false, forceVisible = false, footerText = "Progress saved automatically", privacyPolicyUrl, termsOfServiceUrl, onSelect }: MobileStepBarProps) {
+export function MobileStepBar({ steps, embedded = false, forceVisible = false, footerText = "Progress saved automatically", privacyPolicyUrl, termsOfServiceUrl, onSelect, allowAllSteps = false }: MobileStepBarProps) {
     const currentIndex = steps.findIndex((step) => step.current)
     const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0
 
@@ -68,7 +69,7 @@ export function MobileStepBar({ steps, embedded = false, forceVisible = false, f
 
                         return (
                             <div key={step.key} className="contents">
-                                {onSelect && (step.complete || step.current) ? <button
+                                {onSelect && (allowAllSteps || step.complete || step.current) ? <button
                                     type="button"
                                     onClick={() => onSelect(step.key)}
                                     aria-label={`Open ${step.title}`}
