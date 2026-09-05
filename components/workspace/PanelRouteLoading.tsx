@@ -191,18 +191,23 @@ function SettingsLoading() {
 }
 
 export function PanelRouteLoading({ variant, title }: { variant: PanelLoadingVariant; title?: string }) {
-    if (variant === "communications") return <CommunicationsLoading />
-    if (variant === "settings") return <SettingsLoading />
-    if (variant === "relationships") return <RelationshipsLoading />
-    if (variant === "onboarding") return <OnboardingLoading />
-    if (variant === "work-items") return <WorkItemsLoading />
-    if (variant === "fulfilment") return <WorkItemsLoading fulfilment />
-    if (variant === "appointment-setting") return <AppointmentSettingLoading />
-    if (variant === "assets") return <AssetsLoading />
-    if (variant === "leadgen") return <LeadgenLoading />
-    if (variant === "leadgen-polls") return <LeadgenLoading polls />
-    if (variant === "admin-activity") return <AdminLoading section="activity" />
-    if (variant === "admin-maintenance") return <AdminLoading section="maintenance" />
-    if (variant === "admin") return <AdminLoading />
-    return <DetailRouteLoading title={title ?? "record"} />
+    let content: ReactNode
+    switch (variant) {
+        case "communications": content = <CommunicationsLoading />; break
+        case "settings": content = <SettingsLoading />; break
+        case "relationships": content = <RelationshipsLoading />; break
+        case "onboarding": content = <OnboardingLoading />; break
+        case "work-items": content = <WorkItemsLoading />; break
+        case "fulfilment": content = <WorkItemsLoading fulfilment />; break
+        case "appointment-setting": content = <AppointmentSettingLoading />; break
+        case "assets": content = <AssetsLoading />; break
+        case "leadgen": content = <LeadgenLoading />; break
+        case "leadgen-polls": content = <LeadgenLoading polls />; break
+        case "admin-activity": content = <AdminLoading section="activity" />; break
+        case "admin-maintenance": content = <AdminLoading section="maintenance" />; break
+        case "admin": content = <AdminLoading />; break
+        default: content = <DetailRouteLoading title={title ?? "record"} />
+    }
+
+    return <div data-workspace-route-loading className="contents">{content}</div>
 }

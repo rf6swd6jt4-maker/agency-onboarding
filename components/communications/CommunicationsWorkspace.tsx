@@ -787,8 +787,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     }, [])
 
     useLayoutEffect(() => {
-        if (active && workspaceTabActive && documentVisible) return
-        clearPendingWhatsAppTyping()
+        if (!(active && workspaceTabActive && documentVisible)) clearPendingWhatsAppTyping()
+        return clearPendingWhatsAppTyping
     }, [active, clearPendingWhatsAppTyping, documentVisible, workspaceTabActive])
 
     function handleClientDraftChange(value: string) {

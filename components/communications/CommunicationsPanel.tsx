@@ -35,6 +35,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
     }, [clientBootstrap.workspaceId])
 
     useEffect(() => {
+        if (documentRuntime?.active === false) return
         const tabId = new URL(window.location.href).searchParams.get(WORKSPACE_TAB_FRAME_PARAM) ?? documentRuntime?.tabId
         if (!tabId) return
         const message: WorkspaceTabFrameMessage = {
@@ -45,9 +46,10 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             unreadCount,
         }
         window.parent.postMessage(message, window.location.origin)
-    }, [documentRuntime?.tabId, unreadCount])
+    }, [documentRuntime?.active, documentRuntime?.tabId, unreadCount])
 
     useEffect(() => {
+        if (documentRuntime?.active === false) return
         const url = new URL(window.location.href)
         url.searchParams.set("mode", mode)
         if (clientSelectedId) url.searchParams.set("conversation", clientSelectedId)
@@ -70,7 +72,7 @@ export function CommunicationsPanel({ clientBootstrap, nativeBootstrap, initialM
             url: `${shellUrl.pathname}${shellUrl.search}${shellUrl.hash}`,
         }
         window.parent.postMessage(message, window.location.origin)
-    }, [clientSelectedId, documentRuntime?.tabId, mode, nativeSelectedId])
+    }, [clientSelectedId, documentRuntime?.active, documentRuntime?.tabId, mode, nativeSelectedId])
 
     const setMode = useCallback((next: "clients" | "team") => {
         setModeState(next)

@@ -9,6 +9,13 @@ import {
     workspaceRouteUsesShell,
     workspaceShellRoute,
 } from "../lib/workspace-shell.ts"
+import {
+    MAX_DESKTOP_RETAINED_WORKSPACE_PANES,
+    MAX_MOBILE_RETAINED_WORKSPACE_PANES,
+    pruneRetainedWorkspacePanes,
+    retainRecentWorkspacePane,
+    workspacePaneRetentionLimit,
+} from "../lib/workspace-pane-retention.ts"
 import { workspaceTabIdFromUrl } from "../lib/workspace-tabs.ts"
 
 function source(path: string) {
@@ -72,6 +79,8 @@ test("document mode keeps one shell mounted around routed panel content", () => 
     const layout = source("app/[workspaceSlug]/layout.tsx")
     const topBar = source("components/workspace/WorkspaceTopBar.tsx")
     const client = source("components/workspace/WorkspaceTopBarClient.tsx")
+    const retainedPanes = source("components/workspace/WorkspaceRetainedDocumentPanes.tsx")
+    const panelLoading = source("components/workspace/PanelRouteLoading.tsx")
 
     assert.match(proxy, /workspaceShellRuntime\(\) === "frames"/)
     assert.match(proxy, /headers\.set\(WORKSPACE_DOCUMENT_REQUEST_HEADER, "1"\)/)
@@ -82,6 +91,26 @@ test("document mode keeps one shell mounted around routed panel content", () => 
     assert.match(client, /router\.replace\(url, \{ scroll: false \}\)/)
     assert.match(client, /window\.addEventListener\("popstate", restoreBrowserHistoryTab\)/)
     assert.match(client, /WORKSPACE_BROWSER_TAB_STATE_KEY/)
-    assert.match(client, /<WorkspaceDocumentRuntimeProvider/)
-    assert.match(client, /\{documentContent\}/)
+    assert.match(client, /preparedAutosaveFlush \?\? prepareWorkspacePaneTransition\(\)/)
+    assert.match(client, /lastCommittedDocumentUrlRef\.current === url && !loadedTabIdsRef\.current\.has\(target\.id\)/)
+    assert.match(client, /mutationOwnerTabByIdRef\.current\.get\(detail\.mutationId\)/)
+    assert.match(client, /documentMode && message\.tabId !== activeTabIdRef\.current/)
+    assert.match(client, /<WorkspaceRetainedDocumentPanes/)
+    assert.match(client, /content=\{documentContent\}/)
+    assert.match(retainedPanes, /<Activity name=\{`workspace-pane-\$\{tabId\}`\} mode=\{active \? "visible" : "hidden"\}>/)
+    assert.match(retainedPanes, /<WorkspaceDocumentRuntimeProvider tabId=\{tabId\} active=\{runtimeActive\}>/)
+    assert.match(retainedPanes, /<WorkspaceDocumentRuntimeProvider tabId=\{tabId\} active=\{false\}>/)
+    assert.match(retainedPanes, /onPaneReady\(contentOwnerTabId, contentUrl\)/)
+    assert.match(retainedPanes, /data-workspace-pane-staging/)
+    assert.match(retainedPanes, /MutationObserver/)
+    assert.match(panelLoading, /data-workspace-route-loading/)
+})
+
+test("document pane retention is bounded, adaptive, and deterministic", () => {
+    assert.equal(workspacePaneRetentionLimit({ compact: true, deviceMemoryGb: 8 }), MAX_MOBILE_RETAINED_WORKSPACE_PANES)
+    assert.equal(workspacePaneRetentionLimit({ compact: false, deviceMemoryGb: 4 }), MAX_MOBILE_RETAINED_WORKSPACE_PANES)
+    assert.equal(workspacePaneRetentionLimit({ compact: false, deviceMemoryGb: 8 }), MAX_DESKTOP_RETAINED_WORKSPACE_PANES)
+    assert.deepEqual(retainRecentWorkspacePane(["b", "a", "missing"], "c", ["a", "b", "c"], 3), ["c", "b", "a"])
+    assert.deepEqual(retainRecentWorkspacePane(["c", "b", "a"], "b", ["a", "b", "c"], 3), ["b", "c", "a"])
+    assert.deepEqual(pruneRetainedWorkspacePanes(["c", "missing", "b", "b", "a"], ["a", "b", "c"], 2), ["c", "b"])
 })

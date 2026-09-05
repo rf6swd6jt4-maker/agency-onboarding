@@ -94,7 +94,7 @@ export function ClientContextPanel({ workspaceSlug, relationship, metrics = [], 
     }, [tabId])
 
     useEffect(() => {
-        if (!relationshipId || !contextPayload || tabId === "standalone" || typeof window === "undefined") return
+        if (documentRuntime?.active === false || !relationshipId || !contextPayload || tabId === "standalone" || typeof window === "undefined") return
 
         const postContextStatus = (contextSupported: boolean) => {
             const message: WorkspaceTabFrameMessage = {
@@ -111,7 +111,7 @@ export function ClientContextPanel({ workspaceSlug, relationship, metrics = [], 
 
         postContextStatus(true)
         return () => postContextStatus(false)
-    }, [contextPayload, relationshipId, tabId])
+    }, [contextPayload, documentRuntime?.active, relationshipId, tabId])
 
     if (!relationship) return null
 
