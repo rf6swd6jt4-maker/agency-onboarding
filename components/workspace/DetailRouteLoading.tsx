@@ -19,7 +19,7 @@ export function DetailRouteLoading({ title, preview: suppliedPreview }: { title:
     )
     const storedPreview = parseWorkspaceDetailPreview(previewSnapshot)
 
-    return <main aria-label={`Opening ${title}`} aria-busy="true" className="min-h-screen bg-neutral-950 px-4 py-6 text-white sm:px-6">
+    return <main data-workspace-loading-root aria-label={`Opening ${title}`} aria-busy="true" className="min-h-screen max-w-full overflow-x-clip bg-neutral-950 px-4 py-6 text-white sm:px-6">
         <div className="mx-auto max-w-[92rem]">
             {storedPreview ? <DetailPageHeader
                 category={storedPreview.category}

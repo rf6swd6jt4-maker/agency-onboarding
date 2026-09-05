@@ -7,9 +7,11 @@ export type PanelLoadingVariant =
     | "admin"
     | "admin-activity"
     | "admin-maintenance"
+    | "admin-okrs"
     | "appointment-setting"
     | "assets"
     | "communications"
+    | "communications-team"
     | "fulfilment"
     | "leadgen"
     | "leadgen-polls"
@@ -24,12 +26,12 @@ function Pulse({ className, style }: { className: string; style?: CSSProperties 
 }
 
 function PanelFrame({ title, children }: { title: string; children: ReactNode }) {
-    return <main aria-label={`Loading ${title}`} aria-busy="true" className="min-h-screen bg-neutral-950 px-4 pb-8 text-white sm:px-6">
+    return <main data-workspace-loading-root aria-label={`Loading ${title}`} aria-busy="true" className="min-h-screen max-w-full overflow-x-clip bg-neutral-950 px-4 pb-8 text-white sm:px-6">
         <div className="mx-auto max-w-7xl">{children}</div>
     </main>
 }
 
-function PanelHeader({ title, action = false, tabs = [] }: { title: string; action?: boolean; tabs?: string[] }) {
+function PanelHeader({ title, action = false, tabs = [], activeTab = tabs[0] }: { title: string; action?: boolean; tabs?: string[]; activeTab?: string }) {
     return <section>
         <header className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <div className="min-w-0">
@@ -39,7 +41,7 @@ function PanelHeader({ title, action = false, tabs = [] }: { title: string; acti
             {action ? <Pulse className="h-11 w-full sm:h-10 sm:w-32" /> : null}
         </header>
         {tabs.length ? <nav aria-label={`Loading ${title} tabs`} className="mt-5 flex gap-2 overflow-hidden">
-            {tabs.map((tab, index) => <span key={tab} className={`shrink-0 rounded-lg px-3 py-2 text-sm ${index === 0 ? "bg-white text-black" : "border border-neutral-800 text-neutral-500"}`}>{tab}</span>)}
+            {tabs.map((tab) => <span key={tab} aria-current={tab === activeTab ? "page" : undefined} className={`shrink-0 rounded-lg px-3 py-2 text-sm ${tab === activeTab ? "bg-white text-black" : "border border-neutral-800 text-neutral-500"}`}>{tab}</span>)}
         </nav> : null}
     </section>
 }
@@ -102,7 +104,7 @@ function OnboardingLoading() {
 function WorkItemsLoading({ fulfilment = false }: { fulfilment?: boolean }) {
     const title = fulfilment ? "Fulfilment" : "Work Items"
     return <PanelFrame title={title}>
-        <PanelHeader title={title} action={!fulfilment} tabs={fulfilment ? [] : ["Work Items", "Assets"]} />
+        <PanelHeader title={title} action={!fulfilment} tabs={fulfilment ? [] : ["Work Items", "Assets"]} activeTab="Work Items" />
         <StatsSkeleton />
         <FilterSkeleton widths={fulfilment ? [70, 74, 86] : [54, 62, 74, 92]} />
         <ListSkeleton />
@@ -116,21 +118,44 @@ function AppointmentSettingLoading() {
     </PanelFrame>
 }
 
-function AdminLoading({ section = "work" }: { section?: "work" | "activity" | "maintenance" }) {
-    const title = section === "activity" ? "Activity Console" : section === "maintenance" ? "Maintenance Queue" : "Work Queue"
+function OkrTableSkeleton() {
+    return <section aria-label="Loading Objectives and Key Result metrics" className="mt-5 overflow-hidden rounded-xl border border-neutral-800 bg-black">
+        <div className="grid h-10 grid-cols-[minmax(0,1fr)_repeat(2,5.25rem)] border-b border-neutral-800 bg-neutral-950 px-4 sm:grid-cols-[minmax(13rem,1fr)_repeat(3,minmax(5.5rem,0.38fr))]">
+            <Pulse className="my-auto h-3 w-24" />
+            {Array.from({ length: 3 }, (_, index) => <Pulse key={index} className={`${index === 0 ? "hidden sm:block" : ""} my-auto ml-auto h-3 w-12`} />)}
+        </div>
+        {Array.from({ length: 3 }, (_, objectiveIndex) => <div key={objectiveIndex}>
+            <div className="grid min-h-14 grid-cols-[minmax(0,1fr)_repeat(2,5.25rem)] items-center border-b border-neutral-800 bg-neutral-900/65 px-4 sm:grid-cols-[minmax(13rem,1fr)_repeat(3,minmax(5.5rem,0.38fr))]">
+                <div className="flex min-w-0 items-center gap-3"><Pulse className="h-4 w-52 max-w-full" /><Pulse className="h-4 w-16" /></div>
+                <Pulse className="col-span-2 ml-auto h-9 w-9 rounded-full sm:col-span-3" />
+            </div>
+            {Array.from({ length: objectiveIndex === 2 ? 1 : 2 }, (_, resultIndex) => <div key={resultIndex} className="grid h-12 grid-cols-[minmax(0,1fr)_repeat(2,5.25rem)] items-center border-b border-neutral-900 px-4 sm:grid-cols-[minmax(13rem,1fr)_repeat(3,minmax(5.5rem,0.38fr))]">
+                <Pulse className="ml-4 h-4 w-44 max-w-full bg-neutral-900" />
+                {Array.from({ length: 3 }, (_, metricIndex) => <Pulse key={metricIndex} className={`${metricIndex === 0 ? "hidden sm:block" : ""} ml-auto h-4 w-12 bg-neutral-900`} />)}
+            </div>)}
+        </div>)}
+        <div className="flex h-12 items-center justify-end px-3"><Pulse className="h-8 w-28 bg-neutral-900" /></div>
+    </section>
+}
+
+function AdminLoading({ section = "work" }: { section?: "work" | "okrs" | "activity" | "maintenance" }) {
+    const title = section === "okrs" ? "OKRs" : section === "activity" ? "Activity Console" : section === "maintenance" ? "Maintenance Queue" : "Work Queue"
+    const activeTab = section === "work" ? "Work" : section === "okrs" ? "OKRs" : section === "activity" ? "Activity" : "Maintenance"
     return <PanelFrame title={title}>
-        <PanelHeader title={title} tabs={["Work Queue", "OKRs", "Maintenance", "Activity"]} />
+        <PanelHeader title={title} tabs={["Work", "OKRs", "Maintenance", "Activity"]} activeTab={activeTab} />
+        {section === "okrs" ? <OkrTableSkeleton /> : <>
         {section === "activity" ? <section aria-label="Loading activity trends" className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="min-h-28 rounded-xl border border-neutral-800 bg-black p-4"><Pulse className="h-3 w-24" /><Pulse className="mt-3 h-7 w-16" /><Pulse className="mt-3 h-8 w-full bg-neutral-900" /></div>)}</section> : <StatsSkeleton />}
         <FilterSkeleton widths={section === "work" ? [82, 74] : section === "activity" ? [54, 62, 74, 58] : [58, 78]} />
         {section !== "work" ? <FilterSkeleton widths={section === "activity" ? [92, 82, 104, 76, 88] : [104, 82, 96, 74]} /> : null}
         <ListSkeleton />
+        </>}
     </PanelFrame>
 }
 
 function LeadgenLoading({ polls = false }: { polls?: boolean }) {
     const title = polls ? "Polls" : "Leads"
     return <PanelFrame title={title}>
-        <PanelHeader title={title} action tabs={["Leads", "Polls", "Sources", "Settings"]} />
+        <PanelHeader title={title} action tabs={["Leads", "Polls"]} activeTab={title} />
         <StatsSkeleton count={polls ? 4 : 3} />
         <ListSkeleton />
     </PanelFrame>
@@ -138,7 +163,7 @@ function LeadgenLoading({ polls = false }: { polls?: boolean }) {
 
 function AssetsLoading() {
     return <PanelFrame title="Assets">
-        <PanelHeader title="Assets" action tabs={["Work Items", "Assets"]} />
+        <PanelHeader title="Assets" action tabs={["Work Items", "Assets"]} activeTab="Assets" />
         <StatsSkeleton />
         <section aria-label="Loading assets" className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {Array.from({ length: 10 }, (_, index) => <article key={index} className="overflow-hidden rounded-xl border border-neutral-800 bg-black">
@@ -149,12 +174,12 @@ function AssetsLoading() {
     </PanelFrame>
 }
 
-function CommunicationsLoading() {
-    return <main aria-label="Loading Communications" aria-busy="true" className="fixed inset-0 overflow-hidden bg-black text-white">
+function CommunicationsLoading({ team = false }: { team?: boolean }) {
+    return <main data-workspace-loading-root aria-label="Loading Communications" aria-busy="true" className="absolute inset-0 overflow-hidden bg-black text-white">
         <div className="grid h-full min-h-0 lg:grid-cols-[22rem_minmax(0,1fr)]">
             <aside className="flex min-h-0 flex-col border-r border-neutral-800 bg-neutral-950">
                 <div className="shrink-0 border-b border-neutral-800 p-3">
-                    <div className="flex items-center gap-2"><span className="rounded-lg bg-neutral-800 px-3 py-2 text-xs font-semibold">Clients</span><span className="px-3 py-2 text-xs text-neutral-500">Team</span><Pulse className="ml-auto h-3 w-12" /></div>
+                    <div className="flex items-center gap-2"><span className={`rounded-lg px-3 py-2 text-xs ${team ? "text-neutral-500" : "bg-neutral-800 font-semibold"}`}>Clients</span><span className={`rounded-lg px-3 py-2 text-xs ${team ? "bg-neutral-800 font-semibold" : "text-neutral-500"}`}>Team</span><Pulse className="ml-auto h-3 w-12" /></div>
                     <Pulse className="mt-3 h-10 w-full rounded-lg bg-black" />
                 </div>
                 <div className="min-h-0 flex-1 overflow-hidden">
@@ -178,7 +203,7 @@ function CommunicationsLoading() {
 }
 
 function SettingsLoading() {
-    return <main aria-label="Loading Settings" aria-busy="true" className="min-h-screen max-w-full overflow-x-clip bg-neutral-950 px-4 pb-8 text-white sm:px-6">
+    return <main data-workspace-loading-root aria-label="Loading Settings" aria-busy="true" className="min-h-screen max-w-full overflow-x-clip bg-neutral-950 px-4 pb-8 text-white sm:px-6">
         <div className="mx-auto max-w-7xl pt-5">
             <div className="relative mb-16 h-48 animate-pulse rounded-xl border border-neutral-800 bg-neutral-900 sm:h-64 sm:rounded-2xl"><div className="absolute bottom-0 left-4 h-[112px] w-[112px] translate-y-1/2 rounded-full border-4 border-neutral-950 bg-neutral-900 sm:left-7 sm:h-[108px] sm:w-[108px]" /></div>
             <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
@@ -192,6 +217,7 @@ function SettingsLoading() {
 
 export function PanelRouteLoading({ variant, title }: { variant: PanelLoadingVariant; title?: string }) {
     if (variant === "communications") return <CommunicationsLoading />
+    if (variant === "communications-team") return <CommunicationsLoading team />
     if (variant === "settings") return <SettingsLoading />
     if (variant === "relationships") return <RelationshipsLoading />
     if (variant === "onboarding") return <OnboardingLoading />
@@ -203,6 +229,7 @@ export function PanelRouteLoading({ variant, title }: { variant: PanelLoadingVar
     if (variant === "leadgen-polls") return <LeadgenLoading polls />
     if (variant === "admin-activity") return <AdminLoading section="activity" />
     if (variant === "admin-maintenance") return <AdminLoading section="maintenance" />
+    if (variant === "admin-okrs") return <AdminLoading section="okrs" />
     if (variant === "admin") return <AdminLoading />
     return <DetailRouteLoading title={title ?? "record"} />
 }

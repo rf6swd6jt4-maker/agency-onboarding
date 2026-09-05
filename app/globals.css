@@ -101,18 +101,18 @@ html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true
     width: 100%;
   }
 
-  body[data-workspace-sidebar-open="true"] main:not([data-onboarding-full-window-preview]) {
+  body[data-workspace-sidebar-open="true"] main:not([data-onboarding-full-window-preview]):not([data-workspace-loading-root]) {
     margin-left: var(--workspace-sidebar-width);
     width: calc(100% - var(--workspace-sidebar-width));
   }
 
-  body[data-workspace-sidebar-open="false"] main:not([data-onboarding-full-window-preview]),
-  body:not([data-workspace-sidebar-open]) main:not([data-onboarding-full-window-preview]) {
+  body[data-workspace-sidebar-open="false"] main:not([data-onboarding-full-window-preview]):not([data-workspace-loading-root]),
+  body:not([data-workspace-sidebar-open]) main:not([data-onboarding-full-window-preview]):not([data-workspace-loading-root]) {
     margin-left: 0;
     width: 100%;
   }
 
-  body[data-workspace-sidebar-transition="true"] main:not([data-onboarding-full-window-preview]) {
+  body[data-workspace-sidebar-transition="true"] main:not([data-onboarding-full-window-preview]):not([data-workspace-loading-root]) {
     transition: margin-left 200ms ease, width 200ms ease;
   }
 

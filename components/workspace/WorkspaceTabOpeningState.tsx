@@ -14,9 +14,11 @@ function panelLoadingForUrl(value: string, workspaceSlug: string): { variant: Pa
     if (panel === "admin") {
         if (nested === "activity") return { variant: "admin-activity" as const }
         if (nested === "maintenance") return { variant: "admin-maintenance" as const }
+        if (!nested && url.searchParams.get("view") === "okrs") return { variant: "admin-okrs" as const }
         return { variant: "admin" as const }
     }
     if (panel === "leadgen") return { variant: nested === "polls" ? "leadgen-polls" as const : "leadgen" as const }
+    if (panel === "communications" && (url.searchParams.get("mode") === "team" || url.searchParams.has("dm") || url.searchParams.has("nativeConversation"))) return { variant: "communications-team" as const }
     const variants: Record<string, PanelLoadingVariant> = {
         "appointment-setting": "appointment-setting",
         assets: "assets",

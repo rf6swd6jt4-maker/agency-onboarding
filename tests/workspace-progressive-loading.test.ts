@@ -164,6 +164,8 @@ test("workspace panel homes share one persistent banner inside their tab frame",
 
 test("route loading UI reflects each panel's real composition", () => {
     const loading = source("components/workspace/PanelRouteLoading.tsx")
+    const currentLoading = source("components/workspace/CurrentPanelRouteLoading.tsx")
+    const opening = source("components/workspace/WorkspaceTabOpeningState.tsx")
     assert.match(loading, /function CommunicationsLoading/)
     assert.match(loading, /lg:grid-cols-\[22rem_minmax\(0,1fr\)\]/)
     assert.match(loading, /function AssetsLoading/)
@@ -171,6 +173,14 @@ test("route loading UI reflects each panel's real composition", () => {
     assert.match(loading, /function RelationshipsLoading/)
     assert.match(loading, /function OnboardingLoading/)
     assert.match(loading, /function SettingsLoading/)
+    assert.match(loading, /function OkrTableSkeleton/)
+    assert.match(loading, /tabs=\{\["Work", "OKRs", "Maintenance", "Activity"\]\} activeTab=\{activeTab\}/)
+    assert.match(loading, /tabs=\{\["Leads", "Polls"\]\} activeTab=\{title\}/)
+    assert.match(loading, /tabs=\{\["Work Items", "Assets"\]\} activeTab="Assets"/)
+    assert.match(loading, /variant === "admin-okrs"[\s\S]*?<AdminLoading section="okrs"/)
+    assert.match(currentLoading, /searchParams\.get\("view"\) === "okrs"[\s\S]*?"admin-okrs"/)
+    assert.match(currentLoading, /searchParams\.get\("mode"\) === "team"[\s\S]*?"communications-team"/)
+    assert.match(opening, /url\.searchParams\.get\("view"\) === "okrs"[\s\S]*?"admin-okrs"/)
 
     const variants = {
         admin: "admin",
@@ -205,4 +215,16 @@ test("route loading UI reflects each panel's real composition", () => {
     for (const [route, variant] of Object.entries(nestedVariants)) {
         assert.match(source(`app/[workspaceSlug]/${route}/loading.tsx`), new RegExp(`variant=\\"${variant}\\"`), `${route} needs a route-shaped loading composition`)
     }
+})
+
+test("shell-hosted loading states own their local desktop width without a second sidebar offset", () => {
+    const loading = source("components/workspace/PanelRouteLoading.tsx")
+    const detailLoading = source("components/workspace/DetailRouteLoading.tsx")
+    const styles = source("app/globals.css")
+
+    assert.match(loading, /<main data-workspace-loading-root/)
+    assert.match(detailLoading, /<main data-workspace-loading-root/)
+    assert.match(styles, /main:not\(\[data-onboarding-full-window-preview\]\):not\(\[data-workspace-loading-root\]\)/)
+    assert.match(loading, /className="absolute inset-0 overflow-hidden bg-black text-white"/)
+    assert.doesNotMatch(loading, /className="fixed inset-0 overflow-hidden bg-black text-white"/)
 })
