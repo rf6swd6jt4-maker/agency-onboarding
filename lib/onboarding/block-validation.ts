@@ -123,6 +123,7 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
     let checklistCount = 0
     let videoCount = 0
     let buttonCount = 0
+    let calendarCount = 0
     let connectionCount = 0
     let appointmentMediumCount = 0
     let appointmentFieldsCount = 0
@@ -206,6 +207,20 @@ function normalizeStep(step: OnboardingStepV2, options: { bookend: boolean; firs
                 provider: "meta_ads",
                 label: text(block.label, 120) || "Connect Facebook",
                 description: text(block.description, 1_000),
+                required: true,
+                layout: layout(block),
+            }
+        }
+        if (block.kind === "calendar") {
+            calendarCount += 1
+            if (calendarCount > 1) throw new Error("A step can contain only one Calendar block.")
+            return {
+                id: blockId,
+                name: name(block, "Calendar"),
+                kind: "calendar",
+                title: text(block.title, 160) || "Choose a date and time",
+                description: text(block.description, 1_000),
+                timeLabel: text(block.timeLabel, 120) || "Preferred time",
                 required: true,
                 layout: layout(block),
             }

@@ -192,10 +192,10 @@ export function OnboardingSessionRenderer({
                         <li>Your project moves into fulfilment.</li>
                         <li>We’ll contact you if anything else is needed.</li>
                     </ol>
-                    <p className="mt-4 text-sm leading-6">You can close this page now. There is nothing else you need to do at this stage.</p>
+                    <p className="mt-4 text-sm leading-6">{action ? "Finish onboarding below to open your client portal." : "You can close this page now. There is nothing else you need to do at this stage."}</p>
                 </div>
             )}
-            {action}
+            {action ? <div className="mt-8 grid grid-cols-1">{action}</div> : null}
         </div>
     )
 }

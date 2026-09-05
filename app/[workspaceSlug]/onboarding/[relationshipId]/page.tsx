@@ -23,6 +23,7 @@ import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
 import { fullyAccessibleRelationshipIds, requireRelationshipAccess, requireWorkspacePanel } from "@/lib/workspace-access"
 import { loadNormalizedSessionSnapshot } from "@/lib/onboarding/session-snapshot"
 import { getOnboardingUrl } from "@/lib/onboarding/client-creation"
+import { formatCalendarResponse } from "@/lib/onboarding/calendar"
 
 export const dynamic = "force-dynamic"
 
@@ -53,6 +54,13 @@ type AssetRow = {
     created_at: string
 }
 
+type CalendarRequirementRow = {
+    session_step_id: string
+    session_block_id: string
+    response: unknown
+    satisfied_at: string
+}
+
 type StepStatus = "not_submitted" | "submitted" | "reviewed" | "waiting" | "blocked" | "canceled"
 
 type OnboardingStepDetail = {
@@ -69,6 +77,7 @@ type OnboardingStepDetail = {
     item: WorkItemRow | null
     submission: AssetRow | null
     uploads: AssetRow[]
+    blockAnswers: Array<{ key: string; label: string; value: unknown }>
     status: StepStatus
     updatedAt: string | null
 }
@@ -159,9 +168,19 @@ function FileIcon({ className = "h-4 w-4" }: { className?: string }) {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className={`${className} fill-none stroke-current stroke-2`}><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5" /></svg>
 }
 
-type StaffSessionStep = CanonicalSessionStep & { sessionStepId?: string | null; fieldLabels?: Record<string, string> }
+type StaffSessionStep = CanonicalSessionStep & {
+    sessionStepId?: string | null
+    fieldLabels?: Record<string, string>
+    blockLabels?: Record<string, string>
+}
 
-function buildStepDetails(steps: StaffSessionStep[], workItems: WorkItemRow[], assets: AssetRow[], editRequestStepIds = new Set<string>()) {
+function buildStepDetails(
+    steps: StaffSessionStep[],
+    workItems: WorkItemRow[],
+    assets: AssetRow[],
+    calendarRequirements: CalendarRequirementRow[],
+    editRequestStepIds = new Set<string>(),
+) {
     const itemByStep = new Map<string, WorkItemRow>()
     for (const item of workItems) {
         const stepKey = metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")
@@ -184,11 +203,28 @@ function buildStepDetails(steps: StaffSessionStep[], workItems: WorkItemRow[], a
         }
     }
 
+    const calendarRequirementsByStep = new Map<string, CalendarRequirementRow[]>()
+    for (const requirement of calendarRequirements) {
+        calendarRequirementsByStep.set(requirement.session_step_id, [
+            ...(calendarRequirementsByStep.get(requirement.session_step_id) ?? []),
+            requirement,
+        ])
+    }
+
     return steps.map((step, index): OnboardingStepDetail => {
         const item = itemByStep.get(step.key) ?? null
         const submission = submissionsByStep.get(step.key) ?? null
         const uploads = uploadsByStep.get(step.key) ?? []
-        const dates = [item?.updated_at ?? item?.created_at, submission?.updated_at ?? submission?.created_at, ...uploads.map((asset) => asset.updated_at ?? asset.created_at)].filter(Boolean) as string[]
+        const calendarRequirementsForStep = calendarRequirementsByStep.get(step.sessionStepId ?? step.key) ?? []
+        const blockAnswers = calendarRequirementsForStep.flatMap((requirement) => {
+            const formatted = formatCalendarResponse(requirement.response)
+            return formatted ? [{
+                key: `calendar:${requirement.session_block_id}`,
+                label: step.blockLabels?.[requirement.session_block_id] ?? "Selected date and time",
+                value: formatted,
+            }] : []
+        })
+        const dates = [item?.updated_at ?? item?.created_at, submission?.updated_at ?? submission?.created_at, ...uploads.map((asset) => asset.updated_at ?? asset.created_at), ...calendarRequirementsForStep.map((requirement) => requirement.satisfied_at)].filter(Boolean) as string[]
         const updatedAt = dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? null
         return {
             key: step.key,
@@ -204,6 +240,7 @@ function buildStepDetails(steps: StaffSessionStep[], workItems: WorkItemRow[], a
             item,
             submission,
             uploads,
+            blockAnswers,
             status: statusForStep(item, submission),
             updatedAt,
         }
@@ -305,7 +342,7 @@ function AnswerValue({ value }: { value: unknown }) {
 }
 
 function StepInformationSection({ step, workspaceSlug }: { step: OnboardingStepDetail; workspaceSlug: string }) {
-    const answers = responseEntries(step.submission, step.fieldLabels, step.formKey)
+    const answers = [...responseEntries(step.submission, step.fieldLabels, step.formKey), ...step.blockAnswers]
     const uploadsByField = new Map<string, AssetRow[]>()
     const ungroupedUploads: AssetRow[] = []
     for (const upload of step.uploads) {
@@ -454,9 +491,12 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
             formKey: step.legacyFormKey ?? undefined,
             videoUrl: step.videoUrl,
             fieldLabels: Object.fromEntries(step.fields.map((field) => [field.id, field.label])),
+            blockLabels: Object.fromEntries(step.blocks.flatMap((block) => block.kind === "calendar"
+                ? [[block.sessionBlockId ?? block.id, block.title]]
+                : [])),
         }))
         : session ? getOnboardingStepsForModules(moduleKeys) : []
-    const [{ data: workItems }, { data: assets }, { data: editRequests }] = session
+    const [{ data: workItems }, { data: assets }, { data: editRequests }, { data: calendarRequirements }] = session
         ? await Promise.all([
             supabaseAdmin
                 .from("work_items")
@@ -475,19 +515,24 @@ export default async function OnboardingDetailPage({ params }: PageProps) {
             normalizedSnapshot
                 ? supabaseAdmin.from("onboarding_edit_requests").select("session_step_id").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("status", "pending")
                 : Promise.resolve({ data: [] as Array<{ session_step_id: string }> }),
+            normalizedSnapshot
+                ? supabaseAdmin.from("onboarding_block_requirements").select("session_step_id, session_block_id, response, satisfied_at").eq("workspace_id", workspace.id).eq("session_id", session.id).eq("requirement_kind", "calendar_scheduled")
+                : Promise.resolve({ data: [] as CalendarRequirementRow[] }),
         ])
-        : [{ data: [] }, { data: [] }, { data: [] }]
+        : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }]
 
     const scopedStepIds = new Set(canonicalSteps.map((step) => step.sessionStepId ?? step.key))
     const scopedWorkItems = (workItems ?? []).filter((item) => role !== "staff" || scopedStepIds.has(metadataValue(item.metadata, "session_step_id") || metadataValue(item.metadata, "step_key")))
     const scopedAssets = (assets ?? []).filter((asset) => role !== "staff" || scopedStepIds.has(metadataValue(asset.metadata, "session_step_id") || metadataValue(asset.metadata, "step_key")))
     const scopedEditRequests = (editRequests ?? []).filter((request) => role !== "staff" || scopedStepIds.has(request.session_step_id))
-    const steps = buildStepDetails(canonicalSteps, scopedWorkItems as WorkItemRow[], scopedAssets as AssetRow[], new Set(scopedEditRequests.map((request) => request.session_step_id)))
+    const scopedCalendarRequirements = (calendarRequirements ?? []).filter((requirement) => role !== "staff" || scopedStepIds.has(requirement.session_step_id)) as CalendarRequirementRow[]
+    const steps = buildStepDetails(canonicalSteps, scopedWorkItems as WorkItemRow[], scopedAssets as AssetRow[], scopedCalendarRequirements, new Set(scopedEditRequests.map((request) => request.session_step_id)))
     const percentage = getProgressPercentage(steps.map((step) => ({ key: step.key })), steps.filter((step) => step.status === "submitted" || step.status === "reviewed").map((step) => step.key))
     const latestActivity = [
         session?.updated_at,
         ...scopedWorkItems.map((item) => item.updated_at ?? item.created_at),
         ...scopedAssets.map((asset) => asset.updated_at ?? asset.created_at),
+        ...scopedCalendarRequirements.map((requirement) => requirement.satisfied_at),
     ].filter((value): value is string => Boolean(value)).reduce<string | null>((latest, value) => !latest || new Date(value) > new Date(latest) ? value : latest, null)
     const onboardingUrl = session ? getOnboardingUrl(workspace.slug, session.session_token, workspace.custom_onboarding_domain, workspace.custom_onboarding_domain_status === "verified") : null
     const canManage = role === "owner" || role === "admin"

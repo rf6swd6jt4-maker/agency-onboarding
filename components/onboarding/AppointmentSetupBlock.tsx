@@ -12,6 +12,7 @@ import {
     type AppointmentRequestedField,
 } from "@/lib/appointment-setting"
 import type { OnboardingBlock } from "@/lib/onboarding/block-definition"
+import { RequestHelpLink } from "@/components/onboarding/RequestHelpLink"
 
 type SetupBlock = Extract<OnboardingBlock, { kind: "appointment_medium" | "appointment_fields" }>
 type SetupPayload = { mediums: AppointmentMedium[] } | { fields: AppointmentRequestedField[] }
@@ -213,7 +214,7 @@ export function AppointmentSetupBlock({
             <p className="pt-1 text-xs text-[var(--onboarding-muted)]">Choose up to {block.maximumFields} extra fields.</p>
         </fieldset>}
 
-        {error ? <p role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p> : null}
+        {error ? <p role="alert" className="mt-3 text-left text-sm text-red-700">{error} <RequestHelpLink />.</p> : null}
         {!locked ? <p aria-live="polite" className="mt-3 text-xs text-[var(--onboarding-muted)]">{saveStatus === "saving" ? "Saving changes…" : saveStatus === "saved" ? "Changes saved" : saveStatus === "error" ? "Changes not saved yet" : ""}</p> : null}
     </div>
 }

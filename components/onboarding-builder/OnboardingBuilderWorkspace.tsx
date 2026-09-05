@@ -12,6 +12,7 @@ import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessN
 import { RoundPill, SquarePill, Status } from "@/components/ui"
 import {
     createButtonBlock,
+    createCalendarBlock,
     createAppointmentFieldsBlock,
     createAppointmentMediumBlock,
     createChecklistBlock,
@@ -82,7 +83,7 @@ function definitionId(groupKey: string) {
 }
 
 function blockName(block: OnboardingBlock) {
-    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "checklist" ? "Checklist" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.kind === "connection" ? "Facebook connection" : block.kind === "appointment_medium" ? "Appointment medium" : block.kind === "appointment_fields" ? "Appointment information" : "Button")
+    return block.name?.trim() || (block.kind === "header" ? "Header block" : block.kind === "estimate" ? "Estimated time" : block.kind === "checklist" ? "Checklist" : block.kind === "form" ? "Form" : block.kind === "video" ? "Video" : block.kind === "calendar" ? "Calendar" : block.kind === "connection" ? "Facebook connection" : block.kind === "appointment_medium" ? "Appointment medium" : block.kind === "appointment_fields" ? "Appointment information" : "Button")
 }
 
 function createBuilderBlock(kind: BuilderBlockKind): OnboardingBlock {
@@ -90,6 +91,7 @@ function createBuilderBlock(kind: BuilderBlockKind): OnboardingBlock {
     if (kind === "checklist") return createChecklistBlock()
     if (kind === "form") return createFormBlock()
     if (kind === "video") return createVideoBlock()
+    if (kind === "calendar") return createCalendarBlock()
     if (kind === "connection") return createConnectionBlock()
     if (kind === "appointment_medium") return createAppointmentMediumBlock()
     if (kind === "appointment_fields") return createAppointmentFieldsBlock()
@@ -200,6 +202,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | Onboa
         form: "bg-cyan-500/15 text-cyan-300",
         video: "bg-violet-500/15 text-violet-300",
         button: "bg-amber-500/15 text-amber-300",
+        calendar: "bg-orange-500/15 text-orange-300",
         connection: "bg-blue-500/15 text-blue-300",
         appointment_medium: "bg-fuchsia-500/15 text-fuchsia-300",
         appointment_fields: "bg-rose-500/15 text-rose-300",
@@ -217,6 +220,7 @@ function OutlineItemIcon({ kind }: { kind: "bookend" | "module" | "step" | Onboa
         form: <><path d="M7 5h9M7 10h9M7 15h9" /><circle cx="4" cy="5" r=".6" /><circle cx="4" cy="10" r=".6" /><circle cx="4" cy="15" r=".6" /></>,
         video: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="m8 8 5 2-5 2Z" /></>,
         button: <><rect x="3" y="6" width="14" height="8" rx="2" /><path d="m9 9 2 1-2 1" /></>,
+        calendar: <><rect x="3" y="4" width="14" height="13" rx="2" /><path d="M3 8h14M7 2.5v3M13 2.5v3M7 11h2M11 11h2M7 14h2" /></>,
         connection: <><circle cx="10" cy="10" r="7" /><path d="M8 6.5h2.3c1.8 0 3 1 3 2.5s-1.2 2.5-3 2.5H9v3M7 9.5h4" /></>,
         appointment_medium: <><circle cx="10" cy="10" r="6" /><path d="M7 10h6M10 7v6" /></>,
         appointment_fields: <><path d="M5 5h10M5 10h10M5 15h10" /><circle cx="3" cy="5" r=".5" /><circle cx="3" cy="10" r=".5" /><circle cx="3" cy="15" r=".5" /></>,
@@ -418,6 +422,14 @@ function InspectorPanel({ currentGroup, step, block, field, help, helpSelected, 
         <label className="flex items-center gap-2 rounded-lg border border-neutral-800 p-3 text-xs text-neutral-300"><input type="checkbox" checked={block.requirement === "finish"} disabled={!editable} onChange={(event) => updateBlock({ ...block, requirement: event.target.checked ? "finish" : "none" })} />Client must finish this video</label>
         <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete video</button>
     </div>
+    if (block.kind === "calendar") return <div className="space-y-4">
+        <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Heading<input value={block.title} disabled={!editable} onChange={(event) => updateBlock({ ...block, title: event.target.value })} className={inspectorInputClass} /></label>
+        <label className="block text-xs text-neutral-500">Description<textarea value={block.description} disabled={!editable} onChange={(event) => updateBlock({ ...block, description: event.target.value })} rows={4} className={inspectorTextareaClass} /></label>
+        <label className="block text-xs text-neutral-500">Time label<input value={block.timeLabel} disabled={!editable} onChange={(event) => updateBlock({ ...block, timeLabel: event.target.value })} className={inspectorInputClass} /></label>
+        <p className="text-xs leading-5 text-neutral-600">Clients must save one future date and time before they can continue. Their browser timezone is stored with the response.</p>
+        <button type="button" disabled={!editable} onClick={deleteSelection} className="text-xs text-red-300 disabled:opacity-30">Delete calendar</button>
+    </div>
     if (block.kind === "connection") return <div className="space-y-4">
         <label className="block text-xs text-neutral-500">Element name<input value={blockName(block)} disabled={!editable} onChange={(event) => updateBlock({ ...block, name: event.target.value })} className={inspectorInputClass} /></label>
         <label className="block text-xs text-neutral-500">Button text<input value={block.label} disabled={!editable} onChange={(event) => updateBlock({ ...block, label: event.target.value })} className={inspectorInputClass} /></label>
@@ -552,6 +564,7 @@ const LIBRARY_BLOCK_PRESENTATION: Record<BuilderBlockKind, { label: string; icon
     form: { label: "Form", icon: "▤" },
     video: { label: "Video", icon: "▶" },
     button: { label: "Button", icon: "↗" },
+    calendar: { label: "Calendar", icon: "▦" },
     connection: { label: "Facebook connection", icon: "f" },
     appointment_medium: { label: "Appointment medium", icon: "◉" },
     appointment_fields: { label: "Appointment information", icon: "≡" },
@@ -1136,7 +1149,7 @@ export function OnboardingBuilderWorkspace({ workspaceSlug, workspaceName, data,
                         </> : <div className="space-y-5">
                             <p className="px-2 text-xs leading-5 text-neutral-500">Drag a block into any step, or click to append it to the selected step. A block type can appear once per step.</p>
                             <section className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Info</h3><button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-neutral-800 bg-black p-3 text-left opacity-50"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-800 text-lg">H</span><span><b className="block text-sm">Header block</b><small className="text-neutral-600">Required at the top</small></span></button><BlockLibraryItem kind="estimate" editable={collaboration.editable} addBlock={addBlock} /><BlockLibraryItem kind="checklist" editable={collaboration.editable} addBlock={addBlock} /></section>
-                            <section className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Interactions</h3>{(["video", "form", "button"] as const).map((kind) => <BlockLibraryItem key={kind} kind={kind} editable={collaboration.editable} addBlock={addBlock} />)}<button type="button" disabled className="flex w-full items-center gap-3 rounded-xl border border-dashed border-neutral-800 p-3 text-left opacity-40"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900">▦</span><span><b className="block text-sm">Calendar</b><small>Coming later</small></span></button></section>
+                            <section className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Interactions</h3>{(["video", "form", "button", "calendar"] as const).map((kind) => <BlockLibraryItem key={kind} kind={kind} editable={collaboration.editable} addBlock={addBlock} />)}</section>
                             {installedServiceBlockGroups.map((template) => <section key={template.id} className="space-y-2"><h3 className="px-2 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">{template.name}</h3>{template.onboardingBlocks.map((block) => <BlockLibraryItem key={block.kind} kind={block.kind} label={block.label} editable={collaboration.editable} addBlock={addBlock} />)}</section>)}
                         </div>}
                         </div>

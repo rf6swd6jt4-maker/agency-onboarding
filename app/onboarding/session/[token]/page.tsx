@@ -102,6 +102,10 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
         : null
     const currentStep = requestedStep ?? linearCurrentStep
     const isFinalStep = currentStep.kind === "final"
+    const lastCompletableStep = completableSteps.at(-1) ?? null
+    const everyCompletableStepIsDone = completableSteps.length > 0 && completableSteps.every((step) => completedKeys.has(step.key))
+    const finalizationPending = session.status === "active" && everyCompletableStepIsDone
+    const canFinalizeHere = finalizationPending && (isFinalStep || currentStep.key === lastCompletableStep?.key)
     const stepIsLocked = session.status === "completed" || completedKeys.has(currentStep.key)
     const currentStepIndex = steps.findIndex((step) => step.key === currentStep.key)
     const previousStep = currentStepIndex > 0 ? steps[currentStepIndex - 1] : null
@@ -189,11 +193,15 @@ export default async function CanonicalSessionPage({ params, searchParams }: Pag
                         sections={migrationNotice.sections}
                     />
                 ) : null}
-                action={!isFinalStep && (currentStep.kind === "video" || usesDirectVisualCompletion) && !stepIsLocked && session.status === "active" ? (
+                action={session.status === "active" && (canFinalizeHere || (!isFinalStep && (currentStep.kind === "video" || usesDirectVisualCompletion) && !stepIsLocked)) ? (
                     <OnboardingStepSubmit
                         token={token}
-                        stepKey={currentStep.key}
-                        label={currentStep.navigation?.continueLabel || "Complete and continue"}
+                        stepKey={canFinalizeHere && lastCompletableStep ? lastCompletableStep.key : currentStep.key}
+                        label={canFinalizeHere || currentStep.key === lastCompletableStep?.key
+                            ? ["", "Continue", "Complete and continue"].includes(currentStep.navigation?.continueLabel ?? "")
+                                ? "Finish onboarding"
+                                : currentStep.navigation?.continueLabel ?? "Finish onboarding"
+                            : currentStep.navigation?.continueLabel || "Complete and continue"}
                     />
                 ) : null}
                 satisfiedBlockIds={[...satisfiedBlockIds]}

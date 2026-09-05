@@ -131,7 +131,8 @@ test("the visual Builder is standalone, responsive, collapsible, and composition
     assert.match(builderUi, /Collapse right rail/)
     assert.match(visualCanvas, /max-w-\[430px\]/)
     assert.match(builderUi, /Calendar/)
-    assert.match(builderUi, /Coming later/)
+    assert.match(builderUi, /createCalendarBlock/)
+    assert.doesNotMatch(builderUi, /Calendar[\s\S]{0,100}Coming later/)
 })
 
 test("the block library groups general interactions and installed service blocks", () => {
@@ -201,7 +202,7 @@ test("Builder mobile simulation forces the client layout and Preview fills the v
     assert.match(visualCanvas, /embedded=\{!fullScreen\}/)
     assert.match(visualCanvas, /h-dvh w-full overflow-hidden/)
     assert.match(onboardingLayout, /forceMobile/)
-    assert.match(onboardingLayout, /overflow-y-auto px-4 pb-36 pt-4/)
+    assert.match(onboardingLayout, /overflow-y-auto px-4 pb-44 pt-4/)
     assert.match(onboardingLayout, /embedded \|\| forceMobile/)
     assert.match(mobileStepBar, /forceVisible/)
     assert.match(builderUi, /data-builder-fullscreen-preview/)
@@ -421,7 +422,7 @@ test("runtime requirements persist by stable session block and gate atomic step 
     assert.match(runtimeBlocks, /disabled=\{unsatisfied\.length > 0\}/)
     assert.match(runtimePage, /satisfiedBlockIds/)
     assert.match(runtimePage, /Boolean\(currentStep\.blocks\?\.length\)/)
-    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button", "connection", "appointment_medium", "appointment_fields"\]/)
+    assert.match(sessionSnapshot, /\["header", "estimate", "form", "checklist", "video", "button", "calendar", "connection", "appointment_medium", "appointment_fields"\]/)
 })
 
 test("frozen visual previews and Settings style share the release pipeline without live draft leakage", () => {

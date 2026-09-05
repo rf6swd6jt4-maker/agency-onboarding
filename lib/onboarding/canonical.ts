@@ -916,7 +916,14 @@ export async function completeCanonicalStep(
     const step = resolved.completableSteps[stepIndex]
     if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
     if (!step) throw new Error(resolved.usesSnapshot ? ONBOARDING_SESSION_UPDATED_MESSAGE : "Unknown onboarding step")
-    if (resolved.completedKeys.has(step.key)) throw new Error("Submitted steps are locked")
+    if (resolved.completedKeys.has(step.key)) {
+        const everyStepIsComplete = resolved.completableSteps.length > 0
+            && resolved.completableSteps.every((candidate) => resolved.completedKeys.has(candidate.key))
+        if (!everyStepIsComplete) throw new Error("Submitted steps are locked")
+        const clientPortalUrl = await maybeCompleteOnboarding(resolved.session, resolved.workspace.slug)
+        revalidateOnboarding(resolved.workspace.slug, resolved.session.relationship_id, token)
+        return { clientPortalUrl }
+    }
     const firstIncompleteIndex = resolved.completableSteps.findIndex((candidate) => !resolved.completedKeys.has(candidate.key))
     if (stepIndex !== firstIncompleteIndex) throw new Error("Complete the earlier onboarding step first.")
     const workItem = await findStepWorkItem(resolved.session.workspace_id, resolved.session.id, step)

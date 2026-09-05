@@ -26,6 +26,7 @@ import {
     type AppointmentFieldKey,
     type AppointmentMedium,
 } from "@/lib/appointment-setting"
+import { normalizeCalendarResponse, validateCalendarSelection } from "@/lib/onboarding/calendar"
 
 async function getPublicSession(token: string) {
     const session = await getCanonicalSessionByToken(token)
@@ -43,6 +44,7 @@ export async function completePreparedStep(token: string, stepKey: string) {
         const outcome = await completeCanonicalStep(token, stepKey)
         return {
             ok: true as const,
+            clientPortalUrl: outcome.clientPortalUrl,
             nextPath: outcome.clientPortalUrl ?? await getPublicOnboardingPath(token),
         }
     } catch (error) {
@@ -95,6 +97,33 @@ export async function configureAppointmentSettingBlock(
         return { ok: true as const, data }
     } catch (error) {
         return { ok: false as const, error: error instanceof Error ? error.message : "Could not save the appointment preferences." }
+    }
+}
+
+export async function saveCalendarBlockResponse(
+    token: string,
+    sessionBlockId: string,
+    input: { date: string; time: string; timezone: string },
+) {
+    try {
+        const selection = validateCalendarSelection(input)
+        const resolved = await getPublicSession(token)
+        if (resolved.session.status !== "active") throw new Error("This onboarding session is read-only")
+        const { data, error } = await supabaseAdmin.rpc("submit_onboarding_calendar_block", {
+            p_token: token,
+            p_session_block_id: sessionBlockId,
+            p_local_date: selection.date,
+            p_local_time: selection.time,
+            p_timezone: selection.timezone,
+        })
+        if (error) throw new Error(error.message)
+        const response = normalizeCalendarResponse(data && typeof data === "object" && "response" in data
+            ? (data as { response?: unknown }).response
+            : null)
+        if (!response) throw new Error("The saved date and time could not be confirmed. Please try again.")
+        return { ok: true as const, response }
+    } catch (error) {
+        return { ok: false as const, error: error instanceof Error ? error.message : "Could not save the date and time." }
     }
 }
 

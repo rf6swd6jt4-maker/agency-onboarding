@@ -77,6 +77,14 @@ export type ButtonBlock = BlockBase & {
     openInSameTab?: boolean
 }
 
+export type CalendarBlock = BlockBase & {
+    kind: "calendar"
+    title: string
+    description: string
+    timeLabel: string
+    required: true
+}
+
 export type ConnectionBlock = BlockBase & {
     kind: "connection"
     provider: "meta_ads"
@@ -102,7 +110,7 @@ export type AppointmentFieldsBlock = BlockBase & {
     required: true
 }
 
-export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock | ConnectionBlock | AppointmentMediumBlock | AppointmentFieldsBlock
+export type OnboardingBlock = HeaderBlock | EstimateBlock | ChecklistBlock | FormBlock | VideoBlock | ButtonBlock | CalendarBlock | ConnectionBlock | AppointmentMediumBlock | AppointmentFieldsBlock
 
 export type OnboardingStepV2 = {
     id: string
@@ -201,6 +209,19 @@ export function createVideoBlock(): VideoBlock {
 
 export function createButtonBlock(): ButtonBlock {
     return { id: stableUuid(), name: "Button", kind: "button", label: "Open link", url: "", required: false, appearance: "primary", layout: DEFAULT_BLOCK_LAYOUT }
+}
+
+export function createCalendarBlock(): CalendarBlock {
+    return {
+        id: stableUuid(),
+        name: "Calendar",
+        kind: "calendar",
+        title: "Choose a date and time",
+        description: "Select the date and time that works best for your call.",
+        timeLabel: "Preferred time",
+        required: true,
+        layout: { ...DEFAULT_BLOCK_LAYOUT, width: "wide" },
+    }
 }
 
 export function createConnectionBlock(): ConnectionBlock {
@@ -411,7 +432,7 @@ export function upgradeBookendToV2(bookend: OnboardingBookendDefinition | Onboar
         lastEditedAt: bookend.lastEditedAt,
         lastEditedBy: bookend.lastEditedBy,
         schemaVersion: ONBOARDING_BLOCK_SCHEMA_VERSION,
-        steps: [{ id, key: stableKey(id, "step"), blocks, navigation: { backLabel: "Back", continueLabel: bookend.kind === "welcome" ? "Start onboarding" : "Continue" } }],
+        steps: [{ id, key: stableKey(id, "step"), blocks, navigation: { backLabel: "Back", continueLabel: bookend.kind === "welcome" ? "Start onboarding" : "Finish onboarding" } }],
     }
     return { ...upgraded, steps: upgraded.steps.map((step) => ensureBookendChecklist(step, bookend.kind)) }
 }

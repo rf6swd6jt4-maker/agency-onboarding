@@ -4,6 +4,8 @@ import { useMemo, useState, type ReactNode } from "react"
 import { satisfyBlockRequirement } from "@/app/onboarding/session/[token]/actions"
 import { OnboardingForm } from "@/components/onboarding/OnboardingForm"
 import { AppointmentSetupBlock } from "@/components/onboarding/AppointmentSetupBlock"
+import { CalendarDateTimeBlock } from "@/components/onboarding/CalendarDateTimeBlock"
+import { RequestHelpLink } from "@/components/onboarding/RequestHelpLink"
 import { StripePaymentButtonLabel } from "@/components/onboarding/StripePaymentButtonLabel"
 import { WhyWeAskCard } from "@/components/onboarding/WhyWeAskCard"
 import { ONBOARDING_PAYMENT_BUTTON_ID, type OnboardingBlock } from "@/lib/onboarding/block-definition"
@@ -54,7 +56,7 @@ export function OnboardingBlocks({
     const [satisfied, setSatisfied] = useState(() => new Set(initiallySatisfied))
     const [requirementError, setRequirementError] = useState<string | null>(null)
     const formBlock = blocks.find((block) => block.kind === "form")
-    const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "connection" || block.kind === "appointment_medium" || block.kind === "appointment_fields")
+    const requiredBlocks = blocks.filter((block) => (block.kind === "video" && block.requirement === "finish") || (block.kind === "button" && block.required) || block.kind === "calendar" || block.kind === "connection" || block.kind === "appointment_medium" || block.kind === "appointment_fields")
     const unsatisfied = requiredBlocks.filter((block) => !satisfied.has(block.sessionBlockId ?? block.id))
     const form = useMemo(() => formBlock?.kind === "form" && formBlock.fields.length > 0 ? {
         key: stepKey,
@@ -138,6 +140,10 @@ export function OnboardingBlocks({
                 const requirementId = block.sessionBlockId ?? block.id
                 return <BlockFrame key={block.id} block={block}><AppointmentSetupBlock block={block} token={token} initialResponse={initialBlockResponses[requirementId]} locked={locked} preview={preview} satisfied={satisfied.has(requirementId)} onSatisfied={() => setSatisfied((current) => new Set(current).add(requirementId))} onUnsatisfied={() => setSatisfied((current) => { const next = new Set(current); next.delete(requirementId); return next })} /></BlockFrame>
             }
+            if (block.kind === "calendar") {
+                const requirementId = block.sessionBlockId ?? block.id
+                return <BlockFrame key={block.id} block={block}><CalendarDateTimeBlock block={block} token={token} sessionBlockId={block.sessionBlockId} initialResponse={initialBlockResponses[requirementId]} locked={locked} preview={preview} satisfied={satisfied.has(requirementId)} onSatisfied={() => setSatisfied((current) => new Set(current).add(requirementId))} onUnsatisfied={() => setSatisfied((current) => { const next = new Set(current); next.delete(requirementId); return next })} /></BlockFrame>
+            }
             if (block.kind === "connection") {
                 const requirementId = block.sessionBlockId ?? block.id
                 const connected = satisfied.has(requirementId)
@@ -158,8 +164,8 @@ export function OnboardingBlocks({
                 {block.required && !locked ? <p className="mt-2 text-xs text-[var(--onboarding-muted)]">{satisfied.has(requirementId) ? "✓ Opened" : "Open this link to continue."}</p> : null}
             </BlockFrame>
         })}
-        {!locked && (form || continueAction) ? <div className="mt-8 flex items-stretch gap-3">{backHref ? <a href={backHref} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</a> : null}{form ? <button type="submit" form={formId} disabled={unsatisfied.length > 0} className="min-h-14 flex-1 rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60">{continueLabel}</button> : <fieldset disabled={unsatisfied.length > 0} className="min-w-0 flex-1 disabled:opacity-60 [&>*]:mt-0">{continueAction}</fieldset>}</div> : null}
+        {(!locked && form) || continueAction ? <div className={`mt-8 grid items-start gap-3 ${backHref ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1"}`}>{backHref ? <a href={backHref} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-[var(--onboarding-primary)] px-5 font-medium text-[var(--onboarding-primary)]">{backLabel}</a> : null}{form && !locked ? <button type="submit" form={formId} disabled={unsatisfied.length > 0} className="min-h-14 w-full rounded-xl bg-[var(--onboarding-primary)] px-5 py-4 font-medium text-white transition active:scale-[0.99] active:opacity-80 disabled:cursor-not-allowed disabled:opacity-60">{continueLabel}</button> : <fieldset disabled={unsatisfied.length > 0} className="contents">{continueAction}</fieldset>}</div> : null}
         {unsatisfied.length > 0 && !locked ? <p className="mt-3 text-center text-xs text-[var(--onboarding-muted)]">Complete {unsatisfied.length === 1 ? "the required item" : `${unsatisfied.length} required items`} above to continue.</p> : null}
-        {requirementError ? <p role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{requirementError}</p> : null}
+        {requirementError ? <p role="alert" className="mt-3 text-left text-sm text-red-700">{requirementError} <RequestHelpLink />.</p> : null}
     </>
 }

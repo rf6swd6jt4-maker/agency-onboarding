@@ -53,7 +53,7 @@ export function OnboardingLayout({
     helpSelected = false,
     onHelpSelect,
 }: OnboardingLayoutProps) {
-    const helpCard = <div data-builder-help-block={onHelpSelect ? "true" : undefined} onClick={onHelpSelect} className={`rounded-2xl outline-offset-4 transition ${onHelpSelect ? "cursor-pointer hover:outline hover:outline-1 hover:outline-black/15" : ""} ${helpSelected ? "outline-2 outline-[var(--onboarding-accent,#F0B429)]" : ""}`}><NeedHelpCard help={help} /></div>
+    const helpCard = (id: string) => <div id={id} data-onboarding-help-card data-builder-help-block={onHelpSelect ? "true" : undefined} onClick={onHelpSelect} className={`rounded-2xl outline-offset-4 transition ${onHelpSelect ? "cursor-pointer hover:outline hover:outline-1 hover:outline-black/15" : ""} ${helpSelected ? "outline-2 outline-[var(--onboarding-accent,#F0B429)]" : ""}`}><NeedHelpCard help={help} /></div>
     return (
         <main className={forceMobile
             ? embedded
@@ -80,8 +80,8 @@ export function OnboardingLayout({
             </header>
 
             <div className={forceMobile
-                ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-36 pt-4"
-                : `mx-auto grid w-full max-w-7xl gap-6 px-4 pb-32 pt-4 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:py-6 ${embedded ? "lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]" : "lg:grid-cols-[260px_minmax(0,1fr)_260px]"}`}>
+                ? "mx-auto grid min-h-0 w-full max-w-7xl flex-1 gap-6 overflow-y-auto px-4 pb-44 pt-4"
+                : `mx-auto grid w-full max-w-7xl gap-6 px-4 pb-44 pt-4 sm:px-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden lg:py-6 ${embedded ? "lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_220px]" : "lg:grid-cols-[260px_minmax(0,1fr)_260px]"}`}>
                 <aside className={forceMobile ? "hidden" : "hidden lg:min-h-0 lg:overflow-hidden lg:block"}>
                     <Roadmap steps={roadmapSteps} onSelect={onRoadmapSelect} />
                 </aside>
@@ -93,12 +93,12 @@ export function OnboardingLayout({
                     {children}
 
                     <div className={forceMobile ? "mt-6" : `mt-6 ${embedded ? "xl:hidden" : "lg:hidden"}`}>
-                        {helpCard}
+                        {helpCard("onboarding-help-inline")}
                     </div>
                 </section>
 
                 <aside className={forceMobile ? "hidden" : `${embedded ? "hidden xl:block" : "hidden lg:block"} min-h-0 overflow-hidden`}>
-                    {helpCard}
+                    {helpCard("onboarding-help-sidebar")}
                 </aside>
             </div>
 

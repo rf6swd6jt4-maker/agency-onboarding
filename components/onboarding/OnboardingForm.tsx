@@ -16,6 +16,7 @@ import {
 } from "@/lib/onboarding/forms"
 import { FileUploadField } from "@/components/onboarding/FileUploadField"
 import { LoadingOverlay } from "@/components/LoadingOverlay"
+import { RequestHelpLink } from "@/components/onboarding/RequestHelpLink"
 
 type OnboardingFormProps = {
     token: string
@@ -449,11 +450,7 @@ export function OnboardingForm({
                 </div>
             )}
 
-            {error && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                    {error}
-                </div>
-            )}
+            {error ? <p role="alert" className="text-left text-sm text-red-700">{error} <RequestHelpLink />.</p> : null}
 
             {locked && allowEditRequest ? (
                 <div>
