@@ -13,6 +13,7 @@ import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/com
 import { MessageReadAvatars } from "@/components/communications/MessageReadAvatars"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
+import { NativeMessageBubble } from "@/components/communications/NativeMessageBubble"
 import { NativeAttachment } from "@/components/communications/NativeAttachment"
 import { validateNativeAttachmentFile } from "@/lib/communications/native-attachments"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
@@ -701,7 +702,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
-                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">
+                    <div className="relative min-h-0 flex-1" style={{ containerType: "size" }}><div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">
                         {selected.messages.length ? <div aria-hidden="true" className="mt-auto" /> : null}
                         {selected.messages.length ? selected.messages.map((message, index) => {
                         const own = message.senderUserId === bootstrap.currentUser.id
@@ -731,7 +732,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                 {!own && selected.kind === "team" ? sender?.former
                                     ? <span title={`${sender.name} · former member`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 overflow-hidden rounded-full opacity-70"><Avatar src={sender.avatarSrc} name={sender.name} className="h-full w-full object-center" /></span>
                                     : <button data-icon-button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full object-center" /></button> : null}
-                                <article
+                                <NativeMessageBubble
+                                    video={message.attachment?.kind === "video"}
                                     role="button"
                                     tabIndex={0}
                                     onClick={() => {
@@ -759,7 +761,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                         {selected.kind === "team" ? <MessageReadAvatars readers={readers} /> : <span />}
                                         <span className="flex shrink-0 items-center gap-1.5">{message.editedAt ? <span>Edited</span> : null}<time>{messageTime(message.createdAt)}</time>{own ? <NativeDeliveryTicks message={message} read={readers.length > 0} /> : null}</span>
                                     </div>
-                                </article>
+                                </NativeMessageBubble>
                             </div>
                             {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>

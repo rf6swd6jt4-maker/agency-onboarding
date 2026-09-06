@@ -4,7 +4,7 @@ import Image from "next/image"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AnchoredPopup } from "@/components/ui"
 import type { MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
-import { OpenWithIcon } from "@/components/communications/MessageInteractionIcons"
+import { LoadingSpinnerIcon, OpenWithIcon } from "@/components/communications/MessageInteractionIcons"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import type { CommunicationAttachment } from "@/lib/communications/types"
 import { nativeAttachmentSizeLabel, nativeAttachmentTypeLabel } from "@/lib/communications/native-attachments"
@@ -14,13 +14,24 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
     const requestRef = useRef<AbortController | null>(null)
     const [opening, setOpening] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const [ready, setReady] = useState(false)
     const openRef = useRef<HTMLButtonElement>(null)
     const downloadUrl = `${attachment.url}${attachment.url.includes("?") ? "&" : "?"}download=${encodeURIComponent(attachment.fileName)}`
 
     useEffect(() => {
         openRef.current?.focus({ preventScroll: true })
-        return () => requestRef.current?.abort()
+        const cancel = () => {
+            requestRef.current?.abort()
+            requestRef.current = null
+            setOpening(false)
+        }
+        const visibilityChanged = () => { if (document.hidden) cancel() }
+        document.addEventListener("visibilitychange", visibilityChanged)
+        window.addEventListener("pagehide", cancel)
+        return () => {
+            requestRef.current?.abort()
+            document.removeEventListener("visibilitychange", visibilityChanged)
+            window.removeEventListener("pagehide", cancel)
+        }
     }, [])
 
     async function openWith() {
@@ -33,7 +44,6 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
         requestRef.current = controller
         setOpening(true)
         setError(null)
-        setReady(false)
         try {
             let file = fileRef.current
             if (!file) {
@@ -48,14 +58,9 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
                 setError("This device cannot open this file through its app picker. Download it to open it in an app.")
                 return
             }
-            // A slow download can outlast the browser's user gesture. Keep the file
-            // ready for a fresh tap instead of failing or downloading it again.
-            if (navigator.userActivation && !navigator.userActivation.isActive) {
-                setReady(true)
-                return
-            }
+            if (controller.signal.aborted || document.hidden) return
             await navigator.share({ files: [file] })
-            onClose()
+            if (!controller.signal.aborted) onClose()
         } catch (openError) {
             if (!controller.signal.aborted && !(openError instanceof Error && openError.name === "AbortError")) {
                 setError(openError instanceof Error && openError.name === "NotAllowedError"
@@ -63,7 +68,7 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
                     : openError instanceof Error ? openError.message : "Could not open this file. Try again or download it.")
             }
         } finally {
-            if (!controller.signal.aborted) {
+            if (requestRef.current === controller) {
                 requestRef.current = null
                 setOpening(false)
             }
@@ -75,9 +80,8 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
             <p className="text-xs font-semibold">Open file</p>
             <p className="mt-1 break-words text-xs text-neutral-400">{attachment.fileName}</p>
         </div>
-        <button ref={openRef} type="button" onClick={() => void openWith()} disabled={opening} aria-busy={opening} className="block w-full rounded-lg px-2 py-2.5 text-left text-sm outline-none hover:bg-neutral-800 focus-visible:ring-1 focus-visible:ring-neutral-500 disabled:opacity-50">Open with…</button>
+        <button ref={openRef} type="button" onClick={() => void openWith()} disabled={opening} aria-busy={opening} className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left text-sm outline-none hover:bg-neutral-800 focus-visible:ring-1 focus-visible:ring-neutral-500 disabled:cursor-wait"><span>Open with…</span>{opening ? <LoadingSpinnerIcon /> : null}</button>
         <a href={downloadUrl} download={attachment.fileName} onClick={onClose} className="block rounded-lg px-2 py-2.5 text-sm outline-none hover:bg-neutral-800 focus-visible:ring-1 focus-visible:ring-neutral-500">Download</a>
-        {opening ? <p role="status" className="px-2 py-2 text-xs text-neutral-400">Opening file…</p> : ready ? <p role="status" className="px-2 py-2 text-xs text-neutral-400">File ready. Tap Open with… to choose an app.</p> : null}
         {error ? <p role="alert" className="px-2 py-2 text-xs text-red-300">{error}</p> : null}
     </div>
 }

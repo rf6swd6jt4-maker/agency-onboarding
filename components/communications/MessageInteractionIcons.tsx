@@ -1,3 +1,7 @@
+export function LoadingSpinnerIcon() {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin fill-none stroke-current motion-reduce:animate-none" strokeWidth="2.5"><circle cx="12" cy="12" r="9" opacity="0.25" /><path d="M12 3a9 9 0 0 1 9 9" strokeLinecap="round" /></svg>
+}
+
 export function OpenWithIcon({ className = "h-5 w-5" }: { className?: string }) {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className={`${className} fill-none stroke-current`} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18 18 6M6 6h12v12" /></svg>
 }
