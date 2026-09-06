@@ -97,7 +97,7 @@ function getMediaHeaders(mediaResponse: Response, storagePath: string, downloadN
         "Accept-Ranges": mediaResponse.headers.get("accept-ranges") ?? "bytes",
         "X-Content-Type-Options": "nosniff",
     })
-    if (storagePath.split("/").slice(1, 3).join("/") === "communications/native") {
+    if (downloadName !== null || storagePath.split("/").slice(1, 3).join("/") === "communications/native") {
         const deliveryHeaders = nativeAttachmentDeliveryHeaders(
             mediaResponse.headers.get("content-type") ?? "application/octet-stream",
             downloadName || getSafeFileName(storagePath),

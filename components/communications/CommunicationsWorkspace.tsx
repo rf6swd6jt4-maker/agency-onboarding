@@ -14,6 +14,9 @@ import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/com
 import { MessageReadAvatars } from "@/components/communications/MessageReadAvatars"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
+import { NativeAttachment } from "@/components/communications/NativeAttachment"
+import { NativeChatViewport } from "@/components/communications/NativeChatViewport"
+import { NativeMessageBubble } from "@/components/communications/NativeMessageBubble"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
@@ -173,17 +176,8 @@ function messagePreview(message: CommunicationMessage) {
 }
 
 function MessageAttachment({ attachment, onOpenImage, light, whiteOnColor = false }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void; light: boolean; whiteOnColor?: boolean }) {
-    if (attachment.kind === "sticker") {
-        return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
-    }
-    if (attachment.kind === "image") {
-        return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} className="max-h-80 h-auto w-full object-contain" /></button>
-    }
-    if (attachment.kind === "video") {
-        return <video src={attachment.url} controls preload="metadata" className="mb-2 max-h-80 w-full rounded-xl bg-black" />
-    }
     if (attachment.kind === "audio") return <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} whiteOnColor={whiteOnColor} />
-    return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-3 rounded-xl border border-current/10 bg-black/5 px-3 py-2.5 hover:bg-black/10"><span className="text-xl">↗</span><span className="min-w-0"><span className="block truncate text-xs font-semibold">{attachment.fileName}</span><span className="mt-0.5 block text-[10px] opacity-60">{formatFileSize(attachment.size)}</span></span></a>
+    return <NativeAttachment attachment={attachment} onOpenImage={onOpenImage} light={light} />
 }
 
 function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onReact, onRecentEmoji, onReply, onCopy, onPin, onShowReactions, pinned, side, onSave, saveLabel, saveDisabled, saveActive }: {
@@ -927,7 +921,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 }) : <div className="p-6 text-center"><p className="text-sm font-medium text-neutral-300">{conversations.length ? "No matching conversations" : "No clients yet"}</p><p className="mt-2 text-xs leading-5 text-neutral-600">{conversations.length ? "Try another name or message." : "Client relationships will appear here automatically."}</p></div>}</div>
             </aside>
 
-            <div className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
+            <NativeChatViewport className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
                 {selected ? <>
                     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
                         <button type="button" onClick={() => selectConversation(null)} aria-label="Back to client chats" className="inline-flex h-10 w-10 items-center justify-center text-neutral-400 hover:text-white lg:hidden"><BackIcon /></button>
@@ -970,7 +964,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
                                     <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                     {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
-                                    <article
+                                    <NativeMessageBubble
+                                        video={message.attachment?.kind === "video"}
                                         role="button"
                                         tabIndex={0}
                                         aria-label={`Message from ${sender}. Activate for message actions.`}
@@ -1038,7 +1033,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                         <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : isWhatsAppClientMessage ? "text-white/65" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><MessageReadAvatars readers={readers} /><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {["send_failed", "partial_sent"].includes(message.status) && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry failed channel{message.status === "partial_sent" ? "" : "s"}</button> : null}
-                                    </article>
+                                    </NativeMessageBubble>
                                     {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-reaction-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
                                 </div>
                                 {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
@@ -1077,7 +1072,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                         />
                     </footer>
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950 text-xl">◌</div><h2 className="mt-4 text-sm font-semibold">Select a client chat</h2><p className="mt-2 text-xs text-neutral-600">Messages update here without reloading the panel.</p></div></div>}
-            </div>
+            </NativeChatViewport>
         </ResizableConversationColumns>
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
     </section>
