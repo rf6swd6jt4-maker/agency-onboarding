@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import { ComposerFooter } from "@/components/communications/ComposerFooter"
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { Avatar } from "@/components/account/Avatar"
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
@@ -20,6 +20,7 @@ import { NativeAttachment } from "@/components/communications/NativeAttachment"
 import { validateNativeAttachmentFile } from "@/lib/communications/native-attachments"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
+import { createCoordinatedChat, chatMutationRequest, ChatMutationError, type ChatRead } from "@/lib/communications/coordinated-updates"
 import { useMessagePaneInteractions } from "@/components/communications/useMessagePaneInteractions"
 import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { useWorkspaceTabActive } from "@/components/workspace/useWorkspaceTabActive"
@@ -30,7 +31,7 @@ import { openWorkspaceMemberProfile } from "@/lib/workspace-member-profile"
 import type { CommunicationAttachment, CommunicationSticker } from "@/lib/communications/types"
 import { nativeConversationUnreadCount } from "@/lib/communications/unread"
 import { nativeMessageCanEdit } from "@/lib/teams/message-editing"
-import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, NativeReadCursor, WorkspaceTeam } from "@/lib/teams/types"
+import type { NativeCommunicationsBootstrap, NativeConversation, NativeMessage, NativeReaction, NativeReadCursor, WorkspaceTeam } from "@/lib/teams/types"
 import { closeWorkspaceComposer } from "@/lib/workspace-composer-viewport"
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {} }
@@ -161,21 +162,6 @@ function mergeCursor(current: NativeReadCursor[], incoming: NativeReadCursor) {
     return [...current.filter((cursor) => !(cursor.conversationId === incoming.conversationId && cursor.userId === incoming.userId)), incoming]
 }
 
-function reconcileConversations(current: NativeConversation[], incoming: NativeConversation[]) {
-    const currentById = new Map(current.map((conversation) => [conversation.id, conversation]))
-    return incoming.map((conversation) => ({
-        ...conversation,
-        // Server-persisted messages are authoritative during recovery. Keep
-        // only local sends that have not received their durable row yet; an
-        // additive merge would otherwise resurrect messages deleted while a
-        // Realtime event was missed.
-        messages: mergeMessages(
-            (currentById.get(conversation.id)?.messages ?? []).filter((message) => message.clientRequestId === message.id),
-            conversation.messages,
-        ),
-    })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt))
-}
-
 function realtimeMessage(value: unknown): NativeMessage | null {
     const row = record(value); const id = text(row.id); const conversationId = text(row.conversation_id); const senderUserId = text(row.sender_user_id); const createdAt = text(row.created_at)
     if (row.body_encryption_version !== null && row.body_encryption_version !== undefined) return null
@@ -196,10 +182,11 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     onConversationListWidthChange: (width: number) => void
 }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
-    const [conversations, setConversations] = useState(bootstrap.conversations)
+    const [updates] = useState(() => createCoordinatedChat<NativeMessage, NativeConversation, NativeReaction>(bootstrap, (reaction) => `${reaction.messageId}:${reaction.reactorUserId}`))
+    const { conversations, reactions } = useSyncExternalStore(updates.subscribe, updates.getSnapshot, updates.getSnapshot)
+    const { setConversations } = updates
     const [schemaReady, setSchemaReady] = useState(bootstrap.schemaReady)
     const [teams, setTeams] = useState(bootstrap.teams)
-    const [reactions, setReactions] = useState(bootstrap.reactions)
     const [readCursors, setReadCursors] = useState(bootstrap.readCursors)
     const [selectedId, setSelectedId] = useState(bootstrap.requestedConversationId)
     const [search, setSearch] = useState("")
@@ -283,7 +270,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         return () => documents.forEach((ownerDocument) => ownerDocument.removeEventListener("pointerdown", dismiss, true))
     }, [actionMessageId])
 
-    const updateConversationMessages = useCallback((conversationId: string, incoming: NativeMessage[], animate = false) => {
+    const updateConversationMessages = useCallback((conversationId: string, incoming: NativeMessage[], animate = false, read?: ChatRead, acknowledgement = false) => {
+        if (read) incoming = updates.mergeReadMessages(read, conversationId, incoming, acknowledgement)
         const newMessages = incoming.filter((message) => !knownMessageKeysRef.current.has(messageAnimationKey(message)))
         incoming.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message)))
         if (animate && newMessages.length && selectedRef.current === conversationId && messagePaneCanShowNewMessage(messagePaneRef.current, followLatestRef.current)) {
@@ -298,8 +286,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         for (const message of incoming) {
             setTypingByConversation((current) => updateNativeTyping(current, conversationId, message.senderUserId, null))
         }
-        setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: mergeMessages(conversation.messages, incoming), updatedAt: incoming.at(-1)?.createdAt ?? conversation.updatedAt } : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt)))
-    }, [])
+        if (!read) setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: mergeMessages(conversation.messages, incoming), updatedAt: incoming.at(-1)?.createdAt ?? conversation.updatedAt } : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt)))
+    }, [setConversations, updates])
 
     const persistReadCursor = useCallback(async (cursor: NativeReadCursor) => {
         pendingReadRef.current = cursor
@@ -324,19 +312,21 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }, [persistReadCursor])
 
     const refresh = useCallback(async (selectId?: string | null) => {
+        const read = updates.beginRead()
         const conversationId = selectId === undefined ? selectedRef.current : selectId
         const search = conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ""
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/conversations${search}`, { cache: "no-store" })
         const next = await response.json().catch(() => null) as NativeCommunicationsBootstrap | null
         if (!response.ok || !next) throw new Error("Could not refresh team conversations.")
         next.conversations.forEach((conversation) => conversation.messages.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message))))
-        setSchemaReady(next.schemaReady); setConversations((current) => reconcileConversations(current, next.conversations)); setTeams(next.teams); setReactions(next.reactions); setReadCursors((current) => next.readCursors.reduce((result, cursor) => mergeCursor(result, cursor), current)); setStickers(next.stickers)
+        if (!updates.applySnapshot(read, next)) return
+        setSchemaReady(next.schemaReady); setTeams(next.teams); setReadCursors((current) => next.readCursors.reduce((result, cursor) => mergeCursor(result, cursor), current)); setStickers(next.stickers)
         setSelectedId((current) => {
             const requested = selectId === undefined ? current : selectId
             return requested && next.conversations.some((conversation) => conversation.id === requested) ? requested : null
         })
         await flushPendingRead()
-    }, [bootstrap.workspaceSlug, flushPendingRead])
+    }, [bootstrap.workspaceSlug, flushPendingRead, updates])
 
     useEffect(() => {
         if (!bootstrap.requestedDmUserId) return
@@ -371,14 +361,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     if (payload.eventType === "DELETE") {
-                        const deleted = record(payload.old); const messageId = text(deleted.id); const conversationId = text(deleted.conversation_id)
+                        const deleted = record(payload.old); const messageId = text(deleted.id)
                         if (messageId) {
-                            setConversations((current) => current.map((conversation) => !conversationId || conversation.id === conversationId ? {
-                                ...conversation,
-                                pinnedMessageId: conversation.pinnedMessageId === messageId ? null : conversation.pinnedMessageId,
-                                messages: conversation.messages.filter((message) => message.id !== messageId),
-                            } : conversation))
-                            setReactions((current) => current.filter((reaction) => reaction.messageId !== messageId))
+                            updates.removeMessage(messageId)
+
                             setReplyingTo((current) => current?.id === messageId ? null : current)
                             setEditingMessage((current) => current?.id === messageId ? null : current)
                             setActionMessageId((current) => current === messageId ? null : current)
@@ -391,22 +377,23 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         const row = record(payload.new)
                         const conversationId = text(row.conversation_id)
                         const messageId = text(row.id)
+                        const read = updates.beginRead()
                         if (conversationId && messageId) void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?conversationId=${encodeURIComponent(conversationId)}&messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
                             .then(async (response) => response.ok ? response.json() as Promise<{ message?: NativeMessage }> : null)
-                            .then((result) => { if (result?.message) updateConversationMessages(conversationId, [result.message], true) })
+                            .then((result) => { if (result?.message) updateConversationMessages(conversationId, [result.message], true, read) })
                             .catch(() => undefined)
                     }
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_reactions", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.eventType === "DELETE" ? payload.old : payload.new); const messageId = text(row.message_id); const reactorUserId = text(row.reactor_user_id)
                     if (!messageId || !reactorUserId) return
-                    if (payload.eventType === "DELETE") setReactions((current) => current.filter((reaction) => !(reaction.messageId === messageId && reaction.reactorUserId === reactorUserId)))
-                    else { const id = text(row.id); const conversationId = text(row.conversation_id); const emoji = text(row.emoji); const updatedAt = text(row.updated_at); if (id && conversationId && emoji && updatedAt) setReactions((current) => [...current.filter((reaction) => !(reaction.messageId === messageId && reaction.reactorUserId === reactorUserId)), { id, conversationId, messageId, reactorUserId, emoji, updatedAt }]) }
+                    if (payload.eventType === "DELETE") updates.receiveReaction(`${messageId}:${reactorUserId}`, null, text(row.updated_at) ?? undefined)
+                    else { const id = text(row.id); const conversationId = text(row.conversation_id); const emoji = text(row.emoji); const updatedAt = text(row.updated_at); if (id && conversationId && emoji && updatedAt) updates.receiveReaction(`${messageId}:${reactorUserId}`, { id, conversationId, messageId, reactorUserId, emoji, updatedAt }) }
                 })
                 .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_read_cursors", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => { const row = record(payload.new); const conversationId = text(row.conversation_id); const userId = text(row.user_id); const lastReadAt = text(row.last_read_at); if (conversationId && userId && lastReadAt) setReadCursors((current) => [...current.filter((cursor) => !(cursor.conversationId === conversationId && cursor.userId === userId)), { conversationId, userId, lastReadMessageId: text(row.last_read_message_id), lastReadAt }]) })
-                .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_conversations", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
-                .on("postgres_changes", { event: "*", schema: "public", table: "workspace_team_members", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh(selectedRef.current) })
-        , [bootstrap.currentUser.id, bootstrap.workspaceId, bootstrap.workspaceSlug, refresh, supabase, updateConversationMessages])
+                .on("postgres_changes", { event: "*", schema: "public", table: "workspace_native_conversations", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh().catch(() => undefined) })
+                .on("postgres_changes", { event: "*", schema: "public", table: "workspace_team_members", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, () => { void refresh().catch(() => undefined) })
+        , [bootstrap.currentUser.id, bootstrap.workspaceId, bootstrap.workspaceSlug, refresh, supabase, updateConversationMessages, updates])
 
     const connection = useReliableCommunicationsRealtime({ active, privateChannel: true, register: registerRealtime, schemaReady, supabase, synchronize: refresh, topic: `communications:${bootstrap.workspaceSlug}` })
     const sendRealtimeBroadcast = connection.sendBroadcast
@@ -508,10 +495,11 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         const stickerAttachment: CommunicationAttachment = { kind: "sticker", fileName: sticker.fileName, mimeType: "image/webp", size: sticker.size, storagePath: sticker.storagePath, url: sticker.url }
         const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body: "", replyToMessageId: replyTarget?.id ?? null, attachment: stickerAttachment, createdAt: new Date().toISOString(), editedAt: null }
         updateConversationMessages(selected.id, [optimistic], true); setReplyingTo(null); setStickerTrayOpen(false); setError(null)
+        const acknowledgementRead = updates.beginRead()
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body: "", replyToMessageId: replyTarget?.id, attachment: stickerAttachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
-        if (result?.message) updateConversationMessages(selected.id, [result.message])
-        else { setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((message) => message.clientRequestId !== clientRequestId) } : conversation)); setError(result?.error ?? "Could not send sticker.") }
+        if (result?.message) updateConversationMessages(selected.id, [result.message], false, acknowledgementRead, true)
+        else { setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== clientRequestId) } : conversation)); setError(result?.error ?? "Could not send sticker.") }
     }
 
     async function sendMessage() {
@@ -521,10 +509,11 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         const clientRequestId = crypto.randomUUID(); const replyTarget = replyingTo
         const optimistic: NativeMessage = { id: clientRequestId, clientRequestId, conversationId: selected.id, senderUserId: bootstrap.currentUser.id, senderWorkspaceRole: bootstrap.currentUserRole, body, replyToMessageId: replyTarget?.id ?? null, attachment, createdAt: new Date().toISOString(), editedAt: null }
         updateConversationMessages(selected.id, [optimistic], true); setDraft(""); setReplyingTo(null); setAttachment(null); setError(null); localStorage.removeItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selected.id}`)
+        const acknowledgementRead = updates.beginRead()
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, clientRequestId, body, replyToMessageId: replyTarget?.id, attachment: optimistic.attachment }) }).catch(() => null)
         const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
-        if (result?.message) updateConversationMessages(selected.id, [result.message])
-        else { setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((message) => message.clientRequestId !== clientRequestId) } : conversation)); setError(result?.error ?? "Could not send message.") }
+        if (result?.message) updateConversationMessages(selected.id, [result.message], false, acknowledgementRead, true)
+        else { setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== clientRequestId) } : conversation)); setError(result?.error ?? "Could not send message.") }
     }
 
     function startEditingMessage(message: NativeMessage) {
@@ -554,29 +543,36 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         if (!selected?.canWrite || !editingMessage || editState === "saving") return
         const body = draft.trim()
         if (!body || body === editingMessage.body.trim()) return
+        const conversationId = selected.id
+        const messageId = editingMessage.id
         setEditState("saving")
         setError(null)
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, messageId: editingMessage.id, body }) }).catch(() => null)
-        const result = response ? await response.json().catch(() => null) as { message?: NativeMessage; error?: string } | null : null
-        if (!response?.ok || !result?.message) {
-            setEditState("idle")
-            setError(result?.error ?? "Could not edit message.")
-            return
-        }
-        updateConversationMessages(selected.id, [result.message])
-        setEditingMessage(null)
-        setEditState("idle")
-        setDraft(editingDraftSnapshotRef.current)
+        try {
+            await updates.mutateMessage(messageId, { ...editingMessage, body }, async () => {
+                const result = await chatMutationRequest<{ message?: NativeMessage }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, messageId, body }) })
+                if (!result.message) throw new ChatMutationError("Could not confirm the edit.", true)
+                return result.message
+            })
+            setEditingMessage((current) => current?.id === messageId ? null : current)
+            if (selectedRef.current === conversationId) setDraft(editingDraftSnapshotRef.current)
+        } catch (error) { setError(error instanceof Error ? error.message : "Could not edit message.") }
+        finally { setEditState("idle"); void refresh().catch(() => undefined) }
     }
 
     async function sendReaction(message: NativeMessage, emoji: string) {
         if (!selected?.canWrite) return
-        const previous = reactions.find((reaction) => reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id) ?? null
-        const optimistic = emoji ? { id: previous?.id ?? `optimistic:${message.id}`, conversationId: selected.id, messageId: message.id, reactorUserId: bootstrap.currentUser.id, emoji, updatedAt: new Date().toISOString() } : null
-        setReactions((current) => optimistic ? [...current.filter((reaction) => !(reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id)), optimistic] : current.filter((reaction) => !(reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id)))
+        const conversationId = selected.id
+        const optimistic: NativeReaction | null = emoji ? { id: `optimistic:${message.id}`, conversationId, messageId: message.id, reactorUserId: bootstrap.currentUser.id, emoji, updatedAt: new Date().toISOString() } : null
         setActionMessageId(null)
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/reactions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, messageId: message.id, emoji }) })
-        if (!response.ok) { setReactions((current) => previous ? [...current.filter((reaction) => !(reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id)), previous] : current.filter((reaction) => !(reaction.messageId === message.id && reaction.reactorUserId === bootstrap.currentUser.id))); setError("Could not send reaction.") }
+        setError(null)
+        try {
+            await updates.mutateReaction(`${message.id}:${bootstrap.currentUser.id}`, optimistic, async () => {
+                const result = await chatMutationRequest<{ reaction: NativeReaction | null }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/reactions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, messageId: message.id, emoji }) })
+                if (!("reaction" in result)) throw new ChatMutationError("Could not confirm the reaction.", true)
+                return result.reaction
+            })
+        } catch (error) { setError(error instanceof Error ? error.message : "Could not send reaction.") }
+        finally { void refresh().catch(() => undefined) }
     }
 
     function rememberRecentReaction(emoji: string) {
@@ -609,19 +605,18 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }
 
     async function togglePinnedMessage(message: NativeMessage) {
-        if (!selected?.canWrite) return
+        if (!selected) return
         const conversationId = selected.id
-        const previous = selected.pinnedMessageId
-        const pinnedMessageId = previous === message.id ? null : message.id
+        const pinnedMessageId = selected.pinnedMessageId === message.id ? null : message.id
         setActionMessageId(null)
         setError(null)
-        setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, pinnedMessageId } : conversation))
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/pins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, messageId: pinnedMessageId }) }).catch(() => null)
-        if (!response?.ok) {
-            setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, pinnedMessageId: previous } : conversation))
-            const result = response ? await response.json().catch(() => null) as { error?: string } | null : null
-            setError(result?.error ?? "Could not update the pinned message.")
-        }
+        try {
+            await updates.mutatePin(conversationId, pinnedMessageId, async () => {
+                const result = await chatMutationRequest<{ pinnedMessageId: string | null }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/pins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId, messageId: pinnedMessageId }) })
+                if (result.pinnedMessageId !== pinnedMessageId) throw new ChatMutationError("Could not confirm the pinned message.", true)
+            })
+        } catch (error) { setError(error instanceof Error ? error.message : "Could not pin message.") }
+        finally { void refresh().catch(() => undefined) }
     }
 
     function jumpToMessage(messageId: string) {
@@ -640,32 +635,34 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     async function deleteMessage(message: NativeMessage) {
         if (!selected || message.clientRequestId === message.id) return
         if (!window.confirm(message.senderUserId === bootstrap.currentUser.id ? "Delete this message? This cannot be undone." : "Remove this message for everyone? This cannot be undone.")) return
-        const previous = selected.messages
-        const previousPinnedMessageId = selected.pinnedMessageId
+        const conversationId = selected.id
         setActionMessageId(null)
         setReplyingTo((current) => current?.id === message.id ? null : current)
-        setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, pinnedMessageId: conversation.pinnedMessageId === message.id ? null : conversation.pinnedMessageId, messages: conversation.messages.filter((candidate) => candidate.id !== message.id) } : conversation))
-        const params = new URLSearchParams({ conversationId: selected.id, messageId: message.id })
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?${params}`, { method: "DELETE" }).catch(() => null)
-        const result = response ? await response.json().catch(() => null) as { deleted?: boolean; conversationId?: string; messageId?: string; error?: string } | null : null
-        if (!response?.ok || result?.deleted !== true || result.conversationId !== selected.id || result.messageId !== message.id) {
-            setConversations((current) => current.map((conversation) => conversation.id === selected.id ? { ...conversation, pinnedMessageId: previousPinnedMessageId, messages: mergeMessages(conversation.messages, previous) } : conversation))
-            setError(result?.error ?? "Could not delete message.")
-        }
+        setEditingMessage((current) => current?.id === message.id ? null : current)
+        try {
+            await updates.mutateMessage(message.id, null, async () => {
+                const params = new URLSearchParams({ conversationId, messageId: message.id })
+                const result = await chatMutationRequest<{ deleted: boolean; conversationId: string; messageId: string }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?${params}`, { method: "DELETE" })
+                if (!result.deleted || result.conversationId !== conversationId || result.messageId !== message.id) throw new ChatMutationError("Could not confirm deletion.", true)
+                return null
+            })
+        } catch (error) { setError(error instanceof Error ? error.message : "Could not delete message.") }
+        finally { void refresh().catch(() => undefined) }
     }
 
     async function clearPrivateChat() {
         if (!selected || selected.kind !== "direct") return
         if (!window.confirm("Clear this private chat from your view? The other participant will keep their history.")) return
         const conversationId = selected.id
-        const previous = selected.messages
-        setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: [] } : conversation))
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/clear`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId }) }).catch(() => null)
-        const result = response ? await response.json().catch(() => null) as { cleared?: boolean; error?: string } | null : null
-        if (!response?.ok || result?.cleared !== true) {
-            setConversations((current) => current.map((conversation) => conversation.id === conversationId ? { ...conversation, messages: mergeMessages(conversation.messages, previous) } : conversation))
-            setError(result?.error ?? "Could not clear this private chat.")
+        let request: Promise<{ cleared: boolean }> | undefined
+        const clear = async () => {
+            request ??= chatMutationRequest<{ cleared: boolean }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/clear`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId }) })
+            if (!(await request).cleared) throw new ChatMutationError("Could not confirm chat clearance.", true)
+            return null
         }
+        try { if (selected.messages.length) await Promise.all(selected.messages.map((message) => updates.mutateMessage(message.id, null, clear))); else await clear() }
+        catch (error) { setError(error instanceof Error ? error.message : "Could not clear this private chat.") }
+        finally { void refresh().catch(() => undefined) }
     }
 
     const normalizedSearch = search.trim().toLowerCase()
@@ -729,7 +726,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         const isSticker = message.attachment?.kind === "sticker"
                         const canSaveAttachment = Boolean(message.attachment && !isSticker && !own)
                         const saveAttachmentLabel = `Download ${message.attachment?.fileName ?? "attachment"}`
-                        return <Fragment key={message.id}>
+                        return <Fragment key={messageAnimationKey(message)}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                             <div data-message-interaction={message.id} className={`relative flex items-end transition-[filter,opacity,transform] duration-150 ${own ? "justify-end origin-right" : "justify-start origin-left"} ${focusedMessageId ? focusedMessageId === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                 <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-3 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/45 via-red-950/20 to-transparent" : "bg-gradient-to-r from-white/20 via-white/5 to-transparent"}`} />
@@ -757,14 +754,14 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                     {reply ? <button type="button" aria-label="Jump to replied message" onPointerDown={(event) => { if (event.button === 0) event.preventDefault() }} onClick={(event) => { event.stopPropagation(); jumpToMessage(reply.id) }} className={`block w-full text-left focus-visible:outline focus-visible:outline-2 mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${own ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{reply.senderUserId === bootstrap.currentUser.id ? "You" : peopleById.get(reply.senderUserId)?.name ?? "Team member"}</p><p className="mt-0.5 truncate text-xs opacity-65">{messagePreview(reply)}</p></button> : null}
                                     {message.attachment ? <NativeAttachment key={message.attachment.storagePath} attachment={message.attachment} onOpenImage={setPreviewMedia} light={own} /> : null}
                                     {message.body ? <MessageText body={message.body} /> : null}
-                                    {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
+                                    {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={`${reaction.messageId}:${reaction.reactorUserId}`} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                     <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : own ? "text-neutral-500" : "text-neutral-600"}`}>
                                         {selected.kind === "team" ? <MessageReadAvatars readers={readers} /> : <span />}
                                         <span className="flex shrink-0 items-center gap-1.5">{message.editedAt ? <span>Edited</span> : null}<time>{messageTime(message.createdAt)}</time>{own ? <NativeDeliveryTicks message={message} read={readers.length > 0} /> : null}</span>
                                     </div>
                                 </NativeMessageBubble>
                             </div>
-                            {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
+                            {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={`${reaction.messageId}:${reaction.reactorUserId}`} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm">{reaction.emoji}</span>)}</div> : null}
                         </Fragment>
                     }) : selectedTypingPeople.length ? null : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Native Betelgeze messages update instantly.</p></div></div>}
                     {selectedTypingPeople.length ? <NativeTypingDots label={selectedTypingLabel} /> : null}</div></div>{showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "instant" }) }} /> : null}</div>

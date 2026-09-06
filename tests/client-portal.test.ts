@@ -181,8 +181,8 @@ test("the client portal mirrors the approved BE message interactions without mak
     const communicationInteractions = readFileSync("lib/communications/interactions.ts", "utf8")
     assert.match(communicationInteractions, /message\.provider === "client_portal"/u)
     assert.match(communicationsWorkspace, /const canInteract = clientMessageSupportsReaction\(message, reactionCutoff\)/u)
-    assert.match(communicationsWorkspace, /payload\.eventType === "DELETE"[\s\S]*messages\.filter\(\(message\) => message\.id !== messageId\)/u)
-    assert.match(communicationsWorkspace, /server snapshot is authoritative[\s\S]*message\.clientRequestId === message\.id/u)
+    assert.match(communicationsWorkspace, /payload\.eventType === "DELETE"[\s\S]*updates\.removeMessage\(messageId\)/u)
+    assert.match(communicationsWorkspace, /updates\.applySnapshot\(read, result\)/u)
 })
 
 test("portal attachment access stays relationship scoped without exposing storage paths", () => {

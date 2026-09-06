@@ -3,7 +3,7 @@
 import Link from "next/link"
 import Image from "next/image"
 import { ComposerFooter } from "@/components/communications/ComposerFooter"
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
@@ -21,6 +21,7 @@ import { NativeMessageBubble } from "@/components/communications/NativeMessageBu
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
+import { createCoordinatedChat, chatMutationRequest, ChatMutationError, type ChatRead } from "@/lib/communications/coordinated-updates"
 import { useMessagePaneInteractions } from "@/components/communications/useMessagePaneInteractions"
 import { useReliableCommunicationsRealtime, type CommunicationsConnectionState } from "@/components/communications/useReliableCommunicationsRealtime"
 import { SquarePill } from "@/components/ui"
@@ -99,6 +100,7 @@ function mergeMessages(current: CommunicationMessage[], incoming: CommunicationM
     for (const message of [...current, ...incoming]) {
         const requestKey = message.clientRequestId ? `request:${message.clientRequestId}` : `id:${message.id}`
         const existing = byKey.get(requestKey)
+        if (existing && existing.id !== existing.clientRequestId && message.id === message.clientRequestId) continue
         byKey.set(requestKey, existing ? { ...existing, ...message } : message)
     }
     return [...byKey.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
@@ -211,23 +213,6 @@ function mergeCursor(current: CommunicationReadCursor[], incoming: Communication
     return [...current.filter((cursor) => !(cursor.relationshipId === incoming.relationshipId && cursor.userId === incoming.userId)), incoming]
 }
 
-function mergeReaction(current: CommunicationReaction[], incoming: CommunicationReaction) {
-    return [...current.filter((reaction) => !(reaction.messageId === incoming.messageId && reaction.direction === incoming.direction)), incoming]
-}
-
-function reconcileConversations(current: ClientConversation[], incoming: ClientConversation[]) {
-    const currentById = new Map(current.map((conversation) => [conversation.id, conversation]))
-    return incoming.map((conversation) => ({
-        ...conversation,
-        // The server snapshot is authoritative during recovery. Preserve only
-        // optimistic sends which have not received their durable row yet.
-        messages: mergeMessages(
-            (currentById.get(conversation.id)?.messages ?? []).filter((message) => message.clientRequestId === message.id),
-            conversation.messages,
-        ),
-    })).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title))
-}
-
 export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateChange, onOpenTeam, onSelectedConversationChange, onUnreadCountChange, teamUnreadCount, conversationListWidth, onConversationListWidthChange }: {
     active: boolean
     bootstrap: CommunicationsBootstrap
@@ -240,7 +225,9 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     onConversationListWidthChange: (width: number) => void
 }) {
     const supabase = useMemo(() => createSupabaseBrowserClient(), [])
-    const [conversations, setConversations] = useState(bootstrap.conversations)
+    const [updates] = useState(() => createCoordinatedChat<CommunicationMessage, ClientConversation, CommunicationReaction>(bootstrap, (reaction) => `${reaction.messageId}:${reaction.direction}`))
+    const { conversations, reactions } = useSyncExternalStore(updates.subscribe, updates.getSnapshot, updates.getSnapshot)
+    const { setConversations } = updates
     const [schemaReady, setSchemaReady] = useState(bootstrap.schemaReady)
     const [selectedId, setSelectedId] = useState(bootstrap.selectedConversationId)
     const [search, setSearch] = useState("")
@@ -252,7 +239,6 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     const [actionMessageId, setActionMessageId] = useState<string | null>(null)
     const [actionView, setActionView] = useState<MessageActionView>("actions")
     const [recentReaction, setRecentReaction] = useState<string | null>(null)
-    const [reactions, setReactions] = useState(bootstrap.reactions)
     const [stickers, setStickers] = useState(bootstrap.stickers)
     const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
     const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
@@ -335,7 +321,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         return () => documents.forEach((ownerDocument) => ownerDocument.removeEventListener("pointerdown", dismiss, true))
     }, [actionMessageId])
 
-    const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[], animate = false) => {
+    const updateConversationMessages = useCallback((relationshipId: string, incoming: CommunicationMessage[], animate = false, read?: ChatRead, acknowledgement = false) => {
+        if (read) incoming = updates.mergeReadMessages(read, relationshipId, incoming, acknowledgement)
         const newMessages = incoming.filter((message) => !knownMessageKeysRef.current.has(messageAnimationKey(message)))
         incoming.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message)))
         if (animate && newMessages.length && selectedRef.current === relationshipId && messagePaneCanShowNewMessage(messagePaneRef.current, followLatestRef.current)) {
@@ -347,10 +334,10 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
             }, 320)
             messageAnimationTimersRef.current.push(timer)
         }
-        setConversations((current) => current.map((conversation) => conversation.id === relationshipId
+        if (!read) setConversations((current) => current.map((conversation) => conversation.id === relationshipId
             ? { ...conversation, messages: mergeMessages(conversation.messages, incoming) }
             : conversation).sort((left, right) => (right.messages.at(-1)?.createdAt ?? "").localeCompare(left.messages.at(-1)?.createdAt ?? "") || left.title.localeCompare(right.title)))
-    }, [])
+    }, [setConversations, updates])
 
     const persistReadCursor = useCallback(async (cursor: CommunicationReadCursor) => {
         pendingReadRef.current = cursor
@@ -430,21 +417,16 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     async function togglePinnedMessage(message: CommunicationMessage) {
         if (!selected) return
         const relationshipId = selected.id
-        const previous = selected.pinnedMessageId
-        const pinnedMessageId = previous === message.id ? null : message.id
+        const pinnedMessageId = selected.pinnedMessageId === message.id ? null : message.id
         setActionMessageId(null)
         setInteractionError(null)
-        setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId } : conversation))
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/pins`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ relationshipId, messageId: pinnedMessageId }),
-        }).catch(() => null)
-        if (!response?.ok) {
-            setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId: previous } : conversation))
-            const result = response ? await response.json().catch(() => null) as { error?: string } | null : null
-            setInteractionError(result?.error ?? "Could not update the pinned message.")
-        }
+        try {
+            await updates.mutatePin(relationshipId, pinnedMessageId, async () => {
+                const result = await chatMutationRequest<{ pinnedMessageId: string | null }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/pins`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId, messageId: pinnedMessageId }) })
+                if (result.pinnedMessageId !== pinnedMessageId) throw new ChatMutationError("Could not confirm the pinned message.", true)
+            })
+        } catch (error) { setInteractionError(error instanceof Error ? error.message : "Could not pin message.") }
+        finally { void synchronize().catch(() => undefined) }
     }
 
     function jumpToMessage(messageId: string) {
@@ -596,6 +578,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         setStickerTrayOpen(false)
         setReplyingTo(null)
         setInteractionError(null)
+        const acknowledgementRead = updates.beginRead()
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -606,35 +589,24 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
             return
         }
         const result = await response.json().catch(() => null) as { message?: CommunicationMessage; error?: string; retryable?: boolean } | null
-        if (result?.message) updateConversationMessages(selected.id, [result.message])
+        if (result?.message) updateConversationMessages(selected.id, [result.message], false, acknowledgementRead, true)
         else updateConversationMessages(selected.id, [{ ...optimistic, status: result?.retryable ? "send_failed" : "send_uncertain", error: result?.error ?? "Could not send sticker", failedAt: result?.retryable ? new Date().toISOString() : null }])
     }
 
     async function sendReaction(message: CommunicationMessage, emoji: string) {
         if (!selected || !message.providerMessageId) return
-        const previous = reactions.find((reaction) => reaction.messageId === message.id && reaction.direction === "outbound") ?? null
-        const optimistic: CommunicationReaction | null = emoji ? {
-            id: previous?.id ?? `optimistic:${message.id}`,
-            relationshipId: selected.id,
-            messageId: message.id,
-            direction: "outbound",
-            emoji,
-            reactorUserId: bootstrap.currentUser.id,
-            updatedAt: new Date().toISOString(),
-        } : null
-        setReactions((current) => optimistic ? mergeReaction(current, optimistic) : current.filter((reaction) => !(reaction.messageId === message.id && reaction.direction === "outbound")))
+        const relationshipId = selected.id
+        const optimistic: CommunicationReaction | null = emoji ? { id: `optimistic:${message.id}`, relationshipId, messageId: message.id, direction: "outbound", reactorUserId: bootstrap.currentUser.id, emoji, updatedAt: new Date().toISOString() } : null
         setActionMessageId(null)
         setInteractionError(null)
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/reactions`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ relationshipId: selected.id, messageId: message.id, emoji }),
-        }).catch(() => null)
-        const result = response ? await response.json().catch(() => null) as { reaction?: CommunicationReaction | null; error?: string } | null : null
-        if (!response?.ok) {
-            setReactions((current) => previous ? mergeReaction(current, previous) : current.filter((reaction) => !(reaction.messageId === message.id && reaction.direction === "outbound")))
-            setInteractionError(result?.error ?? "Could not send this reaction.")
-        } else if (result?.reaction) setReactions((current) => mergeReaction(current, result.reaction!))
+        try {
+            await updates.mutateReaction(`${message.id}:outbound`, optimistic, async () => {
+                const result = await chatMutationRequest<{ reaction: CommunicationReaction | null }>(`/api/workspaces/${bootstrap.workspaceSlug}/communications/reactions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId, messageId: message.id, emoji }) })
+                if (!("reaction" in result)) throw new ChatMutationError("Could not confirm the reaction.", true)
+                return result.reaction
+            })
+        } catch (error) { setInteractionError(error instanceof Error ? error.message : "Could not send reaction.") }
+        finally { void synchronize().catch(() => undefined) }
     }
 
     useEffect(() => {
@@ -651,27 +623,41 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     useEffect(() => {
         if (!selectedId) return
         const controller = new AbortController()
+        const read = updates.beginRead()
         void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages?relationshipId=${encodeURIComponent(selectedId)}`, { signal: controller.signal })
             .then(async (response) => response.ok ? response.json() as Promise<{ messages?: CommunicationMessage[] }> : null)
-            .then((result) => { if (result?.messages) updateConversationMessages(selectedId, result.messages) })
+            .then((result) => { if (result?.messages) updateConversationMessages(selectedId, result.messages, false, read) })
             .catch(() => undefined)
         return () => controller.abort()
-    }, [bootstrap.workspaceSlug, selectedId, updateConversationMessages])
+    }, [bootstrap.workspaceSlug, selectedId, updateConversationMessages, updates])
 
     useEffect(() => {
         if (!selectedId || !followLatestRef.current) return
         window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 }))
     }, [selected?.messages.length, selectedId])
 
+    const synchronize = useCallback(async () => {
+        const read = updates.beginRead()
+        const conversationId = selectedRef.current
+        const search = conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ""
+        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/sync${search}`, { cache: "no-store" })
+        const result = await response.json().catch(() => null) as CommunicationsBootstrap | { error?: string } | null
+        if (!response.ok || !result || !("conversations" in result)) throw new Error(result && "error" in result ? result.error ?? "Could not check for missed messages." : "Could not check for missed messages.")
+        result.conversations.forEach((conversation) => conversation.messages.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message))))
+        setSchemaReady(result.schemaReady)
+        if (!updates.applySnapshot(read, result)) return
+        setReadCursors((current) => result.readCursors.reduce((next, cursor) => mergeCursor(next, cursor), current))
+        setStickers(result.stickers)
+        await flushPendingRead()
+    }, [bootstrap.workspaceSlug, flushPendingRead, updates])
+
     const registerRealtime = useCallback((channel: ReturnType<typeof supabase.channel>) => channel
                 .on("postgres_changes", { event: "*", schema: "public", table: "client_messages", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     if (payload.eventType === "DELETE") {
                         const deleted = record(payload.old)
-                        const relationshipId = stringValue(deleted.relationship_id)
                         const messageId = stringValue(deleted.id)
-                        if (relationshipId && messageId) {
-                            setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, messages: conversation.messages.filter((message) => message.id !== messageId) } : conversation))
-                            setReactions((current) => current.filter((reaction) => reaction.messageId !== messageId))
+                        if (messageId) {
+                            updates.removeMessage(messageId)
                             setReplyingTo((current) => current?.id === messageId ? null : current)
                             setActionMessageId((current) => current === messageId ? null : current)
                         }
@@ -701,9 +687,10 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                             } : conversation))
                             return
                         }
+                        const read = updates.beginRead()
                         if (relationshipId && messageId) void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages?relationshipId=${encodeURIComponent(relationshipId)}&messageId=${encodeURIComponent(messageId)}`, { cache: "no-store" })
                             .then(async (response) => response.ok ? response.json() as Promise<{ message?: CommunicationMessage }> : null)
-                            .then((result) => { if (result?.message) updateConversationMessages(relationshipId, [result.message], true) })
+                            .then((result) => { if (result?.message) updateConversationMessages(relationshipId, [result.message], true, read) })
                             .catch(() => undefined)
                     }
                 })
@@ -742,33 +729,18 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                         const deleted = record(payload.old)
                         const messageId = stringValue(deleted.client_message_id)
                         const direction = deleted.direction
-                        if (messageId && (direction === "inbound" || direction === "outbound")) setReactions((current) => current.filter((reaction) => !(reaction.messageId === messageId && reaction.direction === direction)))
+                        if (messageId && (direction === "inbound" || direction === "outbound")) updates.receiveReaction(`${messageId}:${direction}`, null, stringValue(deleted.updated_at) ?? undefined)
                         return
                     }
                     const reaction = realtimeReaction(payload.new)
-                    if (reaction) setReactions((current) => mergeReaction(current, reaction))
+                    if (reaction) updates.receiveReaction(`${reaction.messageId}:${reaction.direction}`, reaction)
                 })
                 .on("postgres_changes", { event: "UPDATE", schema: "public", table: "relationships", filter: `workspace_id=eq.${bootstrap.workspaceId}` }, (payload) => {
                     const row = record(payload.new)
                     const relationshipId = stringValue(row.id)
                     if (!relationshipId || !("communication_pinned_message_id" in row)) return
-                    setConversations((current) => current.map((conversation) => conversation.id === relationshipId ? { ...conversation, pinnedMessageId: stringValue(row.communication_pinned_message_id) } : conversation))
-                }), [bootstrap.workspaceId, bootstrap.workspaceSlug, supabase, updateConversationMessages])
-
-    const synchronize = useCallback(async () => {
-        const conversationId = selectedRef.current
-        const search = conversationId ? `?conversation=${encodeURIComponent(conversationId)}` : ""
-        const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/sync${search}`, { cache: "no-store" })
-        const result = await response.json().catch(() => null) as CommunicationsBootstrap | { error?: string } | null
-        if (!response.ok || !result || !("conversations" in result)) throw new Error(result && "error" in result ? result.error ?? "Could not check for missed messages." : "Could not check for missed messages.")
-        result.conversations.forEach((conversation) => conversation.messages.forEach((message) => knownMessageKeysRef.current.add(messageAnimationKey(message))))
-        setSchemaReady(result.schemaReady)
-        setConversations((current) => reconcileConversations(current, result.conversations))
-        setReadCursors((current) => result.readCursors.reduce((next, cursor) => mergeCursor(next, cursor), current))
-        setReactions(result.reactions)
-        setStickers(result.stickers)
-        await flushPendingRead()
-    }, [bootstrap.workspaceSlug, flushPendingRead])
+                    if (updates.getSnapshot().conversations.find((conversation) => conversation.id === relationshipId)?.pinnedMessageId !== stringValue(row.communication_pinned_message_id)) void synchronize().catch(() => undefined)
+                }), [bootstrap.workspaceId, bootstrap.workspaceSlug, supabase, updateConversationMessages, setConversations, updates, synchronize])
 
     const connection = useReliableCommunicationsRealtime({
         active,
@@ -881,13 +853,14 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
             setReplyingTo(null)
             localStorage.removeItem(`betelgeze:communications:draft:${bootstrap.workspaceId}:${selected.id}`)
         }
+        const acknowledgementRead = updates.beginRead()
         const response = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ relationshipId: selected.id, body: typedBody, attachment: messageAttachment, replyToMessageId: replyMessageId, clientRequestId, retry: Boolean(messageToRetry) }) }).catch(() => null)
         if (!response) {
             updateConversationMessages(selected.id, [{ ...optimistic, status: "send_uncertain", error: "Delivery is being confirmed." }])
             return
         }
         const result = await response.json().catch(() => null) as { message?: CommunicationMessage; error?: string; retryable?: boolean } | null
-        if (result?.message) updateConversationMessages(selected.id, [result.message])
+        if (result?.message) updateConversationMessages(selected.id, [result.message], false, acknowledgementRead, true)
         else if (!response.ok) updateConversationMessages(selected.id, [{ ...optimistic, status: result?.retryable ? "send_failed" : "send_uncertain", error: result?.error ?? "Could not send message", failedAt: result?.retryable ? new Date().toISOString() : null }])
     }
 
@@ -964,7 +937,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                             const canPin = message.clientRequestId !== message.id
                             const showActions = actionMessageId === message.id
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
-                            return <Fragment key={message.id}>
+                            return <Fragment key={messageAnimationKey(message)}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
                                 <div data-message-interaction={message.id} className={`relative flex items-center gap-2 transition-[filter,opacity,transform] duration-150 ${message.direction === "outbound" ? "justify-end origin-right" : "justify-start origin-left"} ${replyingTo ? replyingTo.id === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
@@ -1029,14 +1002,14 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                         {message.replyToMessageId || message.replyToProviderMessageId ? <button type="button" disabled={!repliedMessage} aria-label="Jump to replied message" onPointerDown={(event) => { if (event.button === 0) event.preventDefault() }} onClick={(event) => { event.stopPropagation(); if (repliedMessage) jumpToMessage(repliedMessage.id) }} className={`block w-full text-left disabled:cursor-default focus-visible:outline focus-visible:outline-2 mb-2 rounded-lg border-l-2 px-2.5 py-2 ${isWhatsAppClientMessage ? "border-white/40 bg-black/20" : message.direction === "outbound" ? "border-neutral-500 bg-black/10" : "border-neutral-500 bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></button> : null}
                                         {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={message.direction === "outbound"} whiteOnColor={isWhatsAppClientMessage} /> : null}
                                         {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
-                                        {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${message.direction === "outbound" ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
+                                        {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${message.direction === "outbound" ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={`${reaction.messageId}:${reaction.direction}`} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                         <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : isWhatsAppClientMessage ? "text-white/65" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><MessageReadAvatars readers={readers} /><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
                                         {message.error ? <p className={`mt-1 text-[10px] ${message.status === "send_failed" || message.status === "delivery_failed" ? "text-red-600" : "text-amber-700"}`}>{message.error}</p> : null}
                                         {["send_failed", "partial_sent"].includes(message.status) && message.clientRequestId ? <button type="button" onClick={() => void sendMessage(message)} className="mt-2 text-xs font-semibold underline underline-offset-2">Retry failed channel{message.status === "partial_sent" ? "" : "s"}</button> : null}
                                     </NativeMessageBubble>
                                     {message.direction === "inbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-popup-enter absolute bottom-full left-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="left" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
                                 </div>
-                                {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
+                                {!isSticker && messageReactions.length ? <div className={`flex gap-1 px-1 ${message.direction === "outbound" ? "justify-end" : "justify-start"}`}>{messageReactions.map((reaction) => <span key={`${reaction.messageId}:${reaction.direction}`} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                             </Fragment>
                         }) : <div className="flex min-h-64 items-center justify-center text-center"><div><p className="text-sm font-medium text-neutral-300">Start the conversation</p><p className="mt-2 text-xs text-neutral-600">Messages sent here use this relationship&apos;s connected SMS and WhatsApp channels.</p></div></div>}</div>
                     </div>
