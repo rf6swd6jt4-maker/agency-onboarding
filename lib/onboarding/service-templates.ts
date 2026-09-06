@@ -35,6 +35,7 @@ export type ServiceTemplateDefinition = {
 
 const metaAdsThumbnail = "/service-templates/meta-ads.png"
 const appointmentSettingThumbnail = "/service-templates/appointment-setting.png"
+const googleAdsThumbnail = "/service-templates/google-ads.svg"
 
 export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
     id: "meta-ads",
@@ -81,4 +82,22 @@ export const SERVICE_TEMPLATES: readonly ServiceTemplateDefinition[] = [{
         { kind: "appointment_medium", label: "Appointment medium" },
         { kind: "appointment_fields", label: "Appointment information" },
     ],
+}, {
+    id: "google-ads",
+    name: "Google Ads",
+    description: "Connect your agency’s Google Ads manager account.",
+    thumbnail: { src: googleAdsThumbnail, alt: "Google Ads service cover" },
+    serviceDefaults: {
+        name: "Google Ads",
+        description: "Plan, launch, and manage Google Ads campaigns.",
+        thumbnailSrc: googleAdsThumbnail,
+        serviceType: "retainer",
+        recurringName: "Google Ads management",
+        recurringDescription: "Ongoing planning, launch, and management of Google Ads campaigns.",
+        defaultBillingInterval: "month",
+        defaultBillingIntervalCount: 1,
+    },
+    setup: { kind: "connection", connectionKey: "google_ads" },
+    capabilities: ["onboarding.manage", "fulfilment.manage"],
+    onboardingBlocks: [],
 }]

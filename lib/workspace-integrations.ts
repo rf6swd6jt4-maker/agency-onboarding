@@ -2,9 +2,10 @@ import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes }
 import { getRequiredEnv } from "@/lib/env"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { stripeAccountMode } from "@/lib/stripe/mode"
+import { verifyGoogleAdsManager } from "@/lib/google-ads"
 
 export const BASE_INTEGRATION_PROVIDERS = ["stripe", "meta_whatsapp", "twilio_sms"] as const
-export const INTEGRATION_PROVIDERS = [...BASE_INTEGRATION_PROVIDERS, "meta_ads"] as const
+export const INTEGRATION_PROVIDERS = [...BASE_INTEGRATION_PROVIDERS, "meta_ads", "google_ads"] as const
 export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number]
 export type IntegrationConfig = Record<string, string>
 export type ConnectionAuthMethod = "legacy" | "oauth" | "embedded_signup" | "manual"
@@ -65,6 +66,10 @@ function cleanConfig(config: IntegrationConfig) {
 }
 
 export function integrationHint(provider: IntegrationProvider, config: IntegrationConfig): Record<string, string | null> {
+    if (provider === "google_ads") return {
+        manager_customer_id: config.manager_customer_id || null,
+        service_account_email: config.client_email || null,
+    }
     if (provider === "stripe") return {
         key_suffix: (config.access_token || config.secret_key)?.slice(-4) ?? null,
         currency: config.default_currency || "usd",
@@ -165,6 +170,7 @@ async function candidateConfig(workspaceId: string, provider: IntegrationProvide
     if (error || !data?.candidate_config_encrypted) throw new Error(error?.message ?? "No connection is waiting to be verified.")
     return {
         config: decryptWorkspaceIntegration(data.candidate_config_encrypted),
+        encrypted: data.candidate_config_encrypted as string,
         authMethod: data.candidate_auth_method as Exclude<ConnectionAuthMethod, "legacy">,
     }
 }
@@ -478,6 +484,7 @@ async function verifyTwilioCandidate(config: IntegrationConfig) {
 }
 
 async function verifyCandidate(provider: IntegrationProvider, config: IntegrationConfig) {
+    if (provider === "google_ads") return verifyGoogleAdsManager(config)
     if (provider === "stripe") return verifyStripeCandidate(config)
     if (provider === "meta_whatsapp") return verifyWhatsAppCandidate(config)
     if (provider === "meta_ads") return verifyMetaAdsCandidate(config)
@@ -494,6 +501,8 @@ export async function verifyAndActivateWorkspaceIntegrationCandidate(workspaceId
                 ? (hint as Record<string, unknown>).waba_id
                 : provider === "meta_ads"
                     ? (hint as Record<string, unknown>).business_id
+                    : provider === "google_ads"
+                        ? (hint as Record<string, unknown>).manager_customer_id
                     : (hint as Record<string, unknown>).account_sid
         if (typeof externalAccountId === "string" && externalAccountId) {
             const { data: alreadyConnected, error: connectedLookupError } = await supabaseAdmin.from("workspace_integrations")
@@ -506,7 +515,12 @@ export async function verifyAndActivateWorkspaceIntegrationCandidate(workspaceId
                 .limit(1)
                 .maybeSingle()
             if (connectedLookupError) throw new Error(`Betelgeze could not confirm that this provider account is unique: ${connectedLookupError.message}`)
-            if (alreadyConnected) throw new Error(`This ${provider === "stripe" ? "Stripe" : provider === "meta_whatsapp" ? "WhatsApp" : provider === "meta_ads" ? "Meta Business Portfolio" : "Twilio"} account is already connected to another Betelgeze workspace.`)
+            if (alreadyConnected) throw new Error(`This ${provider === "stripe" ? "Stripe" : provider === "meta_whatsapp" ? "WhatsApp" : provider === "meta_ads" ? "Meta Business Portfolio" : provider === "google_ads" ? "Google Ads manager" : "Twilio"} account is already connected to another Betelgeze workspace.`)
+        }
+        if (provider === "google_ads") {
+            const activation = await supabaseAdmin.rpc("activate_google_ads_manager_candidate", { p_workspace_id: workspaceId, p_expected_candidate: candidate.encrypted, p_verified_hint: hint })
+            if (activation.error) throw new Error(activation.error.message)
+            return hint
         }
         const hintUpdate = await supabaseAdmin.from("workspace_integrations").update({ candidate_config_hint: hint }).eq("workspace_id", workspaceId).eq("provider", provider)
         if (hintUpdate.error) throw new Error(hintUpdate.error.message)
@@ -541,6 +555,11 @@ export async function restorePreviousWorkspaceIntegration(workspaceId: string, p
 
 export async function disconnectWorkspaceIntegration(workspaceId: string, provider: IntegrationProvider) {
     const { error } = await supabaseAdmin.from("workspace_integrations").update({
+        ...(provider === "google_ads" ? {
+            candidate_config_encrypted: null, candidate_config_hint: {}, candidate_auth_method: null,
+            candidate_configured_at: null, candidate_configured_by: null,
+            previous_config_encrypted: null, previous_config_hint: null, previous_auth_method: null, previous_mode: null,
+        } : {}),
         enabled: false,
         mode: "disabled",
         connection_status: "not_connected",
@@ -607,6 +626,7 @@ export async function requireLegacyProviderAccess(workspaceId: string, provider:
 }
 
 function legacyConfig(provider: IntegrationProvider): IntegrationConfig {
+    if (provider === "google_ads") throw new Error("Connect the Google Ads manager account in Workspace Settings.")
     if (provider === "stripe") return {
         secret_key: getRequiredEnv("STRIPE_SECRET_KEY"),
         webhook_secret: getRequiredEnv("STRIPE_WEBHOOK_SECRET"),

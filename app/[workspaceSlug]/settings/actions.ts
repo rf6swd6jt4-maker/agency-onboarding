@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { requireWorkspace } from "@/lib/workspaces"
+import { googleAdsConfigFromForm } from "@/lib/google-ads"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { storeWorkspaceImage } from "@/lib/onboarding/uploads"
 import {
@@ -147,8 +148,10 @@ export async function saveWorkspaceConnection(slug: string, provider: Integratio
         meta_whatsapp: ["access_token", "phone_number_id", "webhook_verify_token"],
         twilio_sms: ["account_sid", "auth_token", "phone_number"],
         meta_ads: [],
+        google_ads: [],
     }
     if (provider === "meta_ads") throw new Error("Meta Ads must be connected through the Betelgeze Meta App.")
+    if (provider === "google_ads") throw new Error("Use Save and verify to connect the Google Ads manager account.")
     if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in all required connection details before saving.")
     await saveWorkspaceIntegration(workspace.id, provider, config, user.id)
     refresh(slug)
@@ -179,12 +182,22 @@ export async function stageManualWorkspaceConnection(slug: string, provider: Int
     return connectionAction(async () => {
         if (!INTEGRATION_PROVIDERS.includes(provider)) throw new Error("Unknown connection.")
         const { workspace, user } = await requireWorkspace(slug, "owner")
+        if (provider === "google_ads") {
+            const { data: installed, error: lookupError } = await supabaseAdmin.from("workspace_integrations").select("provider").eq("workspace_id", workspace.id).eq("provider", "google_ads").maybeSingle()
+            if (lookupError || !installed) throw new Error("Create a service using the Google Ads template before connecting your manager account.")
+            const googleConfig = await googleAdsConfigFromForm(formData)
+            await stageWorkspaceIntegrationCandidate({ workspaceId: workspace.id, provider, config: googleConfig, authMethod: "manual", userId: user.id })
+            await verifyAndActivateWorkspaceIntegrationCandidate(workspace.id, provider)
+            refresh(slug)
+            return
+        }
         const config = Object.fromEntries([...formData.entries()].filter(([, value]) => typeof value === "string")) as Record<string, string>
         const required: Record<IntegrationProvider, string[]> = {
             stripe: ["secret_key", "webhook_secret"],
             meta_whatsapp: ["access_token", "phone_number_id", "waba_id", "consent_template_name"],
             twilio_sms: ["account_sid", "auth_token", "phone_number"],
             meta_ads: [],
+            google_ads: [],
         }
         if (provider === "meta_ads") throw new Error("Meta Ads must be connected through the Betelgeze Meta App.")
         if (required[provider].some((key) => !config[key]?.trim())) throw new Error("Fill in every required connection detail before continuing.")

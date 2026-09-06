@@ -156,7 +156,7 @@ export function normalizeServiceDefinition(input: unknown) {
     const templateId = cleanText(value.templateId, 120) || null
     const requiredConnectionKeys = (Array.isArray(value.requiredConnectionKeys) ? value.requiredConnectionKeys : [])
         .map((key) => cleanText(key, 120))
-        .filter((key): key is string => key === "meta_ads")
+        .filter((key): key is string => key === "meta_ads" || key === "google_ads")
     return {
         ok: true as const,
         definition: {

@@ -68,3 +68,30 @@ Both popups include **Use manual credentials**. This uses the same candidate,
 verification, activation, runtime, webhook and rollback code as OAuth/Embedded
 Signup. It is suitable for Scaylup testing while provider app reviews are still
 pending; it is not a separate legacy mode.
+
+## Google Ads manager account
+
+Creating a service from the Google Ads template adds the optional `google_ads`
+connection in Settings. Apply `20260906230000_google_ads_manager_connection.sql`
+before deploying it. Existing workspaces are not given a connection until they
+use the template. This phase does not add onboarding blocks or portal metrics.
+
+The workspace owner connects using the production manager customer ID, a
+developer token with Explorer/Basic/Standard access, and a Google Cloud service
+account JSON key. Enable Google Ads API in that project and grant the service
+account email Read-only access to the manager in Google Ads. No client-facing
+OAuth app or new platform environment variables are needed for this flow.
+
+The server whitelists the required credential fields, ignores uploaded endpoint
+URLs, encrypts credentials with the existing workspace integration key, and
+exchanges a signed RS256 assertion at Google's fixed token endpoint. A v25
+read-only query verifies that the selected account is a production manager.
+Connection hints contain only manager identity, service account email, currency,
+time zone, verification time and verified capabilities. A failed replacement
+does not replace active credentials. Activation locks and compares the verified
+candidate; a unique index prevents sharing one active manager across workspaces.
+Disconnect removes active, pending and rollback credentials for Google Ads.
+
+References: [service accounts](https://developers.google.com/google-ads/api/docs/oauth/service-accounts),
+[server authentication](https://developers.google.com/identity/protocols/oauth2/service-account),
+[API calls](https://developers.google.com/google-ads/api/docs/concepts/call-structure).

@@ -6,7 +6,7 @@ import { SERVICE_TEMPLATES } from "../lib/onboarding/service-templates.ts"
 const servicesUi = readFileSync("components/settings/ServiceCatalogue.tsx", "utf8")
 
 test("the service template catalogue starts with the Meta Ads template", () => {
-    assert.equal(SERVICE_TEMPLATES.length, 2)
+    assert.equal(SERVICE_TEMPLATES.length, 3)
     const [metaAds, appointmentSetting] = SERVICE_TEMPLATES
     assert.equal(metaAds.id, "meta-ads")
     assert.equal(metaAds.name, "Meta Ads")
@@ -24,6 +24,14 @@ test("the service template catalogue starts with the Meta Ads template", () => {
     assert.deepEqual(appointmentSetting.capabilities, ["onboarding.manage", "fulfilment.manage", "appointment_setting.manage"])
     assert.deepEqual(appointmentSetting.onboardingBlocks.map((block) => block.kind), ["appointment_medium", "appointment_fields"])
     assert.equal(existsSync(`public${appointmentSetting.thumbnail.src}`), true)
+})
+
+test("Google Ads installs a manager connection without onboarding blocks", () => {
+    const googleAds = SERVICE_TEMPLATES.find((template) => template.id === "google-ads")!
+    assert.equal(googleAds.name, "Google Ads")
+    assert.deepEqual(googleAds.setup, { kind: "connection", connectionKey: "google_ads" })
+    assert.deepEqual(googleAds.onboardingBlocks, [])
+    assert.equal(existsSync(`public${googleAds.thumbnail.src}`), true)
 })
 
 test("New service opens templates and the first card reaches the preserved custom editor", () => {

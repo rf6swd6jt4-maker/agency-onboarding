@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640">
+  <rect width="960" height="640" fill="#f5f6f7"/>
+  <g transform="translate(330 102)">
+    <path d="M150 54 38 247" stroke="#fbbc04" stroke-width="76" stroke-linecap="round"/>
+    <path d="M150 54 262 247" stroke="#4285f4" stroke-width="76" stroke-linecap="round"/>
+    <circle cx="38" cy="247" r="38" fill="#34a853"/>
+  </g>
+  <text x="480" y="474" fill="#3c4043" font-family="Arial, sans-serif" font-size="62" text-anchor="middle">Google Ads</text>
+</svg>
