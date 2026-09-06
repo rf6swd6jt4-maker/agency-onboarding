@@ -204,3 +204,18 @@ test("tab identity survives query navigation but never leaks to a different reco
     assert.equal(workspaceTabDisplayTitle({ ...tab, url: "/scaylup/relationships", title: "Relationships" }), "Relationships")
     assert.equal(workspaceTabDisplayTitle({ ...tab, recordTitle: { ...tab.recordTitle, title: "Jane Jones" } }), "Jane Jones")
 })
+
+
+test("Communications titles use the selected chat and never leak between modes or conversations", () => {
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/communications?conversation=1", "scaylup", "Jane Smith"), "Chat · Jane Smith")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/communications?mode=team&nativeConversation=2", "scaylup", "Delivery Team"), "Chat · Delivery Team")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/communications", "scaylup", ""), "")
+    const tab = { title: "Communications", url: "/scaylup/communications?conversation=1", recordTitle: { url: "/scaylup/communications?mode=clients&conversation=1", title: "Chat · Jane Smith" } }
+    assert.equal(workspaceTabDisplayTitle(tab), "Chat · Jane Smith")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, url: "/scaylup/communications?conversation=2" }), "Communications")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, url: "/scaylup/communications?mode=team&nativeConversation=1" }), "Communications")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, url: "/scaylup/communications" }), "Communications")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, customTitle: "Inbox" }), "Inbox")
+    const teamTab = { ...tab, url: "/scaylup/communications?mode=team&nativeConversation=2&conversation=8", recordTitle: { url: "/scaylup/communications?mode=team&nativeConversation=2&conversation=1", title: "Chat · Delivery Team" } }
+    assert.equal(workspaceTabDisplayTitle(teamTab), "Chat · Delivery Team")
+})

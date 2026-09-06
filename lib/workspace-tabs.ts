@@ -228,7 +228,9 @@ export type WorkspaceTabRecordTitle = { url: string; title: string }
 
 export function workspaceTabRecordTitleForUrl(value: string, workspaceSlug: string, name: string) {
     const title = name.trim().replace(/\s+/g, " ").slice(0, 160)
-    if (!title || !workspaceRouteIsRecordDetail(value, workspaceSlug, "http://localhost")) return ""
+    if (!title) return ""
+    if (workspaceTabIsCommunications(value, workspaceSlug, "http://localhost")) return `Chat · ${title}`
+    if (!workspaceRouteIsRecordDetail(value, workspaceSlug, "http://localhost")) return ""
     const category = workspaceTabTitleForUrl(value, workspaceSlug)
     const context = category === "Onboarding Detail" ? "Onboarding"
         : category === "Fulfilment Detail" ? "Fulfilment"
@@ -236,9 +238,19 @@ export function workspaceTabRecordTitleForUrl(value: string, workspaceSlug: stri
     return context ? `${title} · ${context}` : title
 }
 
+function workspaceTabTitleIdentity(value: string) {
+    const url = new URL(value, "http://localhost")
+    if (!url.pathname.endsWith("/communications")) return url.pathname
+    const team = url.searchParams.get("mode") === "team"
+    const conversation = team
+        ? url.searchParams.get("nativeConversation") || url.searchParams.get("dm") || ""
+        : url.searchParams.get("conversation") || ""
+    return JSON.stringify([url.pathname, team ? "team" : "clients", conversation])
+}
+
 export function workspaceTabDisplayTitle(tab: { title: string; customTitle?: string; url: string; recordTitle?: WorkspaceTabRecordTitle }) {
     if (tab.customTitle) return tab.customTitle
-    if (tab.recordTitle?.title && new URL(tab.recordTitle.url, "http://localhost").pathname === new URL(tab.url, "http://localhost").pathname) {
+    if (tab.recordTitle?.title && workspaceTabTitleIdentity(tab.recordTitle.url) === workspaceTabTitleIdentity(tab.url)) {
         return tab.recordTitle.title
     }
     return tab.title

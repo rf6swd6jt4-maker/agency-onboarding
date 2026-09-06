@@ -672,7 +672,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         ? `${selectedTypingPeople.map((person) => person.name).join(", ")} are typing`
         : `${selectedTypingPeople[0]?.name ?? selected?.title ?? "Someone"} is typing`
 
-    return <section aria-label="Team communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
+    return <section data-workspace-record-title={active ? selected?.title : undefined} aria-label="Team communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
         {!schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">Apply the Teams database migration to enable native messaging.</div> : null}
         <ResizableConversationColumns listWidth={conversationListWidth} onListWidthChange={onConversationListWidthChange}>
             <aside className={`${selected ? "hidden lg:flex" : "flex"} min-h-0 flex-col border-r border-neutral-800 bg-neutral-950`}>

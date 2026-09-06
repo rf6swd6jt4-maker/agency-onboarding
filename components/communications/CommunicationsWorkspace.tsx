@@ -896,7 +896,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     const pinnedMessage = selected?.pinnedMessageId ? selected.messages.find((message) => message.id === selected.pinnedMessageId) ?? null : null
     const pinnedPreview = pinnedMessage ? messagePreview(pinnedMessage).split(/\r?\n/, 1)[0] : selected?.pinnedMessageId ? "Pinned message unavailable" : null
 
-    return <section aria-label="Client communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
+    return <section data-workspace-record-title={active ? selected?.title : undefined} aria-label="Client communications" className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-black">
         {!schemaReady ? <div className="shrink-0 border-b border-amber-900 bg-amber-950 px-4 py-2 text-center text-xs text-amber-100">The Communications database update must be applied before live sending and read tracking are available.</div> : null}
 
         <ResizableConversationColumns listWidth={conversationListWidth} onListWidthChange={onConversationListWidthChange}>
