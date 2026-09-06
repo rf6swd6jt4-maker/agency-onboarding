@@ -635,6 +635,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     async function deleteMessage(message: NativeMessage) {
         if (!selected?.canWrite || message.clientRequestId === message.id || message.conversationId !== selected.id || !selected.messages.some((candidate) => candidate.id === message.id)) return
+        closeWorkspaceComposer(composerRef.current)
         if (!window.confirm(message.senderUserId === bootstrap.currentUser.id ? "Delete this message? This cannot be undone." : "Remove this message for everyone? This cannot be undone.")) return
         const conversationId = selected.id
         setActionMessageId(null)
@@ -653,6 +654,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     async function clearPrivateChat() {
         if (!selected || selected.kind !== "direct") return
+        closeWorkspaceComposer(composerRef.current)
         if (!window.confirm("Clear this private chat from your view? The other participant will keep their history.")) return
         const conversationId = selected.id
         let request: Promise<{ cleared: boolean }> | undefined
