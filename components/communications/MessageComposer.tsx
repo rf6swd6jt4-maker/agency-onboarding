@@ -83,7 +83,7 @@ export function MessageComposer({
                     }}
                     disabled={disabled}
                     aria-label={placeholder}
-                    className="relative h-11 min-h-11 w-full resize-none overscroll-y-none overflow-y-hidden bg-transparent py-2.5 text-base leading-6 outline-none transition-[height] duration-[180ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transition-none disabled:cursor-not-allowed lg:h-9 lg:min-h-9 lg:py-2 lg:text-sm lg:leading-5"
+                    className="relative block h-11 min-h-11 w-full resize-none overscroll-y-none overflow-y-hidden bg-transparent py-2.5 text-base leading-6 outline-none transition-[height] duration-[180ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transition-none disabled:cursor-not-allowed lg:h-9 lg:min-h-9 lg:py-2 lg:text-sm lg:leading-5"
                 />
             </div>
             <button data-icon-button type="submit" disabled={sendDisabled} aria-label={submitLabel} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-black disabled:bg-neutral-800 disabled:text-neutral-600 lg:h-9 lg:w-9">
