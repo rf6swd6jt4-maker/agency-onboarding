@@ -55,7 +55,7 @@ import {
     type WorkspaceTabParentMessage,
     type WorkspaceTabRelationshipContext,
 } from "@/lib/workspace-tabs"
-import { persistWorkspaceLaunchHint, type WorkspaceShellBootstrapTiming } from "@/lib/workspace-launch"
+import { persistWorkspaceLaunchHint, workspaceLaunchUrlForRestore, type WorkspaceShellBootstrapTiming } from "@/lib/workspace-launch"
 import { markWorkspaceLaunch, reportWorkspaceLaunch } from "@/lib/workspace-launch-performance"
 import type { WorkspaceCreateTarget } from "@/components/workspace/WorkspaceCreateModal"
 
@@ -546,7 +546,11 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
     const saveTabsState = useCallback((nextTabs: WorkspaceTab[], nextActiveId: string) => {
         sessionStorage.setItem(tabsStorageKey, JSON.stringify({ mode: "live", tabs: nextTabs, activeId: nextActiveId }))
         const active = nextTabs.find((tab) => tab.id === nextActiveId)
-        if (active) persistWorkspaceLaunchHint({ workspaceSlug: workspace.slug, tabId: active.id, url: active.url })
+        if (active) {
+            const restoreUrl = workspaceLaunchUrlForRestore(active.url, workspace.slug) ?? active.url
+            const restoreTab = nextTabs.find((tab) => tab.url === restoreUrl) ?? active
+            persistWorkspaceLaunchHint({ workspaceSlug: workspace.slug, tabId: restoreTab.id, url: restoreUrl })
+        }
     }, [tabsStorageKey, workspace.slug])
 
     const showCreationNotice = useCallback((notice: CreationNotice) => {

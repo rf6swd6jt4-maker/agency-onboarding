@@ -222,7 +222,7 @@ export async function proxy(request: NextRequest) {
             }
             return withSession(withRewrite(request, path, headers))
         }
-        if (path === "/") {
+        if (path === "/" || path === "/workspaces") {
             const launchHint = sessionState.userId
                 ? parseWorkspaceLaunchHint(request.cookies.get(WORKSPACE_LAUNCH_COOKIE)?.value)
                 : null
@@ -233,7 +233,7 @@ export async function proxy(request: NextRequest) {
                 headers.set("x-betelgeze-workspace-launch", "saved")
                 return withSession(withRewrite(request, workspaceShellRoute(launchHint.workspaceSlug), headers, launchHint.url))
             }
-            return withSession(withRewrite(request, "/workspaces"))
+            if (path === "/") return withSession(withRewrite(request, "/workspaces"))
         }
     }
 

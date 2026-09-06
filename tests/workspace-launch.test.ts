@@ -4,7 +4,9 @@ import test from "node:test"
 import {
     parseWorkspaceLaunchHint,
     serializeWorkspaceLaunchHint,
+    workspaceLaunchUrlForRestore,
     WORKSPACE_LAUNCH_COOKIE,
+    WORKSPACE_LAUNCH_COOKIE_DOMAIN,
 } from "../lib/workspace-launch.ts"
 
 function source(path: string) {
@@ -21,7 +23,7 @@ test("workspace launch hints are narrow, same-workspace, and safe to rewrite", (
     assert.deepEqual(parseWorkspaceLaunchHint(value), {
         workspaceSlug: "scaylup",
         tabId: "2df849d2-61f8-43f4-8291-a950a98573cf",
-        url: "/scaylup/relationships/client-1?view=work#timeline",
+        url: "/scaylup/relationships",
     })
     assert.equal(parseWorkspaceLaunchHint(encodeURIComponent(JSON.stringify({ workspaceSlug: "scaylup", tabId: "tab-1", url: "/another/settings" }))), null)
     assert.equal(parseWorkspaceLaunchHint(encodeURIComponent(JSON.stringify({ workspaceSlug: "../admin", tabId: "tab-1", url: "/admin" }))), null)
@@ -34,8 +36,41 @@ test("cold app launch rewrites an authenticated user to the saved panel", () => 
     assert.match(proxy, new RegExp(`request\\.cookies\\.get\\(WORKSPACE_LAUNCH_COOKIE\\)`))
     assert.match(proxy, /workspaceRouteUsesShell\(new URL\(launchHint\.url, request\.url\)\.pathname\)/)
     assert.match(proxy, /withRewrite\(request, workspaceShellRoute\(launchHint\.workspaceSlug\), headers, launchHint\.url\)/)
+    assert.match(proxy, /path === "\/" \|\| path === "\/workspaces"/)
     assert.match(logout, new RegExp(`response\\.cookies\\.set\\(WORKSPACE_LAUNCH_COOKIE, "", \\{ path: "/", maxAge: 0 \\}\\)`))
+    assert.match(logout, /WORKSPACE_LAUNCH_COOKIE_DOMAIN/)
     assert.equal(WORKSPACE_LAUNCH_COOKIE, "betelgeze-last-workspace")
+    assert.equal(WORKSPACE_LAUNCH_COOKIE_DOMAIN, ".betelgeze.com")
+})
+
+test("workspace launch state is shared between the app and dashboard hosts", () => {
+    const launch = source("lib/workspace-launch.ts")
+    assert.match(launch, /hostname\.endsWith\("\.betelgeze\.com"\)/)
+    assert.match(launch, /Domain=\$\{WORKSPACE_LAUNCH_COOKIE_DOMAIN\}/)
+    assert.match(launch, /Max-Age=0/)
+})
+
+test("cold launch restores record tabs to their panel home but preserves exact communications state", () => {
+    const mappings = new Map([
+        ["/scaylup/relationships/client-1?view=work#timeline", "/scaylup/relationships"],
+        ["/scaylup/onboarding/client-1", "/scaylup/onboarding"],
+        ["/scaylup/work/client-1", "/scaylup/work"],
+        ["/scaylup/appointment-setting/client-1", "/scaylup/appointment-setting"],
+        ["/scaylup/work-items/item-1", "/scaylup/work-items"],
+        ["/scaylup/assets/asset-1", "/scaylup/assets"],
+        ["/scaylup/leadgen/poll/poll-1", "/scaylup/leadgen/polls"],
+        ["/scaylup/admin/activity/event-1", "/scaylup/admin/activity"],
+        ["/scaylup/admin/okrs/okr-1", "/scaylup/admin/okrs"],
+    ])
+    for (const [detail, home] of mappings) {
+        assert.equal(workspaceLaunchUrlForRestore(detail, "scaylup"), home, detail)
+    }
+
+    const clientChat = "/scaylup/communications?mode=clients&conversation=client-1#latest"
+    const teamChat = "/scaylup/communications?mode=team&nativeConversation=conversation-1"
+    assert.equal(workspaceLaunchUrlForRestore(clientChat, "scaylup"), clientChat)
+    assert.equal(workspaceLaunchUrlForRestore(teamChat, "scaylup"), teamChat)
+    assert.equal(workspaceLaunchUrlForRestore("/scaylup/work-items?status=doing", "scaylup"), "/scaylup/work-items?status=doing")
 })
 
 test("the first workspace panel is server-rendered before tab restoration", () => {
