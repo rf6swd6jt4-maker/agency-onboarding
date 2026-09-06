@@ -55,6 +55,8 @@ function JumpButton({ className, onClick }: { className: string; onClick: () => 
         type="button"
         aria-label="Jump to latest message"
         title="Jump to latest message"
+        // Keep the keyboard (and this button's position) stable until activation.
+        onPointerDown={(event) => { if (event.button === 0) event.preventDefault() }}
         onClick={onClick}
         className={`${BUTTON_CLASS} ${className}`}
     >

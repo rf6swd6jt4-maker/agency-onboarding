@@ -35,7 +35,7 @@ export function useMessagePaneInteractions(
             pointerGestureRef.current = null
             if (!gesture || gesture.pointerId !== event.pointerId) return
             if (gesture.moved) markUserScroll()
-            else composerRef.current?.blur()
+            else if (!(event.target instanceof Element && event.target.closest("button,a,input,textarea,select,video,audio,[role='slider'],[data-message-control]"))) composerRef.current?.blur()
         },
         onPointerCancel() {
             if (pointerGestureRef.current?.moved) markUserScroll()
