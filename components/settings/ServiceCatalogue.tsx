@@ -100,7 +100,7 @@ function ServiceTemplatesModal({ onClose, onCreateCustom, onSelectTemplate }: { 
     }, [onClose])
 
     return <div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 text-white backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <section ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="service-templates-title" aria-describedby="service-templates-description" className="flex max-h-[min(92dvh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70 sm:h-[min(90dvh,52rem)]">
+        <section ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="service-templates-title" aria-describedby="service-templates-description" className="betelgeze-popup-enter flex max-h-[min(92dvh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70 sm:h-[min(90dvh,52rem)]">
             <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-6 sm:py-5">
                 <div className="min-w-0 flex-1">
                     <h2 id="service-templates-title" className="text-xl font-semibold tracking-tight sm:text-2xl">Service Templates</h2>
@@ -239,7 +239,7 @@ function ServiceEditor({ workspaceSlug, service, assignees, schemaReady, onClose
         || (service.state === "active" && !dirty && Boolean(service.id))
 
     return <div className="fixed inset-0 z-[2147483646] flex items-center justify-center bg-black/70 p-3 text-white backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <section ref={editorRef} role="dialog" aria-modal="true" aria-labelledby="service-editor-title" className="flex max-h-[min(92dvh,54rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+        <section ref={editorRef} role="dialog" aria-modal="true" aria-labelledby="service-editor-title" className="betelgeze-popup-enter flex max-h-[min(92dvh,54rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-6">
                 <div className="min-w-0 flex-1"><p className="text-xs font-medium text-neutral-500">{service.id ? `Revision ${service.version} · ${service.code}` : "Service catalogue"}</p><h2 id="service-editor-title" className="mt-1 truncate text-xl font-semibold">{service.id ? service.name : "New service"}</h2></div>
                 <button ref={closeRef} type="button" onClick={onClose} aria-label="Close service editor" className="inline-flex h-9 w-9 items-center justify-center text-xl text-neutral-500 hover:text-white">×</button>
@@ -367,7 +367,7 @@ function ServiceStaffPermissionsEditor({ workspaceSlug, service, initialPermissi
     }
 
     return <div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 text-white backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="service-staff-permissions-title" aria-describedby="service-staff-permissions-description" className="flex max-h-[min(90dvh,36rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+        <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="service-staff-permissions-title" aria-describedby="service-staff-permissions-description" className="betelgeze-popup-enter flex max-h-[min(90dvh,36rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-5">
                 <div className="min-w-0 flex-1">
                     <h2 id="service-staff-permissions-title" className="text-lg font-semibold">Staff permissions</h2>

@@ -6,6 +6,18 @@ Repeated interface elements use the primitives exported from `components/ui`, `c
 
 Keep the shell stacking order explicit: tab content `30`, relationship context `35`, tab bar `40`, mobile sidebar dismiss surface `45`, sidebar `50`, top bar and its dropdowns `55`, notices `60`, and dialogs `90` or higher. The top bar creates a stacking context, so increasing a dropdown's own z-index cannot lift it above a sibling sidebar. Keep the entire top bar above the sidebar so account and desktop/mobile search popups stay visible and clickable. Use `AnchoredPopup` for editors that must escape an iframe or clipping ancestor; loading overlays remain above all interactive surfaces.
 
+## Popup motion
+
+Every custom popup uses the shared opening motion on both mobile and desktop. Apply `betelgeze-popup-enter` to the visible menu, tooltip, field editor, or dialog surface: a `140ms ease-out` opacity fade with `4px` of upward travel into its final position. `AnchoredPopup` applies this automatically once its initial position is measured; do not animate its children a second time.
+
+- Animate the dialog card, not its full-screen backdrop. Backdrops appear immediately and remain stationary.
+- Use `betelgeze-popup-fade` for full-screen previews, lightboxes, and viewport-filling client panels where movement would expose an edge or disturb fixed descendants.
+- Closing is immediate. Do not delay dismissal, navigation, focus restoration, or input behind an exit animation.
+- Opening motion runs once when the surface appears, not when its contents load, resize, scroll, or update. Do not key an entire popup by changing form values or search results.
+- Both shared classes disable animation for `prefers-reduced-motion: reduce`.
+- Keep motion limited to opacity and transform. Do not animate dimensions, layout coordinates, blur, or shadow; do not add animation libraries, JavaScript frame loops, persistent `will-change`, or retained animation transforms.
+- Preserve portal ownership, viewport clamping, stacking levels, focus behaviour, and outside-click/Escape dismissal. Existing sliding navigation panels and loading indicators retain their separate behaviour; browser-native selects and confirmation prompts remain browser-controlled.
+
 ## Status
 
 `Status` communicates operational state, health, or progress. Its appearance follows the lead-generation poll UI: a Betelgeze diamond followed by plain text.

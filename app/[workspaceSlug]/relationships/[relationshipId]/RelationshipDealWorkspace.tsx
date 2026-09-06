@@ -567,7 +567,7 @@ export function RelationshipDealWorkspace({
     </div>
 
     const modal = invoiceOpen && parentDocument ? createPortal(<div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/75 p-3 text-white backdrop-blur-sm">
-        <section role="dialog" aria-modal="true" aria-labelledby="invoice-review-title" className="flex max-h-[min(92dvh,56rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+        <section role="dialog" aria-modal="true" aria-labelledby="invoice-review-title" className="betelgeze-popup-enter flex max-h-[min(92dvh,56rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <header className="shrink-0 border-b border-neutral-800 px-4 py-4 sm:px-6">
                 <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">Sell client</p><h2 id="invoice-review-title" className="mt-1 text-xl font-semibold">{invoiceStep === 0 ? "Review Relationship Information" : invoiceStep === 1 ? "Review Onboarding" : "Pricing"}</h2><p className="mt-1 text-sm text-neutral-500">{invoiceStep === 0 ? "Double-check the client's details and the services they are buying." : invoiceStep === 1 ? "Confirm the published onboarding this client will receive." : "Review each service's upfront and ongoing charges."}</p></div><button type="button" aria-label="Close sale review" onClick={() => { setInvoiceOpen(false); setError(null) }} className="text-neutral-500 hover:text-white">✕</button></div>
                 <div className="mt-4 grid grid-cols-3 gap-2" aria-label={`Step ${invoiceStep + 1} of 3`}>{["Relationship", "Onboarding", "Pricing"].map((label, index) => <div key={label}><div className={`h-1 rounded-full ${index <= invoiceStep ? "bg-white" : "bg-neutral-800"}`} /><p className={`mt-1.5 text-[11px] ${index === invoiceStep ? "text-white" : "text-neutral-600"}`}>{index + 1}. {label}</p></div>)}</div>
@@ -620,7 +620,7 @@ export function RelationshipDealWorkspace({
         </section>
     </div>, parentDocument.body) : null
 
-    const preview = onboardingPreviewOpen && parentDocument ? createPortal(<div data-pos-onboarding-preview className="fixed inset-0 z-[2147483646] overflow-hidden bg-neutral-100 text-white">
+    const preview = onboardingPreviewOpen && parentDocument ? createPortal(<div data-pos-onboarding-preview className="betelgeze-popup-fade fixed inset-0 z-[2147483646] overflow-hidden bg-neutral-100 text-white">
         <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start p-3 sm:p-4">
             <button type="button" onClick={() => setOnboardingPreviewOpen(false)} className="pointer-events-auto rounded-full border border-white/20 bg-neutral-700 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(0,0,0,0.24)] transition hover:bg-neutral-600 focus:outline-none focus:ring-2 focus:ring-white/70">Exit preview</button>
         </div>

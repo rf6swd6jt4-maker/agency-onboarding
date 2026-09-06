@@ -62,7 +62,7 @@ export function ProfileMenu({ name, email, phone, isTest = false }: ProfileMenuP
             </button>
 
             {open && (
-                <div className="absolute right-0 top-12 z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
+                <div className="betelgeze-popup-enter absolute right-0 top-12 z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
                     <p className="text-xs font-semibold uppercase tracking-wide text-[var(--onboarding-muted,#475569)]">
                         Client profile
                     </p>

@@ -159,9 +159,14 @@ html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes betelgeze-reaction-popup-in {
-  0% { opacity: 0; transform: translateX(0.75rem) scale(0.96); }
-  100% { opacity: 1; transform: translateX(0) scale(1); }
+@keyframes betelgeze-popup-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes betelgeze-popup-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes betelgeze-typing-dot {
@@ -177,9 +182,19 @@ html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true
 .betelgeze-message-enter-left { transform-origin: bottom left; }
 .betelgeze-message-enter-right { transform-origin: bottom right; }
 
-.betelgeze-reaction-popup-enter {
-  transform-origin: right center;
-  animation: betelgeze-reaction-popup-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+/* No retained transform or compositor hint: positioning and stacking return to
+   the surface's own styles as soon as the opening animation completes. */
+.betelgeze-popup-enter {
+  animation: betelgeze-popup-in 140ms ease-out;
+}
+
+.betelgeze-popup-fade {
+  animation: betelgeze-popup-fade-in 140ms ease-out;
+}
+
+/* Native details keeps its contents mounted; restart motion on each opening. */
+details:not([open]) > .betelgeze-popup-enter {
+  animation: none;
 }
 
 .betelgeze-typing-dot {
@@ -189,7 +204,8 @@ html[data-workspace-viewport-locked="true"][data-workspace-keyboard-motion="true
 @media (prefers-reduced-motion: reduce) {
   .betelgeze-message-enter-left,
   .betelgeze-message-enter-right,
-  .betelgeze-reaction-popup-enter,
+  .betelgeze-popup-enter,
+  .betelgeze-popup-fade,
   .betelgeze-typing-dot { animation: none; }
 }
 

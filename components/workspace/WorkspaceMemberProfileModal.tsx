@@ -48,7 +48,7 @@ export function WorkspaceMemberProfileModal({ workspaceSlug, userId, initialProf
     }, [onClose])
 
     return <div role="dialog" aria-modal="true" aria-labelledby="workspace-member-profile-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }} className="fixed inset-0 z-[180] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm">
-        <div className="w-full max-w-md overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950 text-white shadow-2xl shadow-black/60">
+        <div className="betelgeze-popup-enter w-full max-w-md overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950 text-white shadow-2xl shadow-black/60">
             <div className="flex justify-end px-4 pt-4"><button type="button" onClick={onClose} aria-label="Close profile" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-xl text-neutral-500 hover:bg-neutral-900 hover:text-white">×</button></div>
             {error ? <div className="px-6 pb-8 text-center"><p className="text-sm text-red-300">{error}</p></div> : !profile && initialProfile ? <section className="flex flex-col items-center px-6 pb-10 text-center">
                 <Avatar src={initialProfile.avatarSrc} name={initialProfile.displayName} className="h-28 w-28 border-2 border-neutral-700" />

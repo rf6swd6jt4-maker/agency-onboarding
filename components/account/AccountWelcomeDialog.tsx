@@ -36,7 +36,7 @@ export function AccountWelcomeDialog() {
     if (!event) return null
     const role = event.role === "admin" ? "Administrator" : event.role === "owner" ? "Owner" : "Staff"
     return <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/75 px-5" role="presentation" onMouseDown={(mouseEvent) => { if (mouseEvent.target === mouseEvent.currentTarget) setEvent(null) }}>
-        <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-description" className="w-full max-w-md rounded-2xl border border-neutral-700 bg-neutral-900 p-6 text-white shadow-2xl">
+        <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-description" className="betelgeze-popup-enter w-full max-w-md rounded-2xl border border-neutral-700 bg-neutral-900 p-6 text-white shadow-2xl">
             <Status label="Invitation accepted" tone="green" />
             <h2 id="welcome-title" className="mt-5 text-2xl font-semibold">You joined {event.workspaceName}</h2>
             <p id="welcome-description" className="mt-3 text-sm leading-6 text-neutral-300">Your account is secured and you now have {role} access. You can open the workspace now or finish looking around your profile.</p>

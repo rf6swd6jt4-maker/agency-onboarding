@@ -2311,7 +2311,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
                     <WorkspacePresenceAvatars members={workspacePresenceMembers} state={presenceState} error={presenceError} onOpenProfile={setProfileUserId} />
                     <WorkspaceMutationStatus state={activeBackgroundSaving ? "saving" : backgroundMutationState} error={backgroundMutationError} />
                     {searchOpen && (
-                        <div className="absolute left-[6.5rem] right-0 top-11 z-[70] max-h-[32rem] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
+                        <div className="betelgeze-popup-enter absolute left-[6.5rem] right-0 top-11 z-[70] max-h-[32rem] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
                             <div className="max-h-[32rem] overflow-y-auto">
                                 {query.trim().length < 2 && <p className="px-3 py-3 text-sm text-neutral-500">Type at least two characters.</p>}
                                 {query.trim().length >= 2 && searchLoading && <p className="px-3 py-3 text-sm text-neutral-500">Searching...</p>}
@@ -2336,7 +2336,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
                 <div className="flex items-center justify-end gap-2.5">
                     <div ref={mobileSearchRef} className="md:hidden">
                         {searchOpen && (
-                            <div className="fixed left-3 right-3 top-16 z-[70] max-h-[72vh] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
+                            <div className="betelgeze-popup-enter fixed left-3 right-3 top-16 z-[70] max-h-[72vh] overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 shadow-2xl shadow-black/40">
                                 <div className="border-b border-neutral-800 p-3">
                                     <label className="relative block">
                                         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"><SearchIcon /></span>

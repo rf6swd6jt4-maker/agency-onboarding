@@ -40,7 +40,7 @@ export function AdminMfaResetButton({ email, userId, action }: { email: string; 
         <button type="button" onClick={() => { setConfirmation(""); setOpen(true) }} className="rounded-lg border border-yellow-900 px-3 py-1 text-sm text-yellow-200 hover:bg-yellow-950/30">Reset 2FA</button>
         {open && typeof document !== "undefined" ? createPortal(
             <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/75 px-4 py-6 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) setOpen(false) }}>
-                <section role="dialog" aria-modal="true" aria-labelledby={`mfa-reset-${userId}`} className="w-full max-w-md rounded-2xl border border-neutral-700 bg-neutral-950 p-5 text-white shadow-2xl">
+                <section role="dialog" aria-modal="true" aria-labelledby={`mfa-reset-${userId}`} className="betelgeze-popup-enter w-full max-w-md rounded-2xl border border-neutral-700 bg-neutral-950 p-5 text-white shadow-2xl">
                     <Status label="High-impact security action" tone="yellow" />
                     <h2 id={`mfa-reset-${userId}`} className="mt-4 text-xl font-semibold">Reset this account’s 2FA?</h2>
                     <p className="mt-3 text-sm leading-6 text-neutral-300">Every authenticator for <span className="font-medium text-white">{email}</span> will be removed. Their active sessions will end, a security notice will be sent, and authenticator setup will be required at the next login.</p>

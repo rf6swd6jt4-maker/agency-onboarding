@@ -150,7 +150,7 @@ export function WorkspaceInvitationForm({
     const status = lookup ? lookupStatus(lookup.status) : null
     const invitationDisabled = pending || (role === "staff" && selectedServiceIds.size === 0)
     const modal = open ? <div className="fixed inset-0 z-[2147483646] flex items-center justify-center overflow-hidden overscroll-none bg-black/75 p-3 text-white backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) setOpen(false) }}>
-        <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-workspace-user-title" className="flex max-h-[min(92dvh,44rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+        <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-workspace-user-title" className="betelgeze-popup-enter flex max-h-[min(92dvh,44rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <header className="flex shrink-0 items-start gap-4 border-b border-neutral-800 px-4 py-4 sm:px-5">
                 <div className="min-w-0 flex-1">
                     <h2 id="add-workspace-user-title" className="text-lg font-semibold">Add user</h2>

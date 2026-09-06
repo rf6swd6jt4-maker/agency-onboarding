@@ -164,7 +164,7 @@ test("message interactions keep the approved mobile and profile parity", async (
         assert.match(source, /messagePaneCanShowNewMessage\(messagePaneRef\.current, followLatestRef\.current\)/)
         assert.match(source, /betelgeze-message-enter-right/)
         assert.match(source, /betelgeze-message-enter-left/)
-        assert.match(source, /betelgeze-reaction-popup-enter/)
+        assert.match(source, /betelgeze-popup-enter/)
     }
     assert.match(team, /data-message-action-popup/)
     assert.doesNotMatch(panel, /visualViewport|scrollTo|useLayoutEffect/)
@@ -266,7 +266,7 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.match(team, /observeMessagePaneResize\(messagePaneRef\.current, \(\) => followLatestRef\.current, true\)/)
     assert.match(globals, /@keyframes betelgeze-message-grow-in/)
     assert.match(globals, /280ms cubic-bezier/)
-    assert.match(globals, /@keyframes betelgeze-reaction-popup-in/)
+    assert.match(globals, /@keyframes betelgeze-popup-in/)
     assert.match(globals, /prefers-reduced-motion: reduce/)
     assert.match(team, /selected\.kind === "team" \? sender\?\.former/)
     assert.match(team, /!own && selected\.kind === "team" \? sender\?\.former/)

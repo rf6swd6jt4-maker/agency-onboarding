@@ -42,7 +42,7 @@ export function TestClientMenu({
                 <span className="hidden sm:inline">Test menu</span>
             </summary>
 
-            <div className="absolute right-0 top-12 z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
+            <div className="betelgeze-popup-enter absolute right-0 top-12 z-40 w-[min(18rem,calc(100vw-1.5rem))] rounded-2xl border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-4 text-left shadow-xl">
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                     Test client
                 </p>

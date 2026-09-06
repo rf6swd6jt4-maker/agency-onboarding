@@ -129,7 +129,7 @@ export function WorkspaceCreateModal({ target, workspace, currentUserId, usernam
     const ownerOptions = options.okrOwnerOptions.length ? options.okrOwnerOptions : [{ id: currentUserId, label: username, role: currentUserRole }]
 
     return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workspace-create-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-white shadow-2xl shadow-black/50">
+        <div className="betelgeze-popup-enter w-full max-w-xl overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-white shadow-2xl shadow-black/50">
             <div className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3 sm:px-5">
                 <div><p className="text-xs text-neutral-500">Create in {workspace.name}</p><h2 id="workspace-create-title" className="text-lg font-semibold">{title}</h2></div>
                 <button data-icon-button type="button" onClick={onClose} aria-label="Close create panel" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-900 hover:text-white"><span aria-hidden="true" className="text-xl leading-none">×</span></button>

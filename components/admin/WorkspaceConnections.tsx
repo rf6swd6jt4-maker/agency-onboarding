@@ -70,7 +70,7 @@ function connectionDetail(connection: WorkspaceConnection) {
 function Modal({ title, description, error, onClose, children }: { title: string; description: string; error: string | null; onClose: () => void; children: ReactNode }) {
     if (typeof document === "undefined") return null
     return createPortal(<div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[110] flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-        <div className="max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
+        <div className="betelgeze-popup-enter max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-950 shadow-2xl shadow-black/70">
             <div className="sticky top-0 z-10 flex items-start gap-4 border-b border-neutral-800 bg-neutral-950/95 px-4 py-4 backdrop-blur sm:px-5">
                 <div className="min-w-0 flex-1"><h2 className="text-lg font-semibold text-white">{title}</h2><p className="mt-1 text-sm leading-5 text-neutral-500">{description}</p></div>
                 <button type="button" onClick={onClose} aria-label="Close" className="rounded px-2 py-1 text-xl text-neutral-500 hover:bg-neutral-900 hover:text-white">×</button>

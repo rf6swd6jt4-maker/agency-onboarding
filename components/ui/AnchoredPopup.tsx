@@ -147,6 +147,6 @@ export function AnchoredPopup({
             maxHeight: position.maxHeight,
             maxWidth: position.maxWidth,
         } : { visibility: "hidden" }}
-        className={`fixed z-[2147483646] overflow-y-auto overscroll-contain ${className}`}
+        className={`${position ? "betelgeze-popup-enter" : ""} fixed z-[2147483646] overflow-y-auto overscroll-contain ${className}`}
     >{children}</div>, host.document.body)
 }
