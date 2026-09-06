@@ -10,6 +10,7 @@ import {
     normalizeWorkspaceUrl,
     orderWorkspaceTabsByStableIds,
     reorderWorkspaceTabs,
+    insertWorkspaceTabAfter,
     WORKSPACE_TAB_FRAME_PARAM,
     workspaceTabFrameMatchesUrl,
     workspaceTabFrameUrl,
@@ -218,4 +219,24 @@ test("Communications titles use the selected chat and never leak between modes o
     assert.equal(workspaceTabDisplayTitle({ ...tab, customTitle: "Inbox" }), "Inbox")
     const teamTab = { ...tab, url: "/scaylup/communications?mode=team&nativeConversation=2&conversation=8", recordTitle: { url: "/scaylup/communications?mode=team&nativeConversation=2&conversation=1", title: "Chat · Delivery Team" } }
     assert.equal(workspaceTabDisplayTitle(teamTab), "Chat · Delivery Team")
+})
+
+
+test("new tabs appear immediately after their source in the current visual order", () => {
+    const tabs = [{ id: "third" }, { id: "first" }, { id: "second" }]
+    const detail = { id: "detail" }
+    const inserted = insertWorkspaceTabAfter(tabs, detail, "first")
+    assert.deepEqual(inserted.map((tab) => tab.id), ["third", "first", "detail", "second"])
+    assert.deepEqual(tabs.map((tab) => tab.id), ["third", "first", "second"])
+    assert.equal(inserted[1], tabs[1])
+    assert.equal(inserted[2], detail)
+    assert.deepEqual(orderWorkspaceTabsByStableIds(inserted, ["first", "second", "third", "detail"]).map((tab) => tab.id), ["first", "second", "third", "detail"])
+})
+
+test("new tabs append when the source is last or no longer exists", () => {
+    const tabs = [{ id: "one" }, { id: "two" }]
+    for (const source of ["two", "closed"]) {
+        assert.deepEqual(insertWorkspaceTabAfter(tabs, { id: "new" }, source).map((tab) => tab.id), ["one", "two", "new"])
+    }
+    assert.deepEqual(insertWorkspaceTabAfter([], { id: "new" }, "closed"), [{ id: "new" }])
 })

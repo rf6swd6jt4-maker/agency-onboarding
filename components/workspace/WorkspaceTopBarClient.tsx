@@ -40,6 +40,7 @@ import {
     normalizeWorkspaceUrl as normalizeWorkspaceRoute,
     orderWorkspaceTabsByStableIds,
     reorderWorkspaceTabs,
+    insertWorkspaceTabAfter,
     WORKSPACE_TAB_FRAME_NAME_PREFIX,
     WORKSPACE_TAB_FRAME_PARAM,
     WORKSPACE_TAB_MESSAGE_SOURCE,
@@ -906,7 +907,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
         return true
     }, [activateWorkspaceTab, postToTab, saveTabsState])
 
-    const openWorkspaceTab = useCallback((href: string, detailPreview?: WorkspaceDetailPreview) => {
+    const openWorkspaceTab = useCallback((href: string, detailPreview?: WorkspaceDetailPreview, sourceTabId?: string) => {
         const url = normalizeWorkspaceUrl(href)
         if (detailPreview) storeWorkspaceDetailPreview(url, detailPreview)
         const currentTabs = tabsRef.current
@@ -952,7 +953,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
             seenRevision: mutationRevisionRef.current,
             detailPreview,
         }
-        const nextTabs = [...currentTabs, tab]
+        const nextTabs = insertWorkspaceTabAfter(currentTabs, tab, sourceTabId ?? previousTabId)
         tabFrameOrderRef.current.push(tab.id)
         setTabFrameOrder([...tabFrameOrderRef.current])
         tabsRef.current = nextTabs
@@ -1151,7 +1152,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
             }
 
             if (message.type === "open-tab" && message.url) {
-                openWorkspaceTab(message.url, message.detailPreview)
+                openWorkspaceTab(message.url, message.detailPreview, message.tabId)
             }
 
             if (message.type === "reopen-closed-tab") {
@@ -1977,7 +1978,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
         }
         tabFrameOrderRef.current.push(tab.id)
         setTabFrameOrder([...tabFrameOrderRef.current])
-        const nextTabs = [...tabs, tab]
+        const nextTabs = insertWorkspaceTabAfter(tabs, tab, activeTabIdRef.current)
+        tabsRef.current = nextTabs
         activeTabIdRef.current = tab.id
         setTabs(nextTabs)
         activateWorkspaceTab(tab.id)
