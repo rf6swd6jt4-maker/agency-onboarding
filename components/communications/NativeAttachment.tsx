@@ -62,10 +62,11 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
             await navigator.share({ files: [file] })
             if (!controller.signal.aborted) onClose()
         } catch (openError) {
-            if (!controller.signal.aborted && !(openError instanceof Error && openError.name === "AbortError")) {
-                setError(openError instanceof Error && openError.name === "NotAllowedError"
-                    ? "The app picker was blocked. Try Open with again, or download the file."
-                    : openError instanceof Error ? openError.message : "Could not open this file. Try again or download it.")
+            // A download can outlast the browser's activation window. Keep the
+            // loaded file ready for a fresh tap, without an error or extra text.
+            const quiet = openError instanceof Error && ["AbortError", "NotAllowedError"].includes(openError.name)
+            if (!controller.signal.aborted && !quiet) {
+                setError(openError instanceof Error ? openError.message : "Could not open this file. Try again or download it.")
             }
         } finally {
             if (requestRef.current === controller) {
@@ -116,7 +117,7 @@ export function NativeAttachment({ attachment, onOpenImage, light = false }: { a
     if (attachment.kind === "sticker") return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
     if (attachment.kind === "image" && !failed) return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} onError={() => setFailedUrl(attachment.url)} className="max-h-80 h-auto w-full object-contain" /></button>
     if (attachment.kind === "video" && !failed) return <div onClick={(event) => event.stopPropagation()}>
-        <video ref={checkVideo} src={`${attachment.url}#t=0.001`} controls playsInline preload="metadata" aria-label={attachment.fileName} onError={() => setFailedUrl(attachment.url)} className="mb-2 block h-auto w-full rounded-xl bg-black" />
+        <video ref={checkVideo} src={`${attachment.url}#t=0.001`} controls playsInline preload="metadata" aria-label={attachment.fileName} onError={() => setFailedUrl(attachment.url)} className="mb-2 block h-auto w-full rounded-xl bg-black object-contain" style={{ maxHeight: "var(--native-video-max-height, 30rem)" }} />
         <AttachmentFileCard attachment={attachment} />
     </div>
     if (attachment.kind === "audio" && !failed) return <div onClick={(event) => event.stopPropagation()}>

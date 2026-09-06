@@ -14,10 +14,10 @@ export function NativeMessageBubble({ video, style, children, ...props }: Omit<C
         if (media && !media.error) readVideo(media)
     }, [readVideo])
 
-    // The message pane is the size container. Cap the video at two-thirds of
-    // its height (up to 480px) and 560px wide; captions follow the resulting width.
+    // The full chat supplies a keyboard-independent height limit. Keep portrait
+    // captions readable, allowing modest side bars when the minimum width wins.
     const videoWidth = aspectRatio
-        ? `calc(min(35rem, min(66.6667cqh, 30rem) * ${aspectRatio}) + 1.75rem)`
+        ? `max(20rem, calc(min(35rem, var(--native-video-max-height, 30rem) * ${aspectRatio}) + 1.75rem))`
         : "min(35rem, 100%)"
 
     return <article {...props} ref={attachBubble}
