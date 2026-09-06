@@ -21,3 +21,9 @@ Message tombstones prevent older targeted reads from restoring a deleted message
 ## Validation
 
 `tests/coordinated-chat-updates.test.ts` exercises deferred requests, out-of-order snapshots and targeted reads, reaction removal echoes, acknowledgements, serial writes, rejected and uncertain actions, access changes, pending sends, delivery updates, edits, and deletion recovery. Existing source integration tests cover the transport and acknowledgement contracts. These deterministic tests do not substitute for multi-device or physical mobile verification.
+
+## Deletion confirmation
+
+Team/direct chat swipes and bin actions open `MessageDeleteConfirmation`. A swipe only requests confirmation; the explicit Delete message button invokes the coordinated mutation. The dialog cancels when the selected conversation, tab visibility, message availability, or write access no longer allows it. It uses the browser's accessible modal dialog element, with initial focus on Cancel, instead of a blocking JavaScript `confirm()` prompt from a touch event.
+
+The swipe recognizer locks horizontal intent, remembers an action once its threshold is crossed, and ignores late release jitter. Vertical-first scrolling, touch cancellation, another finger, and insufficient permissions cannot complete an action. `tests/message-swipe.test.ts` covers those paths.
