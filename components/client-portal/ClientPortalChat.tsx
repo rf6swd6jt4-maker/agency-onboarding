@@ -1,6 +1,7 @@
 "use client"
 
 import Image from "next/image"
+import { ComposerFooter } from "@/components/communications/ComposerFooter"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { MessageReactionActions, PrimaryMessageActions, copyMessageText, downloadMessageAttachment, type MessageActionView } from "@/components/communications/MessageActionMenu"
@@ -582,7 +583,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
             </div>
         </div>
 
-        <footer className="relative z-10 shrink-0 touch-manipulation border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
+        <ComposerFooter className="relative z-10 shrink-0 touch-manipulation border-t border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
             <div className="mx-auto max-w-2xl">
                 {replyingTo ? <div className="mb-2 flex items-center gap-3 border-l-2 border-[var(--onboarding-primary,#1E3A5F)] px-3 py-1 text-xs">
                     <span className="min-w-0 flex-1"><span className="block truncate font-semibold text-[var(--onboarding-text,#0F172A)]">Replying to {replyingTo.direction === "inbound" ? "yourself" : workspaceName}</span><span className="block truncate text-[var(--onboarding-muted,#475569)]">{messagePreview(replyingTo)}</span></span>
@@ -612,13 +613,13 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                 if (draft.trim()) void sendMessage()
                             }
                         }}
-                        className="h-11 min-h-11 min-w-0 flex-1 resize-none overflow-y-hidden bg-transparent px-2.5 py-2.5 text-base leading-6 outline-none transition-[height] duration-[180ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transition-none placeholder:text-[var(--onboarding-muted,#475569)]/70 lg:text-sm lg:leading-5"
+                        className="h-11 min-h-11 min-w-0 flex-1 resize-none overscroll-y-none overflow-y-hidden bg-transparent px-2.5 py-2.5 text-base leading-6 outline-none transition-[height] duration-[180ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] motion-reduce:transition-none placeholder:text-[var(--onboarding-muted,#475569)]/70 lg:text-sm lg:leading-5"
                     />
                     <button type="submit" disabled={!draft.trim()} aria-label="Send message" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--onboarding-primary,#1E3A5F)] text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-35"><SendIcon /></button>
                 </form>
                 <p className="mt-1.5 hidden text-center text-[10px] text-[var(--onboarding-muted,#475569)] lg:block">Enter to send · Shift+Enter for a new line</p>
             </div>
-        </footer>
+        </ComposerFooter>
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
     </div>
 }

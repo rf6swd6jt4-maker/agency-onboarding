@@ -336,7 +336,7 @@ test("message interactions keep the approved mobile and profile parity", async (
     for (const source of [clients, team]) {
         assert.doesNotMatch(source, /messageContentRef|composerFooterRef|useComposerKeyboardSlide/)
         assert.match(source, /<div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col/)
-        assert.match(source, /<footer className="relative z-10 shrink-0 touch-manipulation/)
+        assert.match(source, /<ComposerFooter className="relative z-10 shrink-0 touch-manipulation/)
     }
     assert.match(keyboardSlide, /hostWindow\.visualViewport\?\.addEventListener\("resize", scheduleKeyboardSlide\)/)
     assert.match(keyboardSlide, /footer\.contains\(document\.activeElement\)/)

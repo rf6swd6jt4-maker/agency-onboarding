@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import Image from "next/image"
+import { ComposerFooter } from "@/components/communications/ComposerFooter"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { CommunicationsConnectionStatus } from "@/components/communications/CommunicationsConnectionStatus"
@@ -1043,12 +1044,12 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                     {showJumpToLatest ? <JumpToLatestButton onClick={() => { followLatestRef.current = true; setAtLatest(true); messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0, behavior: "smooth" }) }} /> : null}
                     </div>
 
-                    <footer className="relative z-10 shrink-0 touch-manipulation border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
+                    <ComposerFooter className="relative z-10 shrink-0 touch-manipulation border-t border-neutral-800 bg-neutral-950 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:p-4">
                         {replyingTo ? <ComposerMessagePreview label={`Replying to ${senderName(replyingTo)}`} preview={messagePreview(replyingTo)} onCancel={() => { setReplyingTo(null); composerRef.current?.focus({ preventScroll: true }) }} /> : null}
                         {attachment || attachmentState === "uploading" || attachmentError ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="text-lg">{attachment?.kind === "image" ? "▧" : attachment?.kind === "video" ? "▶" : "↗"}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium text-neutral-200">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName ?? "Attachment failed"}</span><span className={`mt-0.5 block text-[10px] ${attachmentError ? "text-red-400" : "text-neutral-600"}`}>{attachmentError ?? formatFileSize(attachment?.size ?? null)}</span></span>{attachment ? <button type="button" onClick={() => void removeAttachment()} aria-label="Remove attachment" className="h-8 w-8 text-neutral-500 hover:text-white">×</button> : null}</div> : null}
                         {stickerTrayOpen ? <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-neutral-800 bg-black p-3 shadow-2xl">
                             <div className="flex items-center justify-between"><div><p className="text-xs font-semibold text-neutral-200">Stickers</p><p className="mt-0.5 text-[10px] text-neutral-600">JPEG and PNG images are converted automatically.</p></div><button type="button" onClick={() => setStickerTrayOpen(false)} aria-label="Close sticker tray" className="h-8 w-8 text-neutral-500 hover:text-white">×</button></div>
-                            <div className="mt-3 grid max-h-52 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-7">
+                            <div data-composer-scroll className="mt-3 grid max-h-52 grid-cols-4 gap-2 overflow-y-auto overscroll-y-none sm:grid-cols-7">
                                 {stickers.map((sticker) => <button key={sticker.id} type="button" onClick={() => void sendSticker(sticker)} disabled={!selected.canSend} title={sticker.fileName} className="flex aspect-square items-center justify-center rounded-xl bg-neutral-950 p-1.5 hover:bg-neutral-900 disabled:opacity-40"><Image unoptimized src={sticker.url} alt={sticker.fileName} width={512} height={512} className="h-full w-full object-contain" /></button>)}
                                 <button type="button" onClick={() => stickerInputRef.current?.click()} disabled={stickerUploadState === "uploading"} className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-white disabled:opacity-40"><span className="text-2xl">+</span><span className="mt-1 text-[9px]">{stickerUploadState === "uploading" ? "Converting…" : "Add sticker"}</span></button>
                             </div>
@@ -1070,7 +1071,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                 <button data-icon-button type="button" onClick={() => { setStickerTrayOpen((current) => !current); setInteractionError(null) }} disabled={!schemaReady || !selected.canSend} aria-label="Open sticker tray" className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-neutral-500 hover:text-white disabled:text-neutral-800 lg:h-9 lg:w-9"><StickerIcon /></button>
                             </>}
                         />
-                    </footer>
+                    </ComposerFooter>
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950 text-xl">◌</div><h2 className="mt-4 text-sm font-semibold">Select a client chat</h2><p className="mt-2 text-xs text-neutral-600">Messages update here without reloading the panel.</p></div></div>}
             </NativeChatViewport>
         </ResizableConversationColumns>
