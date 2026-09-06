@@ -4,53 +4,69 @@ import Image from "next/image"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AnchoredPopup } from "@/components/ui"
 import type { MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
+import { OpenWithIcon } from "@/components/communications/MessageInteractionIcons"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
 import type { CommunicationAttachment } from "@/lib/communications/types"
 import { nativeAttachmentSizeLabel, nativeAttachmentTypeLabel } from "@/lib/communications/native-attachments"
 
 function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachment; onClose: () => void }) {
-    const [file, setFile] = useState<File | null>(null)
-    const [preparing, setPreparing] = useState(true)
-    const [sharing, setSharing] = useState(false)
+    const fileRef = useRef<File | null>(null)
+    const requestRef = useRef<AbortController | null>(null)
+    const [opening, setOpening] = useState(false)
     const [error, setError] = useState<string | null>(null)
-    const downloadRef = useRef<HTMLAnchorElement>(null)
+    const [ready, setReady] = useState(false)
+    const openRef = useRef<HTMLButtonElement>(null)
     const downloadUrl = `${attachment.url}${attachment.url.includes("?") ? "&" : "?"}download=${encodeURIComponent(attachment.fileName)}`
 
     useEffect(() => {
-        const controller = new AbortController()
-        downloadRef.current?.focus({ preventScroll: true })
-        async function prepareFile() {
-            try {
-                if (!navigator.share || !navigator.canShare) return
-                const response = await fetch(attachment.url, { signal: controller.signal })
-                if (!response.ok) throw new Error("Could not prepare this file for another app. You can try downloading it.")
-                const blob = await response.blob()
-                const candidate = new File([blob], attachment.fileName, { type: attachment.mimeType })
-                if (!controller.signal.aborted && navigator.canShare({ files: [candidate] })) setFile(candidate)
-            } catch (prepareError) {
-                if (!controller.signal.aborted) setError(prepareError instanceof Error ? prepareError.message : "Could not prepare this file.")
-            } finally {
-                if (!controller.signal.aborted) setPreparing(false)
-            }
-        }
-        void prepareFile()
-        return () => controller.abort()
-    }, [attachment.url, attachment.fileName, attachment.mimeType])
+        openRef.current?.focus({ preventScroll: true })
+        return () => requestRef.current?.abort()
+    }, [])
 
     async function openWith() {
-        if (!file || sharing) return
-        setSharing(true)
+        if (requestRef.current) return
+        if (!navigator.share || !navigator.canShare) {
+            setError("This browser cannot open the device's app picker. Download the file to open it in an app.")
+            return
+        }
+        const controller = new AbortController()
+        requestRef.current = controller
+        setOpening(true)
         setError(null)
+        setReady(false)
         try {
-            // The file is already loaded: the picker must open during this fresh user gesture.
+            let file = fileRef.current
+            if (!file) {
+                const response = await fetch(attachment.url, { signal: controller.signal })
+                if (!response.ok) throw new Error("Could not load this file. Try again or download it.")
+                const blob = await response.blob()
+                if (controller.signal.aborted) return
+                file = new File([blob], attachment.fileName, { type: attachment.mimeType })
+                fileRef.current = file
+            }
+            if (!navigator.canShare({ files: [file] })) {
+                setError("This device cannot open this file through its app picker. Download it to open it in an app.")
+                return
+            }
+            // A slow download can outlast the browser's user gesture. Keep the file
+            // ready for a fresh tap instead of failing or downloading it again.
+            if (navigator.userActivation && !navigator.userActivation.isActive) {
+                setReady(true)
+                return
+            }
             await navigator.share({ files: [file] })
             onClose()
-        } catch (shareError) {
-            if (!(shareError instanceof Error && shareError.name === "AbortError")) {
-                setError("This device could not open the app picker. Download the file to open it in an app.")
+        } catch (openError) {
+            if (!controller.signal.aborted && !(openError instanceof Error && openError.name === "AbortError")) {
+                setError(openError instanceof Error && openError.name === "NotAllowedError"
+                    ? "The app picker was blocked. Try Open with again, or download the file."
+                    : openError instanceof Error ? openError.message : "Could not open this file. Try again or download it.")
             }
         } finally {
-            setSharing(false)
+            if (!controller.signal.aborted) {
+                requestRef.current = null
+                setOpening(false)
+            }
         }
     }
 
@@ -59,8 +75,9 @@ function FileOptions({ attachment, onClose }: { attachment: CommunicationAttachm
             <p className="text-xs font-semibold">Open file</p>
             <p className="mt-1 break-words text-xs text-neutral-400">{attachment.fileName}</p>
         </div>
-        {preparing ? <p role="status" className="px-2 py-2 text-xs text-neutral-500">Preparing app options…</p> : file ? <button type="button" onClick={() => void openWith()} disabled={sharing} className="block w-full rounded-lg px-2 py-2.5 text-left text-sm hover:bg-neutral-800 disabled:opacity-50">{sharing ? "Opening…" : "Open with…"}</button> : <p className="px-2 pb-2 text-xs text-neutral-500">Download this file, then open it in an app on your device.</p>}
-        <a ref={downloadRef} href={downloadUrl} download={attachment.fileName} onClick={onClose} className="block rounded-lg px-2 py-2.5 text-sm outline-none hover:bg-neutral-800 focus-visible:ring-1 focus-visible:ring-neutral-500">Download file</a>
+        <button ref={openRef} type="button" onClick={() => void openWith()} disabled={opening} aria-busy={opening} className="block w-full rounded-lg px-2 py-2.5 text-left text-sm outline-none hover:bg-neutral-800 focus-visible:ring-1 focus-visible:ring-neutral-500 disabled:opacity-50">Open with…</button>
+        <a href={downloadUrl} download={attachment.fileName} onClick={onClose} className="block rounded-lg px-2 py-2.5 text-sm outline-none hover:bg-neutral-800 focus-visible:ring-1 focus-visible:ring-neutral-500">Download</a>
+        {opening ? <p role="status" className="px-2 py-2 text-xs text-neutral-400">Opening file…</p> : ready ? <p role="status" className="px-2 py-2 text-xs text-neutral-400">File ready. Tap Open with… to choose an app.</p> : null}
         {error ? <p role="alert" className="px-2 py-2 text-xs text-red-300">{error}</p> : null}
     </div>
 }
@@ -77,7 +94,7 @@ function AttachmentFileCard({ attachment, previewFailed = false }: { attachment:
                 <span className="mt-0.5 block truncate text-[10px] opacity-60">{nativeAttachmentTypeLabel(attachment)}{size ? ` · ${size}` : ""}</span>
                 {previewFailed ? <span className="mt-1 block text-[10px] opacity-60">Preview unavailable · Open in an app</span> : null}
             </span>
-            <span aria-hidden="true" className="shrink-0 opacity-60">↗</span>
+            <OpenWithIcon className="h-5 w-5 shrink-0 opacity-75" />
         </button>
         <AnchoredPopup anchor={anchor} role="dialog" align="end" onDismiss={close} className="rounded-xl border border-neutral-800 bg-neutral-950 shadow-xl">
             {anchor ? <FileOptions attachment={attachment} onClose={close} /> : null}
@@ -95,7 +112,7 @@ export function NativeAttachment({ attachment, onOpenImage, light = false }: { a
     if (attachment.kind === "sticker") return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
     if (attachment.kind === "image" && !failed) return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} onError={() => setFailedUrl(attachment.url)} className="max-h-80 h-auto w-full object-contain" /></button>
     if (attachment.kind === "video" && !failed) return <div onClick={(event) => event.stopPropagation()}>
-        <video ref={checkVideo} src={`${attachment.url}#t=0.001`} controls playsInline preload="metadata" aria-label={attachment.fileName} onError={() => setFailedUrl(attachment.url)} className="mb-2 max-h-80 w-full rounded-xl bg-black" />
+        <video ref={checkVideo} src={`${attachment.url}#t=0.001`} controls playsInline preload="metadata" aria-label={attachment.fileName} onError={() => setFailedUrl(attachment.url)} className="mb-2 block h-auto w-full rounded-xl bg-black" />
         <AttachmentFileCard attachment={attachment} />
     </div>
     if (attachment.kind === "audio" && !failed) return <div onClick={(event) => event.stopPropagation()}>

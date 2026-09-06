@@ -1,3 +1,7 @@
+export function OpenWithIcon({ className = "h-5 w-5" }: { className?: string }) {
+    return <svg viewBox="0 0 24 24" aria-hidden="true" className={`${className} fill-none stroke-current`} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 18 18 6M6 6h12v12" /></svg>
+}
+
 export function ReplyIcon({ className = "h-4 w-4" }: { className?: string }) {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className={`${className} fill-none stroke-current`} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 8-5 4 5 4" /><path d="M5 12h8a6 6 0 0 1 6 6" /></svg>
 }
