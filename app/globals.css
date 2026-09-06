@@ -197,6 +197,22 @@ details:not([open]) > .betelgeze-popup-enter {
   animation: none;
 }
 
+/* Reserve a touch hold on bubble text for message actions, while embedded
+   links and media controls retain their native selection and callouts. */
+@media (any-pointer: coarse) {
+  [data-message-bubble] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  [data-message-bubble] :is(a, button, input, textarea, select, video, audio, [role="slider"], [data-message-control]) {
+    -webkit-touch-callout: default;
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+}
+
 .betelgeze-typing-dot {
   animation: betelgeze-typing-dot 900ms ease-in-out infinite;
 }

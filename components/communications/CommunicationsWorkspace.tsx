@@ -277,8 +277,6 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     const composerRef = useRef<HTMLTextAreaElement | null>(null)
     const attachmentRef = useRef<CommunicationAttachment | null>(null)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; verticalAtMax: number } | null>(null)
-    const swipedMessageRef = useRef<string | null>(null)
-    const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
     const draftRef = useRef(draft)
     const whatsAppTypingTimerRef = useRef<number | null>(null)
@@ -329,7 +327,6 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         const dismiss = (event: PointerEvent) => {
             const target = event.target instanceof Element ? event.target : null
             if (target?.closest("[data-message-action-popup]")) return
-            if (target?.closest(`[data-message-interaction="${actionMessageId}"]`)) dismissedActionMessageRef.current = actionMessageId
             setActionMessageId(null)
         }
         const documents = [document]
@@ -969,14 +966,8 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                         video={message.attachment?.kind === "video"}
                                         role="button"
                                         tabIndex={0}
-                                        aria-label={`Message from ${sender}. Activate for message actions.`}
-                                        onClick={() => {
-                                            if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
-                                            if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
-                                            setActionView("actions")
-                                            setActionMessageId((current) => current === message.id ? null : message.id)
-                                        }}
-                                        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionView("actions"); setActionMessageId((current) => current === message.id ? null : message.id) } }}
+                                        aria-label={`Message from ${sender}. Right-click or long-press for message actions.`}
+                                        onOpenActions={() => { setActionView("actions"); setActionMessageId(message.id) }}
                                         onTouchStart={(event) => {
                                             const touch = event.touches[0]
                                             swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false, maxDeltaX: 0, verticalAtMax: 0 } : null
@@ -1014,7 +1005,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                             setSwipePosition({ id: message.id, offset: 0, active: false })
                                             window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 180)
                                             if (completed) {
-                                                swipedMessageRef.current = message.id
+
                                                 beginReply(message)
                                             }
                                         }}

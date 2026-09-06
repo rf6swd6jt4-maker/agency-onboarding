@@ -18,6 +18,12 @@ Every custom popup uses the shared opening motion on both mobile and desktop. Ap
 - Keep motion limited to opacity and transform. Do not animate dimensions, layout coordinates, blur, or shadow; do not add animation libraries, JavaScript frame loops, persistent `will-change`, or retained animation transforms.
 - Preserve portal ownership, viewport clamping, stacking levels, focus behaviour, and outside-click/Escape dismissal. Existing sliding navigation panels and loading indicators retain their separate behaviour; browser-native selects and confirmation prompts remain browser-controlled.
 
+## Message action gestures
+
+Message bubbles use `NativeMessageBubble` for action activation in client chats, team/direct chats, and the client portal. Desktop opens the action popup on right-click; touch opens it after a stationary `450ms` hold. A normal click or tap does not open message actions. Movement beyond `10px`, multiple touches, touch cancellation, release before the threshold, or unmount cancels a pending hold. A completed hold must not also trigger a reply/delete swipe or a synthetic click.
+
+Preserve embedded links, buttons, audio/video controls, and scrolling. Keyboard users can open actions with Enter, Space, the context-menu key, or Shift+F10 while the bubble is focused. Popups use the shared opening motion above.
+
 ## Status
 
 `Status` communicates operational state, health, or progress. Its appearance follows the lead-generation poll UI: a Betelgeze diamond followed by plain text.

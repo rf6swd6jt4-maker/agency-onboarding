@@ -1,6 +1,7 @@
 "use client"
 
 import Image from "next/image"
+import { NativeMessageBubble } from "@/components/communications/NativeMessageBubble"
 import { ComposerFooter } from "@/components/communications/ComposerFooter"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -231,8 +232,6 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
     const followingLatestRef = useRef(true)
     const scrollToLatestRef = useRef(true)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; minDeltaX: number; verticalAtMax: number; verticalAtMin: number } | null>(null)
-    const swipedMessageRef = useRef<string | null>(null)
-    const dismissedActionMessageRef = useRef<string | null>(null)
     useClientPortalComposerViewport(textareaRef)
 
     const refreshLatest = useCallback(async (initial = false) => {
@@ -293,7 +292,6 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
         const dismiss = (event: PointerEvent) => {
             const target = event.target instanceof Element ? event.target : null
             if (target?.closest("[data-message-action-popup]")) return
-            if (target?.closest(`[data-message-interaction="${actionMessageId}"]`)) dismissedActionMessageRef.current = actionMessageId
             setActionMessageId(null)
         }
         document.addEventListener("pointerdown", dismiss, true)
@@ -509,17 +507,12 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                     pinned={false}
                                 /> : canReact ? <MessageReactionActions currentEmoji={clientReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} side={own ? "right" : "left"} /> : null}
                             </div> : null}
-                            <article
+                            <NativeMessageBubble
+                                video={false}
                                 role="button"
                                 tabIndex={0}
-                                aria-label={`Message from ${senderLabel}. Activate for message actions.`}
-                                onClick={() => {
-                                    if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
-                                    if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
-                                    setActionView("actions")
-                                    setActionMessageId((current) => current === message.id ? null : message.id)
-                                }}
-                                onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionView("actions"); setActionMessageId((current) => current === message.id ? null : message.id) } }}
+                                aria-label={`Message from ${senderLabel}. Right-click or long-press for message actions.`}
+                                onOpenActions={() => { setActionView("actions"); setActionMessageId(message.id) }}
                                 onTouchStart={(event) => {
                                     const target = event.target instanceof Element ? event.target : null
                                     if (target?.closest("button,a,audio,video")) return
@@ -557,8 +550,8 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                     const deleteGesture = Boolean(start && !start.cancelled && canDelete && start.minDeltaX < -52 && start.verticalAtMin < 42)
                                     setSwipePosition({ id: message.id, offset: 0, active: false })
                                     window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
-                                    if (replyGesture) { swipedMessageRef.current = message.id; beginReply(message) }
-                                    else if (deleteGesture) { swipedMessageRef.current = message.id; void deleteMessage(message) }
+                                    if (replyGesture) { beginReply(message) }
+                                    else if (deleteGesture) { void deleteMessage(message) }
                                 }}
                                 onTouchCancel={() => {
                                     swipeStartRef.current = null
@@ -575,7 +568,7 @@ export function ClientPortalChat({ token, workspaceName }: { token: string; work
                                 {isSticker && message.reactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{message.reactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? "You reacted" : `${workspaceName} reacted`} className="rounded-full border border-black/15 bg-[var(--onboarding-surface,#FFFFFF)] px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                 <div className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${isSticker ? "ml-auto w-fit rounded-full bg-black/70 px-2 py-0.5 text-white/75" : own ? "text-white/65" : "text-[var(--onboarding-muted,#475569)]"}`}><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.sendState === "sending" ? <span>Sending…</span> : null}</div>
                                 {message.sendState === "failed" ? <div className="mt-2 border-t border-white/15 pt-2"><p className="text-xs text-white/85">{message.sendError}</p><button type="button" onClick={() => void sendMessage(message)} className="mt-1 text-xs font-semibold underline underline-offset-2">Try again</button></div> : null}
-                            </article>
+                            </NativeMessageBubble>
                         </div>
                         {!isSticker && message.reactions.length ? <div className={`mb-2 flex gap-1 px-1 ${own ? "justify-end" : "justify-start"}`}>{message.reactions.map((reaction) => <span key={reaction.id} title={reaction.direction === "inbound" ? "You reacted" : `${workspaceName} reacted`} className="rounded-full border border-black/10 bg-[var(--onboarding-surface,#FFFFFF)] px-2 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                     </Fragment>

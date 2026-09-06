@@ -234,8 +234,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const attachmentInputRef = useRef<HTMLInputElement | null>(null)
     const stickerInputRef = useRef<HTMLInputElement | null>(null)
     const swipeStartRef = useRef<{ id: string; x: number; y: number; cancelled: boolean; maxDeltaX: number; minDeltaX: number; verticalAtMax: number; verticalAtMin: number } | null>(null)
-    const swipedMessageRef = useRef<string | null>(null)
-    const dismissedActionMessageRef = useRef<string | null>(null)
     const selectedRef = useRef(selectedId)
     const conversationsRef = useRef(conversations)
     const sentTypingConversationRef = useRef<string | null>(null)
@@ -277,7 +275,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         const dismiss = (event: PointerEvent) => {
             const target = event.target instanceof Element ? event.target : null
             if (target?.closest("[data-message-action-popup]")) return
-            if (target?.closest(`[data-message-interaction="${actionMessageId}"]`)) dismissedActionMessageRef.current = actionMessageId
             setActionMessageId(null)
         }
         const documents = [document]
@@ -738,16 +735,10 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                     video={message.attachment?.kind === "video"}
                                     role="button"
                                     tabIndex={0}
-                                    onClick={() => {
-                                        if (swipedMessageRef.current === message.id) { swipedMessageRef.current = null; return }
-                                        if (dismissedActionMessageRef.current === message.id) { dismissedActionMessageRef.current = null; return }
-                                        setActionView("actions")
-                                        setActionMessageId((current) => current === message.id ? null : message.id)
-                                    }}
-                                    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setActionView("actions"); setActionMessageId((current) => current === message.id ? null : message.id) } }}
+                                    onOpenActions={() => { setActionView("actions"); setActionMessageId(message.id) }}
                                     onTouchStart={(event) => { const touch = event.touches[0]; swipeStartRef.current = touch ? { id: message.id, x: touch.clientX, y: touch.clientY, cancelled: false, maxDeltaX: 0, minDeltaX: 0, verticalAtMax: 0, verticalAtMin: 0 } : null; if (touch) setSwipePosition({ id: message.id, offset: 0, active: true }) }}
                                     onTouchMove={(event) => { const start = swipeStartRef.current; const touch = event.touches[0]; if (!start || start.id !== message.id || !touch || start.cancelled) return; const deltaX = touch.clientX - start.x; const deltaY = touch.clientY - start.y; if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = Math.abs(deltaY) } if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = Math.abs(deltaY) } if (Math.abs(deltaY) > Math.abs(deltaX) * 1.5 && Math.abs(deltaY) > 12) { start.cancelled = true; setSwipePosition({ id: message.id, offset: 0, active: false }); return } const constrained = canDelete ? Math.max(-82, Math.min(82, deltaX * 0.78)) : Math.max(0, Math.min(82, deltaX * 0.78)); if (Math.abs(constrained) > 2) { event.preventDefault(); setSwipePosition({ id: message.id, offset: constrained, active: true }) } }}
-                                    onTouchEnd={(event) => { const start = swipeStartRef.current; const touch = event.changedTouches[0]; swipeStartRef.current = null; if (start && touch) { const deltaX = touch.clientX - start.x; const vertical = Math.abs(touch.clientY - start.y); if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = vertical } if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = vertical } } const replyGesture = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42); const deleteGesture = Boolean(start && !start.cancelled && canDelete && start.minDeltaX < -52 && start.verticalAtMin < 42); setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220); if (replyGesture) { swipedMessageRef.current = message.id; setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } else if (deleteGesture) { swipedMessageRef.current = message.id; void deleteMessage(message) } }}
+                                    onTouchEnd={(event) => { const start = swipeStartRef.current; const touch = event.changedTouches[0]; swipeStartRef.current = null; if (start && touch) { const deltaX = touch.clientX - start.x; const vertical = Math.abs(touch.clientY - start.y); if (deltaX > start.maxDeltaX) { start.maxDeltaX = deltaX; start.verticalAtMax = vertical } if (deltaX < start.minDeltaX) { start.minDeltaX = deltaX; start.verticalAtMin = vertical } } const replyGesture = Boolean(start && !start.cancelled && start.maxDeltaX > 52 && start.verticalAtMax < 42); const deleteGesture = Boolean(start && !start.cancelled && canDelete && start.minDeltaX < -52 && start.verticalAtMin < 42); setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220); if (replyGesture) { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus() } else if (deleteGesture) { void deleteMessage(message) } }}
                                     onTouchCancel={() => { swipeStartRef.current = null; setSwipePosition({ id: message.id, offset: 0, active: false }); window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220) }}
                                     style={{ transform: `translate3d(${swipeOffset}px,0,0)`, transition: swipePosition?.id === message.id && swipePosition.active ? "none" : "transform 220ms cubic-bezier(.22,1,.36,1)", willChange: swipePosition?.id === message.id ? "transform" : undefined }}
                                     className={`${isSticker ? "relative max-w-52 bg-transparent p-0 pb-1 shadow-none" : `max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm shadow-sm sm:max-w-[72%] ${own ? "rounded-br-md bg-neutral-100 text-neutral-950" : "rounded-bl-md border border-neutral-800 bg-neutral-900 text-neutral-100"}`} min-w-0 touch-pan-y cursor-pointer outline-none`}
