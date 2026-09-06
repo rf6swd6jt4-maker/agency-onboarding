@@ -243,3 +243,18 @@ details:not([open]) > .betelgeze-popup-enter {
 @media (prefers-reduced-motion: reduce) {
   .trend-chart-reveal { animation: none; }
 }
+
+/* A lifted copy sits outside the scrolling strip on touch and desktop alike. */
+@keyframes workspace-tab-lift {
+  from { transform: translateY(0) scale(1); }
+  to { transform: translateY(-3px) scale(1.025); }
+}
+.workspace-tab-drag-lift {
+  animation: workspace-tab-lift 140ms ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-tab-drag-lift {
+    animation: none;
+    transform: translateY(-3px);
+  }
+}

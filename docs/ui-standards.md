@@ -434,3 +434,7 @@ Use the neutral white line for ordinary measurements and activity volume. Use `t
 Pass `reveal` to animate the trend line and gradient together from left to right on mount. Key the chart by the selected period to replay this on range changes. Axes remain steady; reduced-motion preferences disable the animation.
 
 Use `breakBefore` on a trend point when missing observations should interrupt the line and area. Do not turn periods with no denominator into a zero error rate.
+
+## Workspace tab gestures
+
+Mobile tab swipes scroll the strip. A stationary 650ms press lifts a tab for reordering; movement before the hold completes cancels drag activation. Desktop reordering starts after a short horizontal drag. Both use the same lifted preview outside the strip's clipping area, with a 140ms upward lift and subtle scale. Reduced motion uses an immediate offset. Drop and cancellation remove the preview immediately; taps, tab closing, and renaming retain their existing behavior.
