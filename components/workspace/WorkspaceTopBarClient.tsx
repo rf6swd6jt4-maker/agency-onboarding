@@ -3,7 +3,8 @@
 /* eslint-disable @next/next/no-img-element */
 
 import Link from "next/link"
-import { useCallback, useEffect, useId, useRef, useState, useTransition, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
+import dynamic from "next/dynamic"
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
 import { usePathname, useSearchParams } from "next/navigation"
 import { AccountMenu } from "@/components/account/AccountMenu"
 import { Avatar } from "@/components/account/Avatar"
@@ -13,7 +14,6 @@ import { shortId } from "@/lib/ui/relative-time"
 import type { WorkspaceCreateActionState } from "@/app/[workspaceSlug]/relationships/actions"
 import { WorkspaceTabBridge } from "@/components/workspace/WorkspaceTabBridge"
 import { WorkspaceSuccessNotice } from "@/components/workspace/WorkspaceSuccessNotice"
-import { WorkspaceMemberProfileModal } from "@/components/workspace/WorkspaceMemberProfileModal"
 import { WorkspaceTabOpeningState } from "@/components/workspace/WorkspaceTabOpeningState"
 import { WORKSPACE_TAB_VISIBILITY_EVENT } from "@/components/workspace/useWorkspaceTabActive"
 import { LEADGEN_POLLING_SYSTEM_VERSION_LABEL } from "@/lib/leadgen/version"
@@ -27,7 +27,6 @@ import { parseWorkspaceDetailPreview, storeWorkspaceDetailPreview, type Workspac
 import { WORKSPACE_COMPOSER_FOCUS_EVENT, type WorkspaceComposerFocusEventDetail } from "@/lib/workspace-composer-viewport"
 import { visibleWorkspacePresence, workspacePresenceRoster, workspacePresenceTopic, type WorkspacePresenceMember, type WorkspacePresencePayload, type WorkspacePresenceRosterMember, type WorkspacePresenceState } from "@/lib/workspace-presence"
 import {
-    runWorkspaceMutation,
     WORKSPACE_MUTATION_END,
     WORKSPACE_MUTATION_START,
     type WorkspaceMutationEventDetail,
@@ -50,10 +49,19 @@ import {
     workspaceTabIsCommunications,
     workspaceRouteCanShowRelationshipContext,
     workspaceRouteIsRecordDetail,
+    workspaceTabTitleForUrl,
+    type WorkspaceInitialTab,
     type WorkspaceTabFrameMessage,
     type WorkspaceTabParentMessage,
     type WorkspaceTabRelationshipContext,
 } from "@/lib/workspace-tabs"
+import { persistWorkspaceLaunchHint, type WorkspaceShellBootstrapTiming } from "@/lib/workspace-launch"
+import { markWorkspaceLaunch, reportWorkspaceLaunch } from "@/lib/workspace-launch-performance"
+import type { WorkspaceCreateTarget } from "@/components/workspace/WorkspaceCreateModal"
+
+const WorkspaceMemberProfileModal = dynamic(() => import("@/components/workspace/WorkspaceMemberProfileModal").then((module) => module.WorkspaceMemberProfileModal))
+const WorkspaceCreateModal = dynamic(() => import("@/components/workspace/WorkspaceCreateModal").then((module) => module.WorkspaceCreateModal))
+const ShellRelationshipContextPanel = dynamic(() => import("@/components/workspace/ShellRelationshipContextPanel").then((module) => module.ShellRelationshipContextPanel))
 
 const sidebarStorageKey = "betelgeze:workspace-sidebar-open"
 const WORKSPACE_KEYBOARD_MOTION_MS = 300
@@ -109,10 +117,10 @@ type WorkspaceTabNavigationState = {
 type Props = {
     workspace: { id: string; name: string; slug: string }
     initialWorkspaceUrl?: string
+    initialTab: WorkspaceInitialTab
+    launchServerTiming?: WorkspaceShellBootstrapTiming
     currentUserId: string
-    workspaceLogoSrc?: string | null
     username: string
-    email: string
     avatarSrc?: string | null
     workspaceRole: WorkspaceRole
     workspaceCapabilities: WorkspaceCapability[]
@@ -121,12 +129,6 @@ type Props = {
     createWorkItemAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createAssetAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
     createOkrAction: (formData: FormData) => Promise<WorkspaceCreateActionState>
-    workItemOptions: Array<{ id: string; title: string; status: string }>
-    relationshipOptions: Array<{ id: string; label: string }>
-    okrOwnerOptions: Array<{ id: string; label: string; role: string }>
-    workspaceMembers: Array<{ id: string; name: string; avatarSrc: string | null }>
-    okrPeriodStart: string
-    okrPeriodEnd: string
 }
 
 type SearchResult = {
@@ -191,127 +193,6 @@ function SidebarIcon() {
 
 function ContextPanelIcon() {
     return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2 md:h-4 md:w-4"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M15 5v14" /></svg>
-}
-
-function contextPanelPhaseLabel(phase: string) {
-    return phase.replace(/_/g, " ")
-}
-
-function contextPanelDisplayValue(value: string | null | undefined, fallback = "Not saved") {
-    return value?.trim() || fallback
-}
-
-function ShellRelationshipContextPanel({ context, workspaceSlug, onNavigate, workspaceCapabilities }: {
-    context: WorkspaceTabRelationshipContext
-    workspaceSlug: string
-    onNavigate: (href: string) => void
-    workspaceCapabilities: WorkspaceCapability[]
-}) {
-    const relationshipHref = `/${workspaceSlug}/relationships/${context.id}`
-    const onboardingHref = `/${workspaceSlug}/onboarding/${context.id}`
-    const workHref = `/${workspaceSlug}/work/${context.id}`
-
-    return (
-        <aside className="fixed right-4 top-[7.75rem] z-[35] hidden h-[calc(100dvh-9.25rem)] w-80 flex-col overflow-hidden overscroll-none rounded-xl border border-neutral-800 bg-neutral-950 text-white shadow-lg shadow-black/20 sm:right-6 lg:flex">
-            <div className="shrink-0 px-4 py-3">
-                <div className="min-w-0">
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">Relationship Context</p>
-                    <h2 className="truncate text-sm font-semibold">{context.primary_person_name}</h2>
-                    <p className="mt-1 font-mono text-xs text-neutral-600">{shortId(context.id)}</p>
-                </div>
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-none border-t border-neutral-900 px-4 py-4">
-                <section>
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">Relationship</p>
-                    <dl className="mt-3 space-y-3 text-sm">
-                        <div>
-                            <dt className="text-neutral-500">Company</dt>
-                            <dd className="mt-1 text-neutral-100">{contextPanelDisplayValue(context.business_name)}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-neutral-500">Lifecycle</dt>
-                            <dd className="mt-1 capitalize text-neutral-100">{contextPanelPhaseLabel(context.lifecycle_phase)}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-neutral-500">Role</dt>
-                            <dd className="mt-1 text-neutral-100">{contextPanelDisplayValue(context.primary_contact_role)}</dd>
-                        </div>
-                    </dl>
-                </section>
-
-                <section className="mt-5 border-t border-neutral-900 pt-4">
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">Contact</p>
-                    <dl className="mt-3 space-y-3 text-sm">
-                        <div>
-                            <dt className="text-neutral-500">Phone</dt>
-                            <dd className="mt-1 text-neutral-100">{contextPanelDisplayValue(context.primary_phone)}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-neutral-500">Email</dt>
-                            <dd className="mt-1 truncate text-neutral-100">{contextPanelDisplayValue(context.primary_email)}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-neutral-500">Website</dt>
-                            <dd className="mt-1 truncate text-neutral-100">{contextPanelDisplayValue(context.website_url)}</dd>
-                        </div>
-                    </dl>
-                </section>
-
-                <section className="mt-5 border-t border-neutral-900 pt-4">
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">Context</p>
-                    <dl className="mt-3 space-y-3 text-sm">
-                        <div>
-                            <dt className="text-neutral-500">Industry</dt>
-                            <dd className="mt-1 capitalize text-neutral-100">{contextPanelDisplayValue(context.industry_value?.replace(/_/g, " "))}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-neutral-500">Location</dt>
-                            <dd className="mt-1 capitalize text-neutral-100">{contextPanelDisplayValue(context.location_value?.replace(/_/g, " "))}</dd>
-                        </div>
-                        <div>
-                            <dt className="text-neutral-500">Source</dt>
-                            <dd className="mt-1 text-neutral-100">{contextPanelDisplayValue(context.source_label)}</dd>
-                        </div>
-                    </dl>
-                    {context.notes_summary && (
-                        <p className="mt-4 rounded-lg border border-neutral-800 bg-black px-3 py-2 text-sm leading-6 text-neutral-300">
-                            {context.notes_summary}
-                        </p>
-                    )}
-                </section>
-
-                {context.metrics.length > 0 && (
-                    <section className="mt-5 border-t border-neutral-900 pt-4">
-                        <p className="text-xs uppercase tracking-wide text-neutral-500">Current view</p>
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                            {context.metrics.map((metric) => (
-                                <div key={metric.label} className="rounded-lg border border-neutral-800 bg-black px-3 py-2">
-                                    <p className="text-xs text-neutral-500">{metric.label}</p>
-                                    <p className="mt-1 text-sm font-medium text-neutral-100">{metric.value}</p>
-                                </div>
-                            ))}
-                        </div>
-                    </section>
-                )}
-
-                <section className="mt-5 border-t border-neutral-900 pt-4">
-                    <p className="text-xs uppercase tracking-wide text-neutral-500">Open</p>
-                    <div className="mt-3 grid gap-2 text-sm">
-                        {workspaceCapabilities.includes("relationships.view") ? <button type="button" onClick={() => onNavigate(relationshipHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
-                            Relationship summary
-                        </button> : null}
-                        {workspaceCapabilities.includes("onboarding.manage") ? <button type="button" onClick={() => onNavigate(onboardingHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
-                            Onboarding
-                        </button> : null}
-                        {workspaceCapabilities.includes("fulfilment.manage") ? <button type="button" onClick={() => onNavigate(workHref)} className="rounded-lg border border-neutral-800 px-3 py-2 text-left text-neutral-300 hover:border-neutral-600 hover:text-white">
-                            Fulfilment
-                        </button> : null}
-                    </div>
-                </section>
-            </div>
-        </aside>
-    )
 }
 
 function SearchIcon() {
@@ -436,7 +317,7 @@ export function WorkspaceTopBarClient(props: Props) {
     return <WorkspaceTabsShell {...props} />
 }
 
-function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, workspaceLogoSrc, username, email, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction, workItemOptions, relationshipOptions, okrOwnerOptions, workspaceMembers, okrPeriodStart, okrPeriodEnd }: Props) {
+function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launchServerTiming, currentUserId, username, avatarSrc, workspaceRole, workspaceCapabilities, leaveAction, createRelationshipAction, createWorkItemAction, createAssetAction, createOkrAction }: Props) {
     const pathname = usePathname()
     const searchParams = useSearchParams()
     const searchMenuId = useId()
@@ -445,12 +326,12 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const mobileSearchRef = useRef<HTMLDivElement>(null)
     const mobileSearchInputRef = useRef<HTMLInputElement>(null)
     const sidebarTransitionTimeout = useRef<number | null>(null)
-    const activeTabIdRef = useRef("")
-    const tabsRef = useRef<WorkspaceTab[]>([])
+    const activeTabIdRef = useRef(initialTab.id)
+    const tabsRef = useRef<WorkspaceTab[]>([initialTab])
     const tabsBootstrappedRef = useRef(false)
     const shellRootRef = useRef<HTMLDivElement>(null)
     const tabStripRef = useRef<HTMLDivElement>(null)
-    const tabFrameOrderRef = useRef<string[]>([])
+    const tabFrameOrderRef = useRef<string[]>([initialTab.id])
     const iframeRefs = useRef(new Map<string, HTMLIFrameElement>())
     const loadedTabIdsRef = useRef(new Set<string>())
     // An iframe's load event fires before its React effects have necessarily
@@ -483,15 +364,21 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const contextManualClosedByTabRef = useRef<Record<string, boolean>>({})
     const contextObstructedByTabRef = useRef<Record<string, boolean>>({})
     const creationNoticeTimeoutRef = useRef<number | null>(null)
+    const shellSecondaryRequestedRef = useRef(false)
+    const launchUsableReportedRef = useRef(false)
+    const workspaceMembersRef = useRef<Array<{ id: string; name: string; avatarSrc: string | null }>>([
+        { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null },
+    ])
+    const presenceIdentityRef = useRef({ name: username, avatarSrc: avatarSrc ?? null })
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [sidebarHydrated, setSidebarHydrated] = useState(false)
     const [sidebarTransitionEnabled, setSidebarTransitionEnabled] = useState(false)
     const [tabsHydrated, setTabsHydrated] = useState(false)
     const [loadedTabIds, setLoadedTabIds] = useState<Set<string>>(() => new Set())
-    const [residentTabIds, setResidentTabIds] = useState<string[]>([])
-    const [tabs, setTabs] = useState<WorkspaceTab[]>([])
-    const [tabFrameOrder, setTabFrameOrder] = useState<string[]>([])
-    const [activeTabId, setActiveTabId] = useState("")
+    const [residentTabIds, setResidentTabIds] = useState<string[]>([initialTab.id])
+    const [tabs, setTabs] = useState<WorkspaceTab[]>([initialTab])
+    const [tabFrameOrder, setTabFrameOrder] = useState<string[]>([initialTab.id])
+    const [activeTabId, setActiveTabId] = useState(initialTab.id)
     const [canAddTab, setCanAddTab] = useState(true)
     const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
     const [tabDragPreview, setTabDragPreview] = useState<WorkspaceTabDragPreview | null>(null)
@@ -515,16 +402,15 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const [searchResults, setSearchResults] = useState<SearchResult[]>([])
     const [searchShortcutLabel, setSearchShortcutLabel] = useState("Ctrl+J")
     const [createTarget, setCreateTarget] = useState<"relationship" | "work-item" | "asset" | "okr" | null>(null)
-    const [relationshipStartPhase, setRelationshipStartPhase] = useState<"potential_client" | "retention">("potential_client")
-    const [relationshipPhone, setRelationshipPhone] = useState("")
-    const [relationshipWhatsappPhone, setRelationshipWhatsappPhone] = useState("")
-    const [relationshipCommunicationPreference, setRelationshipCommunicationPreference] = useState<"" | "twilio_sms" | "meta_whatsapp">("")
-    const [createError, setCreateError] = useState<string | null>(null)
-    const [uploadLabel, setUploadLabel] = useState<string | null>(null)
     const [creationNotice, setCreationNotice] = useState<CreationNotice | null>(null)
     const [profileUserId, setProfileUserId] = useState<string | null>(null)
     const [communicationsUnreadCount, setCommunicationsUnreadCount] = useState(0)
-    const [isCreating, startCreateTransition] = useTransition()
+    const [workspaceLogoSrc, setWorkspaceLogoSrc] = useState<string | null>(null)
+    const [email, setEmail] = useState("")
+    const [workspaceMembers, setWorkspaceMembers] = useState<Array<{ id: string; name: string; avatarSrc: string | null }>>([
+        { id: currentUserId, name: username, avatarSrc: avatarSrc ?? null },
+    ])
+    const [initialPanelReady, setInitialPanelReady] = useState(false)
     const defaultWorkspaceUrl = `/${workspace.slug}`
     const tabsStorageKey = `betelgeze:workspace-tabs:${workspace.slug}`
     const capabilitySet = new Set(workspaceCapabilities)
@@ -599,6 +485,38 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [workspaceMembers])
 
     useEffect(() => {
+        if (!initialPanelReady || shellSecondaryRequestedRef.current) return
+        shellSecondaryRequestedRef.current = true
+        const controller = new AbortController()
+        void (async () => {
+            let attempt = 0
+            const retryDelays = [900, 3_000, 10_000, 30_000]
+            while (!controller.signal.aborted) {
+                try {
+                    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspace.slug)}/shell-secondary`, { signal: controller.signal })
+                    const result = await response.json().catch(() => null) as { email?: string; workspaceLogoSrc?: string | null; workspaceMembers?: Array<{ id: string; name: string; avatarSrc: string | null }> } | null
+                    if (!response.ok || !result) throw new Error("Could not load workspace shell details.")
+                    if (typeof result.email === "string") setEmail(result.email)
+                    if (typeof result.workspaceLogoSrc === "string") setWorkspaceLogoSrc(result.workspaceLogoSrc)
+                    if (Array.isArray(result.workspaceMembers) && result.workspaceMembers.length) {
+                        workspaceMembersRef.current = result.workspaceMembers
+                        const currentMember = result.workspaceMembers.find((member) => member.id === currentUserId)
+                        if (currentMember) presenceIdentityRef.current = { name: currentMember.name, avatarSrc: currentMember.avatarSrc }
+                        setWorkspaceMembers(result.workspaceMembers)
+                    }
+                    return
+                } catch {
+                    if (controller.signal.aborted) return
+                    const delay = retryDelays[Math.min(attempt, retryDelays.length - 1)]
+                    attempt += 1
+                    await new Promise((resolve) => window.setTimeout(resolve, delay))
+                }
+            }
+        })()
+        return () => controller.abort()
+    }, [currentUserId, initialPanelReady, workspace.slug])
+
+    useEffect(() => {
         if (!presenceSessionIdRef.current) presenceSessionIdRef.current = crypto.randomUUID()
         const heartbeat = () => void fetch(`/api/workspaces/${encodeURIComponent(workspace.slug)}/activity/presence`, {
             method: "POST",
@@ -618,38 +536,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [workspace.slug])
 
     const titleForUrl = useCallback((url: string) => {
-        const parsed = new URL(url, window.location.origin)
-        const path = parsed.pathname
-        const suffix = path === defaultWorkspaceUrl
-            ? ""
-            : path.startsWith(`${defaultWorkspaceUrl}/`)
-                ? path.slice(defaultWorkspaceUrl.length + 1)
-                : path.replace(/^\//, "")
-
-        if (!suffix) return "Relationships"
-        if (suffix === "relationships") return "Relationships"
-        if (suffix.startsWith("relationships/")) return "Relationship"
-        if (suffix === "onboarding") return "Onboarding"
-        if (suffix.startsWith("onboarding/")) return "Onboarding Detail"
-        if (suffix === "work") return "Fulfilment"
-        if (suffix.startsWith("work/")) return "Fulfilment Detail"
-        if (suffix === "appointment-setting") return "Appointment Setting"
-        if (suffix.startsWith("appointment-setting/")) return "Appointment Setting Detail"
-        if (suffix === "work-items") return "Work Items"
-        if (suffix.startsWith("work-items/")) return "Work Item"
-        if (suffix === "assets") return "Assets"
-        if (suffix.startsWith("assets/")) return "Asset"
-        if (suffix === "communications") return "Communications"
-        if (suffix.startsWith("communications/")) return "Communication"
-        if (suffix === "leadgen") return "Lead Gen"
-        if (suffix === "leadgen/new") return "New Poll"
-        if (suffix.startsWith("leadgen/poll/")) return "Lead Poll"
-        if (suffix === "leadgen/polls") return "Polls"
-        if (suffix === "admin") return "Admin"
-        if (suffix === "settings") return "Settings"
-        if (suffix === "users") return "Users"
-        return suffix.split("/")[0]?.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tab"
-    }, [defaultWorkspaceUrl])
+        return workspaceTabTitleForUrl(url, workspace.slug)
+    }, [workspace.slug])
 
     const routeCanShowRelationshipContext = useCallback((url: string) => {
         return workspaceRouteCanShowRelationshipContext(url, workspace.slug, window.location.origin)
@@ -657,7 +545,9 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
 
     const saveTabsState = useCallback((nextTabs: WorkspaceTab[], nextActiveId: string) => {
         sessionStorage.setItem(tabsStorageKey, JSON.stringify({ mode: "live", tabs: nextTabs, activeId: nextActiveId }))
-    }, [tabsStorageKey])
+        const active = nextTabs.find((tab) => tab.id === nextActiveId)
+        if (active) persistWorkspaceLaunchHint({ workspaceSlug: workspace.slug, tabId: active.id, url: active.url })
+    }, [tabsStorageKey, workspace.slug])
 
     const showCreationNotice = useCallback((notice: CreationNotice) => {
         if (creationNoticeTimeoutRef.current) window.clearTimeout(creationNoticeTimeoutRef.current)
@@ -807,23 +697,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     }, [canOpenWorkspaceUrl, normalizeWorkspaceUrl, tabsStorageKey, titleForUrl])
 
     useEffect(() => {
-        if (tabsBootstrappedRef.current) return
-        tabsBootstrappedRef.current = true
-        const query = searchParams.toString()
-        const current = normalizeWorkspaceUrl(initialWorkspaceUrl ?? `${pathname}${query ? `?${query}` : ""}`)
-        const stored = readTabsState(current)
-        activeTabIdRef.current = stored.activeId
-        tabsRef.current = stored.tabs
-        tabFrameOrderRef.current = stored.tabs.map((tab) => tab.id)
-        mutationRevisionRef.current = Math.max(0, ...stored.tabs.map((tab) => tab.seenRevision))
-        saveTabsState(stored.tabs, stored.activeId)
-        deferNavigationStateUpdate(() => {
-            activateWorkspaceTab(stored.activeId)
-            setTabs(stored.tabs)
-            setTabFrameOrder(stored.tabs.map((tab) => tab.id))
-            setTabsHydrated(true)
-        })
-    }, [activateWorkspaceTab, initialWorkspaceUrl, normalizeWorkspaceUrl, pathname, readTabsState, saveTabsState, searchParams])
+        markWorkspaceLaunch("shell_hydrated_ms")
+    }, [])
 
     useEffect(() => {
         activeTabIdRef.current = activeTabId
@@ -860,6 +735,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const assignTabFrameRef = useCallback((tabId: string, node: HTMLIFrameElement | null) => {
         if (node) {
             iframeRefs.current.set(tabId, node)
+            if (tabId === initialTab.id) markWorkspaceLaunch("initial_frame_mounted_ms")
             return
         }
         iframeRefs.current.delete(tabId)
@@ -877,7 +753,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             next.delete(tabId)
             return next
         })
-    }, [])
+    }, [initialTab.id])
 
     const markTabFrameReady = useCallback((tabId: string) => {
         loadedTabIdsRef.current.add(tabId)
@@ -888,6 +764,19 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             return next
         })
     }, [])
+
+    const reportInitialPanelReady = useCallback((tabId: string) => {
+        if (tabId !== initialTab.id || launchUsableReportedRef.current) return
+        launchUsableReportedRef.current = true
+        markWorkspaceLaunch("panel_ready_ms")
+        setInitialPanelReady(true)
+        reportWorkspaceLaunch({
+            stage: "usable",
+            workspaceSlug: workspace.slug,
+            initialUrl: initialTab.url,
+            serverTiming: launchServerTiming,
+        })
+    }, [initialTab.id, initialTab.url, launchServerTiming, workspace.slug])
 
     const ensureTabFrameLocation = useCallback((tabId: string, url: string, mode: "assign" | "replace" = "assign") => {
         const frame = iframeRefs.current.get(tabId)
@@ -932,6 +821,38 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         // the desired route, so cancel the stale document load directly.
         ensureTabFrameLocation(tabId, url, mode)
     }, [ensureTabFrameLocation, postToTab, scheduleSoftNavigationFallback])
+
+    useEffect(() => {
+        if (tabsBootstrappedRef.current) return
+        tabsBootstrappedRef.current = true
+        const query = searchParams.toString()
+        const current = normalizeWorkspaceUrl(initialWorkspaceUrl ?? `${pathname}${query ? `?${query}` : ""}`)
+        const stored = readTabsState(current)
+        const storedActive = stored.tabs.find((tab) => tab.id === stored.activeId) ?? stored.tabs[0]
+        const matchingInitial = stored.tabs.find((tab) => tab.id === initialTab.id)
+            ?? stored.tabs.find((tab) => tab.url === initialTab.url)
+        const replacedTabId = matchingInitial?.id ?? storedActive?.id
+        const adoptedActive = matchingInitial
+            ? { ...matchingInitial, id: initialTab.id, url: initialTab.url, title: titleForUrl(initialTab.url) }
+            : initialTab
+        const adoptedTabs = stored.tabs.length
+            ? stored.tabs
+                .map((tab) => tab.id === replacedTabId ? adoptedActive : tab)
+                .filter((tab, index, values) => values.findIndex((candidate) => candidate.id === tab.id) === index)
+            : [initialTab]
+        const tabsToUse = adoptedTabs.length ? adoptedTabs : [initialTab]
+        activeTabIdRef.current = initialTab.id
+        tabsRef.current = tabsToUse
+        tabFrameOrderRef.current = tabsToUse.map((tab) => tab.id)
+        mutationRevisionRef.current = Math.max(0, ...tabsToUse.map((tab) => tab.seenRevision))
+        saveTabsState(tabsToUse, initialTab.id)
+        deferNavigationStateUpdate(() => {
+            activateWorkspaceTab(initialTab.id)
+            setTabs(tabsToUse)
+            setTabFrameOrder(tabsToUse.map((tab) => tab.id))
+            setTabsHydrated(true)
+        })
+    }, [activateWorkspaceTab, initialTab, initialWorkspaceUrl, normalizeWorkspaceUrl, pathname, readTabsState, saveTabsState, searchParams, titleForUrl])
 
     const setTabContextOpen = useCallback((tabId: string, open: boolean) => {
         sessionStorage.setItem(workspaceTabContextStorageKey(workspace.slug, tabId), open ? "true" : "false")
@@ -1069,6 +990,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             if (message.type === "location-replace" && message.url) {
                 const url = normalizeWorkspaceUrl(message.url)
                 markTabFrameReady(message.tabId)
+                reportInitialPanelReady(message.tabId)
                 readyTabIdsRef.current.add(message.tabId)
                 // The frame only reports its location after its bridge effects
                 // have mounted. Reply here as the reliable activation
@@ -1111,6 +1033,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                     return
                 }
                 if (pendingUrl === url) pendingNavigationRef.current.delete(message.tabId)
+                reportInitialPanelReady(message.tabId)
                 completeTabNavigation(message.tabId)
                 if (message.tabId === activeTabIdRef.current) setRouteLoadingTabId(null)
                 setTabs((existingTabs) => {
@@ -1246,7 +1169,16 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
 
         window.addEventListener("message", receiveFrameMessage)
         return () => window.removeEventListener("message", receiveFrameMessage)
-    }, [beginTabNavigation, completeTabNavigation, markTabFrameReady, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, scheduleSoftNavigationFallback, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+    }, [beginTabNavigation, completeTabNavigation, markTabFrameReady, normalizeWorkspaceUrl, openWorkspaceTab, postToTab, reopenClosedTab, reportInitialPanelReady, requestTabFrameNavigation, routeCanShowRelationshipContext, saveTabsState, scheduleSoftNavigationFallback, setTabContextOpen, setTabContextStatus, showCreationNotice, titleForUrl, updateTabForShellNavigation, workspace.slug])
+
+    useEffect(() => {
+        if (!tabsHydrated || readyTabIdsRef.current.has(initialTab.id)) return
+        const delays = [0, 120, 360, 900]
+        const timeouts = delays.map((delay) => window.setTimeout(() => {
+            if (!readyTabIdsRef.current.has(initialTab.id)) postToTab(initialTab.id, { type: "probe" })
+        }, delay))
+        return () => timeouts.forEach((timeout) => window.clearTimeout(timeout))
+    }, [initialTab.id, postToTab, tabsHydrated])
 
     useEffect(() => {
         function start(event: Event) {
@@ -1604,7 +1536,6 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if (createIntentHandledRef.current === key) return
         createIntentHandledRef.current = key
         setCreateTarget(intent)
-        setCreateError(null)
     }, [activeTabId, tabs, tabsHydrated, workspaceCapabilities, workspaceRole])
 
     useEffect(() => {
@@ -1712,13 +1643,6 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         if ((target === "work-item" || target === "asset") && !canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities)) return
         if (target === "okr" && !canAccessPrivateWorkspacePanels(workspaceRole)) return
         window.dispatchEvent(new CustomEvent("betelgeze:dropdown-open", { detail: "workspace-create" }))
-        setCreateError(null)
-        if (target === "relationship") {
-            setRelationshipStartPhase("potential_client")
-            setRelationshipPhone("")
-            setRelationshipWhatsappPhone("")
-            setRelationshipCommunicationPreference("")
-        }
         setCreateTarget(target)
     }
 
@@ -1751,79 +1675,21 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         return true
     }
 
-    async function submitCreate(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault()
-        setCreateError(null)
-        const form = event.currentTarget
-        const formData = new FormData(form)
-        const target = createTarget
-        if (!target) return
-
-        if (target === "asset") {
-            const file = formData.get("asset_file")
-            if (!(file instanceof File) || file.size === 0) {
-                setCreateError("Choose a file to upload.")
-                return
-            }
-            setUploadLabel(`Uploading ${file.name}`)
-            try {
-                const prepare = await fetch(`/api/workspaces/${workspace.slug}/assets/upload`, {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ name: file.name, size: file.size, type: file.type || "application/octet-stream" }),
-                })
-                const prepared = await prepare.json() as { uploadUrl?: string; storedAsset?: { name: string; path: string; size: number; type: string; kind: string }; error?: string }
-                if (!prepare.ok || !prepared.uploadUrl || !prepared.storedAsset) throw new Error(prepared.error ?? "Could not prepare upload.")
-                const upload = await fetch(prepared.uploadUrl, {
-                    method: "PUT",
-                    headers: { "content-type": prepared.storedAsset.type },
-                    body: file,
-                })
-                if (!upload.ok) throw new Error("The file could not be uploaded.")
-                formData.set("storage_path", prepared.storedAsset.path)
-                formData.set("content_type", prepared.storedAsset.type)
-                formData.set("file_size", String(prepared.storedAsset.size))
-                formData.set("asset_kind", prepared.storedAsset.kind)
-                formData.set("original_name", prepared.storedAsset.name)
-                if (!String(formData.get("title") ?? "").trim()) formData.set("title", prepared.storedAsset.name)
-            } catch (error) {
-                setCreateError(error instanceof TypeError ? "The browser could not reach file storage. Please try again in a moment." : error instanceof Error ? error.message : "Upload failed.")
-                setUploadLabel(null)
-                return
-            }
-            setUploadLabel(null)
-        }
-
-        startCreateTransition(async () => {
-            const result = await runWorkspaceMutation(() => target === "relationship"
-                ? createRelationshipAction(formData)
-                : target === "work-item"
-                    ? createWorkItemAction(formData)
-                    : target === "asset"
-                        ? createAssetAction(formData)
-                        : createOkrAction(formData), { category: target === "okr" ? "maintenance" : target === "asset" ? "system" : target === "work-item" ? "gantt" : "services" })
-            if (!result.ok) {
-                setCreateError(result.error ?? "Could not create this item.")
-                return
-            }
-            setCreateTarget(null)
-            form.reset()
-            if (!result.href) return
-
-            const revision = mutationRevisionRef.current + 1
-            mutationRevisionRef.current = revision
-            const tabId = activeTabIdRef.current
-            setTabs((existingTabs) => {
-                const updatedTabs = existingTabs.map((tab) => tab.id === tabId ? { ...tab, seenRevision: revision } : tab)
-                saveTabsState(updatedTabs, tabId)
-                return updatedTabs
-            })
-            postToTab(tabId, { type: "activate", active: true, refresh: true })
-
-            showCreationNotice({
-                label: result.notice ?? (target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : target === "asset" ? "Asset added" : "OKR created"),
-                href: result.href,
-            })
+    function handleCreated(result: WorkspaceCreateActionState, target: WorkspaceCreateTarget) {
+        setCreateTarget(null)
+        if (!result.href) return
+        const revision = mutationRevisionRef.current + 1
+        mutationRevisionRef.current = revision
+        const tabId = activeTabIdRef.current
+        setTabs((existingTabs) => {
+            const updatedTabs = existingTabs.map((tab) => tab.id === tabId ? { ...tab, seenRevision: revision } : tab)
+            saveTabsState(updatedTabs, tabId)
+            return updatedTabs
+        })
+        postToTab(tabId, { type: "activate", active: true, refresh: true })
+        showCreationNotice({
+            label: result.notice ?? (target === "relationship" ? "Relationship added" : target === "work-item" ? "Work item added" : target === "asset" ? "Asset added" : "OKR created"),
+            href: result.href,
         })
     }
 
@@ -1889,6 +1755,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
 
     function handleFrameLoad(tabId: string, expectedUrl: string) {
         markTabFrameReady(tabId)
+        if (tabId === initialTab.id) markWorkspaceLaunch("initial_frame_loaded_ms")
         readyTabIdsRef.current.delete(tabId)
         setRouteLoadingTabId((current) => current === tabId ? null : current)
         const pendingUrl = pendingNavigationRef.current.get(tabId)
@@ -2202,7 +2069,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
     const canCreateOkr = canAccessPrivateWorkspacePanels(workspaceRole)
     const canCreateRelationship = canAccessWorkspacePanel(WORKSPACE_PANELS[0], workspaceRole, workspaceCapabilities)
     const canCreateLibraryItem = canAccessWorkspacePanel(WORKSPACE_PANELS[5], workspaceRole, workspaceCapabilities)
-    const visibleTabs: WorkspaceTab[] = tabsHydrated && tabs.length ? tabs : [{ id: "initial", title: titleForUrl(defaultWorkspaceUrl), url: defaultWorkspaceUrl, history: [defaultWorkspaceUrl], historyIndex: 0, seenRevision: 0 }]
+    const visibleTabs: WorkspaceTab[] = tabs.length ? tabs : [initialTab]
     const residentTabIdSet = new Set(residentTabIds)
     const frameTabs = orderWorkspaceTabsByStableIds(tabs, tabFrameOrder)
         .filter((tab) => tab.id === activeTabId || residentTabIdSet.has(tab.id))
@@ -2252,8 +2119,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             await candidate.track({
                 sessionId: presenceSessionIdRef.current,
                 userId: currentUserId,
-                name: currentPresenceMember.name,
-                avatarSrc: currentPresenceMember.avatarSrc,
+                name: presenceIdentityRef.current.name,
+                avatarSrc: presenceIdentityRef.current.avatarSrc,
                 activePath: tabsRef.current.find((tab) => tab.id === activeTabIdRef.current)?.url ?? null,
                 updatedAt: new Date().toISOString(),
             } satisfies WorkspacePresencePayload)
@@ -2301,7 +2168,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
                 candidate
                     .on("presence", { event: "sync" }, () => {
                         if (disposed || channel !== candidate) return
-                        setActiveWorkspaceUsers(visibleWorkspacePresence(candidate.presenceState<WorkspacePresencePayload>(), currentUserId, workspaceMembers))
+                        setActiveWorkspaceUsers(visibleWorkspacePresence(candidate.presenceState<WorkspacePresencePayload>(), currentUserId, workspaceMembersRef.current))
                     })
                     .subscribe(async (status) => {
                         if (disposed || channel !== candidate) return
@@ -2348,9 +2215,11 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             setActiveWorkspaceUsers([])
             if (channel) void supabase.removeChannel(channel)
         }
-    }, [currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, workspace.slug, workspaceMembers])
+    }, [currentUserId, workspace.slug])
 
     useEffect(() => {
+        workspaceMembersRef.current = workspaceMembers
+        presenceIdentityRef.current = { name: currentPresenceMember.name, avatarSrc: currentPresenceMember.avatarSrc }
         const channel = presenceChannelRef.current
         if (!channel || presenceState !== "live") return
         void channel.track({
@@ -2365,7 +2234,18 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             setPresenceState("reconnecting")
             setPresenceError("Workspace presence could not update the active page.")
         })
-    }, [activeTab.url, currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, presenceState])
+    }, [activeTab.url, currentPresenceMember.avatarSrc, currentPresenceMember.name, currentUserId, presenceState, workspaceMembers])
+
+    useEffect(() => {
+        if (presenceState !== "live") return
+        markWorkspaceLaunch("presence_ready_ms")
+        reportWorkspaceLaunch({
+            stage: "presence",
+            workspaceSlug: workspace.slug,
+            initialUrl: initialTab.url,
+            serverTiming: launchServerTiming,
+        })
+    }, [initialTab.url, launchServerTiming, presenceState, workspace.slug])
 
     function retryActiveNavigation() {
         if (!activeNavigation) return
@@ -2499,83 +2379,27 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             onMessage={(userId) => { setProfileUserId(null); navigateActiveTab(`/${workspace.slug}/communications?mode=team&dm=${userId}`) }}
         /> : null}
 
-        {createTarget && (
-            <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="workspace-create-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setCreateTarget(null) }}>
-                <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-neutral-800 bg-neutral-950 text-white shadow-2xl shadow-black/50">
-                    <div className="flex items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3 sm:px-5">
-                        <div>
-                            <p className="text-xs text-neutral-500">Create in {workspace.name}</p>
-                            <h2 id="workspace-create-title" className="text-lg font-semibold">{createTarget === "relationship" ? "Add relationship" : createTarget === "work-item" ? "Add work item" : createTarget === "asset" ? "Add asset" : "Create OKR"}</h2>
-                        </div>
-                        <button data-icon-button type="button" onClick={() => setCreateTarget(null)} aria-label="Close create panel" className="inline-flex h-9 w-9 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-900 hover:text-white">
-                            <span aria-hidden="true" className="text-xl leading-none">×</span>
-                        </button>
-                    </div>
-                    <form onSubmit={submitCreate} className="max-h-[min(70vh,42rem)] overflow-y-auto px-4 py-4 sm:px-5">
-                        {createTarget === "relationship" && (
-                            <div className="space-y-5">
-                                <section className="grid gap-3 sm:grid-cols-2">
-                                    <label className="block text-sm text-neutral-300 sm:col-span-2">Name<input name="primary_person_name" required autoFocus placeholder="Person or primary contact" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label>
-                                    <label className="block text-sm text-neutral-300">Company<input name="business_name" placeholder="Optional" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label>
-                                    <label className="block text-sm text-neutral-300">Stage<select name="lifecycle_phase" value={relationshipStartPhase} onChange={(event) => setRelationshipStartPhase(event.target.value as "potential_client" | "retention")} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="potential_client">Potential client</option><option value="retention">Retention</option></select></label>
-                                </section>
-                                <section className="border-t border-neutral-900 pt-4">
-                                    <p className="mb-3 text-xs font-medium text-neutral-500">Contact details</p>
-                                    <div className="grid gap-3 sm:grid-cols-2">
-                                        <label className="block text-sm text-neutral-300">Email<input name="primary_email" type="email" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                        <label className="block text-sm text-neutral-300">Phone number<input name="primary_phone" type="tel" value={relationshipPhone} onChange={(event) => { const value = event.target.value; setRelationshipPhone(value); if (!value.trim() && relationshipCommunicationPreference === "twilio_sms") setRelationshipCommunicationPreference("") }} required={relationshipStartPhase === "retention" && !relationshipWhatsappPhone.trim()} aria-describedby={relationshipStartPhase === "retention" ? "retention-phone-help" : undefined} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                        <label className="block text-sm text-neutral-300">WhatsApp number<input name="whatsapp_phone" type="tel" value={relationshipWhatsappPhone} onChange={(event) => { const value = event.target.value; setRelationshipWhatsappPhone(value); if (!value.trim() && relationshipCommunicationPreference === "meta_whatsapp") setRelationshipCommunicationPreference("") }} required={relationshipStartPhase === "retention" && !relationshipPhone.trim()} aria-describedby={relationshipStartPhase === "retention" ? "retention-phone-help" : undefined} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                        {relationshipStartPhase === "retention" ? <label className="block text-sm text-neutral-300">Communication preference<select name="communication_primary_provider" value={relationshipCommunicationPreference} onChange={(event) => setRelationshipCommunicationPreference(event.target.value as "twilio_sms" | "meta_whatsapp")} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="" disabled>Choose a channel</option><option value="twilio_sms" disabled={!relationshipPhone.trim()}>Phone (SMS)</option><option value="meta_whatsapp" disabled={!relationshipWhatsappPhone.trim()}>WhatsApp</option></select></label> : null}
-                                        <label className="block text-sm text-neutral-300">Role<input name="primary_contact_role" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                        <label className="block text-sm text-neutral-300">Website<input name="website_url" type="url" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                        <label className="flex h-10 items-center gap-2 self-end text-sm text-neutral-300"><input name="is_test" type="checkbox" className="h-4 w-4 rounded border-neutral-700 bg-black" />Test client?</label>
-                                    </div>
-                                    {relationshipStartPhase === "retention" ? <p id="retention-phone-help" className="mt-2 text-xs text-neutral-500">Add at least one number and choose where the confirmation should be sent.</p> : null}
-                                </section>
-                                <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Industry<input name="industry_value" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Location<input name="location_value" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300">Source<input name="source_label" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label><label className="block text-sm text-neutral-300 sm:col-span-2">Notes<textarea name="notes_summary" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label></section>
-                            </div>
-                        )}
-                        {createTarget === "work-item" && (
-                            <div className="space-y-5">
-                                <section className="grid gap-3 sm:grid-cols-2"><label className="block text-sm text-neutral-300 sm:col-span-2">Title<input name="title" required autoFocus placeholder="What needs to happen?" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label><label className="block text-sm text-neutral-300">Stage<select name="lifecycle_phase" defaultValue="fulfilment" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="lead">Lead</option><option value="onboarding">Onboarding</option><option value="fulfilment">Fulfilment</option><option value="retention">Retention</option></select></label><label className="block text-sm text-neutral-300">Status<select name="status" defaultValue="todo" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="todo">To do</option><option value="doing">In progress</option><option value="waiting">Waiting</option><option value="blocked">Blocked</option><option value="done">Done</option></select></label></section>
-                                <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2"><div><p className="text-sm text-neutral-300">Start</p><div className="mt-1.5 grid grid-cols-[1fr_5.5rem] gap-2"><input name="planned_start_date" type="date" aria-label="Start date" className="h-10 min-w-0 rounded-lg border border-neutral-700 bg-black px-3 text-white" /><input name="planned_start_time" type="time" aria-label="Start time" className="h-10 min-w-0 rounded-lg border border-neutral-700 bg-black px-2 text-white" /></div></div><div><p className="text-sm text-neutral-300">Due</p><div className="mt-1.5 grid grid-cols-[1fr_5.5rem] gap-2"><input name="due_date" type="date" aria-label="Due date" className="h-10 min-w-0 rounded-lg border border-neutral-700 bg-black px-3 text-white" /><input name="due_time" type="time" aria-label="Due time" className="h-10 min-w-0 rounded-lg border border-neutral-700 bg-black px-2 text-white" /></div></div></section>
-                                <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Linked relationship<select name="relationship_id" defaultValue="" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">None</option>{relationshipOptions.map((relationship) => <option key={relationship.id} value={relationship.id}>{relationship.label}</option>)}</select></label><label className="block text-sm text-neutral-300">Parent work item<select name="parent_work_item_id" defaultValue="" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">None</option>{workItemOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label className="flex items-center gap-2 text-sm text-neutral-400 sm:col-span-2"><input name="wait_for_parent" type="checkbox" value="off" className="h-4 w-4 rounded border-neutral-700 bg-black" /> Can start before its parent is complete</label></section>
-                                <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-[1fr_auto]"><label className="block text-sm text-neutral-300">Description<textarea name="description" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label><div className="flex items-end"><label className="flex h-10 items-center gap-2 whitespace-nowrap text-sm text-neutral-300"><input name="is_key_task" type="checkbox" defaultChecked className="h-4 w-4 rounded border-neutral-700 bg-black" /> Key task</label><input name="priority" type="hidden" value="3" /></div></section>
-                            </div>
-                        )}
-                        {createTarget === "asset" && (
-                            <div className="space-y-5"><section className="space-y-3"><label className="block text-sm text-neutral-300">File<input name="asset_file" type="file" required autoFocus className="mt-1.5 block w-full rounded-lg border border-dashed border-neutral-700 bg-black px-3 py-3 text-sm text-neutral-300 file:mr-3 file:rounded-md file:border-0 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-black" /></label><label className="block text-sm text-neutral-300">Title<input name="title" placeholder="Defaults to the file name" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label></section><section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2"><label className="block text-sm text-neutral-300">Link to relationship<select name="relationship_id" defaultValue="" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">None</option>{relationshipOptions.map((relationship) => <option key={relationship.id} value={relationship.id}>{relationship.label}</option>)}</select></label><label className="block text-sm text-neutral-300">Link to work item<select name="work_item_id" defaultValue="" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white"><option value="">None</option>{workItemOptions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label></section><label className="block border-t border-neutral-900 pt-4 text-sm text-neutral-300">Description<textarea name="description" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>
-                            </div>
-                        )}
-                        {createTarget === "okr" && canCreateOkr && (
-                            <div className="space-y-5">
-                                <section className="grid gap-3 sm:grid-cols-2">
-                                    <label className="block text-sm text-neutral-300 sm:col-span-2">Objective<input name="objective" required autoFocus placeholder="Increase reliable monthly sales" className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white placeholder:text-neutral-600" /></label>
-                                    <label className="block text-sm text-neutral-300 sm:col-span-2">Description<textarea name="description" rows={2} className="mt-1.5 w-full rounded-lg border border-neutral-700 bg-black px-3 py-2 text-white" /></label>
-                                </section>
-                                <section className="grid gap-3 border-t border-neutral-900 pt-4 sm:grid-cols-2">
-                                    <label className="block text-sm text-neutral-300">Starts<input name="period_start" type="date" defaultValue={okrPeriodStart} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                    <label className="block text-sm text-neutral-300">Deadline<input name="period_end" type="date" defaultValue={okrPeriodEnd} required className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white" /></label>
-                                    <label className="block text-sm text-neutral-300">Owner<select name="owner_user_id" defaultValue={currentUserId} className="mt-1.5 h-10 w-full rounded-lg border border-neutral-700 bg-black px-3 text-white">{okrOwnerOptions.map((owner) => <option key={owner.id} value={owner.id}>{owner.label} · {owner.role}</option>)}</select></label>
-                                </section>
-                                <p className="text-xs leading-5 text-neutral-500">This will be saved as a fully editable draft. Add and review its Key Results from the OKRs table before committing it.</p>
-                            </div>
-                        )}
-                        {createError && <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">{createError}</p>}
-                        {uploadLabel && <p className="mt-4 text-sm text-neutral-400">{uploadLabel}</p>}
-                        <div className="mt-5 flex justify-end">
-                            <button disabled={isCreating || Boolean(uploadLabel)} className="inline-flex min-h-10 items-center rounded-lg bg-white px-4 text-sm font-medium text-black disabled:opacity-60">{isCreating || uploadLabel ? "Creating..." : createTarget === "relationship" ? relationshipStartPhase === "retention" ? "Add and send confirmation" : "Create relationship" : createTarget === "work-item" ? "Create work item" : createTarget === "asset" ? "Create asset" : "Create OKR"}</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        )}
+        {createTarget ? <WorkspaceCreateModal
+            key={createTarget}
+            target={createTarget}
+            workspace={workspace}
+            currentUserId={currentUserId}
+            username={username}
+            currentUserRole={workspaceRole}
+            createRelationshipAction={createRelationshipAction}
+            createWorkItemAction={createWorkItemAction}
+            createAssetAction={createAssetAction}
+            createOkrAction={createOkrAction}
+            onClose={() => setCreateTarget(null)}
+            onCreated={handleCreated}
+        /> : null}
+
 
         <div data-workspace-tabbar className={`fixed top-14 z-40 h-11 border-b border-neutral-800 bg-neutral-950/95 text-white shadow-lg shadow-black/10 backdrop-blur ${sidebarTransitionEnabled ? "transition-[left,width] duration-200 ease-out" : ""}`}>
             <div className="flex h-full min-w-0 items-end gap-2 px-2 pt-1">
                 <div ref={tabStripRef} role="tablist" aria-label="Workspace tabs" className="relative flex h-full min-w-0 flex-1 items-end gap-1 overflow-x-auto overflow-y-hidden md:overflow-hidden">
                     {visibleTabs.map((tab) => {
-                        const active = tab.id === activeTabId || (!tabsHydrated && tab.id === "initial")
+                        const active = tab.id === activeTabId
                         const dragging = tab.id === draggingTabId
                         const displayTitle = workspaceTabDisplayTitle(tab)
                         const communicationsTab = workspaceTabIsCommunications(tab.url, workspace.slug, "http://localhost")
@@ -2654,7 +2478,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
         </div>
 
         <div data-workspace-tab-panels className={`fixed bottom-0 top-[6.25rem] z-30 overflow-hidden bg-neutral-950 ${sidebarTransitionEnabled ? "transition-[left,width] duration-200 ease-out" : ""}`}>
-            {tabsHydrated && frameTabs.map((tab) => (
+            {frameTabs.map((tab) => (
                 <WorkspaceTabFrame
                     key={tab.id}
                     tab={tab}
@@ -2666,7 +2490,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, currentUserId, wor
             {tabsHydrated && activeRouteLoading && (
                 <div className="absolute inset-0 z-20 bg-neutral-950" aria-hidden="true" />
             )}
-            {tabsHydrated && !loadedTabIds.has(activeTabId) && !activeRouteLoading && (
+            {!loadedTabIds.has(activeTabId) && !activeRouteLoading && (
                 <div className="absolute inset-0 z-10 overflow-y-auto bg-neutral-950">
                     <WorkspaceTabOpeningState url={activeTab.url} workspaceSlug={workspace.slug} detailPreview={activeTab.detailPreview} />
                 </div>

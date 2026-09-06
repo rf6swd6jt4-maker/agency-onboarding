@@ -12,7 +12,7 @@ const canonical = readFileSync("lib/onboarding/canonical.ts", "utf8")
 const saleAutomation = readFileSync("lib/client-sales/automation.ts", "utf8")
 const relationshipWorkflow = readFileSync("lib/relationship-workflow.ts", "utf8")
 const relationshipActions = readFileSync("app/[workspaceSlug]/relationships/actions.ts", "utf8")
-const workspaceTopBar = readFileSync("components/workspace/WorkspaceTopBarClient.tsx", "utf8")
+const workspaceCreateModal = readFileSync("components/workspace/WorkspaceCreateModal.tsx", "utf8")
 const archiveRelationshipForm = readFileSync("app/[workspaceSlug]/relationships/[relationshipId]/ArchiveRelationshipForm.tsx", "utf8")
 const stripeWebhook = readFileSync("app/api/stripe/webhook/route.ts", "utf8")
 const publicPage = readFileSync("app/onboarding/session/[token]/page.tsx", "utf8")
@@ -54,9 +54,9 @@ test("sale confirmation prepares the immutable session and payment reuses it bef
 })
 
 test("manual relationships start only at Potential Client or Retention and Retention sends confirmation", () => {
-    const relationshipForm = workspaceTopBar.slice(
-        workspaceTopBar.indexOf('{createTarget === "relationship"'),
-        workspaceTopBar.indexOf('{createTarget === "work-item"')
+    const relationshipForm = workspaceCreateModal.slice(
+        workspaceCreateModal.indexOf('{target === "relationship"'),
+        workspaceCreateModal.indexOf('{target === "work-item"')
     )
     assert.match(relationshipForm, /<option value="potential_client">Potential client<\/option><option value="retention">Retention<\/option>/u)
     assert.doesNotMatch(relationshipForm, /<option value="(?:lead|sold|onboarding|fulfilment|completed_lost)"/u)

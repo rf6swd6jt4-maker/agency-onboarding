@@ -188,7 +188,17 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
             const message = event.data
             if (message?.source !== WORKSPACE_TAB_MESSAGE_SOURCE || message.target !== "frame" || message.tabId !== tabId) return
 
-            if (message.type === "navigate" && message.url) {
+            if (message.type === "probe") {
+                const current = normalizeWorkspaceUrl(`${window.location.pathname}${window.location.search}${window.location.hash}`, workspaceSlug, window.location.origin)
+                const reply: WorkspaceTabFrameMessage = {
+                    source: WORKSPACE_TAB_MESSAGE_SOURCE,
+                    target: "host",
+                    tabId,
+                    type: "location",
+                    url: current,
+                }
+                window.parent.postMessage(reply, window.location.origin)
+            } else if (message.type === "navigate" && message.url) {
                 const target = workspaceTabFrameUrl(message.url, tabId, window.location.origin)
                 const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
                 if (target !== current) {

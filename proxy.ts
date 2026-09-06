@@ -5,8 +5,10 @@ import { applySessionResponseHeaders, carrySessionResponse, persistentSessionOpt
 import { authHostname, authOrigin } from "@/lib/auth/origin"
 import { WORKSPACE_TAB_FRAME_PARAM } from "@/lib/workspace-tabs"
 import { WORKSPACE_SHELL_INTERNAL_PREFIX, WORKSPACE_SHELL_REQUEST_HEADER, workspaceRouteUsesShell, workspaceShellRoute } from "@/lib/workspace-shell"
+import { parseWorkspaceLaunchHint, WORKSPACE_LAUNCH_COOKIE } from "@/lib/workspace-launch"
 
 async function refreshSession(request: NextRequest) {
+    const startedAt = performance.now()
     const headers = requestHeadersWithCurrentPath(request)
     let response = NextResponse.next({ request: { headers } })
     migrateLegacyAuthCookies(request, response)
@@ -41,6 +43,7 @@ async function refreshSession(request: NextRequest) {
         response,
         aal: typeof data?.claims?.aal === "string" ? data.claims.aal : null,
         userId: typeof data?.claims?.sub === "string" ? data.claims.sub : null,
+        durationMs: Math.max(0, Math.round((performance.now() - startedAt) * 10) / 10),
     }
 }
 
@@ -80,10 +83,12 @@ function requestHeadersWithCurrentPath(request: NextRequest, headers = request.h
     return nextHeaders
 }
 
-function withRewrite(request: NextRequest, pathname: string, headers?: Headers) {
+function withRewrite(request: NextRequest, pathname: string, headers?: Headers, currentPath?: string) {
     const url = request.nextUrl.clone()
     url.pathname = pathname
-    return NextResponse.rewrite(url, { request: { headers: requestHeadersWithCurrentPath(request, headers, Boolean(headers)) } })
+    const requestHeaders = requestHeadersWithCurrentPath(request, headers, Boolean(headers))
+    if (currentPath) requestHeaders.set("x-betelgeze-current-path", currentPath)
+    return NextResponse.rewrite(url, { request: { headers: requestHeaders } })
 }
 
 function withRedirect(request: NextRequest, pathname: string) {
@@ -155,11 +160,13 @@ export async function proxy(request: NextRequest) {
     // forwarded to the route that renders this same request.
     const sessionState = shouldRefreshSessionForDomain(domain)
         ? await refreshSession(request)
-        : { response: NextResponse.next({ request: { headers: requestHeadersWithCurrentPath(request) } }), aal: null, userId: null }
+        : { response: NextResponse.next({ request: { headers: requestHeadersWithCurrentPath(request) } }), aal: null, userId: null, durationMs: 0 }
     const sessionResponse = sessionState.response
 
     function withSession(response: NextResponse) {
-        return carrySessionResponse(sessionResponse, response)
+        const result = carrySessionResponse(sessionResponse, response)
+        if (sessionState.durationMs > 0) result.headers.set("Server-Timing", `proxy-session;dur=${sessionState.durationMs}`)
+        return result
     }
 
     const isCentralAuthRoute = AUTH_PATHS.some((authPath) => path === authPath || path.startsWith(`${authPath}/`))
@@ -215,7 +222,19 @@ export async function proxy(request: NextRequest) {
             }
             return withSession(withRewrite(request, path, headers))
         }
-        if (path === "/") return withSession(withRewrite(request, "/workspaces"))
+        if (path === "/") {
+            const launchHint = sessionState.userId
+                ? parseWorkspaceLaunchHint(request.cookies.get(WORKSPACE_LAUNCH_COOKIE)?.value)
+                : null
+            if (launchHint && workspaceRouteUsesShell(new URL(launchHint.url, request.url).pathname)) {
+                const headers = requestHeadersWithCurrentPath(request)
+                headers.set("x-betelgeze-workspace-slug", launchHint.workspaceSlug)
+                headers.set(WORKSPACE_SHELL_REQUEST_HEADER, "1")
+                headers.set("x-betelgeze-workspace-launch", "saved")
+                return withSession(withRewrite(request, workspaceShellRoute(launchHint.workspaceSlug), headers, launchHint.url))
+            }
+            return withSession(withRewrite(request, "/workspaces"))
+        }
     }
 
     if (domain === AUTH_HOST) {

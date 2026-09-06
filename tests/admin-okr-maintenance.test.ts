@@ -63,13 +63,13 @@ test("Admin persistence is additive, private, append-only, and concurrency-safe"
 })
 
 test("OKRs are editable drafts until Commit classifies and selectively locks them", async () => {
-    const [migration, lifecycleMigration, reportingMigration, testModeMigration, actions, topBar, detail, workspace] = await Promise.all([
+    const [migration, lifecycleMigration, reportingMigration, testModeMigration, actions, createModal, detail, workspace] = await Promise.all([
         readFile("supabase/migrations/20260804190000_okr_objective_types.sql", "utf8"),
         readFile("supabase/migrations/20260805090000_okr_draft_commit_and_work_links.sql", "utf8"),
         readFile("supabase/migrations/20260805130000_compact_okr_reporting.sql", "utf8"),
         readFile("supabase/migrations/20260806160000_okr_test_mode.sql", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
-        readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("components/workspace/WorkspaceCreateModal.tsx", "utf8"),
         readFile("app/[workspaceSlug]/admin/okrs/[okrId]/page.tsx", "utf8"),
         readFile("components/admin/OkrWorkspace.tsx", "utf8"),
     ])
@@ -99,10 +99,10 @@ test("OKRs are editable drafts until Commit classifies and selectively locks the
     assert.match(actions, /export async function commitOkr[\s\S]*status: "active", objective_type: "committed"/)
     assert.match(actions, /requireDraftOkr/)
     assert.doesNotMatch(actions, /value\(formData, "title"\)[\s\S]{0,500}workspace_okrs/)
-    assert.match(topBar, /Objective<input name="objective"/)
-    assert.match(topBar, />Deadline<input name="period_end"/)
-    assert.doesNotMatch(topBar, /name="objective_type"/)
-    assert.doesNotMatch(topBar, /name="status" defaultValue="draft"/)
+    assert.match(createModal, /Objective<input name="objective"/)
+    assert.match(createModal, />Deadline<input name="period_end"/)
+    assert.doesNotMatch(createModal, /name="objective_type"/)
+    assert.doesNotMatch(createModal, /name="status" defaultValue="draft"/)
     assert.match(detail, /redirect\(`\/\$\{workspace\.slug\}\/admin\/okrs#okr-\$\{okr\.id\}`\)/)
     assert.match(workspace, /commitOkr/)
     assert.match(workspace, /No Key Results/)
@@ -324,14 +324,14 @@ test("the one-time OKR reset is exact, idempotent, and fails closed around repur
 })
 
 test("service-role query paths explicitly exclude private work for Staff surfaces", async () => {
-    const [relationships, topBar, search, detail] = await Promise.all([
+    const [relationships, createOptions, search, detail] = await Promise.all([
         readFile("lib/relationships.ts", "utf8"),
-        readFile("components/workspace/WorkspaceTopBar.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/shell-create-options/route.ts", "utf8"),
         readFile("app/api/workspaces/[workspaceSlug]/search/route.ts", "utf8"),
         readFile("app/[workspaceSlug]/work-items/[id]/page.tsx", "utf8"),
     ])
     assert.match(relationships, /\.eq\("visibility", "workspace"\)/)
-    assert.match(topBar, /\.eq\("visibility", "workspace"\)/)
+    assert.match(createOptions, /\.eq\("visibility", "workspace"\)/)
     assert.match(search, /canAccessPrivatePanels[\s\S]*\.eq\("visibility", "admins_only"\)[\s\S]*Promise\.resolve\(\{ data: \[\], error: null \}\)/)
     assert.match(search, /\.eq\("visibility", "workspace"\)/)
     assert.match(detail, /item\.visibility === "admins_only" && role === "staff"/)
@@ -421,15 +421,18 @@ test("the private activity console covers core automation producers", async () =
 })
 
 test("Create OKR uses the shared shell modal and is never preloaded for Staff", async () => {
-    const [adminPage, topBar, topBarClient, actions] = await Promise.all([
+    const [adminPage, topBarClient, createModal, createOptions, actions] = await Promise.all([
         readFile("app/[workspaceSlug]/admin/page.tsx", "utf8"),
-        readFile("components/workspace/WorkspaceTopBar.tsx", "utf8"),
         readFile("components/workspace/WorkspaceTopBarClient.tsx", "utf8"),
+        readFile("components/workspace/WorkspaceCreateModal.tsx", "utf8"),
+        readFile("app/api/workspaces/[workspaceSlug]/shell-create-options/route.ts", "utf8"),
         readFile("app/[workspaceSlug]/admin/actions.ts", "utf8"),
     ])
     assert.doesNotMatch(adminPage, /Private workspace operations/)
     assert.doesNotMatch(adminPage, /action=\{createOkr/)
-    assert.match(topBar, /workspaceRole === "owner" \|\| workspaceRole === "admin"[\s\S]*: \{ data: \[\] \}/)
+    assert.match(topBarClient, /dynamic\(\(\) => import\("@\/components\/workspace\/WorkspaceCreateModal"\)/)
+    assert.match(createOptions, /role !== "owner" && role !== "admin"/)
+    assert.match(createModal, /fetch\(`\/api\/workspaces\/\$\{encodeURIComponent\(workspace\.slug\)\}\/shell-create-options`/)
     assert.match(topBarClient, /\{canCreateOkr && <button/)
     assert.match(topBarClient, /openCreate\("okr"\)/)
     assert.ok(topBarClient.indexOf('openCreate("asset")') < topBarClient.indexOf('openCreate("okr")'))

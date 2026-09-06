@@ -50,9 +50,10 @@ test("top-level panels rewrite to the shell while framed panels bypass shell boo
 
     assert.match(proxy, /!request\.nextUrl\.searchParams\.has\(WORKSPACE_TAB_FRAME_PARAM\) && workspaceRouteUsesShell\(path\)/)
     assert.match(proxy, /withRewrite\(request, workspaceShellRoute\(workspaceSlug\), headers\)/)
-    assert.match(shellPage, /requireWorkspaceAccess\(workspaceSlug\)/)
+    assert.match(shellPage, /requireWorkspaceShellBootstrap\(workspaceSlug\)/)
     assert.match(shellPage, /workspaceAccess=\{access\}/)
-    assert.match(shellPage, /initialWorkspaceUrl=\{currentPath \?\? undefined\}/)
+    assert.match(shellPage, /initialWorkspaceUrl=\{initialUrl\}/)
+    assert.match(shellPage, /initialTab=\{initialTab\}/)
     assert.ok(frameCheck >= 0 && firstShellQuery > frameCheck)
     assert.match(topBar.slice(frameCheck, firstShellQuery), /return <WorkspaceTabBridge/)
 })

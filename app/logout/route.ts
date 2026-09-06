@@ -3,6 +3,7 @@ import { createSupabaseRouteClient } from "@/lib/supabase/route"
 import { clearCurrentDeviceAuthCookies } from "@/lib/supabase/legacy-cookies"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { PUSH_DEVICE_COOKIE, UUID_PATTERN } from "@/lib/push/device"
+import { WORKSPACE_LAUNCH_COOKIE } from "@/lib/workspace-launch"
 
 export function GET(request: NextRequest) {
     // GET must never mutate authentication state. Next.js may prefetch links
@@ -20,6 +21,7 @@ export async function POST(request: NextRequest) {
     if (user && pushDeviceId && UUID_PATTERN.test(pushDeviceId)) await supabaseAdmin.from("web_push_subscriptions").delete().eq("user_id", user.id).eq("device_id", pushDeviceId)
     await auth.auth.signOut({ scope: "local" }).catch(() => undefined)
     response.cookies.set(PUSH_DEVICE_COOKIE, "", { path: "/", maxAge: 0 })
+    response.cookies.set(WORKSPACE_LAUNCH_COOKIE, "", { path: "/", maxAge: 0 })
     clearCurrentDeviceAuthCookies(request, response)
     return response
 }

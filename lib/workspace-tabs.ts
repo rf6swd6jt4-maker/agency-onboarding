@@ -5,11 +5,20 @@ export const WORKSPACE_TAB_FRAME_NAME_PREFIX = "betelgeze-tab:"
 export const WORKSPACE_TAB_MESSAGE_SOURCE = "betelgeze-workspace-tabs"
 export const WORKSPACE_TAB_VISIBILITY_EVENT = "betelgeze:workspace-tab-visibility"
 
+export type WorkspaceInitialTab = {
+    id: string
+    title: string
+    url: string
+    history: string[]
+    historyIndex: number
+    seenRevision: number
+}
+
 export type WorkspaceTabParentMessage = {
     source: typeof WORKSPACE_TAB_MESSAGE_SOURCE
     target: "frame"
     tabId: string
-    type: "activate" | "navigate" | "traverse" | "context-set"
+    type: "activate" | "navigate" | "traverse" | "context-set" | "probe"
     url?: string
     refresh?: boolean
     active?: boolean
@@ -77,6 +86,40 @@ export function workspaceTabFrameUrl(value: string, tabId: string, origin: strin
     const parsed = new URL(value, origin)
     parsed.searchParams.set(WORKSPACE_TAB_FRAME_PARAM, tabId)
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
+}
+
+export function workspaceTabTitleForUrl(value: string, workspaceSlug: string) {
+    const parsed = new URL(value, "http://localhost")
+    const defaultWorkspaceUrl = `/${workspaceSlug}`
+    const path = parsed.pathname
+    const suffix = path === defaultWorkspaceUrl
+        ? ""
+        : path.startsWith(`${defaultWorkspaceUrl}/`)
+            ? path.slice(defaultWorkspaceUrl.length + 1)
+            : path.replace(/^\//, "")
+
+    if (!suffix || suffix === "relationships") return "Relationships"
+    if (suffix.startsWith("relationships/")) return "Relationship"
+    if (suffix === "onboarding") return "Onboarding"
+    if (suffix.startsWith("onboarding/")) return "Onboarding Detail"
+    if (suffix === "work") return "Fulfilment"
+    if (suffix.startsWith("work/")) return "Fulfilment Detail"
+    if (suffix === "appointment-setting") return "Appointment Setting"
+    if (suffix.startsWith("appointment-setting/")) return "Appointment Setting Detail"
+    if (suffix === "work-items") return "Work Items"
+    if (suffix.startsWith("work-items/")) return "Work Item"
+    if (suffix === "assets") return "Assets"
+    if (suffix.startsWith("assets/")) return "Asset"
+    if (suffix === "communications") return "Communications"
+    if (suffix.startsWith("communications/")) return "Communication"
+    if (suffix === "leadgen") return "Lead Gen"
+    if (suffix === "leadgen/new") return "New Poll"
+    if (suffix.startsWith("leadgen/poll/")) return "Lead Poll"
+    if (suffix === "leadgen/polls") return "Polls"
+    if (suffix === "admin") return "Admin"
+    if (suffix === "settings") return "Settings"
+    if (suffix === "users") return "Users"
+    return suffix.split("/")[0]?.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Tab"
 }
 
 export function workspaceTabIdFromUrl(value: string | null, origin = "http://localhost") {
