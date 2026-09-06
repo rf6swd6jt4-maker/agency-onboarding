@@ -13,7 +13,8 @@ import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/com
 import { MessageReadAvatars } from "@/components/communications/MessageReadAvatars"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
-import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
+import { NativeAttachment } from "@/components/communications/NativeAttachment"
+import { validateNativeAttachmentFile } from "@/lib/communications/native-attachments"
 import { UnreadMessageCount } from "@/components/communications/UnreadMessageCount"
 import { keepComposerCurrentLineCentered } from "@/components/communications/composer-scroll"
 import { useMessagePaneInteractions } from "@/components/communications/useMessagePaneInteractions"
@@ -34,7 +35,7 @@ function text(value: unknown) { return typeof value === "string" && value ? valu
 function messageTime(value: string) { return new Intl.DateTimeFormat("en-IE", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)) }
 function messageDay(value: string) { return new Intl.DateTimeFormat("en-IE", { day: "numeric", month: "short", year: "numeric" }).format(new Date(value)) }
 function sameDay(left: string, right: string) { return new Date(left).toDateString() === new Date(right).toDateString() }
-function attachmentPreview(attachment: CommunicationAttachment | null) { return attachment ? `${attachment.kind === "image" ? "Image" : attachment.kind === "video" ? "Video" : attachment.kind === "audio" ? "Voice note" : attachment.kind === "sticker" ? "Sticker" : "File"}: ${attachment.fileName}` : "" }
+function attachmentPreview(attachment: CommunicationAttachment | null) { return attachment ? `${attachment.kind === "image" ? "Image" : attachment.kind === "video" ? "Video" : attachment.kind === "audio" ? "Audio" : attachment.kind === "sticker" ? "Sticker" : "File"}: ${attachment.fileName}` : "" }
 function messagePreview(message: NativeMessage) { return message.body || attachmentPreview(message.attachment) || "Message" }
 
 const NATIVE_TYPING_EVENT = "native_typing"
@@ -74,14 +75,6 @@ function BackIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" classNa
 function AttachmentIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="m8.5 12.5 6.8-6.8a3 3 0 0 1 4.2 4.2l-9.2 9.2a5 5 0 0 1-7.1-7.1l9-9" /></svg> }
 function StickerIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><path d="M5 3h10a4 4 0 0 1 4 4v7l-7 7H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" /><path d="M12 21v-5a2 2 0 0 1 2-2h5" /><path d="M7 9h.01M15 9h.01M8 13c1.5 1.2 6.5 1.2 8 0" /></svg> }
 function TeamIcon() { return <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-none stroke-current stroke-2"><circle cx="8" cy="8" r="3" /><circle cx="16" cy="9" r="2.5" /><path d="M3 19c0-3 2-5 5-5s5 2 5 5" /><path d="M13 15c1-.8 2-1.2 3.5-1 2.5.3 4 2.1 4 4.5" /></svg> }
-
-function NativeAttachment({ attachment, onOpenImage, light }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void; light: boolean }) {
-    if (attachment.kind === "sticker") return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
-    if (attachment.kind === "image") return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} className="max-h-80 h-auto w-full object-contain" /></button>
-    if (attachment.kind === "video") return <video src={attachment.url} controls preload="metadata" className="mb-2 max-h-80 w-full rounded-xl bg-black" />
-    if (attachment.kind === "audio") return <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} />
-    return <a href={attachment.url} target="_blank" rel="noreferrer" className="mb-2 flex items-center gap-3 rounded-xl border border-current/10 bg-black/5 px-3 py-2.5 hover:bg-black/10"><span className="text-xl">↗</span><span className="min-w-0"><span className="block truncate text-xs font-semibold">{attachment.fileName}</span><span className="mt-0.5 block text-[10px] opacity-60">{attachment.size ? `${Math.max(1, Math.round(attachment.size / 1024))}KB` : "Attachment"}</span></span></a>
-}
 
 function MessageText({ body }: { body: string }) {
     const parts = body.split(/(https?:\/\/[^\s)]+)/g)
@@ -482,6 +475,8 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
 
     async function uploadAttachment(file: File) {
         if (!selected || attachmentState === "uploading") return
+        const validation = validateNativeAttachmentFile(file)
+        if (validation.error) { setError(validation.error); if (attachmentInputRef.current) attachmentInputRef.current.value = ""; return }
         setAttachmentState("uploading"); setError(null)
         try {
             const preparedResponse = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/attachments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, name: file.name, size: file.size, type: file.type }) })
@@ -489,7 +484,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
             if (!preparedResponse.ok || !prepared?.uploadUrl || !prepared.attachment) throw new Error(prepared?.error ?? "Could not prepare attachment.")
             const uploaded = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.attachment.mimeType, ...(prepared.uploadHeaders ?? {}) }, body: file })
             if (!uploaded.ok) throw new Error("Could not upload attachment.")
-            setAttachment(prepared.attachment)
+            if (selectedRef.current === selected.id) setAttachment(prepared.attachment)
         } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.") }
         finally { setAttachmentState("idle"); if (attachmentInputRef.current) attachmentInputRef.current.value = "" }
     }
@@ -757,7 +752,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                         ? <span className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500`}>{sender.name} · former member</span>
                                         : <button data-icon-button type="button" onClick={(event) => { event.stopPropagation(); openWorkspaceMemberProfile(message.senderUserId) }} className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5" : "mb-0.5"} block text-[10px] font-semibold leading-none text-neutral-500 hover:underline`}>{own ? "You" : sender?.name ?? "Team member"}</button> : null}
                                     {reply ? <div className={`mb-2 rounded-lg border-l-2 border-neutral-500 px-2.5 py-2 ${own ? "bg-black/10" : "bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{reply.senderUserId === bootstrap.currentUser.id ? "You" : peopleById.get(reply.senderUserId)?.name ?? "Team member"}</p><p className="mt-0.5 truncate text-xs opacity-65">{messagePreview(reply)}</p></div> : null}
-                                    {message.attachment ? <NativeAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={own} /> : null}
+                                    {message.attachment ? <NativeAttachment key={message.attachment.storagePath} attachment={message.attachment} onOpenImage={setPreviewMedia} light={own} /> : null}
                                     {message.body ? <MessageText body={message.body} /> : null}
                                     {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${own ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={reaction.id} title={`${peopleById.get(reaction.reactorUserId)?.name ?? "Team member"} reacted`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                     <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : own ? "text-neutral-500" : "text-neutral-600"}`}>
@@ -776,7 +771,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         {attachment || attachmentState === "uploading" ? <div className="mx-auto mb-2 flex max-w-3xl items-center gap-3 rounded-xl border border-neutral-800 bg-black px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate">{attachmentState === "uploading" ? "Uploading attachment…" : attachment?.fileName}</span>{attachment ? <button type="button" onClick={() => setAttachment(null)} className="h-8 w-8 text-neutral-500">×</button> : null}</div> : null}
                         {stickerTrayOpen ? <div className="mx-auto mb-2 max-w-3xl rounded-2xl border border-neutral-800 bg-black p-3 shadow-2xl"><div className="flex items-center justify-between"><div><p className="text-xs font-semibold text-neutral-200">Stickers</p><p className="mt-0.5 text-[10px] text-neutral-600">Shared across client and team chats.</p></div><button type="button" onClick={() => setStickerTrayOpen(false)} aria-label="Close sticker tray" className="h-8 w-8 text-neutral-500 hover:text-white">×</button></div><div className="mt-3 grid max-h-52 grid-cols-4 gap-2 overflow-y-auto sm:grid-cols-7">{stickers.map((sticker) => <button key={sticker.id} type="button" onClick={() => void sendSticker(sticker)} disabled={!selected.canWrite} title={sticker.fileName} className="flex aspect-square items-center justify-center rounded-xl bg-neutral-950 p-1.5 hover:bg-neutral-900 disabled:opacity-40"><Image unoptimized src={sticker.url} alt={sticker.fileName} width={512} height={512} className="h-full w-full object-contain" /></button>)}<button type="button" onClick={() => stickerInputRef.current?.click()} disabled={stickerUploadState === "uploading"} className="flex aspect-square flex-col items-center justify-center rounded-xl border border-dashed border-neutral-700 text-neutral-500 hover:border-neutral-500 hover:text-white disabled:opacity-40"><span className="text-2xl">+</span><span className="mt-1 text-[9px]">{stickerUploadState === "uploading" ? "Converting…" : "Add sticker"}</span></button></div></div> : null}
                         {error ? <div className="mx-auto mb-2 flex max-w-3xl justify-between rounded-lg bg-red-950/60 px-3 py-2 text-xs text-red-300"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
-                        <input ref={attachmentInputRef} type="file" accept="image/jpeg,image/png,video/mp4,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
+                        <input ref={attachmentInputRef} type="file" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadAttachment(file) }} />
                         <input ref={stickerInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadSticker(file) }} />
                         <MessageComposer
                             textareaRef={composerRef}

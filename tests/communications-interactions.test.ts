@@ -305,7 +305,8 @@ test("message interactions keep the approved mobile and profile parity", async (
     assert.doesNotMatch(clients, /actionTop/)
     assert.doesNotMatch(team, /actionTop/)
     assert.match(clients, /VoiceNotePlayer/)
-    assert.match(team, /VoiceNotePlayer/)
+    assert.match(team, /NativeAttachment/)
+    assert.match(await readFile("components/communications/NativeAttachment.tsx", "utf8"), /VoiceNotePlayer/)
     for (const source of [clients, team]) {
         assert.match(source, /scale-\[1\.03\]/)
         assert.match(source, /opacity-30 blur-\[1px\]/)

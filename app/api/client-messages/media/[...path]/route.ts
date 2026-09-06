@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { communicationFileKeyForCurrentUser, redeemCommunicationMediaGrant } from "@/lib/communications/encryption"
 import { normalizeWorkspaceRole } from "@/lib/workspace-roles"
+import { nativeAttachmentDeliveryHeaders } from "@/lib/communications/native-attachments"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -67,7 +68,7 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
 
         return {
             mediaResponse,
-            headers: getMediaHeaders(mediaResponse, storagePath),
+            headers: getMediaHeaders(mediaResponse, storagePath, new URL(request.url).searchParams.get("download")),
             status: mediaResponse.status,
         }
     } catch (error) {
@@ -86,7 +87,7 @@ function getSafeFileName(path: string) {
     return fileName.replace(/["\\]/g, "")
 }
 
-function getMediaHeaders(mediaResponse: Response, storagePath: string) {
+function getMediaHeaders(mediaResponse: Response, storagePath: string, downloadName: string | null) {
     const headers = new Headers({
         "Cache-Control": "private, max-age=3600",
         "Content-Disposition": `inline; filename="${getSafeFileName(storagePath)}"`,
@@ -96,6 +97,14 @@ function getMediaHeaders(mediaResponse: Response, storagePath: string) {
         "Accept-Ranges": mediaResponse.headers.get("accept-ranges") ?? "bytes",
         "X-Content-Type-Options": "nosniff",
     })
+    if (storagePath.split("/").slice(1, 3).join("/") === "communications/native") {
+        const deliveryHeaders = nativeAttachmentDeliveryHeaders(
+            mediaResponse.headers.get("content-type") ?? "application/octet-stream",
+            downloadName || getSafeFileName(storagePath),
+            downloadName !== null,
+        )
+        for (const [name, value] of Object.entries(deliveryHeaders)) headers.set(name, value)
+    }
     const contentLength = mediaResponse.headers.get("content-length")
     const contentRange = mediaResponse.headers.get("content-range")
     const etag = mediaResponse.headers.get("etag")

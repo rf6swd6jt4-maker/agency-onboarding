@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 const WAVEFORM = [7, 12, 17, 10, 20, 14, 8, 16, 22, 12, 18, 9, 15, 21, 11, 7, 17, 23, 13, 19, 9, 14, 20, 11, 16, 8, 18, 22, 12, 17, 10, 15]
 const playbackPositions = new Map<string, number>()
@@ -18,12 +18,16 @@ function PlayIcon({ playing }: { playing: boolean }) {
         : <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current"><path d="m8 5 11 7-11 7z" /></svg>
 }
 
-export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = false }: { src: string; fileName: string; light?: boolean; whiteOnColor?: boolean }) {
+export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = false, onError }: { src: string; fileName: string; light?: boolean; whiteOnColor?: boolean; onError?: () => void }) {
     const audioRef = useRef<HTMLAudioElement | null>(null)
     const [duration, setDuration] = useState(0)
     const [currentTime, setCurrentTime] = useState(() => playbackPositions.get(src) ?? 0)
     const [playing, setPlaying] = useState(false)
     const [failed, setFailed] = useState(false)
+    const attachAudio = useCallback((audio: HTMLAudioElement | null) => {
+        audioRef.current = audio
+        if (audio?.error) { setFailed(true); onError?.() }
+    }, [onError])
     const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
     useEffect(() => {
@@ -67,7 +71,7 @@ export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = f
 
     return <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()} className={`mb-1.5 w-60 max-w-full rounded-xl border px-2.5 py-2 ${whiteOnColor ? "border-white/15 bg-white/10 text-white" : light ? "border-black/10 bg-black/5 text-neutral-800" : "border-white/10 bg-black/20 text-neutral-200"}`}>
         <audio
-            ref={audioRef}
+            ref={attachAudio}
             src={src}
             preload="metadata"
             onLoadedMetadata={(event) => loadMetadata(event.currentTarget)}
@@ -76,7 +80,7 @@ export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = f
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={(event) => { playbackPositions.delete(src); event.currentTarget.currentTime = 0; setCurrentTime(0); setPlaying(false) }}
-            onError={() => setFailed(true)}
+            onError={() => { setFailed(true); onError?.() }}
         />
         <div className="flex items-center gap-2.5">
             <button type="button" onClick={() => void togglePlayback()} aria-label={`${playing ? "Pause" : "Play"} ${fileName}`} className="inline-flex h-9 w-9 shrink-0 items-center justify-center bg-transparent text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]"><PlayIcon playing={playing} /></button>

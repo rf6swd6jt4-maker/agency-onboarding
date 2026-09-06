@@ -10,6 +10,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { recordAdminActivity } from "@/lib/admin/activity"
 import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile } from "@/lib/communications/attachments"
+import { MAX_NATIVE_ATTACHMENT_SIZE, nativeAttachmentKind, nativeAttachmentMimeType, validateNativeAttachmentFile } from "@/lib/communications/native-attachments"
 import { convertCommunicationStickerImage } from "@/lib/communications/stickers"
 import { validateClientLogoSvg } from "@/lib/client-branding/svg"
 import { getRequiredEnv } from "@/lib/env"
@@ -670,10 +671,10 @@ export async function createSignedNativeMessageUpload(
     conversationId: string,
     file: { name: string; size: number; type: string }
 ) {
-    const validation = validateCommunicationAttachmentFile(file)
+    const validation = validateNativeAttachmentFile(file)
     if ("error" in validation) throw new Error(validation.error)
-    const fileName = sanitizeFileName(file.name) || "attachment"
-    const contentType = file.type.toLowerCase().split(";", 1)[0].trim()
+    const fileName = validation.fileName
+    const contentType = validation.mimeType
     const path = `${workspaceId}/communications/native/${conversationId}/${randomUUID()}.enc`
     const customerKey = await createCommunicationFileKey({ workspaceId, scopeKind: "native", scopeId: conversationId, storagePath: path })
     const uploadUrl = await getSignedUrl(
@@ -705,10 +706,10 @@ export async function verifyNativeMessageUpload(input: {
     const prefix = `${input.workspaceId}/communications/native/${input.conversationId}/`
     if (!input.storagePath.startsWith(prefix) || input.storagePath.slice(prefix.length).includes("/")) throw new Error("Invalid native message attachment path")
     const response = await getR2Client().send(new HeadObjectCommand({ Bucket: getR2BucketName(), Key: input.storagePath, ...(input.customerKey ? customerEncryptionInput(input.customerKey) : {}) }))
-    const contentType = (response.ContentType ?? input.mimeType).toLowerCase().split(";", 1)[0].trim()
-    const kind = communicationAttachmentKind(contentType)
+    const contentType = nativeAttachmentMimeType(response.ContentType ?? input.mimeType)
+    const kind = nativeAttachmentKind(contentType)
     const size = response.ContentLength ?? 0
-    if (!kind || kind === "sticker" || size <= 0 || size > communicationAttachmentLimit(kind)) throw new Error("The uploaded attachment is missing or unsupported")
+    if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_NATIVE_ATTACHMENT_SIZE) throw new Error("The uploaded attachment is missing or exceeds 100MB.")
     return { kind, contentType, size }
 }
 
