@@ -1,8 +1,19 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { readFile } from "node:fs/promises"
 import { communicationAttachmentFromValue, communicationMediaMetadata, communicationMediaRatio, communicationPreviewUrl } from "../lib/communications/attachments.ts"
 import { communicationMediaRequestHeaders, communicationMediaStatusIsValid } from "../lib/communications/media-http.ts"
 import { createMediaQueue } from "../lib/communications/media-queue.ts"
+
+test("image-only client and team bubbles reserve width independently of decoded media", async () => {
+    const bubble = await readFile("components/communications/NativeMessageBubble.tsx", "utf8")
+    assert.match(bubble, /image \? \{ width: "min\(22rem, 100%\)" \}/)
+    assert.doesNotMatch(bubble, /onLoadedMetadataCapture|setAspectRatio/)
+    for (const file of ["CommunicationsWorkspace", "TeamCommunicationsWorkspace"]) {
+        const source = await readFile(`components/communications/${file}.tsx`, "utf8")
+        assert.match(source, /image=\{message\.attachment\?\.kind === "image"\}/)
+    }
+})
 
 test("media dimensions survive storage normalization without trusting invalid layout hints", () => {
     const attachment = communicationAttachmentFromValue({ storagePath: "workspace/client-messages/image.enc", fileName: "photo.jpg", mimeType: "image/jpeg", width: 1080, height: 1920, duration: 30, hasPreview: true })!

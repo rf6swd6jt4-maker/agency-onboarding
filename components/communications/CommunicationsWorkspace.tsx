@@ -962,6 +962,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                     {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
                                     <NativeMessageBubble
                                         video={message.attachment?.kind === "video"}
+                                        image={message.attachment?.kind === "image"}
                                         role="button"
                                         tabIndex={0}
                                         aria-label={`Message from ${sender}. Right-click or long-press for message actions.`}

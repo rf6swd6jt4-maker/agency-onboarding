@@ -771,6 +771,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                     : <button data-icon-button type="button" onClick={() => openWorkspaceMemberProfile(message.senderUserId)} aria-label={`Open ${sender?.name ?? "team member"} profile`} className="mb-1 mr-2 inline-flex h-7 w-7 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-neutral-500"><Avatar src={sender?.avatarSrc} name={sender?.name ?? "Team member"} className="h-full w-full object-center" /></button> : null}
                                 <NativeMessageBubble
                                     video={message.attachment?.kind === "video"}
+                                        image={message.attachment?.kind === "image"}
                                     role="button"
                                     tabIndex={0}
                                     onOpenActions={() => { setActionView("actions"); setActionMessageId(message.id) }}

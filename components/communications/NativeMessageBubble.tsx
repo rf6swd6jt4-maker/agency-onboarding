@@ -7,14 +7,14 @@ function isMessageControl(target: EventTarget | null) {
     return target instanceof Element && Boolean(target.closest("video,audio,button,a,input,textarea,select,[role='slider'],[data-message-control]"))
 }
 
-export function NativeMessageBubble({ video, style, children, onOpenActions, ...props }: Omit<ComponentProps<"article">, "ref" | "onClick" | "onContextMenu" | "onKeyDown"> & { video: boolean; onOpenActions: () => void }) {
+export function NativeMessageBubble({ video, image = false, style, children, onOpenActions, ...props }: Omit<ComponentProps<"article">, "ref" | "onClick" | "onContextMenu" | "onKeyDown"> & { video: boolean; image?: boolean; onOpenActions: () => void }) {
     const [longPress] = useState(createMessageLongPress)
     const suppressClick = useRef(false)
     const lastTouchAt = useRef(0)
     useEffect(() => () => longPress.cancel(), [longPress])
     // Media metadata must never resize the surrounding bubble after paint.
     return <article {...props} role="button" data-message-bubble aria-haspopup="menu"
-        style={{ ...style, ...(video ? { width: "min(35rem, 100%)" } : {}) }}
+        style={{ ...style, ...(video ? { width: "min(35rem, 100%)" } : image ? { width: "min(22rem, 100%)" } : {}) }}
         // Native video controls retarget timeline touches to the video element.
         // Leave their default behavior alone and do not start a bubble gesture.
         onTouchStart={(event) => {
