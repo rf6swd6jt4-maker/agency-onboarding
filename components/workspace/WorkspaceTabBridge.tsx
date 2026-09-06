@@ -9,6 +9,7 @@ import {
     WORKSPACE_TAB_FRAME_PARAM,
     WORKSPACE_TAB_MESSAGE_SOURCE,
     workspaceTabFrameUrl,
+    workspaceTabRecordTitleForUrl,
     workspaceRouteIsRecordDetail,
     type WorkspaceTabFrameMessage,
     type WorkspaceTabParentMessage,
@@ -78,6 +79,28 @@ export function WorkspaceTabBridge({ tabId, workspaceSlug }: Props) {
         reportLocation()
         window.addEventListener("hashchange", reportLocation)
         return () => window.removeEventListener("hashchange", reportLocation)
+    }, [pathname, searchParams, tabId, workspaceSlug])
+
+    useEffect(() => {
+        let lastReport = ""
+        function reportTitle() {
+            const url = normalizeWorkspaceUrl(window.location.href, workspaceSlug, window.location.origin)
+            const name = document.querySelector("[data-workspace-record-title]")?.getAttribute("data-workspace-record-title") ?? ""
+            const title = workspaceTabRecordTitleForUrl(url, workspaceSlug, name)
+            const report = JSON.stringify([url, title])
+            if (report === lastReport) return
+            lastReport = report
+            const message: WorkspaceTabFrameMessage = {
+                source: WORKSPACE_TAB_MESSAGE_SOURCE, target: "host", tabId,
+                type: "record-title", url, title,
+            }
+            window.parent.postMessage(message, window.location.origin)
+        }
+        reportTitle()
+        // Headers can stream in after the bridge or change after a record edit.
+        const observer = new MutationObserver(reportTitle)
+        observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-workspace-record-title"] })
+        return () => observer.disconnect()
     }, [pathname, searchParams, tabId, workspaceSlug])
 
     useEffect(() => {

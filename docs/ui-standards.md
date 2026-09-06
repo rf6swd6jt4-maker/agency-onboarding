@@ -327,6 +327,7 @@ The record-specific middle remains flexible. The header, fields, and destructive
 ```
 
 - The first line always identifies the record category and short ID in subdued monospaced text: `Relationship 69e381e`, `Poll e154d7a`, or `Asset c92f810`.
+- String record names also supply the automatic workspace tab label. Relationship and work-item tabs use the name; onboarding, fulfilment, and appointment-setting details append their section. Explicit custom tab names take precedence.
 - The record name is always `text-2xl`, semibold, and tightly tracked. Do not use a different title scale for a more complicated page.
 - An optional subtitle gives one stable secondary identity, such as company, event key, or source context. It is not a description of the whole panel.
 - The right-hand metadata rail is bottom-aligned with the identity block. Its order is key categorical labels, up to two short numerical facts, then `Updated …` as the final item.

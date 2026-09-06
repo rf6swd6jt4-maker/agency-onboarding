@@ -29,7 +29,7 @@ export type WorkspaceTabFrameMessage = {
     source: typeof WORKSPACE_TAB_MESSAGE_SOURCE
     target: "host"
     tabId: string
-    type: "location" | "location-replace" | "mutation" | "action-start" | "action-end" | "mutation-start" | "mutation-end" | "refresh-start" | "refresh-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab" | "communications-unread"
+    type: "record-title" | "location" | "location-replace" | "mutation" | "action-start" | "action-end" | "mutation-start" | "mutation-end" | "refresh-start" | "refresh-end" | "context-status" | "context-obstruction" | "navigation-start" | "open-tab" | "poll-started" | "reopen-closed-tab" | "communications-unread"
     url?: string
     relationshipId?: string | null
     contextSupported?: boolean
@@ -37,6 +37,7 @@ export type WorkspaceTabFrameMessage = {
     contextObstructed?: boolean
     pollId?: string
     unreadCount?: number
+    title?: string
     detailPreview?: WorkspaceDetailPreview
     mutationId?: string
     mutationFailed?: boolean
@@ -221,4 +222,24 @@ export function orderWorkspaceTabsByStableIds<T extends { id: string }>(tabs: T[
 export function normalizeWorkspaceTabCustomTitle(value: string, maxLength = 60) {
     const normalized = value.trim().replace(/\s+/g, " ").slice(0, maxLength)
     return normalized || null
+}
+
+export type WorkspaceTabRecordTitle = { url: string; title: string }
+
+export function workspaceTabRecordTitleForUrl(value: string, workspaceSlug: string, name: string) {
+    const title = name.trim().replace(/\s+/g, " ").slice(0, 160)
+    if (!title || !workspaceRouteIsRecordDetail(value, workspaceSlug, "http://localhost")) return ""
+    const category = workspaceTabTitleForUrl(value, workspaceSlug)
+    const context = category === "Onboarding Detail" ? "Onboarding"
+        : category === "Fulfilment Detail" ? "Fulfilment"
+        : category === "Appointment Setting Detail" ? "Appointment Setting" : ""
+    return context ? `${title} · ${context}` : title
+}
+
+export function workspaceTabDisplayTitle(tab: { title: string; customTitle?: string; url: string; recordTitle?: WorkspaceTabRecordTitle }) {
+    if (tab.customTitle) return tab.customTitle
+    if (tab.recordTitle?.title && new URL(tab.recordTitle.url, "http://localhost").pathname === new URL(tab.url, "http://localhost").pathname) {
+        return tab.recordTitle.title
+    }
+    return tab.title
 }

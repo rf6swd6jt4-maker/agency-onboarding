@@ -2,6 +2,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
     appendWorkspaceTabHistory,
+    workspaceTabDisplayTitle,
+    workspaceTabRecordTitleForUrl,
     isReopenClosedTabShortcut,
     isWorkspaceOnboardingBuilderUrl,
     normalizeWorkspaceTabCustomTitle,
@@ -179,4 +181,26 @@ test("normalizes custom tab titles and treats an empty title as automatic", () =
     assert.equal(normalizeWorkspaceTabCustomTitle("  Priority   Polls  "), "Priority Polls")
     assert.equal(normalizeWorkspaceTabCustomTitle("   "), null)
     assert.equal(normalizeWorkspaceTabCustomTitle("A very long name", 6), "A very")
+})
+
+
+test("record tabs use names and contextual section labels while collections stay generic", () => {
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/relationships/1", "scaylup", " Jane  Smith "), "Jane Smith")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/work-items/1", "scaylup", "Launch Google Ads"), "Launch Google Ads")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/onboarding/1", "scaylup", "Jane Smith"), "Jane Smith · Onboarding")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/work/1", "scaylup", "Jane Smith"), "Jane Smith · Fulfilment")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/appointment-setting/1", "scaylup", "Jane Smith"), "Jane Smith · Appointment Setting")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/relationships", "scaylup", "Jane Smith"), "")
+    assert.equal(workspaceTabRecordTitleForUrl("/other/relationships/1", "scaylup", "Jane Smith"), "")
+    assert.equal(workspaceTabRecordTitleForUrl("/scaylup/relationships/1", "scaylup", "  "), "")
+})
+
+test("tab identity survives query navigation but never leaks to a different record or collection", () => {
+    const tab = { title: "Relationship", url: "/scaylup/relationships/1?view=notes#activity", recordTitle: { url: "/scaylup/relationships/1", title: "Jane Smith" } }
+    assert.equal(workspaceTabDisplayTitle(tab), "Jane Smith")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, customTitle: "Follow up" }), "Follow up")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, customTitle: "" }), "Jane Smith")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, url: "/scaylup/relationships/2" }), "Relationship")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, url: "/scaylup/relationships", title: "Relationships" }), "Relationships")
+    assert.equal(workspaceTabDisplayTitle({ ...tab, recordTitle: { ...tab.recordTitle, title: "Jane Jones" } }), "Jane Jones")
 })

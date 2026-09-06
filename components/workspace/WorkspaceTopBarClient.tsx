@@ -50,6 +50,8 @@ import {
     workspaceRouteCanShowRelationshipContext,
     workspaceRouteIsRecordDetail,
     workspaceTabTitleForUrl,
+    workspaceTabDisplayTitle,
+    type WorkspaceTabRecordTitle,
     type WorkspaceInitialTab,
     type WorkspaceTabFrameMessage,
     type WorkspaceTabParentMessage,
@@ -77,6 +79,7 @@ type WorkspaceTab = {
     id: string
     title: string
     customTitle?: string
+    recordTitle?: WorkspaceTabRecordTitle
     url: string
     history: string[]
     historyIndex: number
@@ -278,10 +281,6 @@ function createTabId() {
     return typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
-function workspaceTabDisplayTitle(tab: Pick<WorkspaceTab, "title" | "customTitle">) {
-    return tab.customTitle || tab.title
 }
 
 function deferNavigationStateUpdate(update: () => void) {
@@ -668,6 +667,8 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
                         id: candidate.id,
                         title: titleForUrl(url),
                         customTitle: typeof candidate.customTitle === "string" ? normalizeWorkspaceTabCustomTitle(candidate.customTitle) ?? undefined : undefined,
+                        recordTitle: typeof candidate.recordTitle?.url === "string" && typeof candidate.recordTitle?.title === "string"
+                            ? { url: normalizeWorkspaceUrl(candidate.recordTitle.url), title: candidate.recordTitle.title.slice(0, 200) } : undefined,
                         url,
                         history,
                         historyIndex,
@@ -990,6 +991,17 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
             if (message?.source !== WORKSPACE_TAB_MESSAGE_SOURCE || message.target !== "host") return
             const frame = iframeRefs.current.get(message.tabId)
             if (!frame || event.source !== frame.contentWindow) return
+
+            if (message.type === "record-title" && message.url && typeof message.title === "string") {
+                const recordTitle = { url: normalizeWorkspaceUrl(message.url), title: message.title.slice(0, 200) }
+                setTabs((existingTabs) => {
+                    const updatedTabs = existingTabs.map((tab) => tab.id === message.tabId ? { ...tab, recordTitle } : tab)
+                    tabsRef.current = updatedTabs
+                    saveTabsState(updatedTabs, activeTabIdRef.current)
+                    return updatedTabs
+                })
+                return
+            }
 
             if (message.type === "location-replace" && message.url) {
                 const url = normalizeWorkspaceUrl(message.url)
@@ -2430,6 +2442,7 @@ function WorkspaceTabsShell({ workspace, initialWorkspaceUrl, initialTab, launch
                                     ref={(node) => { if (node) tabButtonRefs.current.set(tab.id, node); else tabButtonRefs.current.delete(tab.id) }}
                                     role="tab"
                                     aria-selected={active}
+                                    title={displayTitle}
                                     tabIndex={active ? 0 : -1}
                                     type="button"
                                     onPointerEnter={() => scheduleTabWarm(tab.id)}
