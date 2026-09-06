@@ -97,6 +97,7 @@ export function communicationAttachmentFromValue(value: unknown): CommunicationA
         size: number(source.size),
         storagePath,
         url: attachmentUrl(storagePath),
+        ...communicationMediaMetadata(source),
     }
 }
 
@@ -104,3 +105,24 @@ export function communicationAttachmentFromRawPayload(value: unknown) {
     const raw = record(value)
     return communicationAttachmentFromValue(raw.bridge_media ?? raw.attachment)
 }
+
+/** Metadata is a layout hint, never an authorization or file-validation input. */
+export function communicationMediaMetadata(value: unknown) {
+    const source = value && typeof value === "object" ? value as Record<string, unknown> : {}
+    const dimension = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 32768
+    const dimensions = dimension(source.width) && dimension(source.height) ? { width: source.width, height: source.height } : {}
+    const duration = typeof source.duration === "number" && Number.isFinite(source.duration) && source.duration > 0 && source.duration <= 604800 ? source.duration : undefined
+    return { ...dimensions, ...(duration ? { duration } : {}), ...(source.hasPreview === true ? { hasPreview: true } : {}) }
+}
+
+export function communicationMediaRatio(media: { width?: number; height?: number; kind: string }) {
+    const { width, height } = communicationMediaMetadata(media)
+    return width && height ? Math.max(0.4, Math.min(2.5, width / height)) : media.kind === "sticker" ? 1 : 4 / 3
+}
+
+export function communicationPreviewUrl(url: string) {
+    const [path] = url.split("#")
+    return `${path}${path.includes("?") ? "&" : "?"}preview=1`
+}
+
+export const COMMUNICATION_PREVIEW_SUFFIX = ".preview-v1.webp"

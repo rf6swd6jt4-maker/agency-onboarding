@@ -770,6 +770,7 @@ async function getInboundMessageContent({
             fileName,
             mimeType: contentType,
             size: downloadedMedia.bytes.byteLength,
+            ...storedMedia.mediaMetadata,
             storagePath: storedMedia.path,
             url: storedMedia.url,
         },

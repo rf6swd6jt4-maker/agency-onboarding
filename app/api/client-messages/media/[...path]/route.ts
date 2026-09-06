@@ -1,4 +1,6 @@
-import { createEncryptedPrivateUploadSignedRequest, createPrivateUploadSignedUrl } from "@/lib/onboarding/uploads"
+import { createEncryptedPrivateUploadSignedRequest, createPrivateUploadSignedUrl, ensureCommunicationImagePreview } from "@/lib/onboarding/uploads"
+import { COMMUNICATION_PREVIEW_SUFFIX } from "@/lib/communications/attachments"
+import { communicationMediaRequestHeaders, communicationMediaStatusIsValid } from "@/lib/communications/media-http"
 import { assertNativeConversationAccess } from "@/lib/teams/server"
 import { getCurrentUser } from "@/lib/workspaces"
 import { supabaseAdmin } from "@/lib/supabase/admin"
@@ -16,6 +18,7 @@ type RouteContext = {
 }
 
 async function loadMediaResponse(request: Request, context: RouteContext) {
+    const started = performance.now()
     const { path = [] } = await context.params
     const storagePath = path.join("/")
 
@@ -50,15 +53,22 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
     }
 
     try {
+        const authorized = performance.now()
+        const method = request.method === "HEAD" ? "HEAD" : "GET"
+        const preview = new URL(request.url).searchParams.get("preview") === "1"
+        // Always authorize the original path. Never expose keys or public URLs.
+        const hasPreview = preview && (method === "HEAD" || await ensureCommunicationImagePreview(storagePath, customerKey).catch(() => false))
+        const deliveryPath = hasPreview ? `${storagePath}${COMMUNICATION_PREVIEW_SUFFIX}` : storagePath
         const signed = customerKey
-            ? await createEncryptedPrivateUploadSignedRequest(storagePath, customerKey)
-            : { url: await createPrivateUploadSignedUrl(storagePath), headers: {} as Record<string, string> }
-        const range = request.headers.get("range")
+            ? await createEncryptedPrivateUploadSignedRequest(deliveryPath, customerKey, undefined, method)
+            : { url: await createPrivateUploadSignedUrl(deliveryPath, undefined, method), headers: {} as Record<string, string> }
         const mediaResponse = await fetch(signed.url, {
-            headers: { ...signed.headers, ...(range ? { Range: range } : {}) },
+            method,
+            cache: "no-store",
+            headers: { ...signed.headers, ...communicationMediaRequestHeaders(request, preview) },
         })
 
-        if (!mediaResponse.ok) {
+        if (!communicationMediaStatusIsValid(mediaResponse.status)) {
             return {
                 error: new Response("Media not found", {
                     status: mediaResponse.status,
@@ -66,9 +76,11 @@ async function loadMediaResponse(request: Request, context: RouteContext) {
             }
         }
 
+        const headers = getMediaHeaders(mediaResponse, deliveryPath, new URL(request.url).searchParams.get("download"))
+        headers.set("Server-Timing", `auth;dur=${(authorized - started).toFixed(1)}, storage;dur=${(performance.now() - authorized).toFixed(1)}`)
         return {
             mediaResponse,
-            headers: getMediaHeaders(mediaResponse, storagePath, new URL(request.url).searchParams.get("download")),
+            headers,
             status: mediaResponse.status,
         }
     } catch (error) {
@@ -88,8 +100,18 @@ function getSafeFileName(path: string) {
 }
 
 function getMediaHeaders(mediaResponse: Response, storagePath: string, downloadName: string | null) {
+    if (mediaResponse.status === 304) {
+        // A validator-only reply must not replace the cached representation's
+        // real MIME type or length with defaults from an empty upstream response.
+        const headers = new Headers({ "Cache-Control": "private, max-age=3600" })
+        for (const name of ["etag", "last-modified", "vary"]) {
+            const value = mediaResponse.headers.get(name)
+            if (value) headers.set(name, value)
+        }
+        return headers
+    }
     const headers = new Headers({
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": mediaResponse.status === 416 ? "no-store" : "private, max-age=3600",
         "Content-Disposition": `inline; filename="${getSafeFileName(storagePath)}"`,
         "Content-Type":
             mediaResponse.headers.get("content-type") ??
@@ -123,7 +145,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
     if (result.error) return result.error
 
-    return new Response(result.mediaResponse.body, {
+    return new Response(result.status === 304 ? null : result.mediaResponse.body, {
         headers: result.headers,
         status: result.status,
     })

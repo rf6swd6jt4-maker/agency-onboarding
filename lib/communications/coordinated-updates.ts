@@ -6,7 +6,7 @@ export class ChatMutationError extends Error {
 }
 
 type Message = { id: string; clientRequestId: string | null; createdAt: string; replyToMessageId?: string | null }
-type Conversation<M> = { id: string; messages: M[]; pinnedMessageId: string | null; updatedAt?: string; title?: string }
+type Conversation<M> = { id: string; messages: M[]; pinnedMessageId: string | null; updatedAt?: string; title?: string; messageWindowStart?: string | null }
 type Reaction = { id: string; messageId: string; updatedAt: string }
 type Cell<T> = { value: T | null; revision: number; pending?: { value: T | null }; version: string; readSequence?: number }
 type Setter<T> = T | ((current: T) => T)
@@ -30,12 +30,13 @@ function collection<T>(keyOf: (value: T) => string, tick: () => number, versionO
         prune: (keep: (value: T) => boolean) => {
             for (const [key, cell] of cells) if (cell.value && !keep(cell.value)) cells.delete(key)
         },
-        replace(read: ChatRead, incoming: T[]) {
+        replace(read: ChatRead, incoming: T[], covers: (value: T) => boolean = () => true) {
             if (read.sequence < snapshotSequence) return
             snapshotSequence = read.sequence
             const next = new Map(incoming.map((value) => [keyOf(value), value]))
             for (const key of new Set([...cells.keys(), ...next.keys()])) {
                 const cell = cells.get(key)
+                if (!next.has(key) && cell?.value && !covers(cell.value)) continue
                 if (cell && (cell.pending || (cell.readSequence ?? 0) > read.sequence || cell.revision > read.revision || (cell.value && provisional(cell.value)))) continue
                 const value = next.get(key) ?? null
                 cells.set(key, { value, revision: read.revision, readSequence: read.sequence, version: value === null ? cell?.version ?? "" : versionOf(value) })
@@ -147,7 +148,13 @@ export function createCoordinatedChat<M extends Message, C extends Conversation<
             appliedSnapshot = read.sequence
             metadata = incoming.conversations // Access and membership always come from the server.
             ingestMessages(incoming.conversations)
-            messages.replace(read, incoming.conversations.flatMap((conversation) => conversation.messages))
+            const windows = new Map(incoming.conversations.map((conversation) => [conversation.id, conversation.messageWindowStart]))
+            messages.replace(read, incoming.conversations.flatMap((conversation) => conversation.messages), (message) => {
+                const start = windows.get(owners.get(message.id) ?? "")
+                // A capped snapshot is authoritative only within its time window.
+                // Keep the boundary timestamp too: its tie group may be truncated.
+                return !start || message.createdAt > start
+            })
             reactions.replace(read, incoming.reactions)
             pins.replace(read, incoming.conversations.map((conversation) => ({ id: conversation.id, messageId: conversation.pinnedMessageId })))
             const allowed = new Set(metadata.map((conversation) => conversation.id))

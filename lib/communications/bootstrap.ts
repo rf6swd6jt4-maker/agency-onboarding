@@ -11,7 +11,7 @@ export async function loadClientCommunicationsBootstrap({ currentUserId, request
 }): Promise<CommunicationsBootstrap> {
     const relationships = (await listRelationshipsForWorkspace(workspaceId)).filter((relationship) => relationship.status !== "archived")
     const clientIds = relationships.flatMap((relationship) => relationship.client_id ? [relationship.client_id] : [])
-    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult, integrationResult] = await Promise.all([
+    const [messageResult, cursorResult, reactionResult, stickerResult, peopleResult, channelResult, integrationResult, selectedMessages] = await Promise.all([
         loadCommunicationMessages({ workspaceId }),
         loadCommunicationReadCursors(workspaceId),
         loadCommunicationReactions(workspaceId),
@@ -21,6 +21,9 @@ export async function loadClientCommunicationsBootstrap({ currentUserId, request
             ? supabaseAdmin.from("client_communication_channels").select("client_id, provider").eq("workspace_id", workspaceId).in("provider", ["meta_whatsapp", "twilio_sms"]).eq("is_active", true).in("client_id", clientIds)
             : Promise.resolve({ data: [], error: null }),
         supabaseAdmin.from("workspace_integrations").select("provider").eq("workspace_id", workspaceId).eq("enabled", true).in("provider", ["meta_whatsapp", "twilio_sms"]),
+        requestedConversationId && relationships.some((relationship) => relationship.id === requestedConversationId)
+            ? loadCommunicationMessages({ workspaceId, relationshipId: requestedConversationId, limit: 500 })
+            : Promise.resolve(null),
     ])
     const channelsByClient = new Map<string, Set<string>>()
     for (const channel of channelResult.data ?? []) {
@@ -52,7 +55,10 @@ export async function loadClientCommunicationsBootstrap({ currentUserId, request
         ].filter(Boolean) as Array<"meta_whatsapp" | "twilio_sms">),
         primaryProvider: (relationship.communication_primary_provider === "twilio_sms" ? "twilio_sms" : "meta_whatsapp") as "twilio_sms" | "meta_whatsapp",
         pinnedMessageId: relationship.communication_pinned_message_id,
-        messages: messagesByRelationship.get(relationship.id) ?? [],
+        messages: relationship.id === requestedConversationId && selectedMessages ? selectedMessages.messages : messagesByRelationship.get(relationship.id) ?? [],
+        messageWindowStart: relationship.id === requestedConversationId && selectedMessages
+            ? selectedMessages.messages.length >= 500 ? selectedMessages.messages[0]?.createdAt : null
+            : messageResult.messages[0]?.createdAt ?? null,
     })).sort((left, right) => {
         const leftDate = left.messages.at(-1)?.createdAt ?? ""
         const rightDate = right.messages.at(-1)?.createdAt ?? ""

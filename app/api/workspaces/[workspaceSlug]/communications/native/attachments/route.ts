@@ -14,7 +14,7 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     if (!await assertNativeConversationAccess(conversationId, user.id, "write")) return Response.json({ error: "Conversation is unavailable or read-only." }, { status: 403 })
     try {
         await ensurePlatformDirectUploads()
-        return Response.json(await createSignedNativeMessageUpload(workspace.id, conversationId, { name: typeof input?.name === "string" ? input.name : "", size: Number(input?.size ?? 0), type: typeof input?.type === "string" ? input.type : "application/octet-stream" }))
+        return Response.json(await createSignedNativeMessageUpload(workspace.id, conversationId, { media: input?.media, previewSize: Number(input?.previewSize ?? 0), name: typeof input?.name === "string" ? input.name : "", size: Number(input?.size ?? 0), type: typeof input?.type === "string" ? input.type : "application/octet-stream" }))
     } catch (error) {
         return Response.json({ error: error instanceof Error ? error.message : "Could not prepare attachment." }, { status: 400 })
     }

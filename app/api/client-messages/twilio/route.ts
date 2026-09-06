@@ -105,6 +105,7 @@ async function firstInboundMedia(input: {
         fileName,
         mimeType: contentType,
         size: downloaded.bytes.byteLength,
+        ...stored.mediaMetadata,
         storagePath: stored.path,
         url: stored.url,
         count,

@@ -55,7 +55,7 @@ test("Communications uploads to R2 and sends verified media through each messagi
     assert.match(meta, /context: replyToMessageId/)
     assert.match(workspace, /Attach image or file/)
     assert.match(workspace, /MessageAttachment/)
-    assert.match(workspace, /VoiceNotePlayer/)
+    assert.match(workspace, /NativeAttachment/)
     assert.match(mediaRoute, /workspace_memberships/)
     assert.match(voiceNotePlayer, /type="range"/)
     assert.match(voiceNotePlayer, /playbackPositions\.set\(src/)

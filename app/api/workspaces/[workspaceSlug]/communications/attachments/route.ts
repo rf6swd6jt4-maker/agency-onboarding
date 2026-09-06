@@ -30,12 +30,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ wo
         name?: unknown
         size?: unknown
         type?: unknown
+        media?: unknown
+        previewSize?: unknown
     } | null
     const relationshipId = typeof input?.relationshipId === "string" ? input.relationshipId : ""
     if (!await activeRelationship(workspace.id, relationshipId)) {
         return Response.json({ error: "Conversation not found." }, { status: 404 })
     }
     const file = {
+        media: input?.media,
+        previewSize: Number(input?.previewSize ?? 0),
         name: typeof input?.name === "string" ? input.name : "",
         size: typeof input?.size === "number" ? input.size : Number(input?.size ?? 0),
         type: typeof input?.type === "string" ? input.type : "application/octet-stream",

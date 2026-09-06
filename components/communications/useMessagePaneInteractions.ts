@@ -22,6 +22,7 @@ export function useMessagePaneInteractions(
     return {
         onPointerDown(event: PointerEvent<HTMLDivElement>) {
             pointerGestureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false }
+            if (event.clientX - event.currentTarget.getBoundingClientRect().left >= event.currentTarget.clientWidth) markUserScroll()
         },
         onPointerMove(event: PointerEvent<HTMLDivElement>) {
             const gesture = pointerGestureRef.current
@@ -29,6 +30,7 @@ export function useMessagePaneInteractions(
             if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) < POINTER_SCROLL_THRESHOLD_PX) return
             gesture.moved = true
             markUserScroll()
+            if (event.clientY > gesture.y) followLatestRef.current = false
         },
         onPointerUp(event: PointerEvent<HTMLDivElement>) {
             const gesture = pointerGestureRef.current
@@ -41,8 +43,16 @@ export function useMessagePaneInteractions(
             if (pointerGestureRef.current?.moved) markUserScroll()
             pointerGestureRef.current = null
         },
-        onWheel() {
+        onWheel(event: { deltaY: number }) {
             markUserScroll()
+            if (event.deltaY < 0) followLatestRef.current = false
+        },
+        onKeyDown(event: { key: string; target: EventTarget | null }) {
+            if (event.target instanceof Element && event.target.closest("input,textarea,video,audio,button,[role='slider']")) return
+            if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+                markUserScroll()
+                if (["ArrowUp", "PageUp", "Home"].includes(event.key)) followLatestRef.current = false
+            }
         },
         onScroll(event: UIEvent<HTMLDivElement>) {
             const pane = event.currentTarget
@@ -53,9 +63,8 @@ export function useMessagePaneInteractions(
                 markUserScroll()
                 followLatestRef.current = following
             }
-            const anchoredToLatest = !userScrolling && followLatestRef.current
-            setAtLatest(anchoredToLatest || following)
-            setShowJumpToLatest(anchoredToLatest ? false : messagePaneIsAwayFromBottom(pane))
+            setAtLatest(following)
+            setShowJumpToLatest(messagePaneIsAwayFromBottom(pane))
         },
     }
 }

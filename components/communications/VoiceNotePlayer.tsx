@@ -18,9 +18,9 @@ function PlayIcon({ playing }: { playing: boolean }) {
         : <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current"><path d="m8 5 11 7-11 7z" /></svg>
 }
 
-export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = false, onError }: { src: string; fileName: string; light?: boolean; whiteOnColor?: boolean; onError?: () => void }) {
+export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = false, onError, initialDuration = 0 }: { src: string; fileName: string; light?: boolean; whiteOnColor?: boolean; onError?: () => void; initialDuration?: number }) {
     const audioRef = useRef<HTMLAudioElement | null>(null)
-    const [duration, setDuration] = useState(0)
+    const [duration, setDuration] = useState(initialDuration)
     const [currentTime, setCurrentTime] = useState(() => playbackPositions.get(src) ?? 0)
     const [playing, setPlaying] = useState(false)
     const [failed, setFailed] = useState(false)
@@ -73,7 +73,7 @@ export function VoiceNotePlayer({ src, fileName, light = false, whiteOnColor = f
         <audio
             ref={attachAudio}
             src={src}
-            preload="metadata"
+            preload="none"
             onLoadedMetadata={(event) => loadMetadata(event.currentTarget)}
             onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
             onTimeUpdate={(event) => { playbackPositions.set(src, event.currentTarget.currentTime); setCurrentTime(event.currentTarget.currentTime) }}

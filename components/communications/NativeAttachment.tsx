@@ -1,11 +1,13 @@
 "use client"
 
 import Image from "next/image"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { AnchoredPopup } from "@/components/ui"
 import type { MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { LoadingSpinnerIcon, OpenWithIcon } from "@/components/communications/MessageInteractionIcons"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
+import { communicationMediaRatio, communicationPreviewUrl } from "@/lib/communications/attachments"
+import { useConversationMedia } from "@/components/communications/ConversationMedia"
 import type { CommunicationAttachment } from "@/lib/communications/types"
 import { nativeAttachmentSizeLabel, nativeAttachmentTypeLabel } from "@/lib/communications/native-attachments"
 
@@ -107,22 +109,36 @@ function AttachmentFileCard({ attachment, previewFailed = false }: { attachment:
     </div>
 }
 
-export function NativeAttachment({ attachment, onOpenImage, light = false }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void; light?: boolean }) {
-    const [failedUrl, setFailedUrl] = useState<string | null>(null)
-    const checkVideo = useCallback((video: HTMLVideoElement | null) => {
-        // Cached/unsupported media can fail before hydration attaches onError.
-        if (video?.error) setFailedUrl(attachment.url)
-    }, [attachment.url])
-    const failed = failedUrl === attachment.url
-    if (attachment.kind === "sticker") return <Image unoptimized src={attachment.url} alt={attachment.fileName} width={512} height={512} className="h-auto max-h-48 w-auto max-w-48 object-contain drop-shadow-lg" />
-    if (attachment.kind === "image" && !failed) return <button type="button" onClick={(event) => { event.stopPropagation(); onOpenImage({ url: attachment.url, alt: attachment.fileName }) }} aria-label={`Open ${attachment.fileName}`} className="mb-2 block w-full overflow-hidden rounded-xl bg-black/10"><Image unoptimized src={attachment.url} alt={attachment.fileName} width={800} height={600} onError={() => setFailedUrl(attachment.url)} className="max-h-80 h-auto w-full object-contain" /></button>
-    if (attachment.kind === "video" && !failed) return <div onClick={(event) => event.stopPropagation()}>
-        <video ref={checkVideo} src={`${attachment.url}#t=0.001`} controls playsInline preload="metadata" aria-label={attachment.fileName} onError={() => setFailedUrl(attachment.url)} className="mb-2 block h-auto w-full rounded-xl bg-black object-contain" style={{ maxHeight: "var(--native-video-max-height, 30rem)" }} />
+export function NativeAttachment({ attachment, onOpenImage, light = false, whiteOnColor = false }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void; light?: boolean; whiteOnColor?: boolean }) {
+    const { ref, admitted, complete } = useConversationMedia(attachment.kind === "image" || attachment.kind === "sticker")
+    // Freeze the fallback for old messages too. Later metadata/refreshes must not
+    // change an already visible frame's shape.
+    const [ratio] = useState(() => communicationMediaRatio(attachment))
+    const [failed, setFailed] = useState(false)
+    const [original, setOriginal] = useState(false)
+    const [attempt, setAttempt] = useState(0)
+    const previewUrl = communicationPreviewUrl(attachment.url)
+    const imageUrl = original || attachment.kind === "sticker" ? attachment.url : previewUrl
+    const retry = () => { setFailed(false); setAttempt((value) => value + 1) }
+    const fallback = <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center text-xs">
+        <span>Preview unavailable</span>
+        <button data-message-control type="button" onClick={retry} className="rounded-lg px-3 py-2 underline">Retry</button>
+        <a href={attachment.url} download={attachment.fileName} className="underline">Download</a>
+    </div>
+    if (attachment.kind === "image" || attachment.kind === "sticker") return <div ref={ref} data-message-media className={attachment.kind === "sticker" ? "relative w-48 max-w-full" : "relative mb-2 w-full overflow-hidden rounded-xl bg-black/10"} style={{ aspectRatio: ratio, maxHeight: attachment.kind === "sticker" ? 192 : 320 }} onClick={(event) => event.stopPropagation()}>
+        {failed ? fallback : <button data-icon-button type="button" onClick={() => onOpenImage({ url: attachment.url, alt: attachment.fileName })} aria-label={`Open ${attachment.fileName}`} className="absolute inset-0 block h-full w-full">
+            {admitted ? <Image key={attempt} unoptimized fill sizes="(max-width: 768px) 80vw, 560px" loading="eager" decoding="async" src={imageUrl} alt={attachment.fileName} onLoad={complete} onError={() => { if (!original && attachment.kind !== "sticker") setOriginal(true); else { complete(); setFailed(true) } }} className={`object-contain ${attachment.kind === "sticker" ? "drop-shadow-lg" : ""}`} /> : null}
+        </button>}
+    </div>
+    if (attachment.kind === "video") return <div ref={ref} data-message-media onClick={(event) => event.stopPropagation()}>
+        <div className="relative mb-2 w-full overflow-hidden rounded-xl bg-black" style={{ aspectRatio: ratio, maxHeight: 480 }}>
+            {failed ? fallback : admitted ? <video key={attempt} src={attachment.url} poster={attachment.hasPreview ? previewUrl : undefined} controls playsInline preload="none" aria-label={attachment.fileName} onError={() => setFailed(true)} className="absolute inset-0 h-full w-full object-contain" /> : null}
+        </div>
         <AttachmentFileCard attachment={attachment} />
     </div>
-    if (attachment.kind === "audio" && !failed) return <div onClick={(event) => event.stopPropagation()}>
-        <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} onError={() => setFailedUrl(attachment.url)} />
+    if (attachment.kind === "audio") return <div ref={ref} data-message-media onClick={(event) => event.stopPropagation()}>
+        <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} whiteOnColor={whiteOnColor} initialDuration={attachment.duration} />
         <AttachmentFileCard attachment={attachment} />
     </div>
-    return <AttachmentFileCard attachment={attachment} previewFailed={failed} />
+    return <AttachmentFileCard attachment={attachment} />
 }

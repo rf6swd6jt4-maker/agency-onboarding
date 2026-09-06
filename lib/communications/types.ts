@@ -7,6 +7,10 @@ export type CommunicationAttachment = {
     size: number | null
     storagePath: string
     url: string
+    width?: number
+    height?: number
+    duration?: number
+    hasPreview?: boolean
 }
 
 export type CommunicationReaction = {
@@ -89,6 +93,7 @@ export type ClientConversation = {
     primaryProvider?: "meta_whatsapp" | "twilio_sms"
     pinnedMessageId: string | null
     messages: CommunicationMessage[]
+    messageWindowStart?: string | null
 }
 
 export type CommunicationsBootstrap = {

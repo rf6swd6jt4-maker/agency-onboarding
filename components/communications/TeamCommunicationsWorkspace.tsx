@@ -8,12 +8,16 @@ import { CommunicationsConnectionStatus } from "@/components/communications/Comm
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
 import { copyMessageText, downloadMessageAttachment, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { CancelIcon, CheckIcon, DeleteIcon, DoubleDeliveryCheckIcon, ReplyIcon, SingleDeliveryCheckIcon } from "@/components/communications/MessageInteractionIcons"
-import { JumpToLatestButton, messagePaneCanShowNewMessage, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
+import { JumpToLatestButton, messagePaneCanShowNewMessage } from "@/components/communications/JumpToLatestButton"
 import { MessageComposer } from "@/components/communications/MessageComposer"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { MessageReadAvatars } from "@/components/communications/MessageReadAvatars"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
+import { useConversationHistory } from "@/components/communications/useConversationHistory"
+import { useConversationLayout } from "@/components/communications/useConversationLayout"
+import { prepareCommunicationMedia } from "@/lib/communications/prepare-media"
+import { ConversationMedia } from "@/components/communications/ConversationMedia"
 import { NativeChatViewport } from "@/components/communications/NativeChatViewport"
 import { beginMessageSwipe, moveMessageSwipe, finishMessageSwipe, type MessageSwipe } from "@/lib/communications/message-swipe"
 import { NativeMessageBubble } from "@/components/communications/NativeMessageBubble"
@@ -231,6 +235,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
+    const history = useConversationHistory(selectedId, selected?.messages ?? [])
     const messagePaneInteractions = useMessagePaneInteractions(composerRef, followLatestRef, setAtLatest, setShowJumpToLatest)
     const focusedMessageId = editingMessage?.id ?? replyingTo?.id ?? null
     const peopleById = useMemo(() => new Map([...bootstrap.people, ...bootstrap.formerPeople].map((person) => [person.id, person])), [bootstrap.formerPeople, bootstrap.people])
@@ -240,7 +245,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     useEffect(() => { const update = () => setDocumentVisible(document.visibilityState === "visible"); document.addEventListener("visibilitychange", update); return () => document.removeEventListener("visibilitychange", update) }, [])
     useEffect(() => { const timer = window.setTimeout(() => setRecentReaction(localStorage.getItem(`betelgeze:communications:recent-reaction:${bootstrap.workspaceId}`)), 0); return () => window.clearTimeout(timer) }, [bootstrap.workspaceId])
     useEffect(() => { keepComposerCurrentLineCentered(composerRef.current) }, [draft])
-    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true), [selectedId])
+    useConversationLayout(messagePaneRef, followLatestRef, selectedId, active && workspaceTabActive && documentVisible, setAtLatest, setShowJumpToLatest)
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
     useEffect(() => {
         const interval = window.setInterval(() => {
@@ -347,8 +352,17 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }
 
     useEffect(() => { if (selectedId && !editingMessage) localStorage.setItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${selectedId}`, draft) }, [bootstrap.workspaceId, draft, editingMessage, selectedId])
-    useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selected?.messages.length, selectedId])
-    useEffect(() => { if (selectedId && followLatestRef.current) window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 })) }, [selectedId, typingByConversation])
+
+    useEffect(() => {
+        if (!selectedId) return
+        const controller = new AbortController()
+        const read = updates.beginRead()
+        void fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/messages?conversationId=${encodeURIComponent(selectedId)}`, { signal: controller.signal })
+            .then(async (response) => response.ok ? response.json() as Promise<{ messages?: NativeMessage[] }> : null)
+            .then((result) => { if (result?.messages) updateConversationMessages(selectedId, result.messages, false, read) })
+            .catch(() => undefined)
+        return () => controller.abort()
+    }, [bootstrap.workspaceSlug, selectedId, updateConversationMessages, updates])
 
     const registerRealtime = useCallback((channel: ReturnType<typeof supabase.channel>) => channel
                 .on("broadcast", { event: NATIVE_TYPING_EVENT }, ({ payload }) => {
@@ -467,11 +481,16 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         if (validation.error) { setError(validation.error); if (attachmentInputRef.current) attachmentInputRef.current.value = ""; return }
         setAttachmentState("uploading"); setError(null)
         try {
-            const preparedResponse = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/attachments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, name: file.name, size: file.size, type: file.type }) })
-            const prepared = await preparedResponse.json().catch(() => null) as { uploadUrl?: string; uploadHeaders?: Record<string, string>; attachment?: CommunicationAttachment; error?: string } | null
+            const { preview, ...media } = await prepareCommunicationMedia(file)
+            const preparedResponse = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/native/attachments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: selected.id, name: file.name, size: file.size, type: file.type, media, previewSize: preview?.size }) })
+            const prepared = await preparedResponse.json().catch(() => null) as { uploadUrl?: string; previewUploadUrl?: string; uploadHeaders?: Record<string, string>; attachment?: CommunicationAttachment; error?: string } | null
             if (!preparedResponse.ok || !prepared?.uploadUrl || !prepared.attachment) throw new Error(prepared?.error ?? "Could not prepare attachment.")
             const uploaded = await fetch(prepared.uploadUrl, { method: "PUT", headers: { "Content-Type": prepared.attachment.mimeType, ...(prepared.uploadHeaders ?? {}) }, body: file })
             if (!uploaded.ok) throw new Error("Could not upload attachment.")
+            if (preview && prepared.previewUploadUrl) {
+                const previewResponse = await fetch(prepared.previewUploadUrl, { method: "PUT", headers: { "Content-Type": "image/webp", ...(prepared.uploadHeaders ?? {}) }, body: preview }).catch(() => null)
+                prepared.attachment.hasPreview = Boolean(previewResponse?.ok)
+            }
             if (selectedRef.current === selected.id) setAttachment(prepared.attachment)
         } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Could not upload attachment.") }
         finally { setAttachmentState("idle"); if (attachmentInputRef.current) attachmentInputRef.current.value = "" }
@@ -621,6 +640,15 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     }
 
     function jumpToMessage(messageId: string) {
+        followLatestRef.current = false
+        if (history.reveal(messageId)) {
+            window.requestAnimationFrame(() => scrollToMessage(messageId))
+            return
+        }
+        scrollToMessage(messageId)
+    }
+
+    function scrollToMessage(messageId: string) {
         const pane = messagePaneRef.current
         const target = pane?.querySelector<HTMLElement>(`[data-message-interaction="${CSS.escape(messageId)}"]`)
         if (!pane || !target) return
@@ -697,7 +725,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                     return <button key={conversation.id} type="button" onClick={() => selectConversation(conversation.id)} className={`grid w-full grid-cols-[2.75rem_minmax(0,1fr)] gap-3 border-b border-neutral-900 px-4 py-3.5 text-left ${selectedId === conversation.id ? "bg-neutral-900" : "hover:bg-black"}`}><TeamAvatar conversation={conversation} currentUserId={bootstrap.currentUser.id} /><span className="min-w-0"><span className="flex items-start justify-between gap-3"><span className="truncate text-sm font-semibold">{conversation.title}</span>{latest ? <time className={unread ? "text-[11px] text-white" : "text-[11px] text-neutral-600"}>{formatRelativeTime(latest.createdAt)}</time> : null}</span><span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-neutral-500">{!showTypingPreview && latest?.senderUserId === bootstrap.currentUser.id ? <NativeDeliveryTicks message={latest} read={latestRead} /> : null}<span className={`truncate ${showTypingPreview ? "font-medium text-neutral-300" : ""}`}>{showTypingPreview ? "typing…" : latest ? `${latest.senderUserId === bootstrap.currentUser.id ? "You: " : ""}${messagePreview(latest)}` : conversation.subtitle}</span>{unread ? <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-white px-1 text-[10px] font-bold text-black">{unread}</span> : null}</span></span></button>
                 }) : <div className="p-6 text-center"><p className="text-sm text-neutral-300">{showArchived ? "No archived teams" : "No team conversations yet"}</p><p className="mt-2 text-xs text-neutral-600">{showArchived ? "Archived team history will appear here." : "Open a profile to start a DM or create a team."}</p></div>}</div>
             </aside>
-            <NativeChatViewport className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
+            <ConversationMedia active={active && workspaceTabActive && documentVisible}><NativeChatViewport className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
                 {selected ? <>
                     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
                         <button type="button" onClick={() => selectConversation(null)} aria-label="Back to team conversations" className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-neutral-400 lg:hidden"><BackIcon /></button>
@@ -709,9 +737,11 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         <CommunicationsConnectionStatus state={connection.state} error={connection.error} />
                     </header>
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
-                    <div className="relative min-h-0 flex-1"><div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">
+                    <div className="relative min-h-0 flex-1"><div key={selectedId} data-message-pane tabIndex={0} ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="invisible data-[positioned=true]:visible h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6"><div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">
                         {selected.messages.length ? <div aria-hidden="true" className="mt-auto" /> : null}
-                        {selected.messages.length ? selected.messages.map((message, index) => {
+                            {history.startIndex > 0 ? <button type="button" onClick={() => { followLatestRef.current = false; history.reveal() }} className="mx-auto shrink-0 px-3 py-2 text-xs text-neutral-500 hover:text-white">Load earlier messages</button> : null}
+                        {selected.messages.length ? selected.messages.slice(history.startIndex).map((message, visibleIndex) => {
+                            const index = history.startIndex + visibleIndex
                         const own = message.senderUserId === bootstrap.currentUser.id
                         const sender = peopleById.get(message.senderUserId)
                         const reply = message.replyToMessageId ? selected.messages.find((candidate) => candidate.id === message.replyToMessageId) ?? null : null
@@ -731,7 +761,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         const saveAttachmentLabel = `Download ${message.attachment?.fileName ?? "attachment"}`
                         return <Fragment key={messageAnimationKey(message)}>
                             {showDay ? <div className="my-3 flex justify-center"><time className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
-                            <div data-message-interaction={message.id} className={`relative flex items-end transition-[filter,opacity,transform] duration-150 ${own ? "justify-end origin-right" : "justify-start origin-left"} ${focusedMessageId ? focusedMessageId === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
+                            <div data-message-scroll-anchor={messageAnimationKey(message)} data-message-interaction={message.id} className={`relative flex items-end transition-[filter,opacity,transform] duration-150 ${own ? "justify-end origin-right" : "justify-start origin-left"} ${focusedMessageId ? focusedMessageId === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? own ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                 <span aria-hidden="true" style={{ opacity: Math.min(1, Math.abs(swipeOffset) / 36) }} className={`pointer-events-none absolute -inset-x-3 inset-y-0 lg:hidden ${swipeOffset < 0 ? "bg-gradient-to-l from-red-600/45 via-red-950/20 to-transparent" : "bg-gradient-to-r from-white/20 via-white/5 to-transparent"}`} />
                                 <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, swipeOffset) / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                 {canDelete ? <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, Math.max(0, -swipeOffset) / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, Math.max(0, -swipeOffset) / 190)})` }} className="pointer-events-none absolute right-0 flex h-9 w-9 items-center justify-center rounded-full bg-red-600 text-white lg:hidden"><DeleteIcon className="h-5 w-5" /></span> : null}
@@ -815,7 +845,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                         />
                     </ComposerFooter>
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950"><TeamIcon /></div><h2 className="mt-4 text-sm font-semibold">Select a team conversation</h2><p className="mt-2 text-xs text-neutral-600">Direct messages and team chats update without reloading.</p></div></div>}
-            </NativeChatViewport>
+            </NativeChatViewport></ConversationMedia>
         </ResizableConversationColumns>
         {editingTeam !== undefined ? <TeamEditor bootstrap={{ ...bootstrap, teams }} team={editingTeam} onClose={() => setEditingTeam(undefined)} onSaved={async () => { await refresh(selectedRef.current) }} /> : null}
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />

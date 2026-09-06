@@ -60,6 +60,7 @@ export type NativeConversation = {
     pinnedMessageId: string | null
     updatedAt: string
     messages: NativeMessage[]
+    messageWindowStart?: string | null
 }
 
 export type WorkspaceCommunicationConversation =

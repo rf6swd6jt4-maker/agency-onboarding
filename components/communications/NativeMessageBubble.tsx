@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react"
+import { useEffect, useRef, useState, type ComponentProps } from "react"
 import { createMessageLongPress } from "@/lib/communications/message-long-press"
 
 function isMessageControl(target: EventTarget | null) {
@@ -8,29 +8,13 @@ function isMessageControl(target: EventTarget | null) {
 }
 
 export function NativeMessageBubble({ video, style, children, onOpenActions, ...props }: Omit<ComponentProps<"article">, "ref" | "onClick" | "onContextMenu" | "onKeyDown"> & { video: boolean; onOpenActions: () => void }) {
-    const [aspectRatio, setAspectRatio] = useState<number | null>(null)
     const [longPress] = useState(createMessageLongPress)
     const suppressClick = useRef(false)
     const lastTouchAt = useRef(0)
     useEffect(() => () => longPress.cancel(), [longPress])
-    const readVideo = useCallback((element: HTMLVideoElement) => {
-        if (element.videoWidth > 0 && element.videoHeight > 0) {
-            setAspectRatio(element.videoWidth / element.videoHeight)
-        }
-    }, [])
-    const attachBubble = useCallback((element: HTMLElement | null) => {
-        const media = element?.querySelector("video")
-        if (media && !media.error) readVideo(media)
-    }, [readVideo])
-
-    // The full chat supplies a keyboard-independent height limit. Keep portrait
-    // captions readable, allowing modest side bars when the minimum width wins.
-    const videoWidth = aspectRatio
-        ? `max(20rem, calc(min(35rem, var(--native-video-max-height, 30rem) * ${aspectRatio}) + 1.75rem))`
-        : "min(35rem, 100%)"
-
-    return <article {...props} ref={attachBubble} role="button" data-message-bubble aria-haspopup="menu"
-        style={{ ...style, ...(video ? { width: videoWidth } : {}) }}
+    // Media metadata must never resize the surrounding bubble after paint.
+    return <article {...props} role="button" data-message-bubble aria-haspopup="menu"
+        style={{ ...style, ...(video ? { width: "min(35rem, 100%)" } : {}) }}
         // Native video controls retarget timeline touches to the video element.
         // Leave their default behavior alone and do not start a bubble gesture.
         onTouchStart={(event) => {
@@ -92,11 +76,6 @@ export function NativeMessageBubble({ video, style, children, onOpenActions, ...
                 event.preventDefault()
                 onOpenActions()
             }
-        }}
-        onLoadedMetadataCapture={(event) => {
-            const media = event.target
-            if (media instanceof HTMLVideoElement) readVideo(media)
-            props.onLoadedMetadataCapture?.(event)
         }}
     >{children}</article>
 }

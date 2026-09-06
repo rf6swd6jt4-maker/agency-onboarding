@@ -9,7 +9,7 @@ import {
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { recordAdminActivity } from "@/lib/admin/activity"
-import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile } from "@/lib/communications/attachments"
+import { communicationAttachmentKind, communicationAttachmentLimit, validateCommunicationAttachmentFile, communicationMediaMetadata, COMMUNICATION_PREVIEW_SUFFIX } from "@/lib/communications/attachments"
 import { MAX_NATIVE_ATTACHMENT_SIZE, nativeAttachmentKind, nativeAttachmentMimeType, validateNativeAttachmentFile } from "@/lib/communications/native-attachments"
 import { convertCommunicationStickerImage } from "@/lib/communications/stickers"
 import { validateClientLogoSvg } from "@/lib/client-branding/svg"
@@ -468,11 +468,12 @@ export async function createUploadSignedUrl(
 
 export async function createPrivateUploadSignedUrl(
     path: string,
-    expiresIn = R2_SIGNED_URL_TTL_SECONDS
+    expiresIn = R2_SIGNED_URL_TTL_SECONDS,
+    method: "GET" | "HEAD" = "GET"
 ) {
     return getSignedUrl(
         getR2Client(),
-        new GetObjectCommand({
+        new (method === "HEAD" ? HeadObjectCommand : GetObjectCommand)({
             Bucket: getR2BucketName(),
             Key: path,
         }),
@@ -482,11 +483,11 @@ export async function createPrivateUploadSignedUrl(
     )
 }
 
-export async function createEncryptedPrivateUploadSignedRequest(path: string, customerKey: string, expiresIn = R2_SIGNED_URL_TTL_SECONDS) {
+export async function createEncryptedPrivateUploadSignedRequest(path: string, customerKey: string, expiresIn = R2_SIGNED_URL_TTL_SECONDS, method: "GET" | "HEAD" = "GET") {
     return {
         url: await getSignedUrl(
             getR2Client(),
-            new GetObjectCommand({ Bucket: getR2BucketName(), Key: path, ...customerEncryptionInput(customerKey) }),
+            new (method === "HEAD" ? HeadObjectCommand : GetObjectCommand)({ Bucket: getR2BucketName(), Key: path, ...customerEncryptionInput(customerKey) }),
             { expiresIn }
         ),
         headers: customerEncryptionHeaders(customerKey),
@@ -532,7 +533,7 @@ export async function createUploadSignedUrls(paths: string[]) {
 }
 
 export async function deleteOnboardingUploads(paths: string[]) {
-    const uniquePaths = [...new Set(paths)].filter(Boolean)
+    const uniquePaths = [...new Set(paths.flatMap((path) => /\/(client-messages|communications\/native)\//.test(path) && !path.endsWith(COMMUNICATION_PREVIEW_SUFFIX) ? [path, `${path}${COMMUNICATION_PREVIEW_SUFFIX}`] : [path]))].filter(Boolean)
 
     if (uniquePaths.length === 0) {
         return
@@ -595,6 +596,7 @@ export async function storeClientMessageMedia({
     if (workspaceId) await recordAdminActivity({ workspaceId, category: "communications", eventKey: "r2.media.stored", summary: "Client message media stored in R2", entityType: "client_message_media", entityId: mediaId, direction: "outbound", metadata: { client_id: clientId, relationship_id: relationshipId ?? null, content_type: contentType } })
 
     return {
+        mediaMetadata: await communicationImageDimensions(body, contentType),
         path,
         url:
             createClientMessageMediaUrl(path, appBaseUrl) ??
@@ -608,7 +610,7 @@ export async function storeClientMessageMedia({
 export async function createSignedClientMessageUpload(
     workspaceId: string,
     relationshipId: string,
-    file: { name: string; size: number; type: string }
+    file: { name: string; size: number; type: string; media?: unknown; previewSize?: number }
 ) {
     const validation = validateCommunicationAttachmentFile(file)
     if ("error" in validation) throw new Error(validation.error)
@@ -630,7 +632,10 @@ export async function createSignedClientMessageUpload(
     return {
         uploadUrl,
         uploadHeaders: customerEncryptionHeaders(customerKey),
+        ...(await createCommunicationPreviewUpload(path, customerKey, file.previewSize)),
         attachment: {
+            ...communicationMediaMetadata(file.media),
+            hasPreview: Boolean(file.previewSize && file.previewSize > 0 && file.previewSize <= 300_000),
             kind: validation.kind,
             fileName: fileName.slice(0, 180),
             mimeType: contentType,
@@ -639,6 +644,53 @@ export async function createSignedClientMessageUpload(
             url: createClientMessageMediaUrl(path) ?? `/api/client-messages/media/${encodeStoragePath(path)}`,
         },
     }
+}
+
+async function createCommunicationPreviewUpload(path: string, customerKey: string, size?: number) {
+    if (!size || !Number.isSafeInteger(size) || size <= 0 || size > 300_000) return {}
+    return { previewUploadUrl: await getSignedUrl(getR2Client(), new PutObjectCommand({
+        Bucket: getR2BucketName(), Key: `${path}${COMMUNICATION_PREVIEW_SUFFIX}`, ContentType: "image/webp", ContentLength: size,
+        ...customerEncryptionInput(customerKey),
+    }), { expiresIn: R2_UPLOAD_URL_TTL_SECONDS }) }
+}
+
+async function communicationImageDimensions(bytes: Uint8Array, contentType: string) {
+    if (!/^image\/(jpeg|png|webp|gif|avif|bmp)$/.test(contentType)) return {}
+    try {
+        const metadata = await sharp(bytes, { limitInputPixels: 40_000_000 }).metadata()
+        const rotated = metadata.orientation && metadata.orientation >= 5
+        return communicationMediaMetadata({ width: rotated ? metadata.height : metadata.width, height: rotated ? metadata.width : metadata.height })
+    } catch { return {} }
+}
+
+const pendingCommunicationPreviews = new Map<string, Promise<boolean>>()
+
+/** Derivatives remain private and use the original's SSE-C key and authorization. */
+export async function ensureCommunicationImagePreview(path: string, customerKey: string | null) {
+    const existing = pendingCommunicationPreviews.get(path)
+    if (existing) return existing
+    const pending = (async () => {
+        const client = getR2Client()
+        const input = { Bucket: getR2BucketName(), ...(customerKey ? customerEncryptionInput(customerKey) : {}) }
+        try {
+            await client.send(new HeadObjectCommand({ ...input, Key: `${path}${COMMUNICATION_PREVIEW_SUFFIX}` }))
+            return true
+        } catch (error) {
+            if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) throw error
+        }
+        const metadata = await client.send(new HeadObjectCommand({ ...input, Key: path }))
+        if (!/^image\/(jpeg|png|webp|gif|avif|bmp)$/.test(metadata.ContentType ?? "") || !metadata.ContentLength || metadata.ContentLength > 20 * 1024 * 1024) return false
+        const original = await client.send(new GetObjectCommand({ ...input, Key: path }))
+        if (!original.Body) return false
+        const image = sharp(await original.Body.transformToByteArray(), { limitInputPixels: 40_000_000 })
+        const dimensions = await image.metadata()
+        if ((dimensions.pages ?? 1) > 1) return false // Do not turn an animation into a still.
+        const bytes = await image.rotate().resize({ width: 960, height: 960, fit: "inside", withoutEnlargement: true }).webp({ quality: 78 }).timeout({ seconds: 5 }).toBuffer()
+        await client.send(new PutObjectCommand({ ...input, Key: `${path}${COMMUNICATION_PREVIEW_SUFFIX}`, Body: bytes, ContentType: "image/webp" }))
+        return true
+    })()
+    pendingCommunicationPreviews.set(path, pending)
+    try { return await pending } finally { pendingCommunicationPreviews.delete(path) }
 }
 
 export async function verifyClientMessageUpload(input: {
@@ -669,7 +721,7 @@ export async function verifyClientMessageUpload(input: {
 export async function createSignedNativeMessageUpload(
     workspaceId: string,
     conversationId: string,
-    file: { name: string; size: number; type: string }
+    file: { name: string; size: number; type: string; media?: unknown; previewSize?: number }
 ) {
     const validation = validateNativeAttachmentFile(file)
     if ("error" in validation) throw new Error(validation.error)
@@ -685,7 +737,10 @@ export async function createSignedNativeMessageUpload(
     return {
         uploadUrl,
         uploadHeaders: customerEncryptionHeaders(customerKey),
+        ...(await createCommunicationPreviewUpload(path, customerKey, file.previewSize)),
         attachment: {
+            ...communicationMediaMetadata(file.media),
+            hasPreview: Boolean(file.previewSize && file.previewSize > 0 && file.previewSize <= 300_000),
             kind: validation.kind,
             fileName: fileName.slice(0, 180),
             mimeType: contentType,

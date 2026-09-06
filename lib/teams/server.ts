@@ -128,13 +128,14 @@ export async function loadNativeCommunications(input: {
     if (!schemaReady) return { ...base, conversations: [], reactions: [], readCursors: [], schemaReady: false }
 
     const supabase = await createSupabaseServerClient()
-    const [conversationResult, participantResult, messageResult, reactionResult, cursorResult, membershipResult] = await Promise.all([
+    const [conversationResult, participantResult, messageResult, reactionResult, cursorResult, membershipResult, selectedMessages] = await Promise.all([
         supabaseAdmin.from("workspace_native_conversations").select("id, kind, team_id, direct_user_one, direct_user_two, archived_at, pinned_message_id, updated_at").eq("workspace_id", input.workspaceId).order("updated_at", { ascending: false }),
         supabaseAdmin.from("workspace_native_conversation_participants").select("conversation_id, user_id").eq("workspace_id", input.workspaceId),
         supabase.rpc("communication_native_messages", { p_workspace_id: input.workspaceId, p_conversation_id: null, p_limit: 4000 }),
         supabaseAdmin.from("workspace_native_reactions").select("id, conversation_id, message_id, reactor_user_id, emoji, updated_at").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspace_native_read_cursors").select("conversation_id, user_id, last_read_message_id, last_read_at").eq("workspace_id", input.workspaceId),
         supabaseAdmin.from("workspace_memberships").select("user_id, role").eq("workspace_id", input.workspaceId),
+        base.requestedConversationId ? loadNativeMessagesForCurrentUser({ workspaceId: input.workspaceId, conversationId: base.requestedConversationId }) : Promise.resolve(null),
     ])
     const fatal = [conversationResult.error, participantResult.error, messageResult.error, reactionResult.error, cursorResult.error, membershipResult.error].find(Boolean)
     if (fatal) throw new Error(fatal!.message)
@@ -165,6 +166,11 @@ export async function loadNativeCommunications(input: {
         const message = nativeMessageFromRow({ ...source, edited_at: editedAtByMessageId.get(text(source.id) ?? "") ?? null })
         if (message) messages.set(message.conversationId, [...(messages.get(message.conversationId) ?? []), message])
     }
+    const messageWindowStart = [...messages.values()].flat().reduce<string | null>((start, message) => !start || message.createdAt < start ? message.createdAt : start, null)
+    const conversationMessages = (id: string) => id === base.requestedConversationId && selectedMessages ? selectedMessages : messages.get(id) ?? []
+    const conversationWindowStart = (id: string) => id === base.requestedConversationId && selectedMessages
+        ? selectedMessages.length >= 1000 ? selectedMessages[0]?.createdAt ?? null : null
+        : messageWindowStart
     const conversations = (conversationResult.data ?? []).flatMap<NativeConversation>((conversation) => {
         if (conversation.kind === "direct") {
             const memberIds = participants.get(conversation.id) ?? []
@@ -174,13 +180,13 @@ export async function loadNativeCommunications(input: {
                 ?? input.currentUserId
             const person: CommunicationPerson = peopleById.get(otherId) ?? { id: otherId, name: "Workspace member", avatarSrc: null, former: false }
             const archived = Boolean(conversation.archived_at) || Boolean(person.former)
-            return [{ id: conversation.id, kind: "direct" as const, teamId: null, title: person.name, subtitle: archived ? "Former member · read-only history" : "Direct message", avatarSrc: person.avatarSrc, memberIds, archived, canWrite: !archived, pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
+            return [{ id: conversation.id, kind: "direct" as const, teamId: null, title: person.name, subtitle: archived ? "Former member · read-only history" : "Direct message", avatarSrc: person.avatarSrc, memberIds, archived, canWrite: !archived, pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: conversationMessages(conversation.id), messageWindowStart: conversationWindowStart(conversation.id) }]
         }
         const team = conversation.team_id ? teamById.get(conversation.team_id) : null
         if (!team) return []
         const archived = Boolean(team.archivedAt)
         if (!team.memberIds.includes(input.currentUserId)) return []
-        return [{ id: conversation.id, kind: "team" as const, teamId: team.id, title: team.name, subtitle: `${team.memberIds.length} member${team.memberIds.length === 1 ? "" : "s"}`, avatarSrc: null, memberIds: team.memberIds, archived, canWrite: !archived && team.memberIds.includes(input.currentUserId), pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: messages.get(conversation.id) ?? [] }]
+        return [{ id: conversation.id, kind: "team" as const, teamId: team.id, title: team.name, subtitle: `${team.memberIds.length} member${team.memberIds.length === 1 ? "" : "s"}`, avatarSrc: null, memberIds: team.memberIds, archived, canWrite: !archived && team.memberIds.includes(input.currentUserId), pinnedMessageId: conversation.pinned_message_id, updatedAt: conversation.updated_at, messages: conversationMessages(conversation.id), messageWindowStart: conversationWindowStart(conversation.id) }]
     }).sort((left, right) => (right.messages.at(-1)?.createdAt ?? right.updatedAt).localeCompare(left.messages.at(-1)?.createdAt ?? left.updatedAt) || left.title.localeCompare(right.title))
     const conversationIds = new Set(conversations.map((conversation) => conversation.id))
     const reactions: NativeReaction[] = (reactionResult.data ?? []).flatMap((reaction) => conversationIds.has(reaction.conversation_id) ? [{ id: reaction.id, conversationId: reaction.conversation_id, messageId: reaction.message_id, reactorUserId: reaction.reactor_user_id, emoji: reaction.emoji, updatedAt: reaction.updated_at }] : [])

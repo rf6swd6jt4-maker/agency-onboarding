@@ -9,13 +9,17 @@ import { CommunicationsConnectionStatus } from "@/components/communications/Comm
 import { ComposerMessagePreview } from "@/components/communications/ComposerMessagePreview"
 import { copyMessageText, downloadMessageAttachment, MessageReactionActions, PrimaryMessageActions, type MessageActionView } from "@/components/communications/MessageActionMenu"
 import { DoubleDeliveryCheckIcon, ReplyIcon, SingleDeliveryCheckIcon } from "@/components/communications/MessageInteractionIcons"
-import { JumpToLatestButton, messagePaneCanShowNewMessage, observeMessagePaneResize } from "@/components/communications/JumpToLatestButton"
+import { JumpToLatestButton, messagePaneCanShowNewMessage } from "@/components/communications/JumpToLatestButton"
 import { MessageComposer } from "@/components/communications/MessageComposer"
 import { MessageMediaLightbox, type MessageMediaPreview } from "@/components/communications/MessageMediaLightbox"
 import { MessageReadAvatars } from "@/components/communications/MessageReadAvatars"
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { NativeAttachment } from "@/components/communications/NativeAttachment"
+import { useConversationHistory } from "@/components/communications/useConversationHistory"
+import { useConversationLayout } from "@/components/communications/useConversationLayout"
+import { prepareCommunicationMedia } from "@/lib/communications/prepare-media"
+import { ConversationMedia } from "@/components/communications/ConversationMedia"
 import { NativeChatViewport } from "@/components/communications/NativeChatViewport"
 import { NativeMessageBubble } from "@/components/communications/NativeMessageBubble"
 import { VoiceNotePlayer } from "@/components/communications/VoiceNotePlayer"
@@ -179,8 +183,8 @@ function messagePreview(message: CommunicationMessage) {
 }
 
 function MessageAttachment({ attachment, onOpenImage, light, whiteOnColor = false }: { attachment: CommunicationAttachment; onOpenImage: (media: MessageMediaPreview) => void; light: boolean; whiteOnColor?: boolean }) {
-    if (attachment.kind === "audio") return <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} whiteOnColor={whiteOnColor} />
-    return <NativeAttachment attachment={attachment} onOpenImage={onOpenImage} light={light} />
+    if (attachment.kind === "audio") return <VoiceNotePlayer src={attachment.url} fileName={attachment.fileName} light={light} whiteOnColor={whiteOnColor} initialDuration={attachment.duration} />
+    return <NativeAttachment attachment={attachment} onOpenImage={onOpenImage} light={light} whiteOnColor={whiteOnColor} />
 }
 
 function MessageActionTray({ view, canInteract, currentEmoji, recentEmoji, onReact, onRecentEmoji, onReply, onCopy, onPin, onShowReactions, pinned, side, onSave, saveLabel, saveDisabled, saveActive }: {
@@ -271,6 +275,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     const readRequestRef = useRef<string | null>(null)
     const workspaceTabActive = useWorkspaceTabActive()
     const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null
+    const history = useConversationHistory(selectedId, selected?.messages ?? [])
     const messagePaneInteractions = useMessagePaneInteractions(composerRef, followLatestRef, setAtLatest, setShowJumpToLatest)
 
     useEffect(() => {
@@ -295,7 +300,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         keepComposerCurrentLineCentered(composerRef.current)
     }, [draft])
 
-    useEffect(() => observeMessagePaneResize(messagePaneRef.current, () => followLatestRef.current, true), [selectedId])
+    useConversationLayout(messagePaneRef, followLatestRef, selectedId, active && workspaceTabActive && documentVisible, setAtLatest, setShowJumpToLatest)
 
     useEffect(() => () => messageAnimationTimersRef.current.forEach((timer) => window.clearTimeout(timer)), [])
 
@@ -430,6 +435,15 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
     }
 
     function jumpToMessage(messageId: string) {
+        followLatestRef.current = false
+        if (history.reveal(messageId)) {
+            window.requestAnimationFrame(() => scrollToMessage(messageId))
+            return
+        }
+        scrollToMessage(messageId)
+    }
+
+    function scrollToMessage(messageId: string) {
         const pane = messagePaneRef.current
         const target = pane?.querySelector<HTMLElement>(`[data-message-interaction="${CSS.escape(messageId)}"]`)
         if (!pane || !target) return
@@ -460,12 +474,13 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         setAttachmentState("uploading")
         setAttachmentError(null)
         try {
+            const { preview, ...media } = await prepareCommunicationMedia(file)
             const prepareResponse = await fetch(`/api/workspaces/${bootstrap.workspaceSlug}/communications/attachments`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ relationshipId, name: file.name, size: file.size, type: file.type }),
+                body: JSON.stringify({ relationshipId, name: file.name, size: file.size, type: file.type, media, previewSize: preview?.size }),
             })
-            const prepared = await prepareResponse.json().catch(() => null) as { uploadUrl?: string; uploadHeaders?: Record<string, string>; attachment?: CommunicationAttachment; error?: string } | null
+            const prepared = await prepareResponse.json().catch(() => null) as { uploadUrl?: string; previewUploadUrl?: string; uploadHeaders?: Record<string, string>; attachment?: CommunicationAttachment; error?: string } | null
             if (!prepareResponse.ok || !prepared?.uploadUrl || !prepared.attachment) throw new Error(prepared?.error ?? "Could not prepare attachment.")
             const uploadResponse = await fetch(prepared.uploadUrl, {
                 method: "PUT",
@@ -473,6 +488,10 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 body: file,
             })
             if (!uploadResponse.ok) throw new Error("Could not upload attachment.")
+            if (preview && prepared.previewUploadUrl) {
+                const previewResponse = await fetch(prepared.previewUploadUrl, { method: "PUT", headers: { "Content-Type": "image/webp", ...(prepared.uploadHeaders ?? {}) }, body: preview }).catch(() => null)
+                prepared.attachment.hasPreview = Boolean(previewResponse?.ok)
+            }
             if (selectedRef.current !== relationshipId) {
                 await removeAttachment(prepared.attachment, relationshipId)
                 return
@@ -631,10 +650,6 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
         return () => controller.abort()
     }, [bootstrap.workspaceSlug, selectedId, updateConversationMessages, updates])
 
-    useEffect(() => {
-        if (!selectedId || !followLatestRef.current) return
-        window.requestAnimationFrame(() => messagePaneRef.current?.scrollTo({ top: messagePaneRef.current.scrollHeight, left: 0 }))
-    }, [selected?.messages.length, selectedId])
 
     const synchronize = useCallback(async () => {
         const read = updates.beginRead()
@@ -900,7 +915,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                 }) : <div className="p-6 text-center"><p className="text-sm font-medium text-neutral-300">{conversations.length ? "No matching conversations" : "No clients yet"}</p><p className="mt-2 text-xs leading-5 text-neutral-600">{conversations.length ? "Try another name or message." : "Client relationships will appear here automatically."}</p></div>}</div>
             </aside>
 
-            <NativeChatViewport className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
+            <ConversationMedia active={active && workspaceTabActive && documentVisible}><NativeChatViewport className={`${selected ? "flex" : "hidden lg:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-black`}>
                 {selected ? <>
                     <header className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-3 sm:px-4">
                         <button type="button" onClick={() => selectConversation(null)} aria-label="Back to client chats" className="inline-flex h-10 w-10 items-center justify-center text-neutral-400 hover:text-white lg:hidden"><BackIcon /></button>
@@ -913,10 +928,12 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                     {selected.pinnedMessageId && pinnedPreview ? <PinnedMessageBar preview={pinnedPreview} onClick={() => jumpToMessage(selected.pinnedMessageId!)} /> : null}
 
                     <div className="relative min-h-0 flex-1">
-                    <div ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
+                    <div key={selectedId} data-message-pane tabIndex={0} ref={messagePaneRef} {...messagePaneInteractions} style={{ overflowAnchor: "none" }} className="invisible data-[positioned=true]:visible h-full touch-pan-y overflow-x-hidden overflow-y-auto overscroll-x-none overscroll-y-contain bg-[radial-gradient(circle_at_top,_rgba(38,38,38,0.5),_transparent_38%)] px-3 py-5 sm:px-6">
                         <div className="mx-auto flex min-h-full w-full min-w-0 max-w-3xl flex-col gap-2 lg:max-w-none">
                             {selected.messages.length ? <div aria-hidden="true" className="mt-auto" /> : null}
-                            {selected.messages.length ? selected.messages.map((message, index) => {
+                            {history.startIndex > 0 ? <button type="button" onClick={() => { followLatestRef.current = false; history.reveal() }} className="mx-auto shrink-0 px-3 py-2 text-xs text-neutral-500 hover:text-white">Load earlier messages</button> : null}
+                            {selected.messages.length ? selected.messages.slice(history.startIndex).map((message, visibleIndex) => {
+                            const index = history.startIndex + visibleIndex
                             const showDay = index === 0 || !sameDay(selected.messages[index - 1].createdAt, message.createdAt)
                             const sender = senderName(message)
                             const repliedMessage = message.replyToMessageId
@@ -939,7 +956,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                             const readers = readCursors.filter((cursor) => cursor.relationshipId === selected.id && cursor.userId !== message.senderUserId && cursor.lastReadAt >= message.createdAt).flatMap((cursor) => peopleById.get(cursor.userId) ?? [])
                             return <Fragment key={messageAnimationKey(message)}>
                                 {showDay ? <div className="my-3 flex justify-center"><time dateTime={message.createdAt} className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[10px] text-neutral-500">{messageDay(message.createdAt)}</time></div> : null}
-                                <div data-message-interaction={message.id} className={`relative flex items-center gap-2 transition-[filter,opacity,transform] duration-150 ${message.direction === "outbound" ? "justify-end origin-right" : "justify-start origin-left"} ${replyingTo ? replyingTo.id === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
+                                <div data-message-scroll-anchor={messageAnimationKey(message)} data-message-interaction={message.id} className={`relative flex items-center gap-2 transition-[filter,opacity,transform] duration-150 ${message.direction === "outbound" ? "justify-end origin-right" : "justify-start origin-left"} ${replyingTo ? replyingTo.id === message.id ? "pointer-events-none z-10 scale-[1.03]" : "pointer-events-none opacity-30 blur-[1px]" : ""} ${enteringMessageIds.has(message.id) ? message.direction === "outbound" ? "betelgeze-message-enter-right" : "betelgeze-message-enter-left" : ""}`}>
                                     <span aria-hidden="true" style={{ opacity: Math.min(1, swipeOffset / 36) }} className="pointer-events-none absolute -inset-x-3 inset-y-0 bg-gradient-to-r from-white/20 via-white/5 to-transparent lg:hidden" />
                                     <span aria-hidden="true" style={{ top: "50%", opacity: Math.min(1, swipeOffset / 38), transform: `translateY(-50%) scale(${0.72 + Math.min(0.28, swipeOffset / 190)})` }} className="pointer-events-none absolute left-0 flex h-9 w-9 items-center justify-center rounded-full bg-neutral-800 text-white lg:hidden"><ReplyIcon className="h-5 w-5" /></span>
                                     {message.direction === "outbound" && showActions ? <div key={`${message.id}:${actionView}`} data-message-action-popup className="betelgeze-popup-enter absolute bottom-full right-0 z-20 mb-1"><MessageActionTray view={actionView} canInteract={canInteract} currentEmoji={teamReaction?.emoji ?? null} recentEmoji={recentReaction} onReact={(emoji) => void sendReaction(message, emoji)} onRecentEmoji={rememberRecentReaction} onReply={() => beginReply(message)} onCopy={() => void copyMessage(message)} onPin={canPin ? () => void togglePinnedMessage(message) : null} onShowReactions={() => setActionView("reactions")} pinned={selected.pinnedMessageId === message.id} side="right" onSave={canSaveAttachment ? () => void saveOrDownloadAttachment(message) : null} saveLabel={saveAttachmentLabel} saveDisabled={saveAttachmentDisabled} saveActive={stickerSaved} /></div> : null}
@@ -1000,7 +1017,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                                     >
                                         <p className={`${isSticker ? "mb-1 w-fit rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : `mb-0.5 leading-none ${isWhatsAppClientMessage ? "text-white/70" : "text-neutral-500"}`} text-[10px] font-semibold`}>{sender}</p>
                                         {message.replyToMessageId || message.replyToProviderMessageId ? <button type="button" disabled={!repliedMessage} aria-label="Jump to replied message" onPointerDown={(event) => { if (event.button === 0) event.preventDefault() }} onClick={(event) => { event.stopPropagation(); if (repliedMessage) jumpToMessage(repliedMessage.id) }} className={`block w-full text-left disabled:cursor-default focus-visible:outline focus-visible:outline-2 mb-2 rounded-lg border-l-2 px-2.5 py-2 ${isWhatsAppClientMessage ? "border-white/40 bg-black/20" : message.direction === "outbound" ? "border-neutral-500 bg-black/10" : "border-neutral-500 bg-black/35"}`}><p className="truncate text-[10px] font-semibold opacity-70">{repliedMessage ? senderName(repliedMessage) : "Replied message"}</p><p className="mt-0.5 truncate text-xs opacity-65">{repliedMessage ? messagePreview(repliedMessage) : "Message unavailable"}</p></button> : null}
-                                        {message.attachment ? <MessageAttachment attachment={message.attachment} onOpenImage={setPreviewMedia} light={message.direction === "outbound"} whiteOnColor={isWhatsAppClientMessage} /> : null}
+                                        {message.attachment ? <MessageAttachment key={message.attachment.storagePath} attachment={message.attachment} onOpenImage={setPreviewMedia} light={message.direction === "outbound"} whiteOnColor={isWhatsAppClientMessage} /> : null}
                                         {message.body && !(message.attachment && message.body === attachmentPlaceholder(message.attachment)) ? <MessageBody body={message.body} /> : null}
                                         {isSticker && messageReactions.length ? <div className={`absolute bottom-5 z-10 flex gap-0.5 ${message.direction === "outbound" ? "right-0" : "left-0"}`}>{messageReactions.map((reaction) => <span key={`${reaction.messageId}:${reaction.direction}`} title={reaction.direction === "inbound" ? `Reacted by ${selected.title}` : `Reacted in Betelgeze by ${peopleById.get(reaction.reactorUserId ?? "")?.name ?? "Team"}`} className="rounded-full border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-sm shadow-sm">{reaction.emoji}</span>)}</div> : null}
                                         <div className={`mt-1.5 flex items-center justify-between gap-3 text-[10px] ${isSticker ? "ml-auto min-w-20 rounded-full bg-neutral-950/80 px-2 py-0.5 text-neutral-400" : isWhatsAppClientMessage ? "text-white/65" : message.direction === "outbound" ? "text-neutral-500" : "text-neutral-600"}`}><MessageReadAvatars readers={readers} /><span className="flex shrink-0 items-center gap-1.5"><time dateTime={message.createdAt}>{messageTime(message.createdAt)}</time>{message.direction === "outbound" ? <DeliveryTicks message={message} /> : null}</span></div>
@@ -1045,7 +1062,7 @@ export function CommunicationsWorkspace({ active, bootstrap, onConnectionStateCh
                         />
                     </ComposerFooter>
                 </> : <div className="flex flex-1 items-center justify-center p-6 text-center"><div><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-neutral-800 bg-neutral-950 text-xl">◌</div><h2 className="mt-4 text-sm font-semibold">Select a client chat</h2><p className="mt-2 text-xs text-neutral-600">Messages update here without reloading the panel.</p></div></div>}
-            </NativeChatViewport>
+            </NativeChatViewport></ConversationMedia>
         </ResizableConversationColumns>
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
     </section>

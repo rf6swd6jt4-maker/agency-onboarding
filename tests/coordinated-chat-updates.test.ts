@@ -13,6 +13,19 @@ const create = (initial = snapshot()) => createCoordinatedChat<Message, Conversa
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const ids = (chat: ReturnType<typeof create>) => chat.getSnapshot().conversations[0]?.messages.map((m) => m.id) ?? []
 
+test("capped refreshes keep older loaded media while reconciling deletions inside their coverage", () => {
+    const old = { ...message, id: "old", clientRequestId: null, createdAt: "2026-09-01T00:00:00Z" }
+    const boundary = { ...message, id: "boundary", clientRequestId: null, createdAt: "2026-09-02T00:00:00Z" }
+    const chat = create(snapshot([old, boundary, message]))
+    const next = snapshot([])
+    chat.applySnapshot(chat.beginRead(), { ...next, conversations: next.conversations.map((conversation) => ({ ...conversation, messageWindowStart: boundary.createdAt })) })
+    assert.deepEqual(ids(chat), ["old", "boundary"])
+    chat.removeMessage("old")
+    assert.deepEqual(ids(chat), ["boundary"], "explicit deletions still apply outside the snapshot window")
+    chat.applySnapshot(chat.beginRead(), snapshot([]))
+    assert.deepEqual(ids(chat), [], "a complete snapshot still reconciles missed deletions")
+})
+
 test("reaction stays visible through reads started before and during its write, including after acknowledgement", async () => {
     const chat = create(), response = deferred<Reaction | null>(), old = chat.beginRead()
     const task = chat.mutateReaction("m1:u1", reaction(), () => response.promise)
