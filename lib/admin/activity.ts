@@ -1,3 +1,4 @@
+import type { AdminActivityMetricEvent } from "@/lib/admin/activity-metrics"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { sanitizeAdminActivityPayload } from "@/lib/admin/activity-sanitizer"
 
@@ -248,20 +249,21 @@ export async function listCorrelatedAdminActivity(workspaceId: string, correlati
     return error ? [] : (data ?? []) as AdminActivityEvent[]
 }
 
-export async function listAdminActivitySince(workspaceId: string, since: string, until = new Date().toISOString()): Promise<AdminActivityEvent[]> {
+export async function listAdminActivitySince(workspaceId: string, since: string, until = new Date().toISOString()): Promise<AdminActivityMetricEvent[]> {
     const pageSize = 1000
-    const events: AdminActivityEvent[] = []
+    const events: AdminActivityMetricEvent[] = []
     for (let from = 0; ; from += pageSize) {
         const { data, error } = await supabaseAdmin.from("workspace_admin_activity")
             .select("id, occurred_at, event_key, metric_classification, outcome, level, metadata")
             .eq("workspace_id", workspaceId)
+            .or("metric_classification.in.(internal_call,external_call),and(metric_classification.eq.operational,event_key.like.workspace.mutation.*),and(metric_classification.is.null,metadata->>request_direction.in.(inbound,outbound))")
             .gte("occurred_at", since)
             .lte("occurred_at", until)
             .order("occurred_at", { ascending: false })
             .order("id", { ascending: false })
             .range(from, from + pageSize - 1)
         if (error) throw new Error("Unable to load activity metrics", { cause: error })
-        const page = (data ?? []) as AdminActivityEvent[]
+        const page = (data ?? []) as AdminActivityMetricEvent[]
         events.push(...page)
         if (page.length < pageSize) return events
     }

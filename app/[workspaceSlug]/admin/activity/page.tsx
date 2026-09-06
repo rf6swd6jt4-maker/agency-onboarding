@@ -1,4 +1,6 @@
 import Link from "next/link"
+import { Suspense } from "react"
+import { ActivityTrends, ActivityTrendsLoading } from "@/components/admin/ActivityTrends"
 
 import { AdminPanelNav } from "@/components/admin/AdminPanelNav"
 import { List, ListItem, ListPrimaryRow, ListSecondaryRow, ListTitle, ListTrailing } from "@/components/list/List"
@@ -7,10 +9,10 @@ import { ListCreatorAvatar } from "@/components/list/ListCreatorAvatar"
 import { MobileListActionSurface } from "@/components/list/MobileCardActionSurface"
 import { FilterRail, FilterRailCount, FilterRailLink } from "@/components/panel/FilterRail"
 import { PanelTabHeader } from "@/components/panel/PanelTabHeader"
-import { Assignee, SquarePill, Status, TrendChart, type StatusTone } from "@/components/ui"
+import { Assignee, SquarePill, Status, type StatusTone } from "@/components/ui"
 import { WorkspaceTopBar } from "@/components/workspace/WorkspaceTopBar"
 import { ADMIN_ACTIVITY_CATEGORIES, adminActivityCategoryLabel, decodeAdminActivityCursor, encodeAdminActivityCursor, getAdminActivityFacets, listAdminActivityPage, listAdminActivitySince, type AdminActivityCategory, type AdminActivityLevel } from "@/lib/admin/activity"
-import { ACTIVITY_RANGES, formatActivityCount, buildAdminActivityMetrics, type AdminActivityRange, type AdminActivityMetric } from "@/lib/admin/activity-metrics"
+import { ACTIVITY_RANGES, formatActivityCount, buildAdminActivityMetricBundle, type AdminActivityRange } from "@/lib/admin/activity-metrics"
 import { profileAvatarUrl } from "@/lib/profile-avatar"
 import { supabaseAdmin } from "@/lib/supabase/admin"
 import { formatRelativeTime, shortId } from "@/lib/ui/relative-time"
@@ -33,34 +35,15 @@ function activityStatus(level: AdminActivityLevel): { label: string; tone: Statu
     return { label: "Info", tone: "grey" }
 }
 
-function metricValue(metric: AdminActivityMetric, value: number) {
-    return metric.unit === "percentage" ? `${value.toFixed(value > 0 && value < 10 ? 1 : 0)}%` : formatActivityCount(value)
-}
-
-function metricTime(value: string, detailed = false, range: AdminActivityRange = "24h") {
-    return new Intl.DateTimeFormat("en-IE", detailed
-        ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Dublin" }
-        : range === "30d" || range === "7d" ? { day: "numeric", month: "short", timeZone: "Europe/Dublin" } : { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Dublin" }
-    ).format(new Date(value))
-}
-
-function ActivityMetricCard({ metric, range }: { metric: AdminActivityMetric; range: AdminActivityRange }) {
-    const maximum = Math.max(1, ...metric.points.map((point) => point.value))
-    const labelIndexes = [0, Math.floor((metric.points.length - 1) / 2), metric.points.length - 1]
-    return <article className="min-w-0 rounded-xl border border-neutral-800 bg-black px-4 pb-3 pt-4">
-        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="text-sm font-medium text-neutral-200">{metric.title}</h2><p className="mt-1 min-h-10 text-xs leading-5 text-neutral-600">{metric.description}</p></div><div className="shrink-0 text-right"><p className={`text-2xl font-semibold tabular-nums ${metric.tone === "red" ? "text-red-400" : "text-white"}`}>{metricValue(metric, metric.currentValue)}</p><p className="mt-0.5 text-[10px] text-neutral-600">{ACTIVITY_RANGES[range].label}</p></div></div>
-        <div className="mt-2"><TrendChart
-            key={range}
-            reveal
-            ariaLabel={`${metric.title}: ${ACTIVITY_RANGES[range].label}`}
-            points={metric.points.map((point, index) => ({ id: `${metric.key}-${point.startsAt}`, position: index, value: point.value, ariaLabel: `${metricTime(point.startsAt, true)}: ${metricValue(metric, point.value)}`, tooltipLabel: metricTime(point.startsAt, true), tooltipValue: metricValue(metric, point.value) }))}
-            domainEnd={metric.points.length - 1}
-            min={0}
-            max={maximum}
-            labels={labelIndexes.map((index, labelIndex) => ({ id: `${metric.key}-label-${index}`, position: index, label: metricTime(metric.points[index].startsAt, false, range), anchor: labelIndex === 0 ? "start" as const : labelIndex === labelIndexes.length - 1 ? "end" as const : "middle" as const }))}
-            tone={metric.tone}
-        /></div>
-    </article>
+async function loadActivityTrends(workspaceId: string, initialRange: AdminActivityRange, now: Date) {
+    // Include three days of history to warm up the longest rolling average.
+    const since = new Date(now.getTime() - 33 * 24 * 60 * 60 * 1000).toISOString()
+    try {
+        const events = await listAdminActivitySince(workspaceId, since, now.toISOString())
+        return <ActivityTrends initialRange={initialRange} metrics={buildAdminActivityMetricBundle(events, now)} />
+    } catch {
+        return <p role="alert" className="mt-5 text-sm text-red-400">Activity charts could not load. Reload the tab to try again.</p>
+    }
 }
 
 export default async function AdminActivityPage({ params, searchParams }: PageProps) {
@@ -71,14 +54,12 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
     const cursor = decodeAdminActivityCursor(query.cursor)
     const range: AdminActivityRange = Object.hasOwn(ACTIVITY_RANGES, query.range ?? "") ? query.range as AdminActivityRange : "24h"
     const now = new Date()
-    const metricSince = new Date(now.getTime() - ACTIVITY_RANGES[range].hours * 60 * 60 * 1000).toISOString()
-    const [activityPage, facets, metricEvents] = await Promise.all([
+    const trends = loadActivityTrends(workspace.id, range, now)
+    const [activityPage, facets] = await Promise.all([
         listAdminActivityPage(workspace.id, { limit: 100, category, level, cursor }),
         getAdminActivityFacets(workspace.id, category, level),
-        listAdminActivitySince(workspace.id, metricSince, now.toISOString()),
     ])
     const events = activityPage.events
-    const metrics = buildAdminActivityMetrics(metricEvents, now, range)
     const actorIds = [...new Set(events.map((event) => event.actor_user_id).filter((id): id is string => Boolean(id)))]
     const { data: profiles } = actorIds.length ? await supabaseAdmin.from("user_profiles").select("user_id, username, avatar_path").in("user_id", actorIds) : { data: [] }
     const actors = new Map((profiles ?? []).map((profile) => [profile.user_id, {
@@ -103,8 +84,7 @@ export default async function AdminActivityPage({ params, searchParams }: PagePr
                 tabs={<AdminPanelNav workspaceSlug={workspace.slug} active="activity" />}
             />
 
-            <FilterRail ariaLabel="Activity time range">{(Object.keys(ACTIVITY_RANGES) as AdminActivityRange[]).map((item) => <FilterRailLink key={item} href={filterHref(category, level, item)} selected={range === item}>{ACTIVITY_RANGES[item].label}</FilterRailLink>)}</FilterRail>
-            <section className="mt-5" aria-label="Activity trends"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <ActivityMetricCard key={metric.key} metric={metric} range={range} />)}</div><p className="mt-2 text-[11px] text-neutral-700">{ACTIVITY_RANGES[range].label} · {ACTIVITY_RANGES[range].bucketLabel} buckets. Reloading this tab includes the latest recorded activity.</p></section>
+            <Suspense fallback={<ActivityTrendsLoading />}>{trends}</Suspense>
 
             <FilterRail ariaLabel="Filter activity by level">
                 <FilterRailLink href={filterHref(category, null)} selected={!level}>All <FilterRailCount>{formatActivityCount(facets.levelTotal)}</FilterRailCount></FilterRailLink>

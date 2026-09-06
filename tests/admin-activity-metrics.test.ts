@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { ACTIVITY_RANGES, formatActivityCount, buildAdminActivityMetrics } from "../lib/admin/activity-metrics.ts"
+import { ACTIVITY_RANGES, formatActivityCount, buildAdminActivityMetricBundle, buildAdminActivityMetrics } from "../lib/admin/activity-metrics.ts"
 import { sanitizeAdminActivityPayload } from "../lib/admin/activity-sanitizer.ts"
 import type { AdminActivityEvent } from "../lib/admin/activity.ts"
 
@@ -22,7 +22,7 @@ function event(id: string, occurredAt: string, overrides: Partial<AdminActivityE
     }
 }
 
-test("Activity graphs use rolling hourly buckets and totals for the entire period", () => {
+test("Activity graphs use rolling buckets and totals for the entire period", () => {
     const metrics = buildAdminActivityMetrics([
         event("request", "2026-08-09T12:05:00.000Z", { event_key: "workspace.mutation.completed", metric_classification: "operational" }),
         event("outbound", "2026-08-09T12:10:00.000Z", { category: "billing", metric_classification: "internal_call" }),
@@ -35,11 +35,11 @@ test("Activity graphs use rolling hourly buckets and totals for the entire perio
     ], new Date("2026-08-09T12:30:00.000Z"))
 
     assert.deepEqual(metrics.map((metric) => metric.title), ["Requests", "Internal Calls", "External Calls", "Error rate"])
-    assert.ok(metrics.every((metric) => metric.points.length === 24))
+    assert.ok(metrics.every((metric) => metric.points.length === ACTIVITY_RANGES["24h"].buckets))
     assert.equal(metrics.find((metric) => metric.key === "requests")?.currentValue, 2)
     assert.equal(metrics.find((metric) => metric.key === "internal_calls")?.currentValue, 1)
     assert.equal(metrics.find((metric) => metric.key === "external_calls")?.currentValue, 2)
-    assert.equal(metrics.find((metric) => metric.key === "external_calls")?.points.at(-2)?.value, 1)
+    assert.equal(metrics.find((metric) => metric.key === "external_calls")?.points.at(-3)?.rawValue, 1)
     assert.equal(metrics.find((metric) => metric.key === "error_rate")?.currentValue, 20)
     assert.equal(metrics.find((metric) => metric.key === "error_rate")?.tone, "red")
 })
@@ -71,10 +71,10 @@ test("Every range includes its exact start and now, excludes older and future ev
         const metrics = buildAdminActivityMetrics([call("start", start, true), call("now", now.getTime()), call("recent", now.getTime() - 1), call("old", start - 1), call("future", now.getTime() + 1)], now, range)
         assert.equal(metrics[1].points.length, config.buckets)
         assert.equal(metrics[1].currentValue, 3)
-        assert.equal(metrics[1].points[0].value, 1)
-        assert.equal(metrics[1].points.at(-1)?.value, 2)
+        assert.equal(metrics[1].points[0].rawValue, 1)
+        assert.equal(metrics[1].points.at(-1)?.rawValue, 2)
         assert.equal(metrics[3].currentValue, (1 / 3) * 100)
-        assert.equal(buildAdminActivityMetrics([], now, range)[3].currentValue, 0)
+        assert.equal(buildAdminActivityMetrics([], now, range)[3].currentValue, null)
     }
 })
 
@@ -83,4 +83,40 @@ test("Activity counts use compact notation", () => {
     assert.equal(formatActivityCount(1234567), "1.2m")
     assert.equal(formatActivityCount(0), "0")
     assert.equal(formatActivityCount(999), "999")
+})
+
+
+test("Rolling error rates weight attempts, carry across quiet buckets, and expose empty windows", () => {
+    const now = new Date("2026-09-06T12:00:00Z")
+    const call = (id: string, time: string, failed = false) => event(id, time, { metric_classification: "internal_call", outcome: failed ? "failed" : "succeeded" })
+    const events = [call("failure", "2026-09-06T11:51:00Z", true), ...Array.from({ length: 99 }, (_, i) => call(`success-${i}`, "2026-09-06T11:53:00Z"))]
+    const metrics = buildAdminActivityMetrics(events, now, "1h")
+    const error = metrics[3]
+    assert.equal(error.currentValue, 1)
+    assert.equal(error.points.at(-1)?.value, 1)
+    assert.equal(error.points.at(-1)?.samples, 100)
+    assert.equal(error.points.at(-1)?.failures, 1)
+    assert.equal(error.points[0].value, null)
+    // The volume spike is averaged over three buckets, while the headline remains exact.
+    assert.equal(metrics[1].currentValue, 100)
+    assert.ok(Math.max(...metrics[1].points.map(p => p.value ?? 0)) < 99)
+    assert.equal(buildAdminActivityMetrics(events, new Date("2026-09-06T12:20:00Z"), "1h")[3].points.at(-1)?.value, null)
+})
+
+test("Warmup history smooths the start but never inflates selected-period totals", () => {
+    const events = [event("prior", "2026-09-06T10:59:00Z", { metric_classification: "internal_call", outcome: "failed" }), event("current", "2026-09-06T11:01:00Z", { metric_classification: "internal_call", outcome: "succeeded" })]
+    const metrics = buildAdminActivityMetrics(events, new Date("2026-09-06T12:00:00Z"), "1h")
+    assert.equal(metrics[1].currentValue, 1)
+    assert.equal(metrics[3].currentValue, 0)
+    assert.equal(metrics[3].points[0].value, 50)
+})
+
+test("Unfinished and cancelled operations do not dilute the failure rate", () => {
+    const events = ["failed", "succeeded", "queued", "skipped", "rejected"].map((outcome, index) => event(String(index), "2026-09-06T11:59:00Z", { outcome: outcome as AdminActivityEvent["outcome"], metric_classification: "internal_call", level: "error" }))
+    const bundles = buildAdminActivityMetricBundle(events, new Date("2026-09-06T12:00:00Z"))
+    for (const metrics of Object.values(bundles)) {
+        assert.equal(metrics[3].currentValue, 50)
+        assert.equal(metrics[3].points.at(-1)?.samples, 2)
+    }
+    assert.equal(Object.keys(bundles).length, 4)
 })
