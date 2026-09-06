@@ -15,7 +15,6 @@ import { MessageReadAvatars } from "@/components/communications/MessageReadAvata
 import { PinnedMessageBar } from "@/components/communications/PinnedMessageBar"
 import { ResizableConversationColumns } from "@/components/communications/ResizableConversationColumns"
 import { NativeChatViewport } from "@/components/communications/NativeChatViewport"
-import { MessageDeleteConfirmation } from "@/components/communications/MessageDeleteConfirmation"
 import { beginMessageSwipe, moveMessageSwipe, finishMessageSwipe, type MessageSwipe } from "@/lib/communications/message-swipe"
 import { NativeMessageBubble } from "@/components/communications/NativeMessageBubble"
 import { NativeAttachment } from "@/components/communications/NativeAttachment"
@@ -204,8 +203,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
     const [stickerUploadState, setStickerUploadState] = useState<"idle" | "uploading">("idle")
     const [error, setError] = useState<string | null>(null)
     const [actionMessageId, setActionMessageId] = useState<string | null>(null)
-    const [deleteTarget, setDeleteTarget] = useState<NativeMessage | null>(null)
-    const cancelDelete = useCallback(() => setDeleteTarget(null), [])
     const [actionView, setActionView] = useState<MessageActionView>("actions")
     const [recentReaction, setRecentReaction] = useState<string | null>(null)
     const [downloadingMessageId, setDownloadingMessageId] = useState<string | null>(null)
@@ -345,7 +342,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         closeWorkspaceComposer(composerRef.current)
         void flushPendingRead().catch(() => undefined)
         followLatestRef.current = true; setAtLatest(true); setShowJumpToLatest(false)
-        setSelectedId(id); setDeleteTarget(null); setReplyingTo(null); setEditingMessage(null); setEditState("idle"); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
+        setSelectedId(id); setReplyingTo(null); setEditingMessage(null); setEditState("idle"); setActionMessageId(null); setActionView("actions"); setAttachment(null); setError(null)
         setDraft(id ? localStorage.getItem(`betelgeze:native-chat:draft:${bootstrap.workspaceId}:${id}`) ?? "" : "")
     }
 
@@ -636,15 +633,9 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
         target.animate([{ filter: "brightness(1.5)" }, { filter: "brightness(1)" }], { duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 900 })
     }
 
-    function deleteMessage(message: NativeMessage) {
-        if (!selected?.canWrite || message.clientRequestId === message.id) return
-        setActionMessageId(null)
-        setDeleteTarget(message)
-    }
-
-    async function confirmDeleteMessage(message: NativeMessage) {
-        setDeleteTarget(null)
-        if (!selected?.canWrite || message.conversationId !== selected.id || !selected.messages.some((candidate) => candidate.id === message.id)) return
+    async function deleteMessage(message: NativeMessage) {
+        if (!selected?.canWrite || message.clientRequestId === message.id || message.conversationId !== selected.id || !selected.messages.some((candidate) => candidate.id === message.id)) return
+        if (!window.confirm(message.senderUserId === bootstrap.currentUser.id ? "Delete this message? This cannot be undone." : "Remove this message for everyone? This cannot be undone.")) return
         const conversationId = selected.id
         setActionMessageId(null)
         setReplyingTo((current) => current?.id === message.id ? null : current)
@@ -769,7 +760,7 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
                                         setSwipePosition({ id: message.id, offset: 0, active: false })
                                         window.setTimeout(() => setSwipePosition((current) => current?.id === message.id && !current.active ? null : current), 220)
                                         if (action === "reply") { setReplyingTo(message); setActionMessageId(null); composerRef.current?.focus({ preventScroll: true }) }
-                                        else if (action === "delete") deleteMessage(message)
+                                        else if (action === "delete") void deleteMessage(message)
                                     }}
                                     onTouchCancel={() => {
                                         swipeStartRef.current = null
@@ -825,13 +816,6 @@ export function TeamCommunicationsWorkspace({ active, bootstrap, onConnectionSta
             </NativeChatViewport>
         </ResizableConversationColumns>
         {editingTeam !== undefined ? <TeamEditor bootstrap={{ ...bootstrap, teams }} team={editingTeam} onClose={() => setEditingTeam(undefined)} onSaved={async () => { await refresh(selectedRef.current) }} /> : null}
-        {deleteTarget ? <MessageDeleteConfirmation
-            open={active && workspaceTabActive && documentVisible && Boolean(selected?.canWrite && selected.id === deleteTarget.conversationId && selected.messages.some((message) => message.id === deleteTarget.id))}
-            own={deleteTarget.senderUserId === bootstrap.currentUser.id}
-            preview={messagePreview(deleteTarget)}
-            onCancel={cancelDelete}
-            onConfirm={() => void confirmDeleteMessage(deleteTarget)}
-        /> : null}
         <MessageMediaLightbox media={previewMedia} onClose={() => setPreviewMedia(null)} />
     </section>
 }

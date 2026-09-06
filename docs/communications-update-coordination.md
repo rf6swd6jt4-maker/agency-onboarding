@@ -24,6 +24,6 @@ Message tombstones prevent older targeted reads from restoring a deleted message
 
 ## Deletion confirmation
 
-Team/direct chat swipes and bin actions open `MessageDeleteConfirmation`. A swipe only requests confirmation; the explicit Delete message button invokes the coordinated mutation. The dialog cancels when the selected conversation, tab visibility, message availability, or write access no longer allows it. It uses the browser's accessible modal dialog element, with initial focus on Cancel, instead of a blocking JavaScript `confirm()` prompt from a touch event.
+Team/direct chat swipes and bin actions call the same `deleteMessage` handler, which opens the device's native confirmation through `window.confirm()`. Only accepting that confirmation invokes the coordinated mutation. Cancelling leaves the message untouched.
 
 The swipe recognizer locks horizontal intent, remembers an action once its threshold is crossed, and ignores late release jitter. Vertical-first scrolling, touch cancellation, another finger, and insufficient permissions cannot complete an action. `tests/message-swipe.test.ts` covers those paths.
